@@ -1,0 +1,134 @@
+name: grid_alloc
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  # ───────── Core Python and Conda packages ─────────
+  - python=3.12           # no build string
+  - pip                   # will install pip-listed packages later
+
+  # ───────── Scientific stack (generic names, no build pins) ─────────
+  - numpy
+  - scipy
+  - pandas
+  - h5py
+  - numba
+  - matplotlib
+  - seaborn
+
+  # ───────── Compression / I/O libraries ─────────
+  - zlib
+  - bzip2
+  - xz
+  - lz4-c
+  - snappy
+  - zstd
+  - libcurl
+  - libexpat
+  - libffi
+  - openssl
+  - libssh2
+
+  # ───────── HDF5/PyTables and related ─────────
+  - hdf5                  # Conda’s build will pull in the correct libaec
+  - pytables
+
+  # ───────── BLAS/LAPACK (OpenBLAS via conda-forge) ─────────
+  - openblas               # replaces nomkl/libopenblas/openblas-provided libs
+  - blas                   # meta-package that points to the chosen BLAS
+  - lapack                 # meta-package that points to the chosen LAPACK
+
+  # ───────── ZeroMQ / messaging ─────────
+  - zeromq
+  - pyzmq
+
+  # ───────── Jupyter/IPython ecosystem (Linux builds) ─────────
+  - ipython
+  - ipykernel
+  - jupyter_client
+  - jupyter_core
+  - matplotlib-inline
+  - tornado                # Jupyter dependencies
+
+  # ───────── Debugging & development utils ─────────
+  - debugpy
+  - psutil
+  - colorama
+  - packaging
+  - decorator
+  - jedi
+  - parso
+  - pygments
+  - prompt-toolkit
+  - stack_data
+  - six
+  - typing-extensions
+
+  # ───────── Date/time / locale ─────────
+  - python-dateutil
+  - pytz
+  - tzdata
+
+  # ───────── Networking / HTTP ─────────
+  - requests
+  - urllib3
+  - certifi
+  - idna
+  - charset-normalizer
+
+  # ───────── Optional / Miscellaneous ─────────
+  - setuptools
+  - wheel
+  - pip
+
+  # ───────── Additional Conda packages copied (but with looser pins) ─────────
+  - asttokens
+  - colorama
+  - comm
+  - exceptiongroup
+  - executing
+  - importlib-metadata
+  - kiwisolver
+  - mako
+  - markupsafe
+  - packaging
+  - pillow
+  - pluggy
+  - rich
+  - tornado
+  - wcwidth
+  - zipp
+
+  # ───────── Conda-only compression / I/O backends (conda-forge builds) ─────────
+  - blosc
+  - c-blosc2
+  - libaec
+  - libzlib
+  - krb5
+  - libsodium
+
+  # ───────── HDF5 variant that works on Linux ─────────
+  - hdf5
+
+  # ───────── Channels to avoid Windows-only artifacts ─────────
+  #   • Removed: liblzma-devel, liblzma (Windows build), libsqlite (Windows build)
+  #   • Removed: vc, vc14_runtime, vs2015_runtime, ucrt, pywin32, tk (Windows build)
+
+  # ───────── Pip-based packages ─────────
+  - pip:
+      - contourpy==1.3.2
+      - cycler==0.12.1
+      - fonttools==4.58.0
+      - holidays==0.73
+      - llvmlite==0.44.0
+      - opendhw==0.2.5
+      - pathlib==1.0.1
+      - pvlib==0.12.0
+      - pylightxl==1.61
+      - pytest==8.3.5
+      - pyyaml==6.0.2
+      - richardsonpy==0.2.1
+      - seaborn==0.13.2
+      - teaser==0.7.7
+      - xlrd==2.0.1

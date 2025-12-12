@@ -1,0 +1,10 @@
+# Sensitive data
+gridalloc/data/statistics/inhabited_buildings/elec_lps.h5
+
+# Ignore logs, results, input data
+docs/
+gridalloc/data/grids/*
+!gridalloc/data/grids/.gitkeep
+gridalloc/results/*
+!gridalloc/results/.gitkeep
+gridalloc/logs/

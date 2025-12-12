@@ -1,0 +1,15 @@
+# Source: https://www.datanwg.de/fileadmin/user/iwu/210412_IWU_Projektinfo-8.3_BE_Strukturdaten_final.pdf
+type,public_prob,commercial_prob
+public_office,0.1505774289918402,0
+office,0,0.3091960850140743
+research_highereducation,0.05127747803986266,0
+health_nursing,0.14045570071788469,0
+school_kindergarden,0.3433361573103848,0
+culture_leisure,0.31435323494002765,0
+sports,0,0.10071533713813495
+hotel_accomodation,0,0.07294500109749984
+gastronomy,0,0.2756850120729673
+trade_retail,0,0.24145856467732355
+technical,0,0
+traffic,0,0
+production_workshop_store,0,0

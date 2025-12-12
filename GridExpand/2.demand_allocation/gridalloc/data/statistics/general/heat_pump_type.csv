@@ -1,0 +1,5 @@
+# Probability for a building to have a certain heat pump system, source: https://www.dena.de/fileadmin/dena/Publikationen/PDFs/2023/Analyse_Waermepumpen_im_Gebaeudesektor.pdf, Abbildung 4.4
+type,prob
+ASHP,0.6726027397
+GSHP,0.2784246575
+WSHP,0.0489726027

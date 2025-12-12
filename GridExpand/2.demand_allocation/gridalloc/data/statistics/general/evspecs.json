@@ -1,0 +1,5206 @@
+{
+    "fallback_parameters": {
+        "battery_charging_eff": {
+            "value": 0.9,
+            "unit": "percent",
+            "description": "Battery charging efficiency"
+        },
+        "battery_discharging_eff": {
+            "value": 0.95,
+            "unit": "percent",
+            "description": "Battery discharging efficiency"
+        },
+        "transmission_eff": {
+            "value": 0.95,
+            "unit": "percent",
+            "description": "Transmission efficiency"
+        },
+        "auxiliary_power": {
+            "value": 300,
+            "unit": "W",
+            "description": "Auxiliary power"
+        },
+        "cabin_volume": {
+            "value": 3.5,
+            "unit": "m3",
+            "description": "Cabin volume"
+        },
+        "hvac_cop_heating": {
+            "value": 1,
+            "unit": null,
+            "description": "HVAC COP heating"
+        },
+        "hvac_cop_cooling": {
+            "value": 2,
+            "unit": null,
+            "description": "HVAC COP cooling"
+        }
+    },
+
+    "Tesla Model Y": {
+        "acc_0_100_kmh": {
+            "value": 6.9,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "axle_ratio": {
+            "value": 9.0,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "battery_cap": {
+            "value": 60.0,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1984.0,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "drag_coeff": {
+            "value": 0.23,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "height": {
+            "value": 1.624,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "length": {
+            "value": 4.751,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": "North America, Europe, China",
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "power": {
+            "value": 220.0,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "reg_braking": {
+            "value": "YesYes",
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "top_speed": {
+            "value": 217.0,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": "Lithium-Ion",
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        },
+        "width": {
+            "value": 1.921,
+            "unit": "m",
+            "description": "Width of vehicle"
+        }
+        
+    },
+
+    "Volkswagen ID_3": {
+        "acc_0_100_kmh": {
+            "value": 8.2,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "axle_ratio": {
+            "value": 11.53,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "battery_cap": {
+            "value": 55,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1787,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "drag_coeff": {
+            "value": 0.267,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "motor_type": {
+            "value": "Brushless DC",
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "front_area": {
+            "value": null,
+            "unit": "m2",
+            "description": "Frontal area"
+        },
+        "height": {
+            "value": 1.564,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "inertial_mass": {
+            "value": null,
+            "unit": "kg",
+            "description": "Inertial mass"
+        },
+        "length": {
+            "value": 4.264,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": "Europe",
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "pmr": {
+            "value": null,
+            "unit": "W/kg",
+            "description": "PMR W/kg"
+        },
+        "power": {
+            "value": 125,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "top_speed": {
+            "value": 160,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        },
+        "width": {
+            "value": 1.809,
+            "unit": "m",
+            "description": "Width of vehicle"
+        }
+    },
+
+    "Tesla Model 3": {
+        "acc_0_100_kmh": {
+            "value": 6.1,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "axle_ratio": {
+            "value": 9.0,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "battery_cap": {
+            "value": 60.0,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1836.0,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "drag_coeff": {
+            "value": 0.23,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "motor_type": {
+            "value": "Switched reluctance",
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "height": {
+            "value": 1.441,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "length": {
+            "value": 4.720,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": "North America",
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "power": {
+            "value": 208.0,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "top_speed": {
+            "value": 201.0,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": "Lithium-Ion",
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        },
+        "width": {
+            "value": 1.849,
+            "unit": "m",
+            "description": "Width of vehicle"
+        }
+    },
+
+    "Skoda Enyaq": {
+        "axle_ratio": {
+            "value": 4.389,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "battery_cap": {
+            "value": 55.0,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2141,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "drag_coeff": {
+            "value": 0.245,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "height": {
+            "value": 1.616,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "power": {
+            "value": 125,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "width": {
+            "value": 1.879,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Fiat 500e": {
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "axle_ratio": {
+            "value": 9.60,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "battery_cap": {
+            "value": 23.8,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1255.0,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "drag_coeff": {
+            "value": 0.311,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "motor_type": {
+            "value": "Permanent magnet synchronous",
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "height": {
+            "value": 1.529,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "length": {
+            "value": 3.617,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": "North America",
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "power": {
+            "value": 87.0,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "top_speed": {
+            "value": 150.0,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": "Lithium-Ion",
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        },
+        "width": {
+            "value": 1.683,
+            "unit": "m",
+            "description": "Width of vehicle"
+        }
+    },
+
+    "Hyundai Kona Electric": {
+        "axle_ratio": {
+            "value": 10.65,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "battery_cap": {
+            "value": 51,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1690,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "drag_coeff": {
+            "value": 0.27,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "height": {
+            "value": 1.575,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.825,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "power": {
+            "value": 115,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Renault Zoe": {
+        "axle_ratio": {
+            "value": 9.3,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.32,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 44.1,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1502,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 80,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.562,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.787,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Volkswagen ID_4": {
+        "axle_ratio": {
+            "value": 4.39,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.28,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 55.0,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1991,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 125,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.640,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.852,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Volkswagen e-up": {
+        "axle_ratio": {
+            "value": 8.774,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.308,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 36.8,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1248,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 61,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.492,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.645,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Cupra Born": {
+        "axle_ratio": {
+            "value": 11.53,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.272,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 62,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1841,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 170,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.540,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.809,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Audi Q4 e-tron": {
+        "axle_ratio": {
+            "value": 10,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.26,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 82,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2125,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 150,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.632,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.865,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Smart Fortwo ED": {
+        "axle_ratio": {
+            "value": 10,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.29,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 17.5,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1095,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 60,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.555,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.663,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Mini Cooper SE": {
+        "axle_ratio": {
+            "value": 8.961,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.28,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 54.2,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1680,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 160,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.460,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.756,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Opel Corsa-e": {
+        "axle_ratio": {
+            "value": 7.412,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.29,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 50.0,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1544,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 100,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.433,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.765,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Audi Q8 e-tron": {
+        "axle_ratio": {
+            "value": 9.08,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.29,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 95,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2585,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 250,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.633,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.937,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Hyundai Ioniq 5": {
+        "axle_ratio": {
+            "value": 4.706,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.288,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 58,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1905,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 125,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.605,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.890,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Mercedes-Benz EQA": {
+        "axle_ratio": {
+            "value": 9.4,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.28,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 69.7,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2110,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 168,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.620,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.834,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Dacia Spring": {
+        "axle_ratio": {
+            "value": 10.7,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.42,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 26.8,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1020,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 33,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.516,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.622,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Opel Mokka-e": {
+        "axle_ratio": {
+            "value": 8.5,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.32,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 50.0,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1598,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 100,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.525,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.790,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "BMW iX1": {
+        "axle_ratio": {
+            "value": 10.05,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.26,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 66.5,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1940,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 150,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.616,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.845,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "BMW i4": {
+        "axle_ratio": {
+            "value": 8.77,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.24,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 83.9,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2125,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 250,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.448,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.852,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "BMW i3 BEV": {
+        "axle_ratio": {
+            "value": 9.665,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.29,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 42.2,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1345,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 125,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.598,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.775,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Volkswagen ID_4_ID_5": {
+        "axle_ratio": {
+            "value": 4.39,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.28,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 55.0,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1991,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 125,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.640,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.852,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "MG MG4 EV": {
+        "axle_ratio": {
+            "value": 9.552,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.27,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 51,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1710,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 125,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.504,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.836,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Peugeot e-208": {
+        "axle_ratio": {
+            "value": 5.058,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.29,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 50,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1530,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 100,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.430,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.765,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Kia Niro EV": {
+        "axle_ratio": {
+            "value": 10.65,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.29,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 68,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1757,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 150,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.570,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.825,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Volkswagen ID_7": {
+        "axle_ratio": {
+            "value": 9,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.23,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 82,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2172,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 210,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.536,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.862,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Renault Twingo E-Tech": {
+        "axle_ratio": {
+            "value": 8.774,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.68,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 23,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1186,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 60,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.541,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.646,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Mercedes-Benz EQB": {
+        "axle_ratio": {
+            "value": 9.576,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.28,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 73.9,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2105,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 140,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.667,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.834,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Porsche Taycan": {
+        "axle_ratio": {
+            "value": 8.05,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.22,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 89,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2245,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 300,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.379,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.966,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Mercedes-Benz EQE": {
+        "axle_ratio": {
+            "value": 9.644,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.242,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 98,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2405,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 180,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.503,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.906,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Kia EV6": {
+        "axle_ratio": {
+            "value": 10.65,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.28,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 63,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1855,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 125,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.575,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.880,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Polestar 2": {
+        "axle_ratio": {
+            "value": 10.51,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.278,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 70,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2020,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 200,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.479,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.859,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "BMW iX3": {
+        "axle_ratio": {
+            "value": 11.115,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.29,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 80,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2255,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 210,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.668,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.891,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Volkswagen ID_5": {
+        "axle_ratio": {
+            "value": 12.98,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.26,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 55,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1970,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 125,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.615,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.852,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "BMW iX": {
+        "axle_ratio": {
+            "value": 8.77,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.25,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 76.6,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2440,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 240,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.695,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.967,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Volkswagen e-Golf": {
+        "axle_ratio": {
+            "value": 3.61,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.27,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 35.8,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1615,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 100,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.450,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.799,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Renault Megane E-Tech": {
+        "axle_ratio": {
+            "value": 12,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.29,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 65,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1719,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 160,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.505,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.860,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Smart Hashtag 1": {
+        "axle_ratio": {
+            "value": 9.5,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.29,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 65,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1719,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 160,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.505,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.860,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Volvo EX40": {
+        "axle_ratio": {
+            "value": 8.57,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.329,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 70,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2040,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 175,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.652,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.863,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Ford Mustang Mach-E": {
+        "axle_ratio": {
+            "value": 9.05,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.28,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 75,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2166,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 197,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.624,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.881,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Peugeot e-2008": {
+        "axle_ratio": {
+            "value": 5.058,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.33,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 50,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1623,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 100,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.523,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.775,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Volkswagen ID_Buzz": {
+        "axle_ratio": {
+            "value": 10,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.29,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 63,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2400,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 125,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.927,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.985,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Nissan Leaf": {
+        "axle_ratio": {
+            "value": 8.19,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.28,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 40,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1580,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 110,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.530,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.788,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Mercedes-Benz EQC": {
+        "axle_ratio": {
+            "value": 3.266,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.27,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 85,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2495,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 300,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.624,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.884,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Smart Forfour ED": {
+        "axle_ratio": {
+            "value": 9.665,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.345,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 17.6,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1200,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 60,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.554,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.665,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Mazda MX-30 BEV": {
+        "axle_ratio": {
+            "value": 9.986,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.29,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 35.5,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1720,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 107,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.555,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.848,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "BMW i5": {
+        "axle_ratio": {
+            "value": 8.774,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.23,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 84.4,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2255,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 250,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.515,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.900,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Volvo EX30": {
+        "axle_ratio": {
+            "value": 3.417,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.28,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 51,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 1840,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 200,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.549,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.837,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    },
+
+    "Mercedes-Benz EQS": {
+        "axle_ratio": {
+            "value": 9.64,
+            "unit": "n",
+            "description": "Axle ratio"
+        },
+        "drag_coeff": {
+            "value": 0.20,
+            "unit": null,
+            "description": "Drag coefficient Cd"
+        },
+        "battery_cap": {
+            "value": 125,
+            "unit": "kWh",
+            "description": "Battery capacity"
+        },
+        "curb_weight": {
+            "value": 2515,
+            "unit": "kg",
+            "description": "Curb weight"
+        },
+        "power": {
+            "value": 265,
+            "unit": "kw",
+            "description": "Power"
+        },
+        "height": {
+            "value": 1.926,
+            "unit": "m",
+            "description": "Height of vehicle"
+        },
+        "width": {
+            "value": 1.518,
+            "unit": "m",
+            "description": "Width of vehicle"
+        },
+        "reg_braking": {
+            "value": null,
+            "unit": null,
+            "description": "Regenerative braking"
+        },
+        "acc_0_100_kmh": {
+            "value": null,
+            "unit": "s",
+            "description": "Acceleration from 0 to 100 km/h"
+        },
+        "motor_type": {
+            "value": null,
+            "unit": "None",
+            "description": "Electric motor type"
+        },
+        "length": {
+            "value": null,
+            "unit": "m",
+            "description": "Length of vehicle"
+        },
+        "market": {
+            "value": null,
+            "unit": null,
+            "description": "Market"
+        },
+        "num_cells": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of cells"
+        },
+        "num_modules": {
+            "value": null,
+            "unit": "n",
+            "description": "Number of modules"
+        },
+        "top_speed": {
+            "value": null,
+            "unit": "km/h",
+            "description": "Top speed"
+        },
+        "torque": {
+            "value": null,
+            "unit": null,
+            "description": "Torque Nm (newton meters)"
+        },
+        "trunk_volume": {
+            "value": null,
+            "unit": "m3",
+            "description": "Trunk volume m3 (cubic meters)"
+        },
+        "battery_type": {
+            "value": null,
+            "unit": null,
+            "description": "Type of rechargeable battery"
+        },
+        "voltage": {
+            "value": null,
+            "unit": "V",
+            "description": "Voltage V (volts)"
+        },
+        "weight": {
+            "value": null,
+            "unit": "kg",
+            "description": "Weight of vehicle"
+        }
+    }
+
+}

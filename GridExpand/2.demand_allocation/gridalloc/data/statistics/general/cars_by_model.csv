@@ -1,0 +1,52 @@
+# Probability of car being of certain model, data source: https://open-ev-charts.org/#DE:electric-sales:model:5y:limit30:table, took top 50 cars of last 5 years which account for 1.778627 million sales
+model,probability
+Tesla Model Y,0.06689542
+Volkswagen ID_3,0.063541709
+Tesla Model 3,0.059421678
+Skoda Enyaq,0.045741462
+Fiat 500e,0.041675967
+Hyundai Kona Electric,0.037608785
+Renault Zoe,0.036568094
+Volkswagen ID_4,0.034487838
+Volkswagen e-up,0.033462328
+Cupra Born,0.029526146
+Audi Q4 e-tron,0.029075236
+Smart Fortwo ED,0.028911065
+Mini Cooper SE,0.028859901
+Opel Corsa-e,0.027923786
+Audi Q8 e-tron,0.023798694
+Hyundai Ioniq 5,0.023310115
+Mercedes-Benz EQA,0.022696721
+Dacia Spring,0.020238645
+Opel Mokka-e,0.018182002
+BMW iX1,0.017394316
+BMW i4,0.016901801
+BMW i3 BEV,0.016244553
+Volkswagen ID_4_ID_5,0.016101184
+MG MG4 EV,0.0158583
+Peugeot e-208,0.01524603
+Kia Niro EV,0.014110884
+Volkswagen ID_7,0.014014181
+Renault Twingo E-Tech,0.013606563
+Mercedes-Benz EQB,0.012918392
+Porsche Taycan,0.012428688
+Mercedes-Benz EQE,0.012109903
+Kia EV6,0.010960139
+Polestar 2,0.010863436
+BMW iX3,0.010365861
+Volkswagen ID_5,0.008851772
+BMW iX,0.008481261
+Volkswagen e-Golf,0.008357008
+Renault Megane E-Tech,0.008344077
+Smart Hashtag 1,0.008233317
+Volvo EX40,0.008192274
+Ford Mustang Mach-E,0.007979751
+Peugeot e-2008,0.007920154
+Volkswagen ID_Buzz,0.007346116
+Nissan Leaf,0.007247725
+Mercedes-Benz EQC,0.007196
+Smart Forfour ED,0.00717576
+Mazda MX-30 BEV,0.006660756
+BMW i5,0.006226151
+Volvo EX30,0.005810662
+Mercedes-Benz EQS,0.004927396

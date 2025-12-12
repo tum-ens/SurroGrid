@@ -1,0 +1,16 @@
+# Compiled code
+**/__pycache__/
+*.py[cod]
+
+# Sensitive data
+0.data_preparation
+gurobi.lic
+
+*.out
+*.err
+*.h5
+
+# Others
+Archive/
+Plots/
+**/logs_0/

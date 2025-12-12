@@ -1,0 +1,7 @@
+# Data source: destatis, "Haushalte nach Haushaltsgröße und Haushaltsmitgliedern",  https://www.destatis.de/DE/Themen/Gesellschaft-Umwelt/Bevoelkerung/Haushalte-Familien/Tabellen/1-2-privathaushalte-bundeslaender.html
+size,probability
+1,0.41149286232760707
+2,0.33498669247519963
+3,0.11945318170820228
+4,0.09540285506895717
+5.394180225281598,0.03866440842003387

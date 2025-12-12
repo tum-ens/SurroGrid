@@ -1,0 +1,13 @@
+# Roof tilt distribution, Source: https://www.researchgate.net/publication/318124361_Assessment_of_rooftop_photovoltaic_potentials_at_the_urban_level_using_publicly_available_geodata_and_image_recognition_techniques
+bin_left,bin_right,prob,cum_prob
+1.72,8.38,0.01283,0.12830
+8.38,14.85,0.0693,0.082130
+14.85,21.28,0.07718,0.159310
+21.28,27.86,0.098394,0.257704
+27.86,34.20,0.175068,0.432772
+34.20,40.70,0.153147,0.585919
+40.70,47.30,0.141934,0.727853
+47.30,53.65,0.087989,0.815842
+53.65,60.30,0.078998,0.894840
+60.30,66.66,0.080916,0.975756
+66.66,73.26,0.024244,1

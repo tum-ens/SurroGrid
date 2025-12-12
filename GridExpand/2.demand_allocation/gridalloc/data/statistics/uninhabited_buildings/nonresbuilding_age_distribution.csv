@@ -1,0 +1,14 @@
+# Source: IWU Forschungsdatenbank Nichtwohngebäude, "https://www.datanwg.de/fileadmin/user/iwu/210412_IWU_Projektinfo-8.3_BE_Strukturdaten_final.pdf"
+age,prob
+<=1859,0.032
+1860-1918,0.104
+1919-1948,0.062
+1949-1957,0.075
+1958-1968,0.153
+1969-1978,0.152
+1979-1983,0.050
+1984-1994,0.142
+1995-2001,0.093
+2002-2009,0.097
+2010-2014,0.031
+>=2015,0.009

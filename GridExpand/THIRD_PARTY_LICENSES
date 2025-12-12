@@ -1,0 +1,19 @@
+# THIRD_PARTY_LICENSES
+
+## RWTH districtgenerator
+Used in: /2.demand_allocation/gridalloc//src/external/districtgenerator
+Original repo: https://github.com/RWTH-EBC/districtgenerator
+License: MIT
+See license: /2.demand_allocation/gridalloc/src/external/third_party_licenses/districtgenerator_LICENSE
+
+## emobpy
+Used in: /2.demand_allocation/gridalloc//src/external/emobpy
+Original repo: https://github.com/RWTH-EBC/districtgenerator
+License: MIT
+See license: /2.demand_allocation/gridalloc/src/external/third_party_licenses/emobpy_LICENSE
+
+## urbs
+Used in: /3.urbs/urbs
+Original repo: https://github.com/RWTH-EBC/districtgenerator
+License: GNU General Public License v3.0
+See license: /3.urbs/urbs_LICENSE

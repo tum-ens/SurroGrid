@@ -1,0 +1,8 @@
+# Inputs and Outputs
+Input/*
+!Input/.gitkeep
+Output/*
+!Output/.gitkeep
+Archive/*
+Plots/*
+logs/*
