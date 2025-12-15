@@ -1,15 +1,20 @@
-cff-version: 0.0.0
+cff-version: 1.0.0
 message: "If you use this software, please cite it using this metadata."
 authors:
-  - family-names: "Doepfert"
-    given-names: "Markus"
-    alias: "@mdoepfert"
+  - family-names: "Hanser"
+    given-names: "Elias"
     affiliation: "Technical University of Munich"
-    orcid: "https://orcid.org/0000-0001-8720-2585"
-title: "ENS Repo Template"
+  - family-names: "Mohapatra"
+    given-names: "Anurag"
+    affiliation: "Technical University of Munich"
+  - family-names: "Reveron Baecker"
+    given-names: "Beneharo"
+    affiliation: "Technical University of Munich"
+  - family-names: "Hamacher"
+    given-names: "Thomas"
+    affiliation: "Technical University of Munich"
+title: "SurroGrid"
 type: software
-license: MIT
-version: 0.2.0
-doi: 
-date-released: 2024-11-04
-url: "https://gitlab.lrz.de/tum-ens/super-repo"
+version: 1.0.0
+date-released: 2025-12-15
+url: "https://gitlab.lrz.de/tum-ens/SurroGrid"

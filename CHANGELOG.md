@@ -1,38 +1,11 @@
 
 # Changelog
-
-All notable changes to this project will be documented in this file. 
-See below for the format and guidelines for updating the changelog.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
-
----
-
-## [Unreleased]
-- **Added** `MR #4`: `Added labels in the repo and issue boards. Issues are described in CONTRIBUTING.md.`
-
-## [0.1.0] Initial Release - Hello ENS-Repo-Template - 2024-11-04
+## [1.0.0] Initial Release - SurroGrid - 2025-12-15
 ### Added
 - Initial setup for project.
 
-### Changed
-- Changed the RLI template to fit our needs. The original template's citation metadata are as follows:
-    ```
-    authors:
-      - family-names: "Hülk"
-        given-names: "Ludwig"
-        alias: "@Ludee"
-        affiliation: "Reiner Lemoine Institut"
-        orcid: "https://orcid.org/0000-0003-4655-2321"
-    title: "Super Repo"
-    type: software
-    license: MIT
-    version: 0.2.0
-    doi: 
-    date-released: 2023-08-11
-    url: "https://github.com/rl-institut/super-repo/"
-    ```
----
+
+<!-- ---
 
 # Guidelines for Updating the Changelog
 ## [Version X.X.X] - YYYY-MM-DD
@@ -81,4 +54,4 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 3. **Link Issues or MRs**: Where possible, reference related issues or merge requests for easy tracking.
 4. **Date Each Release**: Add the release date in `YYYY-MM-DD` format for each version.
 5. **Organize Unreleased Changes**: Document ongoing changes under the `[Unreleased]` section, which can be merged into the next release version.
-
+ -->
