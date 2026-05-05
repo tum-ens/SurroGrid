@@ -11,6 +11,10 @@ In short: **GridExpand produces one HDF5 (`.h5`) file per grid/scenario containi
 > Note: Several scripts in this repository are tuned for an HPC environment (Slurm) and may contain absolute filesystem paths (e.g. `/dss/...`). If you run elsewhere, adjust the configs accordingly.
 
 ---
+## Resources and Detailed Descriptions
+- IPCC 2026 Paper (to be published)
+- Underlying Master's Thesis:
+  _Hanser, Elias (2025). Deep Learning Surrogates for Low-Voltage Grid Planning. Master’s thesis, Technical University of Munich, https://mediatum.ub.tum.de/node?id=1851114._
 
 ## What this repo can do
 
