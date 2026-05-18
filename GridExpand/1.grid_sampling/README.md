@@ -51,11 +51,10 @@ DB_PASSWORD=...
 
 The notebooks expect the pylovo DB schema to provide at least the tables queried in `src/db_read.py`:
 
-- `public.grids` (grid JSON)
-- `public.transformer_classified` (grid identifiers + transformer geometry)
-- `public.transformer_positions` (transformer point geometry)
-- `public.buildings_result`, `public.res`, `public.oth` (building attributes)
-- `public.municipal_register` (regional stats)
+- `pylovo.grid_result` (grid JSON + grid identifiers)
+- `pylovo.transformer_positions` (transformer point geometry)
+- `pylovo.buildings_result` (building attributes incl. `type`; no separate `res`/`oth` tables required)
+- `pylovo.municipal_register` (regional stats)
 
 If you do not have DB access, see **“Skip DB / use your own .h5 grids”** below.
 
@@ -108,13 +107,14 @@ For cheap debugging runs, you can export exactly one grid without editing notebo
 
 ```bash
 cd GridExpand/1.grid_sampling/gridreadout
-python export_single_grid.py --plz 80803 --list-candidates
-python export_single_grid.py --plz 80803 --candidate-index 0 --cell-id 0
+uv run --project .. python export_single_grid.py --plz 80803 --list-candidates
+uv run --project .. python export_single_grid.py --plz 80803 --candidate-index 0 --cell-id 0
 ```
 
 Notes:
 
-- `--list-candidates` shows available `(plz, kcid, bcid)` tuples from `public.transformer_classified`.
+- `--list-candidates` shows available `(plz, kcid, bcid)` tuples from the new `pylovo` grid tables.
+- Candidate grids are filtered by a minimum building threshold (`--min-buildings`, default `5`).
 - You can pin an exact grid with `--kcid <...> --bcid <...>`.
 - `--cell-id` controls the output filename prefix used by downstream step selection.
 - Use `--skip-weather` if API calls are not possible; then run Step 2 with `weather_data_exists=False`.

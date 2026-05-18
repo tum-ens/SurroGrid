@@ -51,20 +51,26 @@ class DataBase:
 
     def show_contents(self):
         """ Show all database sheets """
-        schema_name = "public"  # Change this if needed
+        schema_name = "pylovo"
         with self.engine.connect() as conn:
-            result = conn.execute(text(f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema_name}';"))
+            result = conn.execute(
+                text(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = :schema_name ORDER BY table_name;"
+                ),
+                {"schema_name": schema_name},
+            )
             tables = [row[0] for row in result]
-            print("Available tables:")
+            print(f"Available tables in schema '{schema_name}':")
             print(tables)
 
 
     def read_all_grid_identifiers(self):
-        """ Retrieve all grids' (PLZ, kcid, bcid, regiostar) that were generated and stored in the grids database """
+        """Retrieve all available pylovo grid identifiers (PLZ, KCID, BCID)."""
 
         query = """
-            SELECT plz, kcid, bcid
-            FROM public.grids;
+            SELECT DISTINCT plz, kcid, bcid
+            FROM pylovo.grid_result;
         """
         # Execute the query with Pandas. This will only read data.
         df_generated_grids = pd.read_sql_query(query, self.engine)
@@ -73,18 +79,50 @@ class DataBase:
 
         return df_generated_grids
 
-    def read_nonfiller_grid_identifiers(self):
-        """ Retrieve all grids' (PLZ, kcid, bcid, location) that were generated and stored in the grids database """
+    def read_grid_identifiers_from_positions(self, min_buildings=5):
+        """Retrieve candidate grids from pylovo transformer positions.
 
-        query = """
-            SELECT plz, kcid, bcid, ST_AsText(geom) as loc
-            FROM public.transformer_classified
-            WHERE kmeans_clusters!=0;
+        Only grids with at least `min_buildings` associated buildings are
+        returned.
         """
-        # Execute the query with Pandas. This will only read data.
-        df_generated_grids = pd.read_sql_query(query, self.engine)
-        print(f"Retrieved {len(df_generated_grids)} generated grids!")
 
+        query = text("""
+            WITH building_counts AS (
+                SELECT
+                    b.grid_result_id,
+                    b.version_id,
+                    COUNT(*) AS n_buildings
+                FROM pylovo.buildings_result b
+                GROUP BY b.grid_result_id, b.version_id
+            )
+            SELECT DISTINCT ON (gr.plz, gr.kcid, gr.bcid)
+                gr.plz,
+                gr.kcid,
+                gr.bcid,
+                ST_AsText(tp.geom) AS loc,
+                bc.n_buildings
+            FROM pylovo.grid_result gr
+            JOIN pylovo.transformer_positions tp
+              ON tp.grid_result_id = gr.grid_result_id
+             AND tp.version_id = gr.version_id
+            JOIN building_counts bc
+              ON bc.grid_result_id = gr.grid_result_id
+             AND bc.version_id = gr.version_id
+            WHERE bc.n_buildings >= :min_buildings
+            ORDER BY gr.plz, gr.kcid, gr.bcid, gr.version_id DESC;
+        """)
+        df_generated_grids = pd.read_sql_query(
+            query,
+            self.engine,
+            params={"min_buildings": int(min_buildings)},
+        )
+        if "n_buildings" in df_generated_grids.columns:
+            df_generated_grids = df_generated_grids.drop(columns=["n_buildings"])
+        print(
+            "Retrieved "
+            f"{len(df_generated_grids)} generated grids from transformer_positions (global pool) "
+            f"with >= {min_buildings} buildings!"
+        )
 
         return df_generated_grids
 
@@ -101,16 +139,29 @@ class DataBase:
 
         query = text("""
             SELECT grid
-            FROM public.grids
-            WHERE (plz= :plz) AND (kcid= :kcid) AND (bcid= :bcid);
+            FROM pylovo.grid_result
+            WHERE (plz= :plz) AND (kcid= :kcid) AND (bcid= :bcid)
+            ORDER BY version_id DESC
+            LIMIT 1;
         """)
 
         # Execute the query with Pandas. This will only read data.
         with self.engine.connect() as conn:
             df_grid = pd.read_sql(query, conn, params={"plz":int(grid_specs["plz"]), "kcid":int(grid_specs["kcid"]), "bcid":int(grid_specs["bcid"])})
 
+        if df_grid.empty:
+            raise ValueError(
+                f"No grid found for PLZ={grid_specs['plz']}, KCID={grid_specs['kcid']}, BCID={grid_specs['bcid']}."
+            )
+
+        grid_payload = df_grid.loc[0, "grid"]
+        if isinstance(grid_payload, (dict, list)):
+            grid_json = json.dumps(grid_payload)
+        else:
+            grid_json = str(grid_payload)
+
         # Transform to pandapower net
-        net = pp.from_json_string(json.dumps(df_grid.loc[0, "grid"]))
+        net = pp.from_json_string(grid_json)
 
         return net
 
@@ -119,14 +170,24 @@ class DataBase:
         """ Read out position of transformer position for given grid from database """
 
         query = text("""
-            SELECT ST_AsText(geom) as loc
-            FROM public.transformer_positions
-            WHERE (plz= :plz) AND (kcid= :kcid) AND (bcid= :bcid);
+            SELECT ST_AsText(tp.geom) as loc
+            FROM pylovo.transformer_positions tp
+            JOIN pylovo.grid_result gr
+              ON gr.grid_result_id = tp.grid_result_id
+             AND gr.version_id = tp.version_id
+            WHERE (gr.plz= :plz) AND (gr.kcid= :kcid) AND (gr.bcid= :bcid)
+            ORDER BY gr.version_id DESC
+            LIMIT 1;
         """)
 
         # Execute the query with Pandas. This will only read data.
         with self.engine.connect() as conn:
             df_trafo = pd.read_sql(query, conn, params={"plz":int(grid_specs["plz"]), "kcid":int(grid_specs["kcid"]), "bcid":int(grid_specs["bcid"])})
+
+        if df_trafo.empty:
+            raise ValueError(
+                f"No transformer position found for PLZ={grid_specs['plz']}, KCID={grid_specs['kcid']}, BCID={grid_specs['bcid']}."
+            )
 
         # Read out location string
         loc = df_trafo.loc[0, "loc"]
@@ -154,7 +215,7 @@ class DataBase:
     def read_regional_stats(self, plz):
         query = text("""
             SELECT plz, pop, area, name_city, pop_den, regio7
-            FROM public.municipal_register
+            FROM pylovo.municipal_register
             WHERE plz=:plz;
         """)
 
@@ -165,47 +226,98 @@ class DataBase:
         return df_region_specs
 
 
-    def read_buildings(self, grid_specs, df_bus): #r.occupants, r.constructi, r.refurb_wal, r.refurb_roo, r.refurb_bas, r.refurb_win
-        # query = text("""
-        #     SELECT b.osm_id, b.vertice_id, b.type, r.use, b.houses_per_building, r.occupants, r.free_walls, b.floors, r.constructi, b.area, ST_AsText(b.center) as center, r.refurb_wal, r.refurb_roo, r.refurb_bas, r.refurb_win
-        #     FROM public.buildings_result b
-        #     RIGHT OUTER JOIN public.res r 
-        #     ON b.osm_id = r.osm_id
-        #     WHERE (b.plz= :plz) AND (b.kcid= :kcid) AND (b.bcid= :bcid);
-        # """)
+    def read_buildings(self, grid_specs, df_bus):
+        select_parts = [
+            "b.osm_id",
+            "b.vertice_id",
+            (
+                "CASE "
+                "WHEN UPPER(COALESCE(TRIM(b.type), '')) IN ('AB', 'MFH', 'TH', 'SFH') "
+                "THEN UPPER(TRIM(b.type)) "
+                "WHEN LOWER(COALESCE(TRIM(b.type), '')) LIKE '%public%' "
+                "THEN 'public' "
+                "WHEN LOWER(COALESCE(TRIM(b.type), '')) LIKE '%commercial%' "
+                "THEN 'commercial' "
+                "ELSE 'commercial' "
+                "END AS type"
+            ),
+            (
+                "CASE "
+                "WHEN UPPER(COALESCE(TRIM(b.type), '')) IN ('AB', 'MFH', 'TH', 'SFH') "
+                "THEN 'Residential' "
+                "WHEN LOWER(COALESCE(TRIM(b.type), '')) LIKE '%public%' "
+                "THEN 'Public' "
+                "WHEN LOWER(COALESCE(TRIM(b.type), '')) LIKE '%commercial%' "
+                "THEN 'Commercial' "
+                "ELSE 'Commercial' "
+                "END AS use"
+            ),
+            "b.households_per_building AS houses_per_building",
+            "NULL::double precision AS occupants",
+            "NULL::double precision AS free_walls",
+            "CAST(b.construction_year AS VARCHAR) AS constructi",
+            "b.floors",
+            "b.area",
+            "b.connection_point",
+            "ST_AsText(b.center) AS center",
+        ]
 
-        query = text(''' 
-            SELECT 
-                b.osm_id, b.vertice_id, b.type,
-                COALESCE(r.use, o.use) AS use,
-                b.houses_per_building, r.occupants,
-                COALESCE(r.free_walls, o.free_walls) AS free_walls,
-                b.floors, r.constructi, b.area, ST_AsText(b.center) AS center
-            FROM public.buildings_result b
-            LEFT JOIN public.res r 
-                ON b.osm_id = r.osm_id
-            LEFT JOIN public.oth o 
-                ON b.osm_id = o.osm_id
-            WHERE 
-                b.plz = :plz
-                AND b.kcid = :kcid
-                AND b.bcid = :bcid;
-        ''')
+        query = text(
+            """
+            WITH selected_grid AS (
+                SELECT grid_result_id, version_id
+                FROM pylovo.grid_result
+                WHERE plz = :plz AND kcid = :kcid AND bcid = :bcid
+                ORDER BY version_id DESC
+                LIMIT 1
+            )
+            SELECT
+                """
+            + ",\n                ".join(select_parts)
+            + """
+            FROM selected_grid sg
+            JOIN pylovo.buildings_result b
+              ON b.grid_result_id = sg.grid_result_id
+             AND b.version_id = sg.version_id
+            ;
+            """
+        )
 
         with self.engine.connect() as conn:
-            df_buildings = pd.read_sql(query, conn, params={"plz":int(grid_specs["plz"]), "kcid":int(grid_specs["kcid"]), "bcid":int(grid_specs["bcid"])})
+            df_buildings = pd.read_sql(
+                query,
+                conn,
+                params={
+                    "plz": int(grid_specs["plz"]),
+                    "kcid": int(grid_specs["kcid"]),
+                    "bcid": int(grid_specs["bcid"]),
+                },
+            )
+
+        if df_buildings.empty:
+            raise ValueError(
+                f"No buildings found for PLZ={grid_specs['plz']}, KCID={grid_specs['kcid']}, BCID={grid_specs['bcid']}."
+            )
 
         ### Match bus to building
         df_id = pd.DataFrame()
         df_id["vertice_id"] = df_bus['name'].str.extract(r'^Consumer Nodebus (\d+)$')[0].dropna().astype(int)
         df_id = df_id.reset_index().rename(columns={"index":"bus"})
         df_buildings = df_buildings.merge(df_id, on='vertice_id', how="left")
+        if "connection_point" in df_buildings.columns:
+            df_buildings["bus"] = df_buildings["bus"].fillna(df_buildings["connection_point"])
+            df_buildings.drop(columns=["connection_point"], inplace=True)
 
         ### Take bus to front and order by it
         cols = df_buildings.columns.tolist()
         cols.insert(0, cols.pop(cols.index('bus')))
         df_buildings = df_buildings[cols]
         df_buildings = df_buildings.sort_values(by='bus').reset_index(drop=True)
+
+        if "occupants" in df_buildings.columns:
+            fallback_occ = df_buildings["houses_per_building"].fillna(1)
+            fallback_occ = fallback_occ.clip(lower=1) * 2
+            df_buildings["occupants"] = df_buildings["occupants"].fillna(fallback_occ)
 
 
         ### Read out location from string
@@ -214,7 +326,7 @@ class DataBase:
             lat = 48.1351
             lon = 11.5820
 
-            match = re.match(r"POINT\(([-+]?[0-9]*\.?[0-9]+)\s*([-+]?[0-9]*\.?[0-9]+)\)", loc_string)
+            match = re.match(r"POINT\(([-+]?[0-9]*\.?[0-9]+)\s*([-+]?[0-9]*\.?[0-9]+)\)", str(loc_string))
             if match:
                 x = float(match.group(1))
                 y = float(match.group(2))
