@@ -136,10 +136,9 @@ The output file is an HDFStore written with compression (`blosc`). You will typi
 From the `GridExpand/3.urbs` directory:
 
 1. Create and activate the environment (example):
-   - `conda env create -f environment.yml`
-   - `conda activate urbs`
+  - `uv sync`
 2. Run a case:
-   - `python3 run_urbs_cluster.py 0 --n_cpu 8`
+  - `uv run python run_urbs_cluster.py 0 --n_cpu 8`
 
 `--n_cpu` controls how many **parallel Python worker processes** are spawned (clusters of building nodes).
 
@@ -162,6 +161,10 @@ The SLURM script:
 - loads `miniconda3` and `gurobi`
 - activates `conda env urbs`
 - runs: `srun python3 run_urbs_cluster.py <INDEX> --n_cpu $SLURM_CPUS_PER_TASK`
+
+If you migrate HPC jobs to uv as well, replace the conda activation with `uv run python ...` in the job script.
+
+Note: uv manages Python dependencies only. Gurobi binaries/licenses are external and still required.
 
 ## Configuration knobs (most important)
 

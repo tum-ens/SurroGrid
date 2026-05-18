@@ -116,22 +116,32 @@ If you bring your own `.h5` files, make sure the required keys exist for the ste
 
 ## Setup (environments)
 
-Each step provides its own conda environment definition:
+GridExpand now supports uv-managed environments per step.
 
-- Step 1: `1.grid_sampling/environment.yml`
-- Step 2: `2.demand_allocation/environment.yml` (and `environment_HPC.yml`)
-- Step 3: `3.urbs/environment.yml` (and `environment_HPC.yml`)
-- Step 4: `4.powerflow/environment.yml` (and `environment_HPC.yml`)
-
-Create environments from within the step directory, e.g.:
+Install uv and Python runtimes once:
 
 ```bash
-cd GridExpand/2.demand_allocation
-conda env create -f environment.yml
-conda activate <env-name-from-yml>
+uv python install 3.12
+uv python install 3.10
 ```
 
-Note: some `environment.yml` files may contain a `prefix:` entry from another machine/OS. If conda errors, remove the `prefix:` line.
+Then create each step environment from its folder:
+
+- Step 1: `cd GridExpand/1.grid_sampling && uv sync`
+- Step 2: `cd GridExpand/2.demand_allocation && uv sync`
+- Step 3: `cd GridExpand/3.urbs && uv sync`
+- Step 4: `cd GridExpand/4.powerflow && uv sync`
+
+Step-specific dependency manifests are in:
+
+- `1.grid_sampling/pyproject.toml`
+- `2.demand_allocation/pyproject.toml`
+- `3.urbs/pyproject.toml`
+- `4.powerflow/pyproject.toml`
+
+For detailed commands, see `UV_SETUP.md`.
+
+Legacy conda files are still present (`environment.yml`, `environment_HPC.yml`) for backward compatibility.
 
 ---
 
@@ -172,7 +182,7 @@ Location: `2.demand_allocation/gridalloc/`
 
 ```bash
 cd GridExpand/2.demand_allocation/gridalloc
-python3 main.py <inputfile_id> --n_cpu <N>
+uv run --project .. python main.py <inputfile_id> --n_cpu <N>
 ```
 
 The script selects the first `.h5` in `data/grids/` whose prefix before the first underscore matches `inputfile_id`.
@@ -196,7 +206,7 @@ Location: `3.urbs/`
 
 ```bash
 cd GridExpand/3.urbs
-python3 run_urbs_cluster.py <inputfile_id> --n_cpu <N>
+uv run python run_urbs_cluster.py <inputfile_id> --n_cpu <N>
 ```
 
 #### Step 3: Outputs
@@ -219,7 +229,7 @@ Location: `4.powerflow/`
 
 ```bash
 cd GridExpand/4.powerflow
-python3 run_pwrflw.py <inputfile_id> --n_cpu <N>
+uv run python run_pwrflw.py <inputfile_id> --n_cpu <N>
 ```
 
 #### Step 4: Outputs

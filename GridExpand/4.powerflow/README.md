@@ -54,10 +54,24 @@ The exact schema of these tables is defined by upstream steps; this step assumes
 
 ### 2) Python environment
 
-Dependencies are listed in:
+Preferred setup is uv in this step folder:
 
-- `environment.yml` (local/dev)
-- `environment_HPC.yml` (cluster)
+```bash
+cd GridExpand/4.powerflow
+uv sync
+```
+
+Use the uv-managed interpreter to run the step:
+
+```bash
+uv run python run_pwrflw.py <inputfile_id> --n_cpu <N>
+```
+
+Dependency manifests are available in:
+
+- `pyproject.toml` (uv)
+- `environment.yml` (legacy conda, local/dev)
+- `environment_HPC.yml` (legacy conda, cluster)
 
 Core runtime packages used in this step:
 

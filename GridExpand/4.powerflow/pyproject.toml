@@ -1,0 +1,22 @@
+[project]
+name = "gridexpand-step4-powerflow"
+version = "0.1.0"
+description = "UV-managed environment for GridExpand Step 4 (power flow)."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "pandas>=2.2,<2.3",
+  "numpy>=2.2,<2.3",
+  "scipy>=1.15,<1.16",
+  "h5py>=3.13,<4",
+  "tables>=3.10,<4",
+  "pandapower>=3.1,<3.2",
+  "numba>=0.61,<0.62",
+  "llvmlite>=0.44,<0.45",
+  "networkx>=3.5,<4",
+  "deepdiff>=8.5,<9",
+  "matplotlib>=3.10,<3.11",
+  "tqdm>=4.67,<5",
+]
+
+[tool.uv]
+package = false

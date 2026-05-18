@@ -1,0 +1,25 @@
+[project]
+name = "gridexpand-step3-urbs"
+version = "0.1.0"
+description = "UV-managed environment for GridExpand Step 3 (urbs optimization)."
+requires-python = ">=3.10,<3.11"
+dependencies = [
+  "pandas>=2.2,<2.3",
+  "numpy>=1.26,<2",
+  "scipy>=1.15,<1.16",
+  "h5py>=3.13,<4",
+  "tables>=3.8,<4",
+  "pyomo>=6.9,<7",
+  "tsam>=2.3,<3",
+  "scikit-learn>=1.6,<2",
+  "threadpoolctl>=3.6,<4",
+  "networkx>=3.4,<4",
+  "matplotlib>=3.5,<3.11",
+  "highspy>=1.10,<2",
+  "msgpack>=1.1,<2",
+  "blosc2>=2,<4",
+  "tqdm>=4.67,<5",
+]
+
+[tool.uv]
+package = false

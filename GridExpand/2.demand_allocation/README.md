@@ -309,25 +309,31 @@ All commands below assume you are in the `gridalloc/` directory.
 
 ### 1) Create the environment
 
-On Linux/HPC, use:
+From `GridExpand/2.demand_allocation` use uv:
 
 ```bash
-conda env create -f environment_HPC.yml
-conda activate grid_alloc
+uv sync
 ```
 
-The `environment.yml` in this folder is a fully pinned export from a development machine and may include OS-specific artifacts; prefer `environment_HPC.yml` on clusters.
+Then run Step 2 from `gridalloc/` with the step-local interpreter:
+
+```bash
+cd gridalloc
+uv run --project .. python main.py <inputfile_id> --n_cpu <N>
+```
+
+Legacy fallback: `environment.yml` and `environment_HPC.yml` remain available for conda-based setups.
 
 ### 2) Run a single grid locally
 
 ```bash
-python3 main.py <inputfile_id> --n_cpu 1
+uv run --project .. python main.py <inputfile_id> --n_cpu 1
 ```
 
 Example (if your grid file name starts with `0_`):
 
 ```bash
-python3 main.py 0 --n_cpu 8
+uv run --project .. python main.py 0 --n_cpu 8
 ```
 
 ### 3) Run on HPC (SLURM)

@@ -1,6 +1,8 @@
 # Compiled code
 **/__pycache__/
 *.py[cod]
+.venv/
+**/.venv/
 
 # Sensitive data
 0.data_preparation

@@ -22,15 +22,16 @@ If you already have your own grid(s) in the **same `.h5` format as the provided 
 
 ### 1) Create the environment
 
-The conda environment is defined in [environment.yml](environment.yml).
+Use uv in this folder:
 
 ```bash
 cd GridExpand/1.grid_sampling
-conda env create -f environment.yml
-conda activate grid_sampling
+uv sync
 ```
 
-Note: the `prefix:` entry at the bottom of `environment.yml` may point to a Windows path; you can ignore/remove it if it causes issues when creating the env on Linux.
+This uses [pyproject.toml](pyproject.toml) and creates `.venv` locally.
+
+Legacy fallback: [environment.yml](environment.yml) is still available for conda-based setups.
 
 ### 2) (Optional) Configure pylovo DB access
 
@@ -45,6 +46,8 @@ DB_NAME=...
 DB_USER=...
 DB_PASSWORD=...
 ```
+
+`config.py` calls `load_dotenv()` without a fixed path. In practice, a repository-root `.env` can also be discovered when launching from this project, but placing the file next to `gridreadout/config.py` is the safest option.
 
 The notebooks expect the pylovo DB schema to provide at least the tables queried in `src/db_read.py`:
 
@@ -62,7 +65,7 @@ Run the notebooks from within `gridreadout/` so imports like `import src.db_read
 
 ```bash
 cd GridExpand/1.grid_sampling/gridreadout
-jupyter lab
+uv run --project .. jupyter lab
 ```
 
 ### Notebook 1: Filter valid grids
@@ -98,6 +101,23 @@ What it does:
 Output:
 
 - One `.h5` file per sampled grid in `gridreadout/results/`.
+
+### Optional CLI for single-grid pilots (e.g. PLZ 80803)
+
+For cheap debugging runs, you can export exactly one grid without editing notebooks:
+
+```bash
+cd GridExpand/1.grid_sampling/gridreadout
+python export_single_grid.py --plz 80803 --list-candidates
+python export_single_grid.py --plz 80803 --candidate-index 0 --cell-id 0
+```
+
+Notes:
+
+- `--list-candidates` shows available `(plz, kcid, bcid)` tuples from `public.transformer_classified`.
+- You can pin an exact grid with `--kcid <...> --bcid <...>`.
+- `--cell-id` controls the output filename prefix used by downstream step selection.
+- Use `--skip-weather` if API calls are not possible; then run Step 2 with `weather_data_exists=False`.
 
 ## Output file format (`.h5`)
 
