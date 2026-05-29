@@ -136,16 +136,39 @@ def _normalize_cmap_name(cmap: str) -> str:
     return cmap
 
 
+def _match_heatmap_colorbars(fig) -> None:
+    colorbar_x = {
+        "Bus Voltage [pu]": 1.02,
+        "Line Loading [%]": 1.14,
+    }
+
+    for trace in fig.data:
+        marker = getattr(trace, "marker", None)
+        colorbar = getattr(marker, "colorbar", None)
+        title = getattr(colorbar, "title", None)
+        title_text = getattr(title, "text", None)
+        if title_text not in colorbar_x:
+            continue
+
+        marker.colorbar.update(
+            title={"text": title_text, "side": "right"},
+            x=colorbar_x[title_text],
+            y=0.5,
+            yanchor="middle",
+            len=0.9,
+            thickness=10,
+        )
+
+
 def _draw_plotly_heatmap(
     net: pp.pandapowerNet,
-    output_html: Path,
     on_map: bool,
     map_style: str,
     cmap: str,
     climits_volt: tuple[float, float],
     climits_load: tuple[float, float],
     show_household_buses: bool,
-) -> None:
+):
     cmap = _normalize_cmap_name(cmap)
     on_map = _ensure_geodata(net, on_map)
     use_line_geo = "geo" in net.line.columns and net.line["geo"].notna().all()
@@ -200,7 +223,7 @@ def _draw_plotly_heatmap(
         on_map=on_map,
         map_style=map_style,
         showlegend=True,
-        filename=str(output_html),
+        filename=None,
         auto_open=False,
     )
 
@@ -237,8 +260,12 @@ def _draw_plotly_heatmap(
                     "cmax": climits_load[1],
                     "showscale": True,
                     "colorbar": {
-                        "title": {"text": "Line Loading [%]"},
+                        "title": {"text": "Line Loading [%]", "side": "right"},
                         "x": 1.14,
+                        "y": 0.5,
+                        "yanchor": "middle",
+                        "len": 0.9,
+                        "thickness": 10,
                     },
                 },
                 "hoverinfo": "skip",
@@ -246,21 +273,22 @@ def _draw_plotly_heatmap(
             }
         )
 
-    fig.write_html(str(output_html), auto_open=False)
+    _match_heatmap_colorbars(fig)
+    return fig
 
 
 def plot_powerflow_heatmap(
     h5_path: Path,
     stage: str,
     timestep: int,
-    output_html: Path,
     on_map: bool,
     map_style: str,
     cmap: str,
     climits_volt: tuple[float, float],
     climits_load: tuple[float, float],
     show_household_buses: bool = False,
-) -> Path:
+    show: bool = True,
+):
     net = _read_net(h5_path)
     vm_df, line_df = _read_results(h5_path, stage)
 
@@ -269,11 +297,9 @@ def plot_powerflow_heatmap(
     line_loading_percent = _line_loading_from_current(net, i_from_ka)
     _set_results_on_net(net, bus_vm, i_from_ka, line_loading_percent)
 
-    output_html.parent.mkdir(parents=True, exist_ok=True)
     try:
-        _draw_plotly_heatmap(
+        fig = _draw_plotly_heatmap(
             net=net,
-            output_html=output_html,
             on_map=on_map,
             map_style=map_style,
             cmap=cmap,
@@ -286,7 +312,9 @@ def plot_powerflow_heatmap(
             "pandapower plotly backend is unavailable. Run `uv sync` in "
             "GridExpand/4.powerflow to install plotly."
         ) from exc
-    return output_html
+    if show:
+        fig.show()
+    return fig
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -304,11 +332,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Which result stage to plot (default: pre).",
     )
     parser.add_argument("--timestep", type=int, default=0, help="Timestep index (default: 0).")
-    parser.add_argument(
-        "--output-html",
-        default=None,
-        help="Path to HTML output. Default: plotting/<stem>_<stage>_t<timestep>_heatmap.html",
-    )
     parser.add_argument(
         "--on-map",
         action="store_true",
@@ -348,18 +371,10 @@ def main() -> None:
     if not h5_path.exists():
         raise FileNotFoundError(f"File not found: {h5_path}")
 
-    if args.output_html is None:
-        output_html = Path(__file__).resolve().parent / (
-            f"{h5_path.stem}_{args.stage}_t{args.timestep}_heatmap.html"
-        )
-    else:
-        output_html = Path(args.output_html)
-
-    saved_path = plot_powerflow_heatmap(
+    plot_powerflow_heatmap(
         h5_path=h5_path,
         stage=args.stage,
         timestep=args.timestep,
-        output_html=output_html,
         on_map=args.on_map,
         map_style=args.map_style,
         cmap=args.cmap,
@@ -367,7 +382,6 @@ def main() -> None:
         climits_load=tuple(args.climits_load),
         show_household_buses=args.show_household_buses,
     )
-    print(f"Saved heatmap plot to: {saved_path}")
 
 
 if __name__ == "__main__":

@@ -72,3 +72,17 @@
 - What was decided: Move plotting back to `GridExpand/4.powerflow/plotting`, keep using the step-4 uv environment, force-display both voltage and line-loading colorbars, and hide household/load buses by default.
 - Why: This keeps tooling aligned with the step where dependencies live, guarantees both requested legend bars are visible, and reduces visual clutter in dense LV household networks.
 - What was rejected and why: Keeping plotting at repo root was rejected after workflow feedback; relying only on `create_line_trace(..., show_colorbar=True)` was rejected because the line-loading colorbar was not rendered in this pandapower version.
+
+
+## 2026-05-29 - Step 4 plotting displays inline
+
+- What was decided: Change `plot_powerflow_heatmap` to return a Plotly figure and call `fig.show()` by default instead of creating HTML files.
+- Why: The plotting workflow is being used from Jupyter, where inline display is the intended review path.
+- What was rejected and why: Keeping `output_html` plus an `IFrame` display in the notebook was rejected because it creates extra generated files and makes notebook viewing indirect.
+
+
+## 2026-05-29 - Step 4 matching heatmap colorbars
+
+- What was decided: Normalize the bus-voltage and line-loading Plotly colorbars to the same title side, vertical anchor, length, and thickness.
+- Why: Jupyter display showed mismatched colorbar geometry, making the two heatmap legends look inconsistent.
+- What was rejected and why: Leaving the fallback line-loading colorbar with Plotly defaults was rejected because its title rendered above the bar while the bus-voltage title rendered beside the bar.
