@@ -51,3 +51,24 @@
 - What was decided: Treat the current Step 3 blocker as runtime resource pressure, not missing Gurobi.
 - Why: With `gurobipy` installed, model setup completes and the main-process diagnostic exits with code 137 during solve, which indicates the process was killed below Python, commonly by the OS due memory pressure.
 - What was rejected and why: Continuing to debug as a Python exception was rejected because no Python traceback is produced when the worker is killed.
+
+
+## 2026-05-29 - Step 4 plotting module approach
+
+- What was decided: Add a minimal plotting CLI at `GridExpand/4.powerflow/plotting/powerflow_plotting.py` that reads saved Step-4 result tables and calls pandapower's built-in `pf_res_plotly` for heatmap visualization.
+- Why: This directly satisfies the request to use prebuilt pandapower plotting on a map-like network view while keeping implementation simple and avoiding custom plotting logic.
+- What was rejected and why: Building custom matplotlib/plotly traces from scratch was rejected because it increases maintenance and duplicates existing pandapower functionality.
+
+
+## 2026-05-29 - Plotting package moved to repository root
+
+- What was decided: Move the plotting package from `GridExpand/4.powerflow/plotting` to top-level `plotting/` and add `plotting/powerflow_plotting_test.ipynb` for direct interactive testing.
+- Why: The user requested easier review and a single obvious location for plotting code plus a runnable notebook.
+- What was rejected and why: Keeping plotting under step 4 was rejected because it made review/discovery less direct for this workflow.
+
+
+## 2026-05-29 - Step 4 plotting location and display defaults
+
+- What was decided: Move plotting back to `GridExpand/4.powerflow/plotting`, keep using the step-4 uv environment, force-display both voltage and line-loading colorbars, and hide household/load buses by default.
+- Why: This keeps tooling aligned with the step where dependencies live, guarantees both requested legend bars are visible, and reduces visual clutter in dense LV household networks.
+- What was rejected and why: Keeping plotting at repo root was rejected after workflow feedback; relying only on `create_line_trace(..., show_colorbar=True)` was rejected because the line-loading colorbar was not rendered in this pandapower version.
