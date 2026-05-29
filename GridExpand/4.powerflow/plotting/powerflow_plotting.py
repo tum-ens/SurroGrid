@@ -139,7 +139,7 @@ def _normalize_cmap_name(cmap: str) -> str:
 def _match_heatmap_colorbars(fig) -> None:
     colorbar_x = {
         "Bus Voltage [pu]": 1.02,
-        "Line Loading [%]": 1.14,
+        "Line Loading [%]": 1.20,
     }
 
     for trace in fig.data:
@@ -158,6 +158,24 @@ def _match_heatmap_colorbars(fig) -> None:
             len=0.9,
             thickness=10,
         )
+
+
+def _bus_hover_info(net: pp.pandapowerNet, buses: list[int]) -> pd.Series:
+    hover_text = []
+    for bus in buses:
+        name = net.bus.at[bus, "name"] if "name" in net.bus.columns else f"Bus {bus}"
+        vm_pu = net.res_bus.at[bus, "vm_pu"]
+        hover_text.append(f"{name}<br>Voltage: {vm_pu:.4f} p.u.")
+    return pd.Series(hover_text, index=buses)
+
+
+def _line_hover_info(net: pp.pandapowerNet) -> pd.Series:
+    hover_text = []
+    for line in net.line.index:
+        name = net.line.at[line, "name"] if "name" in net.line.columns else f"Line {line}"
+        loading_percent = net.res_line.at[line, "loading_percent"]
+        hover_text.append(f"{name}<br>Loading: {loading_percent:.2f}%")
+    return pd.Series(hover_text, index=net.line.index)
 
 
 def _draw_plotly_heatmap(
@@ -180,6 +198,7 @@ def _draw_plotly_heatmap(
         buses=bus_subset,
         cmap=cmap,
         cmap_vals=net.res_bus.loc[bus_subset, "vm_pu"].values,
+        infofunc=_bus_hover_info(net, bus_subset),
         cbar_title="Bus Voltage [pu]",
         cmin=climits_volt[0],
         cmax=climits_volt[1],
@@ -194,9 +213,10 @@ def _draw_plotly_heatmap(
         cmap=cmap,
         cmap_vals=net.res_line["loading_percent"].values,
         cbar_title="Line Loading [%]",
+        infofunc=_line_hover_info(net),
         cmin=climits_load[0],
         cmax=climits_load[1],
-        cpos=1.14,
+        cpos=1.20,
         show_colorbar=True,
         width=2,
         trace_name="line loading",
@@ -236,7 +256,7 @@ def _draw_plotly_heatmap(
             "yanchor": "bottom",
             "bgcolor": "rgba(255,255,255,0.75)",
         },
-        margin={"l": 10, "r": 260, "t": 70, "b": 10},
+        margin={"l": 10, "r": 320, "t": 70, "b": 10},
     )
 
     fig_json = fig.to_plotly_json()
@@ -261,7 +281,7 @@ def _draw_plotly_heatmap(
                     "showscale": True,
                     "colorbar": {
                         "title": {"text": "Line Loading [%]", "side": "right"},
-                        "x": 1.14,
+                        "x": 1.20,
                         "y": 0.5,
                         "yanchor": "middle",
                         "len": 0.9,
