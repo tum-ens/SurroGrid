@@ -32,6 +32,14 @@ def prepare_grid(grid):
     # Remove load max restrictions
     df_loads = grid.load
     df_loads["max_p_mw"] = 1000
+    for column, value in {
+        "const_z_percent": 0.0,
+        "const_i_percent": 0.0,
+        "scaling": 1.0,
+        "in_service": True,
+    }.items():
+        if column not in df_loads.columns:
+            df_loads[column] = value
     grid.load = df_loads
 
     # Remove voltage restrictions
