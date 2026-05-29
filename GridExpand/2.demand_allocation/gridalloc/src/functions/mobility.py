@@ -228,13 +228,18 @@ def _consolidate_home_stretches(df_hourly):
 ###################### Publicly callable #####################
 ##############################################################
 def sample_statistics(df_buildings, df_region):
+    if df_region is None or df_region.empty:
+        raise ValueError("Missing region metadata for mobility sampling.")
+
+    region_row = df_region.iloc[0]
+
     # Select correct car owner statistics
-    region = df_region["regio7"]
+    region = int(region_row["regio7"])
     df_cars_per_hh = config.CARS_PER_HH_BY_REGION[config.CARS_PER_HH_BY_REGION["region"]==region]
 
     # Now sample number of owned cars, and their model + driver type
     df_buildings[["cars_by_flat", "n_cars_tot"]] = df_buildings["occ_list"].apply(lambda x: pd.Series(_sample_cars_in_building(x, df_cars_per_hh)))
-    df_buildings["car_dict"] = df_buildings.apply(lambda x: _sample_model_and_commuting(x["n_cars_tot"], config.PROB_COMMUTING, config.CAR_MODEL_DISTRIBUTION, df_region, x["bus"]), axis=1)
+    df_buildings["car_dict"] = df_buildings.apply(lambda x: _sample_model_and_commuting(x["n_cars_tot"], config.PROB_COMMUTING, config.CAR_MODEL_DISTRIBUTION, region_row, x["bus"]), axis=1)
     
     return df_buildings
 

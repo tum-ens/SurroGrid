@@ -21,11 +21,15 @@ class Grid:
 
         ### Basic grid data
         self.df_buildings, self.df_region, self.df_weather_raw = self.SF.get_input_data()
-        self.region = int(self.df_region["regio7"])        # regiostar region used for mobility statistics
-        self.plz = str(self.df_region["plz"]).zfill(5)     # plz of assumed grid position (not of pylovo grid used as representation)
-        self.location = {"lat": self.df_region["lat"],     # lattitude of transformer position used for weather data
-                         "lon": self.df_region["lon"]}     # longitude of transformer position used for weather data
-        self.altitude = self.df_region["altitude"]         # altitude of location in meters
+        if self.df_region is None or self.df_region.empty:
+            raise ValueError("Missing region metadata in input file (/raw_data/region).")
+
+        region_row = self.df_region.iloc[0]
+        self.region = int(region_row["regio7"])            # regiostar region used for mobility statistics
+        self.plz = str(region_row["plz"]).zfill(5)         # plz of assumed grid position (not of pylovo grid used as representation)
+        self.location = {"lat": float(region_row["lat"]), # latitude of transformer position used for weather data
+                         "lon": float(region_row["lon"])} # longitude of transformer position used for weather data
+        self.altitude = float(region_row.get("altitude", 0.0))  # altitude of location in meters
 
         ### Data to be generated
         if not self.settings["weather_data_exists"]: self.df_weather_raw = pd.DataFrame()
