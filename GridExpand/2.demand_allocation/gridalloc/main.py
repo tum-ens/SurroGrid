@@ -13,6 +13,12 @@ if __name__ == '__main__':
         parser = argparse.ArgumentParser(description="Low voltage grid DER allocation.")
         parser.add_argument("inputfile_id", help="Input file name (no path)")
         parser.add_argument("--n_cpu", default=1, help="Number of CPUs available for parallel generation")
+        parser.add_argument(
+            "--profiles",
+            choices=["all", "electricity"],
+            default="all",
+            help="Demand profiles to generate. Use electricity for status-quo powerflow tests.",
+        )
         args = parser.parse_args()
 
         #### Obtain relevant input file ####
@@ -30,7 +36,8 @@ if __name__ == '__main__':
             "grid_filename": inputfile,         # Name of input file
             "weather_data_exists": True,        # Is weather data already included in input grid file's raw data? (recommended, as on HPC cluster no outside API access)
             "parallel": (int(args.n_cpu) > 1),  # Parallelized run?
-            "n_cpu": int(args.n_cpu)            # cpus if parallel 
+            "n_cpu": int(args.n_cpu),           # cpus if parallel
+            "profiles": args.profiles
         }                    
 
         print(f"Running input file {inputfile} (ID {args.inputfile_id}) with {settings['n_cpu']} CPUs!")
@@ -45,25 +52,37 @@ if __name__ == '__main__':
         # Order of operations is important: Weather -> Solar -> Electricity -> Heat -> Mobility
         GRD.retrieve_weather()          # Weather
 
-        with resource_report(include_children=True, name="Solar Generation") as rr:
-            GRD.generate_solar()        # Solar data
-        with resource_report(include_children=True, name="Electricity Generation") as rr:
-            GRD.generate_electricity()  # Electricity
-        with resource_report(include_children=True, name="Heat Generation") as rr:
-            GRD.generate_heat()         # Heat
-        with resource_report(include_children=True, name="Mobility Generation") as rr:
-            GRD.generate_mobility()     # Mobility
+        if settings["profiles"] == "electricity":
+            with resource_report(include_children=True, name="Electricity Generation") as rr:
+                GRD.generate_electricity()  # Electricity
 
-        ### Conversion of generated data to urbs outputs
-        GRD.create_weather_urbs()       # Weather
-        GRD.create_supim()              # SupIm
-        GRD.create_demand()             # Demands
-        GRD.create_tve()                # Eff Factor
-        GRD.create_bsp()                # Buy-Sell-Price
-        GRD.create_processes()          # Process
-        GRD.create_commodities()        # Commoditites
-        GRD.create_process_commodity()  # Process Commodity
-        GRD.create_storages()           # Storage
+            GRD.create_demand()
+            GRD.SF.copy_save_file()
+            GRD.SF.save_df(GRD.df_buildings, "raw_data/buildings")
+            if GRD.df_weather_raw is not None and not GRD.df_weather_raw.empty:
+                GRD.SF.save_df(GRD.df_weather_raw, "raw_data/weather")
+            GRD.SF.save_df(GRD.df_demand, "urbs_in/demand")
+            print("Electricity-only profile generation complete.")
+        else:
+            with resource_report(include_children=True, name="Solar Generation") as rr:
+                GRD.generate_solar()        # Solar data
+            with resource_report(include_children=True, name="Electricity Generation") as rr:
+                GRD.generate_electricity()  # Electricity
+            with resource_report(include_children=True, name="Heat Generation") as rr:
+                GRD.generate_heat()         # Heat
+            with resource_report(include_children=True, name="Mobility Generation") as rr:
+                GRD.generate_mobility()     # Mobility
 
-        ### Saving Grid Data to .h5
-        df = GRD.save_grid_data()
+            ### Conversion of generated data to urbs outputs
+            GRD.create_weather_urbs()       # Weather
+            GRD.create_supim()              # SupIm
+            GRD.create_demand()             # Demands
+            GRD.create_tve()                # Eff Factor
+            GRD.create_bsp()                # Buy-Sell-Price
+            GRD.create_processes()          # Process
+            GRD.create_commodities()        # Commoditites
+            GRD.create_process_commodity()  # Process Commodity
+            GRD.create_storages()           # Storage
+
+            ### Saving Grid Data to .h5
+            GRD.save_grid_data()
