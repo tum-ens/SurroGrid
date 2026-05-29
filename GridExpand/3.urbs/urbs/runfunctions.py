@@ -13,6 +13,7 @@ import os
 import multiprocessing as mp
 import time
 import warnings
+import traceback
 
 def run_worker(data_cluster, global_settings, log_dir, scenario_name, return_dict=None, i=""):
     """ run 
@@ -27,7 +28,16 @@ def run_worker(data_cluster, global_settings, log_dir, scenario_name, return_dic
 
     Returns:
         dataframe dict with results
-    """   
+    """
+    try:
+        return _run_worker(data_cluster, global_settings, log_dir, scenario_name, return_dict, i)
+    except Exception:
+        if return_dict is not None:
+            return_dict[i] = {"__error__": traceback.format_exc()}
+            return None
+        raise
+
+def _run_worker(data_cluster, global_settings, log_dir, scenario_name, return_dict=None, i=""):
     ###################### Setup pyomo model instance + solver ###########################
     start_time=time.time()   # Timer for measuring model setup duration
 
@@ -215,7 +225,12 @@ def run_lvds_opt(input_path,        # path to input file
         for i, proc in enumerate(procs):
             ### Retrieve data from child processes
             proc.join()
-            model_results[i] = return_dict[i]  # solved model instances
+            result = return_dict.get(i)
+            if isinstance(result, dict) and "__error__" in result:
+                raise RuntimeError(f"Worker {i} failed:\n{result['__error__']}")
+            if result is None:
+                raise RuntimeError(f"Worker {i} exited without returning a result.")
+            model_results[i] = result  # solved model instances
     else:
         model_results = run_worker(data,                   # whole data
                                 global_settings,        # settings of the run

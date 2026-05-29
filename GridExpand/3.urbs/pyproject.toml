@@ -19,6 +19,7 @@ dependencies = [
   "msgpack>=1.1,<2",
   "blosc2>=2,<4",
   "tqdm>=4.67,<5",
+  "gurobipy>=13.0.2",
 ]
 
 [tool.uv]

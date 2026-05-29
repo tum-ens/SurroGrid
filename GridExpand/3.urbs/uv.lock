@@ -123,6 +123,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "blosc2" },
+    { name = "gurobipy" },
     { name = "h5py" },
     { name = "highspy" },
     { name = "matplotlib" },
@@ -142,6 +143,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "blosc2", specifier = ">=2,<4" },
+    { name = "gurobipy", specifier = ">=13.0.2" },
     { name = "h5py", specifier = ">=3.13,<4" },
     { name = "highspy", specifier = ">=1.10,<2" },
     { name = "matplotlib", specifier = ">=3.5,<3.11" },
@@ -156,6 +158,17 @@ requires-dist = [
     { name = "threadpoolctl", specifier = ">=3.6,<4" },
     { name = "tqdm", specifier = ">=4.67,<5" },
     { name = "tsam", specifier = ">=2.3,<3" },
+]
+
+[[package]]
+name = "gurobipy"
+version = "13.0.2"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/58/76/954811b540d1c849a6f53c0ffcdc04c0e196aed4f522b2914fa0e19dd932/gurobipy-13.0.2-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:9bbe727cdcfdf336cda7f48990d26e3fb65869b589c1eb4f07a64f95dc830ef4", size = 16005699, upload-time = "2026-05-05T10:40:15.968Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/0e/62bad91839ecfea6423f8229744af3dc00aa45b3fd080d9afd9a6448d3f8/gurobipy-13.0.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:7fba47ceec1afb39124aedf09a025b00ce3e105b255e9401235f8eaaa0c12bd8", size = 15038005, upload-time = "2026-05-05T10:40:23.176Z" },
+    { url = "https://files.pythonhosted.org/packages/30/fa/3ab49093a173d888c36c25a7bbe8d797aef5c5168d3a93465b5fd12fb036/gurobipy-13.0.2-cp310-cp310-manylinux_2_26_aarch64.whl", hash = "sha256:11480bee339cd2a7916bbdc9665094989ac6ee3ffc138c7ae4d220f65c601c2d", size = 87380311, upload-time = "2026-05-05T10:41:13.401Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/0f/5088d5e04e4b842bff860207d9bbc6b308d447fd95395e5538100523e07a/gurobipy-13.0.2-cp310-cp310-win_amd64.whl", hash = "sha256:e33fc769ae7929e5608cd00af7318f84d79671a4e2db088d0fb40da29a344e83", size = 11396438, upload-time = "2026-05-05T10:41:19.678Z" },
 ]
 
 [[package]]
