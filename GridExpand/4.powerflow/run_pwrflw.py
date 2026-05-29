@@ -26,6 +26,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Low voltage grid DER allocation.")
     parser.add_argument("inputfile_id", help="Input file name (no path)")
     parser.add_argument("--n_cpu", default=1, help="Number of CPUs available for parallel generation")
+    parser.add_argument(
+        "--pre-only",
+        action="store_true",
+        help="Run only status-quo powerflow from urbs_in/demand; does not require urbs_out/MILP/tau_pro.",
+    )
     args = parser.parse_args()
 
     # list all .h5 files in your directory
@@ -51,11 +56,16 @@ if __name__ == "__main__":
 
     ##### Obtaining Power Demands #####
     # Read-out and preprocess demand before and after DER expansion
-    df_pre_demand, df_post_demand = dmnds.obtain_demand(SF)
+    if args.pre_only:
+        df_pre_demand = dmnds.obtain_pre_demand(SF)
+        df_post_demand = None
+    else:
+        df_pre_demand, df_post_demand = dmnds.obtain_demand(SF)
 
     # Save to be retrieved later by ML model
     SF.save_df(df_pre_demand, "/pwrflw/input/demand_pre")
-    SF.save_df(df_post_demand, "/pwrflw/input/demand_post")
+    if df_post_demand is not None:
+        SF.save_df(df_post_demand, "/pwrflw/input/demand_post")
 
 
     ##### Powerflow #####
@@ -72,12 +82,13 @@ if __name__ == "__main__":
         SF.save_df(vm_pre, "/pwrflw/output/pre/vm")
         SF.save_df(line_loads_pre, "/pwrflw/output/pre/line_loads")
 
-    # Run powerflow post DER expansion
-    with resource_report(name="Post-Expansion Powerflow Run", include_children=True):
-        ext_import_post, vm_post, line_loads_post = pwrflw.pf(grid, df_post_demand, settings["parallel"], settings["n_cpu"])
-        ##### Save results #####
-        SF.save_df(ext_import_post, "/pwrflw/output/post/demand_import")
-        SF.save_df(vm_post, "/pwrflw/output/post/vm")
-        SF.save_df(line_loads_post, "/pwrflw/output/post/line_loads")
+    if not args.pre_only:
+        # Run powerflow post DER expansion
+        with resource_report(name="Post-Expansion Powerflow Run", include_children=True):
+            ext_import_post, vm_post, line_loads_post = pwrflw.pf(grid, df_post_demand, settings["parallel"], settings["n_cpu"])
+            ##### Save results #####
+            SF.save_df(ext_import_post, "/pwrflw/output/post/demand_import")
+            SF.save_df(vm_post, "/pwrflw/output/post/vm")
+            SF.save_df(line_loads_post, "/pwrflw/output/post/line_loads")
 
     print("Done!")

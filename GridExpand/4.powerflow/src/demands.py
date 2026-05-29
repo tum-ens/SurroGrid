@@ -129,6 +129,11 @@ def _process_post_demands(df_urbs_demand, df_pre_demand_react):
 
     return df_post_demand_elec, df_post_demand_react, df_react_save
 
+def obtain_pre_demand(SF):
+    df_raw_demand = pd.read_hdf(SF.input_path, key=SF.raw_demand_dir)
+    df_pre_demand_elec, df_pre_demand_react = _process_pre_demands(df_raw_demand)
+    return pd.concat([df_pre_demand_elec, df_pre_demand_react], axis=1)
+
 def obtain_demand(SF):
     # Read-out demands:
     df_raw_demand, df_urbs_demand = SF.get_input_demands()
