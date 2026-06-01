@@ -7,14 +7,14 @@ import warnings
 ##############################################################
 ################## Obtaining GHD + HP COP ####################
 ##############################################################
-def _get_single_dhw_timeseries_ghd(type, area, floors, df_normalized_lps_ghd):
-    return df_normalized_lps_ghd[type]*area*floors
+def _get_single_dhw_timeseries_ghd(building_type, floor_area, df_normalized_lps_ghd):
+    return df_normalized_lps_ghd[building_type] * floor_area
 
 def _get_dhw_demand_ghd(df_buildings):
     df_normalized_lps_ghd = pd.read_csv(config.DHW_GHD_PATH, skiprows=1, header=[0])*1000
 
     # Apply function and create a new DataFrame
-    data_dict_ghd = {row["bus"]: _get_single_dhw_timeseries_ghd(row['type'], row["area"], row["floors"], df_normalized_lps_ghd) for idx, row in df_buildings.iterrows() if row["use"]!="Residential"}
+    data_dict_ghd = {row["bus"]: _get_single_dhw_timeseries_ghd(row["building_type"], row["floor_area"], df_normalized_lps_ghd) for idx, row in df_buildings.iterrows() if row["building_use"]!="Residential"}
 
     # Convert to DataFrame
     df_dhw_demand = pd.DataFrame(data_dict_ghd).reset_index(drop=True)
@@ -72,9 +72,9 @@ def _get_cop(hp_type, heating_type, df_heat_space, df_heat_water, air_temp, soil
 ##############################################################
 def sample_statistics(df_buildings):
     # Sample ages for non-residential buildings:
-    df_buildings.loc[df_buildings["constructi"].isna(), ["constructi"]] = np.random.choice(
+    df_buildings.loc[df_buildings["construction_year"].isna(), ["construction_year"]] = np.random.choice(
         config.AGE_GHD_DISTRIBUTION["age"], 
-        size=len(df_buildings[df_buildings["constructi"].isna()]["constructi"]), 
+        size=len(df_buildings[df_buildings["construction_year"].isna()]["construction_year"]), 
         p=config.AGE_GHD_DISTRIBUTION["prob"])
     
     # # Sample heat pump type:
@@ -97,12 +97,11 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip):
 
     # Setting up input for heat load generator
     scenario = df_buildings.copy()
-    scenario = scenario[["bus", "type", "constructi", "area", "floors", "houses_per_building","occ_list"]]
+    scenario = scenario[["bus", "building_type", "construction_year", "floor_area", "floor_number", "households", "occ_list"]]
     scenario.reset_index(inplace=True)
-    scenario.rename(inplace=True, columns={"index":"id","type":"building", "houses_per_building":"nb_flat", "occ_list":"nb_occ", "constructi":"year"})
+    scenario.rename(inplace=True, columns={"index": "id", "building_type": "building", "households": "nb_flat", "occ_list": "nb_occ", "construction_year": "year", "floor_area": "area", "floor_number": "floors"})
     scenario["NWG"] = scenario["building"].apply(lambda x: 1 if x not in ["SFH","MFH","TH","AB"] else 0)
     scenario["year"] = scenario["year"].str.extract(r'(\d+)(?!.*\d)').astype(int)
-    scenario["area"] = scenario["area"] * scenario["floors"]
     scenario["nb_occ"] = scenario["nb_occ"].apply(lambda x: [int(round(y,0)) for y in x])
     scenario["retrofit"] = 0
 

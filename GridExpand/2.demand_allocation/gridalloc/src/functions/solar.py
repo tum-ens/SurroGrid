@@ -10,13 +10,13 @@ from pvlib.temperature import TEMPERATURE_MODEL_PARAMETERS
 ################### Sampling + Generation ####################
 ##############################################################
 
-def _get_roof_sections(area, tilt_hist):
+def _get_roof_sections(floor_area, tilt_hist):
     ### First sample whether flat roof:
     roof_type = np.random.choice(["flat","gabled"], p=[config.PROB_FLAT_ROOF,config.PROB_GABLED_ROOF])
 
     ### If flat roof return one flat roof section
     if roof_type == "flat":
-        A_eff = area*config.FLAT_ROOF_UTILIZATION
+        A_eff = floor_area*config.FLAT_ROOF_UTILIZATION
         cap = round(A_eff*config.PV_AREA_FACTOR, 3)
         return [(cap,0,0)]
     ### Else assume two opposing gabled roof sections
@@ -31,7 +31,7 @@ def _get_roof_sections(area, tilt_hist):
         row = tilt_hist.iloc[bin_idx]
         tilt = int(round(np.random.uniform(row['bin_left'], row['bin_right']),0)) # Sample uniformly within the selected bin
         
-        A_eff = round((area/2)*config.SLANTED_ROOF_UTILIZATION/np.cos(np.radians(tilt)),3)
+        A_eff = round((floor_area/2)*config.SLANTED_ROOF_UTILIZATION/np.cos(np.radians(tilt)),3)
         cap = round(A_eff*config.PV_AREA_FACTOR, 3)
         return [(cap,tilt,azimuth_1),(cap,tilt,azimuth_2)]
 
@@ -116,7 +116,9 @@ def _calculate_pv_power(lat, lon, altitude, tilt, azimuth, weather_df):
 
 def sample_statistics(df_buildings):
     ### Sample buildings' roof sections: [(capacity, tilt, azim), ...]
-    df_buildings["roofs"] = df_buildings["area"].apply(lambda x: _get_roof_sections(x, config.ROOF_TILT_DIST)) 
+    floor_number = df_buildings["floor_number"].replace(0, np.nan).fillna(1)
+    roof_area = df_buildings["floor_area"] / floor_number
+    df_buildings["roofs"] = roof_area.apply(lambda x: _get_roof_sections(x, config.ROOF_TILT_DIST)) 
     return df_buildings
 
 def create_supim_solar(df_buildings, df_weather, location, altitude):

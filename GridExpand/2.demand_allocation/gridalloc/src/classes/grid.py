@@ -100,8 +100,8 @@ class Grid:
         # Now, obtain heat demands
         if self.settings["parallel"]:
             # Run parallel jobs
-            print(f"Generating heat demands for {len(self.df_buildings)} building(s) with {sum(self.df_buildings["houses_per_building"])} flat(s)...")
-            building_subsets = self.partition_df_by_cpu(self.df_buildings, self.settings["n_cpu"], "houses_per_building")
+            print(f"Generating heat demands for {len(self.df_buildings)} building(s) with {sum(self.df_buildings["households"])} flat(s)...")
+            building_subsets = self.partition_df_by_cpu(self.df_buildings, self.settings["n_cpu"], "households")
             col_subsets = [[(col, "electricity") for col in subset["bus"].values] for subset in building_subsets]
             job_args = [(subset.reset_index(drop=True), df_elec_input[col_subsets[i]], [np.array(df_wth_input[col]) for col in ["dni", "dhi", "temp_air"]], self.plz)
                          for i, subset in enumerate(building_subsets)]

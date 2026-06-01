@@ -228,38 +228,47 @@ class DataBase:
 
     def read_buildings(self, grid_specs, df_bus):
         select_parts = [
-            "b.osm_id",
+            "b.objectid",
+            "b.id",
+            "b.feature_id",
             "b.vertice_id",
+            "b.height",
+            "b.floor_area",
+            "b.floor_number",
             (
                 "CASE "
-                "WHEN UPPER(COALESCE(TRIM(b.type), '')) IN ('AB', 'MFH', 'TH', 'SFH') "
-                "THEN UPPER(TRIM(b.type)) "
-                "WHEN LOWER(COALESCE(TRIM(b.type), '')) LIKE '%public%' "
+                "WHEN UPPER(COALESCE(TRIM(b.building_type), TRIM(b.type), '')) IN ('AB', 'MFH', 'TH', 'SFH') "
+                "THEN UPPER(COALESCE(TRIM(b.building_type), TRIM(b.type))) "
+                "WHEN LOWER(COALESCE(TRIM(b.building_use), TRIM(b.type), '')) LIKE '%public%' "
                 "THEN 'public' "
-                "WHEN LOWER(COALESCE(TRIM(b.type), '')) LIKE '%commercial%' "
+                "WHEN LOWER(COALESCE(TRIM(b.building_use), TRIM(b.type), '')) LIKE '%commercial%' "
                 "THEN 'commercial' "
                 "ELSE 'commercial' "
-                "END AS type"
+                "END AS building_type"
             ),
             (
                 "CASE "
-                "WHEN UPPER(COALESCE(TRIM(b.type), '')) IN ('AB', 'MFH', 'TH', 'SFH') "
+                "WHEN UPPER(COALESCE(TRIM(b.building_type), TRIM(b.type), '')) IN ('AB', 'MFH', 'TH', 'SFH') "
                 "THEN 'Residential' "
-                "WHEN LOWER(COALESCE(TRIM(b.type), '')) LIKE '%public%' "
+                "WHEN LOWER(COALESCE(TRIM(b.building_use), TRIM(b.type), '')) LIKE '%public%' "
                 "THEN 'Public' "
-                "WHEN LOWER(COALESCE(TRIM(b.type), '')) LIKE '%commercial%' "
+                "WHEN LOWER(COALESCE(TRIM(b.building_use), TRIM(b.type), '')) LIKE '%commercial%' "
                 "THEN 'Commercial' "
                 "ELSE 'Commercial' "
-                "END AS use"
+                "END AS building_use"
             ),
-            "b.households_per_building AS houses_per_building",
-            "NULL::double precision AS occupants",
-            "NULL::double precision AS free_walls",
-            "CAST(b.construction_year AS VARCHAR) AS constructi",
-            "b.floors",
-            "b.area",
+            "b.occupants",
+            "b.households",
+            "CAST(b.construction_year AS VARCHAR) AS construction_year",
+            "b.postcode",
+            "b.address_street_id",
+            "b.street",
+            "b.house_number",
+            "b.gemeindeschluessel",
+            "b.assigned_way_id",
+            "b.peak_load_in_kw",
             "b.connection_point",
-            "ST_AsText(b.center) AS center",
+            "ST_AsText(b.centroid) AS centroid",
         ]
 
         query = text(
@@ -315,7 +324,7 @@ class DataBase:
         df_buildings = df_buildings.sort_values(by='bus').reset_index(drop=True)
 
         if "occupants" in df_buildings.columns:
-            fallback_occ = df_buildings["houses_per_building"].fillna(1)
+            fallback_occ = df_buildings["households"].fillna(1)
             fallback_occ = fallback_occ.clip(lower=1) * 2
             df_buildings["occupants"] = df_buildings["occupants"].fillna(fallback_occ)
 
@@ -338,7 +347,7 @@ class DataBase:
 
             return lat, lon
 
-        df_buildings[["lat", "lon"]] = df_buildings["center"].apply(_get_loc).apply(pd.Series)
-        df_buildings.drop(columns=["center"], inplace=True)
+        df_buildings[["lat", "lon"]] = df_buildings["centroid"].apply(_get_loc).apply(pd.Series)
+        df_buildings.drop(columns=["centroid"], inplace=True)
 
         return df_buildings

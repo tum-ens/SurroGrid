@@ -115,6 +115,8 @@ def _get_occupancy_distribution(prob:dict, n_hh:int, n_occ:int)->list:
     if pd.isna(n_hh) or pd.isna(n_occ): 
         return []
     else:
+        n_hh = int(round(n_hh))
+        n_occ = float(n_occ)
         # To check whether occupancy can even be fulfilled by statistics:
         min_dist_member = min(prob.keys())          # minimum household size in statistics
         max_dist_member = max(prob.keys())          # maximum household size in statistics
@@ -137,7 +139,7 @@ def _assign_household_occupancy(df_buildings):
     else:
         df_prob = config.HH_SIZE_DISTRIBUTION
         prob = dict(zip(df_prob["size"], df_prob["probability"]))          # retrieve polynomial encoding household size probabilities
-        df_buildings['occ_list'] = df_buildings.apply(lambda row: _get_occupancy_distribution(prob, row['houses_per_building'], row['occupants']), axis=1)
+        df_buildings['occ_list'] = df_buildings.apply(lambda row: _get_occupancy_distribution(prob, row['households'], row['occupants']), axis=1)
         return df_buildings
     
 
@@ -175,17 +177,17 @@ def _assign_total_elec_demands(df_buildings):
 ##############################################################
 ################## Sampling building use #####################
 ##############################################################
-def _get_use_type(dist, type, use):
-    if use == "Residential":  # Use pre-assigned type
-        return type
-    if use == "Public":       # Sample from distribution
+def _get_use_type(dist, building_type, building_use):
+    if building_use == "Residential":  # Use pre-assigned type
+        return building_type
+    if building_use == "Public":       # Sample from distribution
         return np.random.choice(dist["type"], p=dist['public_prob'])
-    if use == "Commercial":   # Sample from distribution
+    if building_use == "Commercial":   # Sample from distribution
         return np.random.choice(dist["type"], p=dist['commercial_prob'])
 
 def _assign_use_type(df_buildings):
     df_type_dist = config.TYPE_GHD_DISTRIBUTION
-    df_buildings["type"] = df_buildings.apply(lambda row: _get_use_type(df_type_dist, row['type'], row["use"]), axis=1)
+    df_buildings["building_type"] = df_buildings.apply(lambda row: _get_use_type(df_type_dist, row["building_type"], row["building_use"]), axis=1)
     return df_buildings
 
 def _get_single_building_elec_timeseries_res(yearly_demand_list, df_normalized_lps, lps_total_demands):
@@ -203,8 +205,8 @@ def _get_single_building_elec_timeseries_res(yearly_demand_list, df_normalized_l
     total_ts = df_ts.sum(axis=1)
     return total_ts
 
-def _get_single_building_elec_timeseries_ghd(type, area, floors, df_normalized_lps_ghd):
-    return df_normalized_lps_ghd[type]*area*floors
+def _get_single_building_elec_timeseries_ghd(building_type, floor_area, df_normalized_lps_ghd):
+    return df_normalized_lps_ghd[building_type] * floor_area
 
 
 ##############################################################
@@ -222,8 +224,8 @@ def get_elec_demand(df_buildings):
     df_normalized_lps_ghd = pd.read_csv(config.ELEC_GHD_PATH, skiprows=1, header=[0])
 
     # Apply function and create a new DataFrame
-    data_dict_res = {row["bus"]: _get_single_building_elec_timeseries_res(row['demand_tot_list'], df_normalized_lps_res, lps_res_total_demand) for idx, row in df_buildings.iterrows() if row["use"]=="Residential"}
-    data_dict_ghd = {row["bus"]: _get_single_building_elec_timeseries_ghd(row['type'], row["area"], row["floors"], df_normalized_lps_ghd) for idx, row in df_buildings.iterrows() if row["use"]!="Residential"}
+    data_dict_res = {row["bus"]: _get_single_building_elec_timeseries_res(row['demand_tot_list'], df_normalized_lps_res, lps_res_total_demand) for idx, row in df_buildings.iterrows() if row["building_use"]=="Residential"}
+    data_dict_ghd = {row["bus"]: _get_single_building_elec_timeseries_ghd(row["building_type"], row["floor_area"], df_normalized_lps_ghd) for idx, row in df_buildings.iterrows() if row["building_use"]!="Residential"}
 
     # Convert to DataFrame
     df_elec_demand_res = pd.DataFrame(data_dict_res).reset_index(drop=True)
@@ -232,7 +234,7 @@ def get_elec_demand(df_buildings):
     df_elec_demand.columns = pd.MultiIndex.from_product([df_elec_demand.columns, ["electricity"]])
 
     # Assign correct total demand to non-res
-    non_res_mask = df_buildings["use"] != "Residential"
+    non_res_mask = df_buildings["building_use"] != "Residential"
     df_buildings.loc[non_res_mask, "demand_tot_list"] = df_buildings.loc[non_res_mask, "bus"].map(
         lambda bus: df_elec_demand[bus].sum().tolist()
     )
