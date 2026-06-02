@@ -11,9 +11,7 @@ from typing import Optional
 import pandas as pd
 
 import src.db_read as dbrd
-import src.grid_topol as grdtpl
-import src.save_grid as svgrd
-import src.weather as wth
+import src.export_grid as expgrd
 
 
 def _select_grid_for_plz(
@@ -66,23 +64,6 @@ def _select_grid_for_plz(
         n_total_candidates,
     )
 
-
-def _build_region_row(db: dbrd.DataBase, plz: int, kcid: int, bcid: int) -> pd.DataFrame:
-    grid_specs = {"plz": plz, "kcid": kcid, "bcid": bcid}
-
-    df_region = db.read_regional_stats(plz)
-    if df_region.empty:
-        df_region = pd.DataFrame([{"plz": plz}])
-    else:
-        df_region = df_region.iloc[[0]].copy().reset_index(drop=True)
-
-    location = db.read_trafo_pos(grid_specs)
-    df_region["lat"] = location["lat"]
-    df_region["lon"] = location["lon"]
-    df_region["kcid"] = kcid
-    df_region["bcid"] = bcid
-
-    return df_region
 
 
 def main() -> None:
@@ -143,40 +124,15 @@ def main() -> None:
     grid_specs = {"cell_id": cell_id, "plz": plz, "kcid": kcid, "bcid": bcid}
     print(f"Selected grid: PLZ={plz}, KCID={kcid}, BCID={bcid}, cell_id={cell_id}")
 
-    net = db.read_single_ppgrid(grid_specs)
-    net = grdtpl.assign_min_linelen(net)
-    net = grdtpl.remove_duplicate_loads(net)
+    df_region = expgrd.build_region_row(db, plz, kcid, bcid)
+    output_path = expgrd.export_pylovo_grid(
+        db=db,
+        grid_specs=grid_specs,
+        region_specs=df_region,
+        skip_weather=args.skip_weather,
+    )
 
-    df_buildings = db.read_buildings(grid_specs, net.bus)
-    df_region = _build_region_row(db, plz, kcid, bcid)
-
-    df_weather = None
-    if not args.skip_weather:
-        lat = float(df_region.iloc[0]["lat"])
-        lon = float(df_region.iloc[0]["lon"])
-
-        weather_tuple = wth.get_pvgis_tmy_sarah3_dataframe(lat, lon)
-        if weather_tuple is None:
-            raise RuntimeError("PVGIS weather retrieval failed.")
-        df_weather, altitude, selected_months = weather_tuple
-
-        df_weather["dew_point"] = wth.get_dew_point(
-            df_weather["temp_air"], df_weather["relative_humidity"]
-        )
-
-        df_soil = wth.get_open_meteo_soil_temperature(lat, lon, selected_months)
-        soil_series = df_soil.iloc[:, 0] if isinstance(df_soil, pd.DataFrame) else df_soil
-        df_weather["soil_temp"] = pd.Series(soil_series).reset_index(drop=True)
-        df_region["altitude"] = float(altitude)
-
-    sf = svgrd.SaveFile(grid_specs)
-    sf.save_topology(net, "/raw_data/")
-    sf.save_df(df_region, "/raw_data/region")
-    sf.save_df(df_buildings, "/raw_data/buildings")
-    if df_weather is not None:
-        sf.save_df(df_weather, "/raw_data/weather")
-
-    print(f"Export complete: {sf.path}")
+    print(f"Export complete: {output_path}")
     if args.skip_weather:
         print("Weather skipped. For Step 2 set weather_data_exists=False or add weather later.")
 

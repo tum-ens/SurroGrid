@@ -162,6 +162,7 @@ If a downstream step expects a different key (e.g. `grid_top/net`), adapt your f
 Helper modules live in [gridreadout/src/](gridreadout/src):
 
 - `db_read.py`: SQLAlchemy-based readout of grids, buildings, and metadata from the pylovo DB.
+- `export_grid.py`: shared grid export flow used by Notebook 2 and the single-grid CLI.
 - `save_grid.py`: creates `.h5` files and writes pandapower + pandas objects.
 - `grid_topol.py`: small topology cleanup helpers (line lengths, duplicate loads, consumer buses).
 - `weather.py`: fetch PVGIS TMY and Open-Meteo soil temperature; computes dew point.

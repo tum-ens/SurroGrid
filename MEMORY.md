@@ -171,3 +171,9 @@
 - What was decided: Keep `--profiles electricity` as a slim Step 2 mode that writes only sampled building metadata and `urbs_in/demand`, and require Step 4 `--no-urbs` for status-quo power-flow checks.
 - Why: Electricity-only runs are not meant to feed URBS optimization, so fabricating empty URBS input tables and adding empty HP/PV robustness in `demands.py` made the codebase harder to understand without supporting the intended workflow.
 - What was rejected and why: Keeping `Grid.create_electricity_only_urbs()` and special post-URBS empty-component handling was rejected because full `--profiles all` should produce the normal URBS inputs, while electricity-only bypasses URBS entirely.
+
+## 2026-06-02 - Step 1 shared single-grid export helper
+
+- What was decided: Extract the duplicated pylovo grid export flow into `GridExpand/1.grid_sampling/gridreadout/src/export_grid.py` and have both `export_single_grid.py` and Notebook 2 call it.
+- Why: The pilot CLI should not duplicate the original notebook pipeline logic for topology cleanup, building readout, weather enrichment, and HDF5 writing.
+- What was rejected and why: Keeping the full export sequence inside `export_single_grid.py` was rejected because it creates two places to maintain the same Step 1 output contract. Replacing the notebook workflow with a larger CLI was rejected for now because the smallest cleanup is a shared helper.
