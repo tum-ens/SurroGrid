@@ -67,6 +67,14 @@ Use the uv-managed interpreter to run the step:
 uv run python run_pwrflw.py <inputfile_id> --n_cpu <N>
 ```
 
+DB-backed power-flow result storage can be enabled with the command below. Use `--no-urbs` when the input only contains `urbs_in/demand` and no Step 3 URBS output:
+
+```bash
+uv run python run_pwrflw.py <inputfile_id> --storage db --no-urbs
+```
+
+In DB mode Step 4 still reads `urbs_in/*` and `urbs_out/*` from the input HDF5 file, but reads the pandapower grid from PostgreSQL and writes `pwrflw/*` results to the `surrogrid` schema instead of `Output/*.h5`. Results are grouped under the static `baseline_static` scenario key, integer `scenario_id`, and an interpretable `run_name`; rerunning the same grid/scenario/run overwrites the previous time-series rows. Building-level joins are available through the `surrogrid.grid_building_bus` view.
+
 Dependency manifests are available in:
 
 - `pyproject.toml` (uv)
@@ -180,7 +188,7 @@ bash start_batch_jobs_serialstd.sh 0 24
 
 ## Details to keep in mind
 
-- **File selection logic**: `run_pwrflw.py` chooses the first `.h5` in `Input/` whose prefix matches `inputfile_id`. If multiple files share the same prefix, only the first match will be used.
+- **File selection logic**: if `inputfile_id` ends with `.h5`, `run_pwrflw.py` selects that exact file from `Input/`. Otherwise it chooses the first `.h5` whose prefix before the first `_` matches `inputfile_id`. Use the exact filename when both a Step 2 bridge file and a suffixed Step 3 URBS result exist for the same grid.
 - **Output overwrites**: if `Output/<filename>` already exists it will be overwritten (because the input file is copied over at start).
 - **Units**: loads are converted from kW/kVAr to MW/MVAr by dividing by `1000` before running pandapower.
 - **Parallel runs**: each worker receives a deep-copied pandapower net. This avoids shared-state issues but increases memory use.

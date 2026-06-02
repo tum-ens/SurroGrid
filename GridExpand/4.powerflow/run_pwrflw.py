@@ -13,10 +13,16 @@ The selected file is copied to `Output/` and augmented with:
 See `README.md` in this folder for required HDF5 keys and expected outputs.
 """
 
+import sys
+from pathlib import Path
+
+GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
+if str(GRIDEXPAND_DIR) not in sys.path:
+    sys.path.insert(0, str(GRIDEXPAND_DIR))
+
 import src.save_grid as svgrd
 import src.demands as dmnds
 import src.powerflow as pwrflw
-
 import argparse
 import os
 from src.resource_report import resource_report
@@ -27,7 +33,13 @@ if __name__ == "__main__":
     parser.add_argument("inputfile_id", help="Input file name (no path)")
     parser.add_argument("--n_cpu", default=1, help="Number of CPUs available for parallel generation")
     parser.add_argument(
-        "--pre-only",
+        "--storage",
+        choices=["h5", "db"],
+        default="h5",
+        help="Write powerflow results to HDF5 or database. DB mode still reads urbs_in/urbs_out from HDF5.",
+    )
+    parser.add_argument(
+        "--no-urbs",
         action="store_true",
         help="Run only status-quo powerflow from urbs_in/demand; does not require urbs_out/MILP/tau_pro.",
     )
@@ -38,7 +50,10 @@ if __name__ == "__main__":
     h5_files = [fname for fname in all_entries if fname.endswith(".h5")]
     # find file with correct id prefix
     input_id_str = str(args.inputfile_id)
-    matched_files = [fname for fname in h5_files if fname.split('_', 1)[0] == input_id_str]
+    if input_id_str.endswith(".h5"):
+        matched_files = [fname for fname in h5_files if fname == input_id_str]
+    else:
+        matched_files = [fname for fname in h5_files if fname.split('_', 1)[0] == input_id_str]
     input_file = matched_files[0]
 
 
@@ -46,17 +61,25 @@ if __name__ == "__main__":
     settings = {
         "file": input_file,
         "parallel": True,
-        "n_cpu": int(args.n_cpu)
+        "n_cpu": int(args.n_cpu),
+        "storage": args.storage,
     }
-    print(f"Running input file {settings['file']} (ID {args.inputfile_id}) with {settings['n_cpu']} CPUs!")
+    print(
+        f"Running input file {settings['file']} (ID {args.inputfile_id}, storage {args.storage}) "
+        f"with {settings['n_cpu']} CPUs!"
+    )
 
     # Save file handler
-    SF = svgrd.SaveFile(settings["file"])
+    SF = svgrd.SaveFile(
+        settings["file"],
+        storage=args.storage,
+        pre_only=args.no_urbs,
+    )
 
 
     ##### Obtaining Power Demands #####
     # Read-out and preprocess demand before and after DER expansion
-    if args.pre_only:
+    if args.no_urbs:
         df_pre_demand = dmnds.obtain_pre_demand(SF)
         df_post_demand = None
     else:
@@ -82,7 +105,7 @@ if __name__ == "__main__":
         SF.save_df(vm_pre, "/pwrflw/output/pre/vm")
         SF.save_df(line_loads_pre, "/pwrflw/output/pre/line_loads")
 
-    if not args.pre_only:
+    if not args.no_urbs:
         # Run powerflow post DER expansion
         with resource_report(name="Post-Expansion Powerflow Run", include_children=True):
             ext_import_post, vm_post, line_loads_post = pwrflw.pf(grid, df_post_demand, settings["parallel"], settings["n_cpu"])

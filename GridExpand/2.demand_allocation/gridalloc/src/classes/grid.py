@@ -17,10 +17,16 @@ class Grid:
     def __init__(self, settings):
         ### Setup savefile instance which manages data retrieval and saving
         self.settings = settings
-        self.SF = svgrd.SaveFile(settings["grid_filename"])
+        self.SF = svgrd.SaveFile(
+            settings["grid_filename"],
+            storage=settings.get("storage", "h5"),
+            grid_ref=settings.get("grid_ref"),
+        )
 
         ### Basic grid data
         self.df_buildings, self.df_region, self.df_weather_raw = self.SF.get_input_data()
+        if self.df_weather_raw is None:
+            self.df_weather_raw = pd.DataFrame()
         if self.df_region is None or self.df_region.empty:
             raise ValueError("Missing region metadata in input file (/raw_data/region).")
 
@@ -235,6 +241,7 @@ class Grid:
         df_sto = pd.concat([df_sto_elec,df_sto_heat,df_sto_mob], axis=0)
         self.df_sto = df_sto.reset_index(drop=True) 
     
+
 
     ############################################
     ########## Saving all grid data ############ 

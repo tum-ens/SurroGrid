@@ -50,7 +50,8 @@ def _run_worker(data_cluster, global_settings, log_dir, scenario_name, return_di
     ### Setup solver
     optim = SolverFactory(global_settings["solver_name"])   # Create solver
     # logfile = repr(os.path.join(result_dir, f'{scenario_name}_{i}.log'))
-    logfile = repr(f'{log_dir}/{global_settings["input_file"][:-3]}_{scenario_name}_{i}.log')
+    os.makedirs(log_dir, exist_ok=True)
+    logfile = os.path.join(log_dir, f'{global_settings["input_file"][:-3]}_{scenario_name}_{i}.log')
     if os.path.exists(logfile): os.remove(logfile)
     optim = setup_solver_mip(optim,                # solver instance
                              logfile = logfile)    # logfile save path + name

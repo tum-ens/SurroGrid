@@ -97,7 +97,7 @@ and then augmented with additional tables.
 
 ### 2) HDF5 keys written by this step
 
-This step writes (or overwrites) the following keys using `pandas.HDFStore`:
+By default this step writes (or overwrites) the following keys using `pandas.HDFStore`:
 
 #### Raw data updates
 
@@ -115,6 +115,8 @@ This step writes (or overwrites) the following keys using `pandas.HDFStore`:
 - `urbs_in/commodity`
 - `urbs_in/process_commodity`
 - `urbs_in/storage`
+
+With `--profiles electricity`, Step 2 writes only sampled building metadata and `urbs_in/demand`; that output is intended for Step 4 status-quo power flow with `--no-urbs`, not for Step 3 URBS.
 
 ### 3) Logs (HPC)
 
@@ -321,6 +323,14 @@ Then run Step 2 from `gridalloc/` with the step-local interpreter:
 cd gridalloc
 uv run --project .. python main.py <inputfile_id> --n_cpu <N>
 ```
+
+DB-backed raw-grid readout can be enabled with:
+
+```bash
+uv run --project .. python main.py 09278140 --storage db --profiles electricity
+```
+
+In DB mode Step 2 resolves the AGS against the existing `pylovo` tables, stores AGS without a leading zero, and reads raw building/region input from PostgreSQL. The generated Step 2 outputs intentionally remain HDF5 for now. With `--profiles electricity`, only `urbs_in/demand` is written for Step 4 `--no-urbs`; full profile generation writes the normal `urbs_in/*` tables for Step 3.
 
 Legacy fallback: `environment.yml` and `environment_HPC.yml` remain available for conda-based setups.
 

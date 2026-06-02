@@ -22,3 +22,17 @@ No repeated failed approaches logged yet.
 - What didn't work: Switching from `pf_res_plotly` to explicit `create_line_trace(..., show_colorbar=True, cbar_title=...)` did not render the line-loading colorbar in output HTML for this environment.
 - What worked instead: Keep pandapower trace-based plotting, then append one minimal invisible Plotly marker trace with a dedicated colorbar titled `Line Loading [%]` when missing.
 - Note for next time: Validate colorbar presence from generated figure JSON/HTML, not only function arguments, because trace-helper behavior can vary by pandapower/plotly combination.
+
+
+## 2026-06-01 - SurroGrid schema cleanup DDL attempts
+
+- What did not work: `apply_patch` continued to fail in the sandbox with `bwrap: loopback: Failed RTM_NEWADDR`, and the first scenario DDL used a semicolon inside a quoted description string, which broke the existing simple semicolon-based SQL statement splitter.
+- What worked instead: Apply the file edits through the project `uv run` Python environment after approval, keep the DDL strings free of embedded semicolons, and validate with `SurroGridDatabase.ensure_schema()`.
+- Note for next time: Either keep `surrogrid_schema.sql` free of semicolons inside quoted strings or replace the schema loader with a real SQL splitter before adding richer DDL blocks.
+
+
+## 2026-06-02 - Timeslice revert file-edit attempts
+
+- What did not work: `apply_patch` failed again with the sandbox loopback error. A direct `uv run python -c` edit then failed first under the same sandbox restriction and later due shell quoting/newline issues in embedded replacement strings.
+- What worked instead: Run an elevated `uv run python` heredoc and use explicit text replacements with triple-quoted strings.
+- Note for next time: For multi-file edits in this environment, prefer `apply_patch` first for policy compliance, but if the loopback error recurs, use an elevated `uv run python` heredoc with simple, readable replacements.
