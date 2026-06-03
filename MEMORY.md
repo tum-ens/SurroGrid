@@ -229,3 +229,9 @@
 - Why: Step 2 and Step 4 runs are not fully uncoupled because they belong to the same grid/scenario pipeline execution, but they still need separate child metadata for allocation settings and power-flow settings. A parent run table makes this relationship explicit without merging unrelated step-specific result tables.
 - What was rejected and why: Collapsing `grid_case`, `scenario`, `demand_allocation_run`, and `powerflow_run` into one table was rejected because physical grid identity, scenario assumptions, and step execution metadata have different meanings and reuse patterns. Keeping Step 2 and Step 4 coupled only by matching names was rejected because it makes DB queries fragile.
 - Verification: `uv run --project GridExpand/2.demand_allocation python -m py_compile GridExpand/database.py` passed. `SurroGridDatabase().ensure_schema()` applied successfully on the configured DB, and the existing PLZ 94342 test grid now shows one `baseline_static_pipeline` parent with one demand allocation run and one power-flow run.
+
+## 2026-06-03 - Status-quo profile and pre-only power-flow terminology
+
+- What was decided: Rename the Step 2 electricity-only shortcut to `--profiles status_quo`, add explicit electrification profile combinations (`electricity_heat`, `electricity_mobility`, `electricity_heat_mobility`, with `all` as the full-combination alias), and use Step 4 `--pre-only` for runs that should only evaluate the pre-expansion power-flow stage.
+- Why: `status_quo` makes the cheap electricity-only/no-Step-3 workflow explicit, while `--pre-only` describes Step 4 behavior more clearly than `--no-urbs`. Electrification studies should use profile combinations and go through Step 3 before full Step 4.
+- What was rejected and why: Removing the electricity-only shortcut entirely was rejected because it is still useful for status-quo power-flow checks that intentionally skip expensive URBS optimization.

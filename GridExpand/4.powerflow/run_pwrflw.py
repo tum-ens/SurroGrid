@@ -39,9 +39,9 @@ if __name__ == "__main__":
         help="Write powerflow results to HDF5 or database. DB mode still reads urbs_in/urbs_out from HDF5.",
     )
     parser.add_argument(
-        "--no-urbs",
+        "--pre-only",
         action="store_true",
-        help="Run only status-quo powerflow from urbs_in/demand; does not require urbs_out/MILP/tau_pro.",
+        help="Run only pre-expansion powerflow from urbs_in/demand; does not require urbs_out/MILP/tau_pro.",
     )
     args = parser.parse_args()
 
@@ -73,13 +73,13 @@ if __name__ == "__main__":
     SF = svgrd.SaveFile(
         settings["file"],
         storage=args.storage,
-        pre_only=args.no_urbs,
+        pre_only=args.pre_only,
     )
 
 
     ##### Obtaining Power Demands #####
     # Read-out and preprocess demand before and after DER expansion
-    if args.no_urbs:
+    if args.pre_only:
         df_pre_demand = dmnds.obtain_pre_demand(SF)
         df_post_demand = None
     else:
@@ -105,7 +105,7 @@ if __name__ == "__main__":
         SF.save_df(vm_pre, "/pwrflw/output/pre/vm")
         SF.save_df(line_loads_pre, "/pwrflw/output/pre/line_loads")
 
-    if not args.no_urbs:
+    if not args.pre_only:
         # Run powerflow post DER expansion
         with resource_report(name="Post-Expansion Powerflow Run", include_children=True):
             ext_import_post, vm_post, line_loads_post = pwrflw.pf(grid, df_post_demand, settings["parallel"], settings["n_cpu"])

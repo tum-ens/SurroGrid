@@ -14,6 +14,23 @@ import src.classes.grid as grd
 from src.classes.resource_report import resource_report
 
 
+PROFILE_CHOICES = [
+    "status_quo",
+    "electricity_heat",
+    "electricity_mobility",
+    "electricity_heat_mobility",
+    "all",
+]
+
+
+def profile_flags(profile):
+    return {
+        "is_status_quo": profile == "status_quo",
+        "include_heat": profile in {"electricity_heat", "electricity_heat_mobility", "all"},
+        "include_mobility": profile in {"electricity_mobility", "electricity_heat_mobility", "all"},
+    }
+
+
 if __name__ == '__main__':
     with resource_report(include_children=True, name="Main Script") as rr_main:
         ####### Input arguments: #######
@@ -43,9 +60,12 @@ if __name__ == '__main__':
         )
         parser.add_argument(
             "--profiles",
-            choices=["all", "electricity"],
+            choices=PROFILE_CHOICES,
             default="all",
-            help="Demand profiles to generate. Use electricity for status-quo powerflow tests.",
+            help=(
+                "Demand profile scope to generate. Use status_quo for electricity-only "
+                "pre-expansion powerflow; 'all' is an alias for electricity_heat_mobility."
+            ),
         )
         parser.add_argument(
             "--mobility-source",
@@ -78,16 +98,18 @@ if __name__ == '__main__':
             inputfile = grid_ref["bridge_filename"]
 
         ####### Run Settings: #######
+        profile_settings = profile_flags(args.profiles)
         settings = {
             # "grid_filename": "N2775500E4431500_86154_1_-6.h5"
             "grid_filename": inputfile,         # Name of input file
             "grid_ref": grid_ref,               # DB-mode resolved pylovo grid metadata
             "storage": args.storage,            # h5 or db raw-grid storage
-            "weather_data_exists": args.storage == "h5" or args.profiles == "electricity",  # DB mode has no raw weather cache.
+            "weather_data_exists": args.storage == "h5" or args.profiles == "status_quo",  # DB mode has no raw weather cache.
             "parallel": (int(args.n_cpu) > 1),  # Parallelized run?
             "n_cpu": int(args.n_cpu),           # cpus if parallel
             "profiles": args.profiles,
             "mobility_source": args.mobility_source,
+            **profile_settings,
         }
 
         print(
@@ -103,28 +125,32 @@ if __name__ == '__main__':
 
         ### Data and Demand Generation
         # Order of operations is important: Weather -> Solar -> Electricity -> Heat -> Mobility
-        GRD.retrieve_weather()          # Weather
-
-        if settings["profiles"] == "electricity":
+        if settings["is_status_quo"]:
             with resource_report(include_children=True, name="Electricity Generation") as rr:
-                GRD.generate_electricity()  # Electricity
-
+                GRD.generate_electricity()
+            GRD.align_electricity_output_time()
             GRD.create_demand()
             GRD.SF.copy_save_file()
             GRD.SF.save_df(GRD.df_buildings, "raw_data/buildings")
             if GRD.df_weather_raw is not None and not GRD.df_weather_raw.empty:
                 GRD.SF.save_df(GRD.df_weather_raw, "raw_data/weather")
             GRD.SF.save_df(GRD.df_demand, "urbs_in/demand")
-            print("Electricity-only profile generation complete.")
+            print("Status-quo profile generation complete. Run Step 4 with --pre-only.")
         else:
+            GRD.retrieve_weather()          # Weather
+
             with resource_report(include_children=True, name="Solar Generation") as rr:
                 GRD.generate_solar()        # Solar data
             with resource_report(include_children=True, name="Electricity Generation") as rr:
                 GRD.generate_electricity()  # Electricity
-            with resource_report(include_children=True, name="Heat Generation") as rr:
-                GRD.generate_heat()         # Heat
-            with resource_report(include_children=True, name="Mobility Generation") as rr:
-                GRD.generate_mobility()     # Mobility
+            if settings["include_heat"]:
+                with resource_report(include_children=True, name="Heat Generation") as rr:
+                    GRD.generate_heat()     # Heat
+            else:
+                GRD.align_electricity_output_time()
+            if settings["include_mobility"]:
+                with resource_report(include_children=True, name="Mobility Generation") as rr:
+                    GRD.generate_mobility() # Mobility
 
             ### Conversion of generated data to urbs outputs
             GRD.create_weather_urbs()       # Weather

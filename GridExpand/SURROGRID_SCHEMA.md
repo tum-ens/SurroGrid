@@ -64,7 +64,7 @@ Key columns:
 - `grid_case_id`, `scenario_id`: repeated for direct filtering and uniqueness.
 - `run_name`: Step 2 run name, for example `baseline_static_all_pool_demand_allocation`.
 - `bridge_filename`: temporary HDF5 bridge filename used while Step 3 still consumes HDF5.
-- `profiles`: Step 2 profile scope, for example `electricity_heat`, `electricity_mobility`, or `all`.
+- `profiles`: Step 2 profile scope, for example `status_quo`, `electricity_heat`, `electricity_mobility`, or `all`.
 - `mobility_source`: `emobpy` or `pool`.
 
 ### `surrogrid.allocated_demand`

@@ -21,6 +21,7 @@ class Grid:
             settings["grid_filename"],
             storage=settings.get("storage", "h5"),
             grid_ref=settings.get("grid_ref"),
+            allocation_settings=settings,
         )
 
         ### Basic grid data
@@ -94,6 +95,9 @@ class Grid:
         # For normal elec demand only after heat, as still needed in this form!  
         # self.df_demand_elec_react = self._add_output_data_daylight_saving_shift(self.df_demand_elec_react)
 
+    def align_electricity_output_time(self):
+        self.df_demand_elec = self._add_output_data_daylight_saving_shift(self.df_demand_elec)
+
     def generate_heat(self):
         # First, assign missing building ages
         self.df_buildings = heat.sample_statistics(self.df_buildings)
@@ -101,7 +105,7 @@ class Grid:
         # Add daylight saving dummy shift to input data:
         df_wth_input = self._add_input_data_daylight_saving_shift(self.df_weather_raw)
         df_elec_input = self._add_input_data_daylight_saving_shift(self.df_demand_elec)
-        self.df_demand_elec = self._add_output_data_daylight_saving_shift(self.df_demand_elec)  # Now we can also adjust elec output data
+        self.align_electricity_output_time()  # Now we can also adjust elec output data
 
         # Now, obtain heat demands
         if self.settings["parallel"]:
@@ -212,39 +216,49 @@ class Grid:
         self.df_bsp = df_bsp
 
     def create_processes(self):
-        df_pro_elec = elc.create_pro_elec(list(self.df_buildings["bus"]))
-        df_pro_heat = heat.create_pro_heat(list(self.df_buildings["bus"]))
-        df_pro_mob = mbl.create_pro_mob(self.battery_dict)
-        df_pro_sol = slr.create_pro_solar(self.df_buildings[["bus", "roofs"]])
-        
-        df_pro = pd.concat([df_pro_elec,df_pro_heat,df_pro_mob,df_pro_sol], axis=0)
-        self.df_pro = df_pro.reset_index(drop=True)
+        dfs = [
+            elc.create_pro_elec(list(self.df_buildings["bus"])),
+            slr.create_pro_solar(self.df_buildings[["bus", "roofs"]]),
+        ]
+        if self.settings["include_heat"]:
+            dfs.append(heat.create_pro_heat(list(self.df_buildings["bus"])))
+        if self.settings["include_mobility"]:
+            dfs.append(mbl.create_pro_mob(self.battery_dict))
+
+        self.df_pro = pd.concat(dfs, axis=0).reset_index(drop=True)
 
     def create_commodities(self):
-        df_com_elec = elc.create_com_elec(list(self.df_buildings["bus"]))
-        df_com_heat = heat.create_com_heat(list(self.df_buildings["bus"]))
-        df_com_mob = mbl.create_com_mob(self.battery_dict)
-        df_com_sol = slr.create_com_solar(list(self.df_supim_solar.columns))
-        
-        df_com = pd.concat([df_com_elec,df_com_heat,df_com_mob,df_com_sol], axis=0)
-        self.df_com =  df_com.reset_index(drop=True)   
+        dfs = [
+            elc.create_com_elec(list(self.df_buildings["bus"])),
+            slr.create_com_solar(list(self.df_supim_solar.columns)),
+        ]
+        if self.settings["include_heat"]:
+            dfs.append(heat.create_com_heat(list(self.df_buildings["bus"])))
+        if self.settings["include_mobility"]:
+            dfs.append(mbl.create_com_mob(self.battery_dict))
+
+        self.df_com = pd.concat(dfs, axis=0).reset_index(drop=True)
 
     def create_process_commodity(self):
-        df_pro_com_elec = elc.create_pro_com_elec()
-        df_pro_com_heat = heat.create_pro_com_heat()
-        df_pro_com_mob = mbl.create_pro_com_mob(self.battery_dict)
-        df_pro_com_sol = slr.create_pro_com_solar(list(self.df_supim_solar.columns.get_level_values(1).unique()))
-        
-        df_pro_com = pd.concat([df_pro_com_elec,df_pro_com_heat,df_pro_com_mob,df_pro_com_sol], axis=0)
-        self.df_pro_com = df_pro_com.reset_index(drop=True) 
+        dfs = [
+            elc.create_pro_com_elec(),
+            slr.create_pro_com_solar(list(self.df_supim_solar.columns.get_level_values(1).unique())),
+        ]
+        if self.settings["include_heat"]:
+            dfs.append(heat.create_pro_com_heat())
+        if self.settings["include_mobility"]:
+            dfs.append(mbl.create_pro_com_mob(self.battery_dict))
+
+        self.df_pro_com = pd.concat(dfs, axis=0).reset_index(drop=True)
 
     def create_storages(self):
-        df_sto_elec = elc.create_sto_elec(list(self.df_buildings["bus"]))
-        df_sto_heat = heat.create_sto_heat(list(self.df_buildings["bus"]))
-        df_sto_mob = mbl.create_sto_mob(self.battery_dict)
-        
-        df_sto = pd.concat([df_sto_elec,df_sto_heat,df_sto_mob], axis=0)
-        self.df_sto = df_sto.reset_index(drop=True) 
+        dfs = [elc.create_sto_elec(list(self.df_buildings["bus"]))]
+        if self.settings["include_heat"]:
+            dfs.append(heat.create_sto_heat(list(self.df_buildings["bus"])))
+        if self.settings["include_mobility"]:
+            dfs.append(mbl.create_sto_mob(self.battery_dict))
+
+        self.df_sto = pd.concat(dfs, axis=0).reset_index(drop=True)
     
 
 
@@ -258,6 +272,7 @@ class Grid:
         ### Save other data:
         self.SF.save_df(self.df_weather_raw, "raw_data/weather")
         self.SF.save_df(self.df_buildings,   "raw_data/buildings")
+        self.SF.save_allocated_vehicles(self.df_buildings, self.battery_dict)
 
         ### Saving urbs input sheets:
         self.SF.save_df(self.df_demand,      "urbs_in/demand")

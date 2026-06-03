@@ -116,7 +116,7 @@ By default this step writes (or overwrites) the following keys using `pandas.HDF
 - `urbs_in/process_commodity`
 - `urbs_in/storage`
 
-With `--profiles electricity`, Step 2 writes only sampled building metadata and `urbs_in/demand`; that output is intended for Step 4 status-quo power flow with `--no-urbs`, not for Step 3 URBS.
+`--profiles status_quo` writes only sampled building metadata and `urbs_in/demand`; that output is intended for Step 4 pre-expansion power flow with `--pre-only`, not for Step 3 URBS. Electrification studies use profile combinations that always include electricity: `electricity_heat`, `electricity_mobility`, or `electricity_heat_mobility` (`all` is kept as an alias for the full combination).
 
 ### 3) Logs (HPC)
 
@@ -327,10 +327,11 @@ uv run --project .. python main.py <inputfile_id> --n_cpu <N>
 DB-backed raw-grid readout can be enabled with:
 
 ```bash
-uv run --project .. python main.py 09278140 --storage db --profiles electricity
+uv run --project .. python main.py 09278140 --storage db --profiles status_quo
+uv run --project .. python main.py 09278140 --storage db --profiles all
 ```
 
-In DB mode Step 2 resolves the AGS against the existing `pylovo` tables, stores AGS without a leading zero, and reads raw building/region input from PostgreSQL. The generated Step 2 outputs intentionally remain HDF5 for now. With `--profiles electricity`, only `urbs_in/demand` is written for Step 4 `--no-urbs`; full profile generation writes the normal `urbs_in/*` tables for Step 3.
+In DB mode Step 2 resolves the AGS against the existing `pylovo` tables, stores AGS without a leading zero, and reads raw building/region input from PostgreSQL. The generated Step 2 outputs intentionally remain HDF5 for now. `--profiles status_quo` writes only `urbs_in/demand` for Step 4 `--pre-only`; electrification profile combinations write the normal `urbs_in/*` tables for Step 3.
 
 Legacy fallback: `environment.yml` and `environment_HPC.yml` remain available for conda-based setups.
 

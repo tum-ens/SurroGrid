@@ -67,10 +67,10 @@ Use the uv-managed interpreter to run the step:
 uv run python run_pwrflw.py <inputfile_id> --n_cpu <N>
 ```
 
-DB-backed power-flow result storage can be enabled with the command below. Use `--no-urbs` when the input only contains `urbs_in/demand` and no Step 3 URBS output:
+DB-backed power-flow result storage can be enabled with the command below. Use `--pre-only` to run only the pre-expansion stage from `urbs_in/demand` without requiring Step 3 URBS output:
 
 ```bash
-uv run python run_pwrflw.py <inputfile_id> --storage db --no-urbs
+uv run python run_pwrflw.py <inputfile_id> --storage db --pre-only
 ```
 
 In DB mode Step 4 still reads `urbs_in/*` and `urbs_out/*` from the input HDF5 file, but reads the pandapower grid from PostgreSQL and writes `pwrflw/*` results to the `surrogrid` schema instead of `Output/*.h5`. Results are grouped under the static `baseline_static` scenario key, integer `scenario_id`, and an interpretable `run_name`; rerunning the same grid/scenario/run overwrites the previous time-series rows. Building-level joins are available through the `surrogrid.grid_building_bus` view.
