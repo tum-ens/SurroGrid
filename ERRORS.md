@@ -36,3 +36,10 @@ No repeated failed approaches logged yet.
 - What did not work: `apply_patch` failed again with the sandbox loopback error. A direct `uv run python -c` edit then failed first under the same sandbox restriction and later due shell quoting/newline issues in embedded replacement strings.
 - What worked instead: Run an elevated `uv run python` heredoc and use explicit text replacements with triple-quoted strings.
 - Note for next time: For multi-file edits in this environment, prefer `apply_patch` first for policy compliance, but if the loopback error recurs, use an elevated `uv run python` heredoc with simple, readable replacements.
+
+## 2026-06-03 - Markdown edits through shell-quoted Python
+
+- What did not work: Running `uv run python -c` inside double quotes for Markdown-heavy README replacements let shell command substitution execute text inside backticks before Python received the script. Intermittent `apply_patch`/shell commands also failed with `bwrap: loopback: Failed RTM_NEWADDR`.
+- What worked instead: Restore the README from `git show HEAD:<path>` inside a single-quoted Python command, then apply exact string replacements with triple-double-quoted Python strings so Markdown backticks remain literal.
+- Note for next time: For Markdown-heavy scripted edits, use single-quoted shell Python or a temporary script file pattern instead of double-quoted `python -c` strings containing backticks.
+

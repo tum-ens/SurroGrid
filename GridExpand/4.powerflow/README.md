@@ -39,6 +39,7 @@ Notes:
 
 - `Input/` and `Output/` are controlled by `config.py` (`Config.DATA_DIR`, `Config.STORAGE_DIR`).
 - `run_pwrflw.py` always reads from `Input/` and writes to `Output/`.
+- Plotting notebooks and reusable analysis helpers now live in `../5.postprocessing/plotting`.
 
 ## Required inputs
 

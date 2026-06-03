@@ -242,3 +242,39 @@
 - Why: Step 4 now stores power-flow results in PostgreSQL for DB-backed runs, so the old HDF5-only plotting path could not inspect the recent full-pipeline results for PLZ 94342. Using original line ratings is necessary because Step 4 relaxes line limits during simulation.
 - What was rejected and why: Reusing the modified runtime grid ratings was rejected because `prepare_grid()` sets `max_i_ka` to a high artificial value before solving. A DB-only replacement for the old HDF5 heatmap path was rejected because HDF5 output mode is still supported.
 - Verification: `uv run --project GridExpand/4.powerflow python -m py_compile GridExpand/4.powerflow/plotting/powerflow_plotting.py` passed. The DB comparison for `9278140-00_94342_1_-1.h5` produced the expected table values, and `plotting_notebook.ipynb` now displays the table with pandas plus the Plotly comparison figure.
+
+## 2026-06-03 - Power-flow plotting notebook distribution plots
+
+- What was decided: Remove the old ad hoc transformer import time-series cell from GridExpand/4.powerflow/plotting/plotting_notebook.ipynb, keep the network timestep slider, make the slider render into one output area, and add DB-backed helper functions for voltage deviation histograms plus attached-style transformer import distribution panels.
+- Why: The old transformer time-series implementation was not desired, the notebook displayed the network plot multiple times, and the current usable Step 4 plotting data is DB-backed for the PLZ 94342 full power-flow run.
+- What was rejected and why: Keeping the stale HDF5 notebook path was rejected because the referenced HDF5 output is not present and the only local HDF5 file lacks pwrflw/output result keys. Installing a static image export dependency was rejected because the Plotly figures can be validated and displayed in the existing notebook environment without adding kaleido.
+- Verification: uv run --project GridExpand/4.powerflow python -m py_compile GridExpand/4.powerflow/plotting/powerflow_plotting.py passed. The DB heatmap, voltage histogram, transformer distribution figure, and max-loading comparison all built with show=False for 9278140-00_94342_1_-1.h5 / baseline_static_full_powerflow.
+
+## 2026-06-03 - Thesis-style transformer distribution plotting
+
+- What was decided: Compare the new transformer distribution helper against thesis_plots.ipynb and switch plotting_notebook.ipynb to a Matplotlib thesis-style transformer distribution renderer while keeping the Plotly helper available. The DB transformer data prep now uses Gaussian-equivalent quantiles 0.02275, 0.15865, 0.84135, and 0.97725, and normalizes LDC values by the average per-grid maximum apparent load.
+- Why: The original notebook used daily aggregation, month-centered ticks, Matplotlib percentile bands, and an across-grid LDC normalization convention. Matching those choices makes the new notebook closer to the attached thesis figure and more methodologically consistent.
+- What was rejected and why: Keeping only the previous Plotly approximation was rejected because it used rounded percentile cuts and per-grid LDC normalization. Modifying thesis_plots.ipynb was rejected because it is user-provided reference material and currently untracked.
+- Verification: py_compile passed for GridExpand/4.powerflow/plotting/powerflow_plotting.py. The notebook validates and parses, and the Matplotlib transformer distribution figure draws six axes for the DB-backed PLZ 94342 run.
+
+## 2026-06-03 - Step 5 postprocessing workspace
+
+- What was decided: Move the active power-flow plotting notebooks and helper module from `GridExpand/4.powerflow/plotting` into a new `GridExpand/5.postprocessing/plotting` workspace with its own `pyproject.toml`, `.venv`, and `uv.lock`.
+- Why: Plotting and result analysis need a separate environment for notebook and figure dependencies without bloating the Step 4 simulation runtime.
+- What was rejected and why: Duplicating the notebooks in both Step 4 and Step 5 was rejected because it would create two active plotting copies. A Step 5 wrapper around Step 4 plotting was rejected because it would keep analysis code owned by the simulation step.
+- Verification: `uv sync --project GridExpand/5.postprocessing`, `uv run --project GridExpand/5.postprocessing python -m py_compile GridExpand/5.postprocessing/plotting/powerflow_plotting.py`, notebook nbformat validation, and Step 5 import smoke test passed.
+
+## 2026-06-03 - Apparent transformer pre/post comparison plot
+
+- What was decided: Add a one-row Matplotlib transformer apparent-power comparison plot to Step 5, with the pre/status-quo power-flow stage on the left and the post/electrification stage on the right.
+- Why: The notebook needs a compact comparison focused only on daily aggregated apparent transformer load, without active/reactive panels or LDC panels.
+- What was rejected and why: Extending the existing 3x2 thesis plot was rejected because it would keep unnecessary active, reactive, and load-duration panels in a figure meant to be a focused pre/post comparison.
+- Verification: Step 5 plotting helper compiles, the notebook validates with 13 cells, and a synthetic Matplotlib smoke render produced two axes.
+
+## 2026-06-03 - Population-ready line loading stress plots
+
+- What was decided: Replace the notebook max-line-loading barplot with population-ready line loading analysis: per-line maximum loading distributions, a grid-level stress summary, an ECDF plot, and a pre-vs-post per-grid stress scatter using p95 line maximum loading.
+- Why: A single worst-line barplot is too brittle for the upcoming Munich batch with hundreds of grids. The new view keeps high-load tails visible while showing the full line population and one robust point per grid.
+- What was rejected and why: Comparing only the two absolute maximum line loadings was rejected because it overweights one line and one timestep and gives little sense of whole-grid stress.
+- Verification: Step 5 helper compiles, notebook validates with 13 cells, synthetic Plotly smoke tests pass, and the existing dummy DB grid returns 36 lines per stage with pre/post stress metrics.
+

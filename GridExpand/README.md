@@ -1,9 +1,9 @@
 
 # GridExpand
 
-GridExpand is a 4-step pipeline to (1) sample representative **low-voltage (LV) distribution grids**, (2) generate **building- and bus-resolved time series** (electricity/heat/mobility/PV) and write **MILP-ready inputs**, (3) run the **MILP** energy system optimization (DER expansion / dispatch) and write results back to the same file, and (4) run **time-series LV power-flow** before/after expansion.
+GridExpand is a 4-step simulation pipeline plus a dedicated Step 5 postprocessing workspace. Steps 1-4 (1) sample representative **low-voltage (LV) distribution grids**, (2) generate **building- and bus-resolved time series** (electricity/heat/mobility/PV) and write **MILP-ready inputs**, (3) run the **MILP** energy system optimization (DER expansion / dispatch), and (4) run **time-series LV power-flow** before/after expansion. Step 5 collects result analysis, plotting notebooks, and figure-generation tooling.
 
-All steps communicate via a single **HDF5 (`.h5`) file per grid/scenario**. Downstream steps always read a `.h5`, copy it to their output folder, and append additional datasets.
+Steps 1-4 communicate via a single **HDF5 (`.h5`) file per grid/scenario**. Downstream simulation steps read a `.h5`, copy it to their output folder, and append additional datasets. Step 5 reads Step 4 HDF5 or database-backed results and should not mutate simulation artifacts.
 
 If you already have compatible `.h5` files (see “HDF5 interface”), you can start at any step.
 
@@ -12,10 +12,15 @@ If you already have compatible `.h5` files (see “HDF5 interface”), you can s
 ## Pipeline at a glance
 
 ```text
-Step 1 (grid sampling)        Step 2 (demand allocation)      Step 3 (urbs optimization)        Step 4 (power flow)
-1.grid_sampling/              2.demand_allocation/            3.urbs/                           4.powerflow/
-  input: pylovo DB + GIS        input: Step-1 .h5               input: Step-2 .h5                input: Step-3 .h5
-  output: raw grid .h5          output: same .h5 + /urbs_in     output: same .h5 + /urbs_out     output: same .h5 + /pwrflw
+Step 1 (grid sampling)        Step 2 (demand allocation)      Step 3 (urbs optimization)
+1.grid_sampling/              2.demand_allocation/            3.urbs/
+  input: pylovo DB + GIS        input: Step-1 .h5               input: Step-2 .h5
+  output: raw grid .h5          output: same .h5 + /urbs_in     output: same .h5 + /urbs_out
+
+Step 4 (power flow)           Step 5 (postprocessing)
+4.powerflow/                  5.postprocessing/
+  input: Step-3 .h5             input: Step-4 HDF5 or DB results
+  output: same .h5 + /pwrflw    output: notebooks, plots, exports
 ```
 
 ### Typical file naming
@@ -73,6 +78,13 @@ GridExpand/
     Output/                        # output .h5 files (copied+augmented)
     logs/                          # slurm logs
     src/                           # demand reconstruction + pf engine
+
+  5.postprocessing/                # Step 5: result analysis + plotting
+    pyproject.toml                 # uv environment for plotting notebooks
+    plotting/
+      plotting_notebook.ipynb
+      thesis_plots.ipynb
+      powerflow_plotting.py
 ```
 
 Each step folder has its own `README.md` with more detail:
@@ -81,6 +93,7 @@ Each step folder has its own `README.md` with more detail:
 - `2.demand_allocation/README.md`
 - `3.urbs/README.md`
 - `4.powerflow/README.md`
+- `5.postprocessing/README.md`
 
 DB-backed SurroGrid storage is documented in `SURROGRID_SCHEMA.md`.
 
@@ -107,7 +120,7 @@ All steps read/write using `pandas.HDFStore` and store objects under well-known 
 
 - `/urbs_out/MILP/*` : optimization results (key input for Step 4 is `tau_pro`)
 
-#### Step 4 output (final artifacts)
+#### Step 4 output (power-flow artifacts consumed by Step 5)
 
 - `/pwrflw/input/*` : reconstructed per-bus $P/Q$ time series (pre/post expansion)
 - `/pwrflw/output/{pre,post}/*` : voltages, line loadings, external grid imports
@@ -133,6 +146,7 @@ Then create each step environment from its folder:
 - Step 2: `cd GridExpand/2.demand_allocation && uv sync`
 - Step 3: `cd GridExpand/3.urbs && uv sync`
 - Step 4: `cd GridExpand/4.powerflow && uv sync`
+- Step 5: `cd GridExpand/5.postprocessing && uv sync`
 
 Step-specific dependency manifests are in:
 
@@ -140,6 +154,7 @@ Step-specific dependency manifests are in:
 - `2.demand_allocation/pyproject.toml`
 - `3.urbs/pyproject.toml`
 - `4.powerflow/pyproject.toml`
+- `5.postprocessing/pyproject.toml`
 
 For detailed commands, see `UV_SETUP.md`.
 
@@ -237,6 +252,28 @@ uv run python run_pwrflw.py <inputfile_id> --n_cpu <N>
 #### Step 4: Outputs
 
 - A copied/augmented output file in `4.powerflow/Output/` containing `pwrflw/` inputs + results.
+
+### Step 5: Postprocessing and plotting
+
+Location: `5.postprocessing/`
+
+#### Step 5: Required inputs
+
+- Step 4 HDF5 outputs in `4.powerflow/Output/`, or
+- DB-backed Step 4 results in PostgreSQL under the `surrogrid` schema.
+
+#### Step 5: Run
+
+```bash
+cd GridExpand/5.postprocessing
+uv sync
+```
+
+Open `plotting/plotting_notebook.ipynb` with the Step 5 uv kernel for interactive result analysis.
+
+#### Step 5: Outputs
+
+- Notebook outputs, figures, static exports, and other analysis artifacts.
 
 ---
 

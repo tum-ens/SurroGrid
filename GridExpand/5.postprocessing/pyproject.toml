@@ -1,7 +1,7 @@
 [project]
-name = "gridexpand-step4-powerflow"
+name = "gridexpand-step5-postprocessing"
 version = "0.1.0"
-description = "UV-managed environment for GridExpand Step 4 (power flow)."
+description = "UV-managed environment for GridExpand Step 5 result analysis and plotting."
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "pandas>=2.2,<2.3",
@@ -16,6 +16,7 @@ dependencies = [
   "deepdiff>=8.5,<9",
   "plotly>=5.24,<6",
   "matplotlib>=3.10,<3.11",
+  "seaborn>=0.13,<0.14",
   "tqdm>=4.67,<5",
   "ipykernel>=7.2.0",
   "nbformat>=5.10.4",
