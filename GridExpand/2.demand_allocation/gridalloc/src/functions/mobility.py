@@ -360,6 +360,8 @@ def get_mobility_demand_from_pool(
                 f"model={cfg['model']}, schedule={cfg['schedule']}, weather_key={weather_key}."
             )
         row = candidates.iloc[int(cfg["seed"]) % len(candidates)]
+        cfg["profile_id"] = row["profile_id"]
+        cfg["battery_cap_kwh"] = float(row["battery_cap_kwh"])
         selected_by_vehicle[key] = row["profile_id"]
         selected_rows.append(row)
 
