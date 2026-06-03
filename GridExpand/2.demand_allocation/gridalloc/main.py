@@ -47,6 +47,12 @@ if __name__ == '__main__':
             default="all",
             help="Demand profiles to generate. Use electricity for status-quo powerflow tests.",
         )
+        parser.add_argument(
+            "--mobility-source",
+            choices=["emobpy", "pool"],
+            default="emobpy",
+            help="Generate mobility with emobpy or assign pregenerated mobility profile pool entries.",
+        )
         args = parser.parse_args()
 
         #### Obtain relevant input file ####
@@ -81,6 +87,7 @@ if __name__ == '__main__':
             "parallel": (int(args.n_cpu) > 1),  # Parallelized run?
             "n_cpu": int(args.n_cpu),           # cpus if parallel
             "profiles": args.profiles,
+            "mobility_source": args.mobility_source,
         }
 
         print(

@@ -126,6 +126,16 @@ class Config:
     #--------------------------------------------------------------#
     # Statistical and input data
     EMOBPY_DATA_PATH = f"{DATA_STAT_DIR}/general/"
+    MOBILITY_PROFILE_POOL_DIR = f"{DATA_STAT_DIR}/general/mobility_profile_pool"
+    MOBILITY_PROFILE_POOL_METADATA_PATH = f"{MOBILITY_PROFILE_POOL_DIR}/mobility_profile_pool_metadata.csv"
+    MOBILITY_PROFILE_POOL_DEMAND_PATH = f"{MOBILITY_PROFILE_POOL_DIR}/mobility_demand_pool.csv"
+    MOBILITY_PROFILE_POOL_AVAILABILITY_PATH = f"{MOBILITY_PROFILE_POOL_DIR}/mobility_availability_pool.csv"
+    MOBILITY_PROFILE_POOL_WEATHER_PATH = f"{MOBILITY_PROFILE_POOL_DIR}/mobility_weather_central_germany_tmy.csv"
+    MOBILITY_PROFILE_POOL_WEATHER_KEY = "central_germany_tmy"
+    MOBILITY_PROFILE_POOL_WEATHER_SOURCE = "PVGIS SARAH3 TMY at lat=51.16 lon=10.45"
+    MOBILITY_PROFILE_POOL_LAT = 51.16
+    MOBILITY_PROFILE_POOL_LON = 10.45
+    MOBILITY_PROFILE_POOL_GENERATION_VERSION = "emobpy_pool_v1"
     CARS_PER_HH_BY_REGION = pd.read_csv(f"{DATA_STAT_DIR}/general/cars_per_household_by_region.csv", 
                                     dtype={"region": int, "hh_size": int, "vehicle_count": int, "probability": float},
                                     skiprows=1)

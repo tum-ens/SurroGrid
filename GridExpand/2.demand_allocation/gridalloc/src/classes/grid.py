@@ -130,48 +130,53 @@ class Grid:
         print("Finished generating heat demands!")
 
     def generate_mobility(self):
+        mobility_source = self.settings.get("mobility_source", "emobpy")
+        allowed_models = None
+        if mobility_source == "pool":
+            allowed_models = mbl.get_pool_supported_models()
+
         # First obtain missing BEV distributions over buildings + specs
-        self.df_buildings = mbl.sample_statistics(self.df_buildings, self.df_region)
-        # Add daylight saving dummy shift to input data
-        wth_input = self._add_input_data_daylight_saving_shift(self.df_weather_raw)
-        wth_input = mbl.prepare_weather_input(wth_input)
-        # Main calculation
-        # if self.settings["parallel"]:
+        self.df_buildings = mbl.sample_statistics(
+            self.df_buildings,
+            self.df_region,
+            allowed_models=allowed_models,
+        )
 
-        ### Info statement:
         n_cars = self.df_buildings["n_cars_tot"].sum()
-        cars_per_cpu = -(-n_cars//self.settings["n_cpu"])
-        print(f"Simulating {n_cars} vehicle(s). Expected time {40*cars_per_cpu:.1f} minutes!")
+        if mobility_source == "pool":
+            print(f"Assigning {n_cars} vehicle(s) from pregenerated mobility profile pool.")
+        else:
+            cars_per_cpu = -(-n_cars//self.settings["n_cpu"])
+            print(f"Simulating {n_cars} vehicle(s). Expected time {40*cars_per_cpu:.1f} minutes!")
 
-        ### Parallelized run
         if n_cars > 0:
-            vehicles = [{key: value} for build_dict in self.df_buildings["car_dict"].values for key,value in build_dict.items()]
-            
-            # with ProcessPoolExecutor(max_workers=self.settings["n_cpu"]) as executor:
-            #     results = list(executor.map(mbl.get_mobility_demand, vehicles, [wth_input.copy()]*len(vehicles)))
-            
-            with ProcessPoolExecutor(max_workers=self.settings["n_cpu"]) as exe:
-                # 1) fire off all jobs
-                futures = [exe.submit(mbl.get_mobility_demand, v, wth_input) for v in vehicles]
-                # 2) wait until either one fails or all succeed
-                done, pending = wait(futures, return_when=FIRST_EXCEPTION)
-                # 3) if ANY failed, tear down and re‑raise
-                for fut in done:
-                    if fut.exception() is not None:
-                        exe.shutdown(cancel_futures=True) # cancel the rest
-                        raise fut.exception()             # propagate the first error
-                # 4) otherwise collect results
-                results = [f.result() for f in futures]
+            if mobility_source == "pool":
+                vehicles = {}
+                self.df_buildings["car_dict"].apply(lambda x: vehicles.update(x))
+                self.df_demand_mobility, self.df_tve_mobility, self.battery_dict = mbl.get_mobility_demand_from_pool(
+                    vehicles,
+                    self.region,
+                )
+            elif mobility_source == "emobpy":
+                # Add daylight saving dummy shift to input data
+                wth_input = self._add_input_data_daylight_saving_shift(self.df_weather_raw)
+                wth_input = mbl.prepare_weather_input(wth_input)
+                vehicles = [{key: value} for build_dict in self.df_buildings["car_dict"].values for key,value in build_dict.items()]
 
-            ### Concatenate results
-            self.df_demand_mobility = pd.concat([results[i][0] for i in range(len(results))], axis=1)
-            self.df_tve_mobility = pd.concat([results[i][1] for i in range(len(results))], axis=1)
-            for d in [results[i][2] for i in range(len(results))]: self.battery_dict.update(d)
-        # else:
-        #     ### Prepare vehicle data in correct input format (concat into one big vehicle dict)
-        #     vehicles = {}
-        #     self.df_buildings["car_dict"].apply(lambda x: vehicles.update(x))
-        #     self.df_demand_mobility, self.df_tve_mobility, self.battery_dict = mbl.get_mobility_demand(vehicles, wth_input)
+                with ProcessPoolExecutor(max_workers=self.settings["n_cpu"]) as exe:
+                    futures = [exe.submit(mbl.get_mobility_demand, v, wth_input) for v in vehicles]
+                    done, pending = wait(futures, return_when=FIRST_EXCEPTION)
+                    for fut in done:
+                        if fut.exception() is not None:
+                            exe.shutdown(cancel_futures=True)
+                            raise fut.exception()
+                    results = [f.result() for f in futures]
+
+                self.df_demand_mobility = pd.concat([results[i][0] for i in range(len(results))], axis=1)
+                self.df_tve_mobility = pd.concat([results[i][1] for i in range(len(results))], axis=1)
+                for d in [results[i][2] for i in range(len(results))]: self.battery_dict.update(d)
+            else:
+                raise ValueError(f"Unknown mobility source: {mobility_source}")
         
         self.df_demand_mobility = self._add_output_data_daylight_saving_shift(self.df_demand_mobility, mobility_dmd=True)
         self.df_tve_mobility = self._add_output_data_daylight_saving_shift(self.df_tve_mobility)

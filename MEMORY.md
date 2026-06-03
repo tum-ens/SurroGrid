@@ -177,3 +177,41 @@
 - What was decided: Extract the duplicated pylovo grid export flow into `GridExpand/1.grid_sampling/gridreadout/src/export_grid.py` and have both `export_single_grid.py` and Notebook 2 call it.
 - Why: The pilot CLI should not duplicate the original notebook pipeline logic for topology cleanup, building readout, weather enrichment, and HDF5 writing.
 - What was rejected and why: Keeping the full export sequence inside `export_single_grid.py` was rejected because it creates two places to maintain the same Step 1 output contract. Replacing the notebook workflow with a larger CLI was rejected for now because the smallest cleanup is a shared helper.
+
+## 2026-06-02 - Pregenerated mobility profile pool pilot strategy
+
+- What was decided: Implement a CSV-backed pregenerated emobpy mobility profile pool with a pilot target of 1 profile per `(RegioStaR7, EV model, driver schedule)` stratum, then append to 10 profiles per stratum after validating pool application on the updated database.
+- Why: Pool generation is independent of pylovo building tables, so the older broad database can still support broad RegioStaR coverage for generation planning, while the updated database can be used later to test grid-specific application without old `buildings_result` schema issues.
+- What was rejected and why: Generating the full 10-profile-per-stratum pool before validating Step 2 application was rejected because a one-profile pilot proves the CSV format, selection logic, schema load, and URBS input integration faster with less generated data.
+
+## 2026-06-02 - Reduced mobility pool strata for pilot generation
+
+- What was decided: Drop RegioStaR7 from pregenerated mobility profile pool strata and generate the pilot pool for the EV models that cover at least 80% cumulative market share, with 3 profiles per `(EV model, driver schedule)` stratum.
+- Why: RegioStaR7 affects vehicle ownership allocation before profile assignment, but the pregenerated emobpy profile itself is defined by vehicle model, commuter/non-commuter schedule, weather, and seed. The 80% model subset reduces the pilot run to 168 profiles while preserving the most common vehicle-physics diversity.
+- What was rejected and why: Keeping all 7 RegioStaR7 regions in the profile pool was rejected because it duplicates profiles without changing emobpy behavior under the single central German weather assumption. Generating all 50 EV models for the first pilot was rejected because the added runtime is not needed before validating the approach.
+
+## 2026-06-02 - Mobility pool completed at 10 profiles per stratum
+
+- What was decided: Complete the reduced pregenerated mobility profile pool at 10 profiles per EV model and driver schedule stratum using 12 parallel workers for the final append.
+- Why: The 16-worker append stopped silently after partial progress, likely due external resource pressure, while the direct 12-worker run completed the remaining 274 profiles with visible progress and exit code 0. The final CSV pool has 560 profiles, 56 strata, and exactly 10 samples per stratum.
+- What was rejected and why: Continuing with 16 workers was rejected because the previous run exited without a traceback or tmux session, making it harder to diagnose and less reliable for completing the pool.
+
+
+## 2026-06-02 - TASK.md DB migration brief refined
+
+- What was decided: Rewrite `TASK.md` as an agent-ready continuation brief for the DB-backed GridExpand storage migration, with current-state context, explicit non-goals, an analysis-only first phase, an approval gate, narrow implementation rules, and verification requirements for AGS `09278140`.
+- Why: The previous brief described the original migration goal but did not account for recent DB-backed storage work or make the next agent's discovery, approval, and verification steps explicit enough.
+- What was rejected and why: Starting a new migration implementation from the task brief was rejected because the user asked to refine the task description, not execute the migration. Mirroring the same edits into `TASK_db.md` was rejected because the request named `TASK.md` and unrelated files should not be touched.
+
+## 2026-06-02 - Pool mobility full-pipeline smoke test for PLZ 94342
+
+- What was decided: In mobility pool mode, sample EV models only from the models present in the pregenerated pool metadata and renormalize the original market probabilities over that supported subset. The normal emobpy path remains unchanged and still uses the full EV model distribution.
+- Why: The reduced 80 percent market-share pool has 28 supported models, but the first DB-mode Step 2 test sampled Mercedes-Benz EQB from the full distribution, which has no pool profile. Renormalizing in pool mode keeps vehicle count, building assignment, driver schedule sampling, and market-weighted model sampling consistent with the chosen reduced pool scope.
+- What was rejected and why: Falling back from unsupported vehicles to an arbitrary available profile was rejected because it would mix vehicle physics and battery capacities across different models.
+- Verification: Full DB-backed pipeline passed for AGS 09278140, PLZ 94342, KCID 1, BCID -1 using 9278140-00_94342_1_-1.h5. Step 2 assigned 24 vehicles from the pool, URBS solved the PV100 HP100 EV100 scenario, and Step 4 wrote pre and post power-flow results for run baseline_static_full_powerflow.
+
+## 2026-06-03 - Mobility pool CSV filenames made reusable
+
+- What was decided: Rename the generated mobility pool CSV files to mobility_profile_pool_metadata.csv, mobility_demand_pool.csv, mobility_availability_pool.csv, and mobility_weather_central_germany_tmy.csv.
+- Why: The pool is intended to be stored outside the repository and reused, so descriptive filenames make the data purpose clear without surrounding project context.
+- What was rejected and why: Keeping generic names such as metadata.csv, demand.csv, availability.csv, and central_germany_weather.csv was rejected because they are ambiguous once copied outside the mobility_profile_pool directory.

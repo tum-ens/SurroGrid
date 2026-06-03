@@ -159,6 +159,43 @@ LEFT JOIN pylovo.pandapower_load pl
   ON pl.grid_result_id = gc.pylovo_grid_result_id
  AND pl.bus = COALESCE(pb_name.pp_index, pb_connection.pp_index, br.connection_point);
 
+CREATE TABLE IF NOT EXISTS surrogrid.mobility_profile_pool (
+    profile_id TEXT PRIMARY KEY,
+    schedule TEXT NOT NULL,
+    model TEXT NOT NULL,
+    sample_index INTEGER NOT NULL,
+    pool_seed BIGINT NOT NULL,
+    weather_key TEXT NOT NULL,
+    weather_source TEXT NOT NULL,
+    battery_cap_kwh DOUBLE PRECISION NOT NULL,
+    total_hours INTEGER NOT NULL,
+    emobpy_timestep_h DOUBLE PRECISION NOT NULL,
+    output_timestep_h DOUBLE PRECISION NOT NULL,
+    ref_year INTEGER NOT NULL,
+    demand_sum_kwh DOUBLE PRECISION NOT NULL,
+    availability_hours DOUBLE PRECISION NOT NULL,
+    generation_version TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_mobility_profile_pool_stratum UNIQUE (schedule, model, sample_index, weather_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mobility_profile_pool_stratum
+    ON surrogrid.mobility_profile_pool (schedule, model, weather_key);
+
+CREATE TABLE IF NOT EXISTS surrogrid.mobility_profile_demand (
+    profile_id TEXT NOT NULL REFERENCES surrogrid.mobility_profile_pool(profile_id) ON DELETE CASCADE,
+    t_index INTEGER NOT NULL,
+    demand_kwh DOUBLE PRECISION NOT NULL,
+    PRIMARY KEY (profile_id, t_index)
+);
+
+CREATE TABLE IF NOT EXISTS surrogrid.mobility_profile_availability (
+    profile_id TEXT NOT NULL REFERENCES surrogrid.mobility_profile_pool(profile_id) ON DELETE CASCADE,
+    t_index INTEGER NOT NULL,
+    availability DOUBLE PRECISION NOT NULL,
+    PRIMARY KEY (profile_id, t_index)
+);
+
 CREATE TABLE IF NOT EXISTS surrogrid.powerflow_demand (
     powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.powerflow_run(powerflow_run_id) ON DELETE CASCADE,
     stage TEXT NOT NULL,

@@ -8,6 +8,7 @@ from src.external.emobpy.tools import set_seed
 
 import tempfile
 import warnings
+from pathlib import Path
 import numpy as np
 import pandas as pd
 
@@ -227,7 +228,7 @@ def _consolidate_home_stretches(df_hourly):
 ##############################################################
 ###################### Publicly callable #####################
 ##############################################################
-def sample_statistics(df_buildings, df_region):
+def sample_statistics(df_buildings, df_region, allowed_models=None):
     if df_region is None or df_region.empty:
         raise ValueError("Missing region metadata for mobility sampling.")
 
@@ -237,9 +238,17 @@ def sample_statistics(df_buildings, df_region):
     region = int(region_row["regio7"])
     df_cars_per_hh = config.CARS_PER_HH_BY_REGION[config.CARS_PER_HH_BY_REGION["region"]==region]
 
+    df_car_model_dist = config.CAR_MODEL_DISTRIBUTION
+    if allowed_models is not None:
+        allowed_models = set(allowed_models)
+        df_car_model_dist = df_car_model_dist[df_car_model_dist["model"].isin(allowed_models)].copy()
+        if df_car_model_dist.empty:
+            raise ValueError("No EV model statistics overlap with the pregenerated mobility profile pool.")
+        df_car_model_dist["probability"] = df_car_model_dist["probability"] / df_car_model_dist["probability"].sum()
+
     # Now sample number of owned cars, and their model + driver type
     df_buildings[["cars_by_flat", "n_cars_tot"]] = df_buildings["occ_list"].apply(lambda x: pd.Series(_sample_cars_in_building(x, df_cars_per_hh)))
-    df_buildings["car_dict"] = df_buildings.apply(lambda x: _sample_model_and_commuting(x["n_cars_tot"], config.PROB_COMMUTING, config.CAR_MODEL_DISTRIBUTION, region_row, x["bus"]), axis=1)
+    df_buildings["car_dict"] = df_buildings.apply(lambda x: _sample_model_and_commuting(x["n_cars_tot"], config.PROB_COMMUTING, df_car_model_dist, region_row, x["bus"]), axis=1)
     
     return df_buildings
 
@@ -253,6 +262,151 @@ def prepare_weather_input(df_weather):
     }
     return weather
 
+
+def _format_mobility_frames(demand_dict, avai_dict):
+    availability = pd.DataFrame(avai_dict).reset_index(drop=True)
+    mob_demand = pd.DataFrame(demand_dict).reset_index(drop=True)
+
+    if not availability.empty:
+        if not isinstance(availability.columns, pd.MultiIndex):
+            availability.columns = pd.MultiIndex.from_tuples(availability.columns)
+        new_ids = [f"charging_station{id}" for id in availability.columns.levels[1]]
+        availability.columns = availability.columns.set_levels(new_ids, level=1)
+
+    if not mob_demand.empty:
+        if not isinstance(mob_demand.columns, pd.MultiIndex):
+            mob_demand.columns = pd.MultiIndex.from_tuples(mob_demand.columns)
+        new_ids = [f"mobility{id}" for id in mob_demand.columns.levels[1]]
+        mob_demand.columns = mob_demand.columns.set_levels(new_ids, level=1)
+
+    return mob_demand, availability
+
+
+def _read_pool_metadata(metadata_path=None):
+    metadata_path = Path(metadata_path or config.MOBILITY_PROFILE_POOL_METADATA_PATH)
+    if not metadata_path.exists():
+        raise FileNotFoundError(f"Mobility profile pool metadata not found: {metadata_path}")
+
+    metadata = pd.read_csv(metadata_path)
+    required = {
+        "profile_id", "schedule", "model", "sample_index", "pool_seed",
+        "weather_key", "battery_cap_kwh", "total_hours",
+    }
+    missing = required - set(metadata.columns)
+    if missing:
+        raise ValueError(f"Mobility profile pool metadata is missing columns: {sorted(missing)}")
+    return metadata
+
+
+def get_pool_supported_models(metadata_path=None, weather_key=None):
+    weather_key = weather_key or config.MOBILITY_PROFILE_POOL_WEATHER_KEY
+    metadata = _read_pool_metadata(metadata_path)
+    metadata = metadata[metadata["weather_key"] == weather_key]
+    if metadata.empty:
+        raise ValueError(f"No mobility pool profiles found for weather_key={weather_key}.")
+    return sorted(metadata["model"].unique())
+
+
+def _read_pool_timeseries(csv_path, profile_ids, value_column):
+    csv_path = Path(csv_path)
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Mobility profile pool timeseries not found: {csv_path}")
+
+    profile_ids = set(profile_ids)
+    chunks = []
+    for chunk in pd.read_csv(csv_path, chunksize=200_000):
+        subset = chunk[chunk["profile_id"].isin(profile_ids)]
+        if not subset.empty:
+            chunks.append(subset)
+
+    if not chunks:
+        raise ValueError(f"No selected profile rows found in {csv_path}")
+
+    data = pd.concat(chunks, ignore_index=True)
+    required = {"profile_id", "t", value_column}
+    missing = required - set(data.columns)
+    if missing:
+        raise ValueError(f"{csv_path} is missing columns: {sorted(missing)}")
+    return data
+
+
+def get_mobility_demand_from_pool(
+    vehicles,
+    region=None,
+    metadata_path=None,
+    demand_path=None,
+    availability_path=None,
+    weather_key=None,
+):
+    if not vehicles:
+        return pd.DataFrame(), pd.DataFrame(), {}
+
+    weather_key = weather_key or config.MOBILITY_PROFILE_POOL_WEATHER_KEY
+    metadata = _read_pool_metadata(metadata_path)
+    metadata = metadata[metadata["weather_key"] == weather_key].copy()
+    if metadata.empty:
+        raise ValueError(f"No mobility pool profiles found for weather_key={weather_key}.")
+
+    selected_rows = []
+    selected_by_vehicle = {}
+    for key, cfg in vehicles.items():
+        candidates = metadata[
+            (metadata["schedule"] == cfg["schedule"])
+            & (metadata["model"] == cfg["model"])
+        ].sort_values(["sample_index", "pool_seed", "profile_id"])
+        if candidates.empty:
+            raise ValueError(
+                "No mobility pool profile found for "
+                f"model={cfg['model']}, schedule={cfg['schedule']}, weather_key={weather_key}."
+            )
+        row = candidates.iloc[int(cfg["seed"]) % len(candidates)]
+        selected_by_vehicle[key] = row["profile_id"]
+        selected_rows.append(row)
+
+    selected = pd.DataFrame(selected_rows).drop_duplicates(subset=["profile_id"])
+    selected_profile_ids = selected["profile_id"].tolist()
+    demand_table = _read_pool_timeseries(
+        demand_path or config.MOBILITY_PROFILE_POOL_DEMAND_PATH,
+        selected_profile_ids,
+        "demand_kwh",
+    )
+    availability_table = _read_pool_timeseries(
+        availability_path or config.MOBILITY_PROFILE_POOL_AVAILABILITY_PATH,
+        selected_profile_ids,
+        "availability",
+    )
+
+    demand_by_profile = {
+        profile_id: group.sort_values("t")["demand_kwh"].reset_index(drop=True)
+        for profile_id, group in demand_table.groupby("profile_id")
+    }
+    availability_by_profile = {
+        profile_id: group.sort_values("t")["availability"].reset_index(drop=True)
+        for profile_id, group in availability_table.groupby("profile_id")
+    }
+    battery_by_profile = selected.set_index("profile_id")["battery_cap_kwh"].to_dict()
+
+    demand_dict = {}
+    avai_dict = {}
+    battery_dict = {}
+    for key, profile_id in selected_by_vehicle.items():
+        if profile_id not in demand_by_profile or profile_id not in availability_by_profile:
+            raise ValueError(f"Selected mobility pool profile {profile_id} is missing timeseries rows.")
+        demand = demand_by_profile[profile_id]
+        availability = availability_by_profile[profile_id]
+        if len(demand) != config.TOTAL_HOURS or len(availability) != config.TOTAL_HOURS:
+            raise ValueError(
+                f"Mobility pool profile {profile_id} has {len(demand)} demand rows and "
+                f"{len(availability)} availability rows, expected {config.TOTAL_HOURS}."
+            )
+        demand_dict[key] = demand
+        avai_dict[key] = availability
+        battery_dict[key] = float(battery_by_profile[profile_id])
+
+    mob_demand, availability = _format_mobility_frames(demand_dict, avai_dict)
+    return mob_demand, availability, battery_dict
+
+
 def get_mobility_demand(vehicles, weather):
     ### Run emobpy for all grid vehicles
     # print(f"Running mobility generator for {len(vehicles)} vehicles...")
@@ -260,7 +414,7 @@ def get_mobility_demand(vehicles, weather):
         warnings.simplefilter("ignore", FutureWarning)
         # all_timeseries, all_batteries = _simulate_vehicles(vehicles, weather)
         max_retries = 3
-        for attempt in range(1, max_retries):
+        for attempt in range(1, max_retries + 1):
             try:
                 all_timeseries, all_batteries = _simulate_vehicles(vehicles, weather)
                 break
@@ -305,25 +459,7 @@ def get_mobility_demand(vehicles, weather):
     # new_ids = [f"mobility{id}" for id in mob_demand.columns.levels[1]]
     # mob_demand.columns = mob_demand.columns.set_levels(new_ids, level=1)
 
-    # Handle availability DataFrame
-    availability = pd.DataFrame(avai_dict).reset_index(drop=True)
-    if isinstance(availability.columns, pd.MultiIndex) and len(availability.columns.levels) > 1:
-        new_ids = [f"charging_station{id}" for id in availability.columns.levels[1]]
-        availability.columns = availability.columns.set_levels(new_ids, level=1)
-    else:
-        # If not MultiIndex, create an empty or default structure
-        new_ids = []
-        availability.columns = pd.MultiIndex.from_arrays([availability.columns, new_ids])
-
-    # Handle mob_demand DataFrame
-    mob_demand = pd.DataFrame(demand_dict).reset_index(drop=True)
-    if isinstance(mob_demand.columns, pd.MultiIndex) and len(mob_demand.columns.levels) > 1:
-        new_ids = [f"mobility{id}" for id in mob_demand.columns.levels[1]]
-        mob_demand.columns = mob_demand.columns.set_levels(new_ids, level=1)
-    else:
-        # If not MultiIndex, create an empty or default structure
-        new_ids = []
-        mob_demand.columns = pd.MultiIndex.from_arrays([mob_demand.columns, new_ids])
+    mob_demand, availability = _format_mobility_frames(demand_dict, avai_dict)
 
     # Replace hour at end of year with predecessing 
     # (important as we shifted all demands to last timestep that car is home to allow flexible charging,

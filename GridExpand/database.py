@@ -800,6 +800,41 @@ class SurroGridDatabase:
             )
         self._append(pd.concat(rows, ignore_index=True), "powerflow_reactive_component")
 
+    def load_mobility_profile_pool_csv(
+        self,
+        metadata_csv: str | Path,
+        demand_csv: str | Path,
+        availability_csv: str | Path,
+        *,
+        replace: bool = False,
+        chunksize: int = 10000,
+    ) -> None:
+        self.ensure_schema()
+        metadata_csv = Path(metadata_csv)
+        demand_csv = Path(demand_csv)
+        availability_csv = Path(availability_csv)
+
+        for csv_path in [metadata_csv, demand_csv, availability_csv]:
+            if not csv_path.exists():
+                raise FileNotFoundError(f"Mobility profile pool CSV not found: {csv_path}")
+
+        if replace:
+            with self.engine.begin() as conn:
+                conn.execute(text("DELETE FROM surrogrid.mobility_profile_availability"))
+                conn.execute(text("DELETE FROM surrogrid.mobility_profile_demand"))
+                conn.execute(text("DELETE FROM surrogrid.mobility_profile_pool"))
+
+        metadata = pd.read_csv(metadata_csv)
+        self._append(metadata, "mobility_profile_pool")
+
+        for chunk in pd.read_csv(demand_csv, chunksize=chunksize):
+            chunk = chunk.rename(columns={"t": "t_index"})
+            self._append(chunk, "mobility_profile_demand")
+
+        for chunk in pd.read_csv(availability_csv, chunksize=chunksize):
+            chunk = chunk.rename(columns={"t": "t_index"})
+            self._append(chunk, "mobility_profile_availability")
+
     def _append(self, df: pd.DataFrame, table_name: str) -> None:
         df.to_sql(
             table_name,
