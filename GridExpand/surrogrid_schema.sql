@@ -59,8 +59,22 @@ ON CONFLICT (scenario_key) DO UPDATE SET
     assumptions = EXCLUDED.assumptions,
     updated_at = NOW();
 
+CREATE TABLE IF NOT EXISTS surrogrid.pipeline_run (
+    pipeline_run_id BIGSERIAL PRIMARY KEY,
+    grid_case_id BIGINT NOT NULL REFERENCES surrogrid.grid_case(grid_case_id) ON DELETE CASCADE,
+    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id),
+    run_name TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_pipeline_run_grid_scenario_name UNIQUE (grid_case_id, scenario_id, run_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_run_grid_case ON surrogrid.pipeline_run (grid_case_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_run_scenario ON surrogrid.pipeline_run (scenario_id);
+
 CREATE TABLE IF NOT EXISTS surrogrid.powerflow_run (
     powerflow_run_id BIGSERIAL PRIMARY KEY,
+    pipeline_run_id BIGINT NOT NULL REFERENCES surrogrid.pipeline_run(pipeline_run_id) ON DELETE CASCADE,
     grid_case_id BIGINT NOT NULL REFERENCES surrogrid.grid_case(grid_case_id) ON DELETE CASCADE,
     scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id),
     run_name TEXT NOT NULL,
@@ -71,6 +85,7 @@ CREATE TABLE IF NOT EXISTS surrogrid.powerflow_run (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD COLUMN IF NOT EXISTS pipeline_run_id BIGINT;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD COLUMN IF NOT EXISTS scenario_id BIGINT;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD COLUMN IF NOT EXISTS run_name TEXT;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD COLUMN IF NOT EXISTS urbs_input_file TEXT;
@@ -96,6 +111,19 @@ WHERE run_name LIKE '%max_electricity_demand_week%'
    OR run_name LIKE '%max_reverse_power_flow_week%'
    OR run_name LIKE '%max_net_load_week%';
 UPDATE surrogrid.powerflow_run SET urbs_input_file = COALESCE(urbs_input_file, '') WHERE urbs_input_file IS NULL;
+INSERT INTO surrogrid.pipeline_run (grid_case_id, scenario_id, run_name)
+SELECT DISTINCT grid_case_id, scenario_id, 'baseline_static_pipeline'
+FROM surrogrid.powerflow_run
+WHERE pipeline_run_id IS NULL
+ON CONFLICT (grid_case_id, scenario_id, run_name) DO UPDATE SET updated_at = NOW();
+UPDATE surrogrid.powerflow_run pr
+SET pipeline_run_id = pipe.pipeline_run_id
+FROM surrogrid.pipeline_run pipe
+WHERE pr.pipeline_run_id IS NULL
+  AND pipe.grid_case_id = pr.grid_case_id
+  AND pipe.scenario_id = pr.scenario_id
+  AND pipe.run_name = 'baseline_static_pipeline';
+ALTER TABLE IF EXISTS surrogrid.powerflow_run ALTER COLUMN pipeline_run_id SET NOT NULL;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run ALTER COLUMN scenario_id SET NOT NULL;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run ALTER COLUMN run_name SET NOT NULL;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run ALTER COLUMN urbs_input_file SET NOT NULL;
@@ -104,7 +132,10 @@ ALTER TABLE IF EXISTS surrogrid.powerflow_run DROP COLUMN IF EXISTS scenario_key
 ALTER TABLE IF EXISTS surrogrid.powerflow_run DROP COLUMN IF EXISTS source_input_file;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run DROP CONSTRAINT IF EXISTS fk_powerflow_run_scenario;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD CONSTRAINT fk_powerflow_run_scenario FOREIGN KEY (scenario_id) REFERENCES surrogrid.scenario(scenario_id);
+ALTER TABLE IF EXISTS surrogrid.powerflow_run DROP CONSTRAINT IF EXISTS fk_powerflow_run_pipeline;
+ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD CONSTRAINT fk_powerflow_run_pipeline FOREIGN KEY (pipeline_run_id) REFERENCES surrogrid.pipeline_run(pipeline_run_id) ON DELETE CASCADE;
 
+CREATE INDEX IF NOT EXISTS idx_powerflow_run_pipeline ON surrogrid.powerflow_run (pipeline_run_id);
 CREATE INDEX IF NOT EXISTS idx_powerflow_run_grid_case ON surrogrid.powerflow_run (grid_case_id);
 CREATE INDEX IF NOT EXISTS idx_powerflow_run_scenario ON surrogrid.powerflow_run (scenario_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_powerflow_run_grid_scenario_name
@@ -159,42 +190,92 @@ LEFT JOIN pylovo.pandapower_load pl
   ON pl.grid_result_id = gc.pylovo_grid_result_id
  AND pl.bus = COALESCE(pb_name.pp_index, pb_connection.pp_index, br.connection_point);
 
-CREATE TABLE IF NOT EXISTS surrogrid.mobility_profile_pool (
-    profile_id TEXT PRIMARY KEY,
-    schedule TEXT NOT NULL,
-    model TEXT NOT NULL,
-    sample_index INTEGER NOT NULL,
-    pool_seed BIGINT NOT NULL,
-    weather_key TEXT NOT NULL,
-    weather_source TEXT NOT NULL,
-    battery_cap_kwh DOUBLE PRECISION NOT NULL,
-    total_hours INTEGER NOT NULL,
-    emobpy_timestep_h DOUBLE PRECISION NOT NULL,
-    output_timestep_h DOUBLE PRECISION NOT NULL,
-    ref_year INTEGER NOT NULL,
-    demand_sum_kwh DOUBLE PRECISION NOT NULL,
-    availability_hours DOUBLE PRECISION NOT NULL,
-    generation_version TEXT NOT NULL,
+DROP TABLE IF EXISTS surrogrid.mobility_profile_availability;
+DROP TABLE IF EXISTS surrogrid.mobility_profile_demand;
+DROP TABLE IF EXISTS surrogrid.mobility_profile_pool;
+
+CREATE TABLE IF NOT EXISTS surrogrid.demand_allocation_run (
+    demand_allocation_run_id BIGSERIAL PRIMARY KEY,
+    pipeline_run_id BIGINT NOT NULL REFERENCES surrogrid.pipeline_run(pipeline_run_id) ON DELETE CASCADE,
+    grid_case_id BIGINT NOT NULL REFERENCES surrogrid.grid_case(grid_case_id) ON DELETE CASCADE,
+    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id),
+    run_name TEXT NOT NULL,
+    bridge_filename TEXT NOT NULL DEFAULT '',
+    storage_mode TEXT NOT NULL DEFAULT 'db',
+    profiles TEXT NOT NULL DEFAULT 'all',
+    mobility_source TEXT NOT NULL DEFAULT 'emobpy',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT uq_mobility_profile_pool_stratum UNIQUE (schedule, model, sample_index, weather_key)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_mobility_profile_pool_stratum
-    ON surrogrid.mobility_profile_pool (schedule, model, weather_key);
+ALTER TABLE IF EXISTS surrogrid.demand_allocation_run ADD COLUMN IF NOT EXISTS pipeline_run_id BIGINT;
+INSERT INTO surrogrid.pipeline_run (grid_case_id, scenario_id, run_name)
+SELECT DISTINCT grid_case_id, scenario_id, 'baseline_static_pipeline'
+FROM surrogrid.demand_allocation_run
+WHERE pipeline_run_id IS NULL
+ON CONFLICT (grid_case_id, scenario_id, run_name) DO UPDATE SET updated_at = NOW();
+UPDATE surrogrid.demand_allocation_run dar
+SET pipeline_run_id = pipe.pipeline_run_id
+FROM surrogrid.pipeline_run pipe
+WHERE dar.pipeline_run_id IS NULL
+  AND pipe.grid_case_id = dar.grid_case_id
+  AND pipe.scenario_id = dar.scenario_id
+  AND pipe.run_name = 'baseline_static_pipeline';
+ALTER TABLE IF EXISTS surrogrid.demand_allocation_run ALTER COLUMN pipeline_run_id SET NOT NULL;
+ALTER TABLE IF EXISTS surrogrid.demand_allocation_run DROP CONSTRAINT IF EXISTS fk_demand_allocation_run_pipeline;
+ALTER TABLE IF EXISTS surrogrid.demand_allocation_run ADD CONSTRAINT fk_demand_allocation_run_pipeline FOREIGN KEY (pipeline_run_id) REFERENCES surrogrid.pipeline_run(pipeline_run_id) ON DELETE CASCADE;
 
-CREATE TABLE IF NOT EXISTS surrogrid.mobility_profile_demand (
-    profile_id TEXT NOT NULL REFERENCES surrogrid.mobility_profile_pool(profile_id) ON DELETE CASCADE,
+CREATE UNIQUE INDEX IF NOT EXISTS uq_demand_allocation_run_grid_scenario_name
+    ON surrogrid.demand_allocation_run (grid_case_id, scenario_id, run_name);
+CREATE INDEX IF NOT EXISTS idx_demand_allocation_run_pipeline
+    ON surrogrid.demand_allocation_run (pipeline_run_id);
+CREATE INDEX IF NOT EXISTS idx_demand_allocation_run_grid_case
+    ON surrogrid.demand_allocation_run (grid_case_id);
+
+CREATE TABLE IF NOT EXISTS surrogrid.allocated_demand (
+    demand_allocation_run_id BIGINT NOT NULL REFERENCES surrogrid.demand_allocation_run(demand_allocation_run_id) ON DELETE CASCADE,
+    ts TIMESTAMPTZ NOT NULL,
     t_index INTEGER NOT NULL,
-    demand_kwh DOUBLE PRECISION NOT NULL,
-    PRIMARY KEY (profile_id, t_index)
+    bus INTEGER NOT NULL,
+    commodity TEXT NOT NULL,
+    value DOUBLE PRECISION NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS surrogrid.mobility_profile_availability (
-    profile_id TEXT NOT NULL REFERENCES surrogrid.mobility_profile_pool(profile_id) ON DELETE CASCADE,
+CREATE INDEX IF NOT EXISTS idx_allocated_demand_run_commodity
+    ON surrogrid.allocated_demand (demand_allocation_run_id, commodity, t_index);
+CREATE INDEX IF NOT EXISTS idx_allocated_demand_bus
+    ON surrogrid.allocated_demand (bus);
+SELECT create_hypertable('surrogrid.allocated_demand', 'ts', if_not_exists => TRUE);
+
+CREATE TABLE IF NOT EXISTS surrogrid.allocated_eff_factor (
+    demand_allocation_run_id BIGINT NOT NULL REFERENCES surrogrid.demand_allocation_run(demand_allocation_run_id) ON DELETE CASCADE,
+    ts TIMESTAMPTZ NOT NULL,
     t_index INTEGER NOT NULL,
-    availability DOUBLE PRECISION NOT NULL,
-    PRIMARY KEY (profile_id, t_index)
+    bus INTEGER NOT NULL,
+    component TEXT NOT NULL,
+    value DOUBLE PRECISION NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_allocated_eff_factor_run_component
+    ON surrogrid.allocated_eff_factor (demand_allocation_run_id, component, t_index);
+CREATE INDEX IF NOT EXISTS idx_allocated_eff_factor_bus
+    ON surrogrid.allocated_eff_factor (bus);
+SELECT create_hypertable('surrogrid.allocated_eff_factor', 'ts', if_not_exists => TRUE);
+
+CREATE TABLE IF NOT EXISTS surrogrid.allocated_vehicle (
+    demand_allocation_run_id BIGINT NOT NULL REFERENCES surrogrid.demand_allocation_run(demand_allocation_run_id) ON DELETE CASCADE,
+    bus INTEGER NOT NULL,
+    vehicle_id INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    schedule TEXT NOT NULL,
+    seed BIGINT NOT NULL,
+    profile_id TEXT,
+    battery_cap_kwh DOUBLE PRECISION,
+    PRIMARY KEY (demand_allocation_run_id, bus, vehicle_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_allocated_vehicle_run_model
+    ON surrogrid.allocated_vehicle (demand_allocation_run_id, model, schedule);
 
 CREATE TABLE IF NOT EXISTS surrogrid.powerflow_demand (
     powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.powerflow_run(powerflow_run_id) ON DELETE CASCADE,

@@ -646,6 +646,179 @@ class SurroGridDatabase:
                 ).scalar_one()
             )
 
+    def ensure_pipeline_run(
+        self,
+        *,
+        grid_case_id: int,
+        scenario_id: int,
+        run_name: str,
+    ) -> int:
+        query = text(
+            """
+            INSERT INTO surrogrid.pipeline_run (
+                grid_case_id, scenario_id, run_name
+            )
+            VALUES (
+                :grid_case_id, :scenario_id, :run_name
+            )
+            ON CONFLICT (grid_case_id, scenario_id, run_name) DO UPDATE SET
+                updated_at = NOW()
+            RETURNING pipeline_run_id
+            """
+        )
+        with self.engine.begin() as conn:
+            return int(
+                conn.execute(
+                    query,
+                    {
+                        "grid_case_id": int(grid_case_id),
+                        "scenario_id": int(scenario_id),
+                        "run_name": run_name,
+                    },
+                ).scalar_one()
+            )
+
+    def default_pipeline_run_name(self, scenario_key: str) -> str:
+        return f"{scenario_key}_pipeline"
+
+    def create_demand_allocation_run(
+        self,
+        grid_ref: dict[str, Any],
+        *,
+        bridge_filename: str,
+        profiles: str,
+        mobility_source: str,
+        scenario_key: str = DEFAULT_SCENARIO_KEY,
+        scenario_label: str = DEFAULT_SCENARIO_LABEL,
+        run_name: str | None = None,
+    ) -> int:
+        grid_case_id = self.get_or_create_grid_case(grid_ref)
+        scenario_id = self.ensure_scenario(
+            scenario_key=scenario_key,
+            scenario_label=scenario_label,
+        )
+        pipeline_run_id = self.ensure_pipeline_run(
+            grid_case_id=grid_case_id,
+            scenario_id=scenario_id,
+            run_name=self.default_pipeline_run_name(scenario_key),
+        )
+        run_name = run_name or self.default_demand_allocation_run_name(
+            scenario_key,
+            profiles,
+            mobility_source,
+        )
+        query = text(
+            """
+            INSERT INTO surrogrid.demand_allocation_run (
+                pipeline_run_id, grid_case_id, scenario_id, run_name, bridge_filename,
+                storage_mode, profiles, mobility_source
+            )
+            VALUES (
+                :pipeline_run_id, :grid_case_id, :scenario_id, :run_name, :bridge_filename,
+                'db', :profiles, :mobility_source
+            )
+            ON CONFLICT (grid_case_id, scenario_id, run_name) DO UPDATE SET
+                pipeline_run_id = EXCLUDED.pipeline_run_id,
+                bridge_filename = EXCLUDED.bridge_filename,
+                storage_mode = EXCLUDED.storage_mode,
+                profiles = EXCLUDED.profiles,
+                mobility_source = EXCLUDED.mobility_source,
+                updated_at = NOW()
+            RETURNING demand_allocation_run_id
+            """
+        )
+        with self.engine.begin() as conn:
+            run_id = int(
+                conn.execute(
+                    query,
+                    {
+                        "pipeline_run_id": pipeline_run_id,
+                        "grid_case_id": grid_case_id,
+                        "scenario_id": scenario_id,
+                        "run_name": run_name,
+                        "bridge_filename": bridge_filename,
+                        "profiles": profiles,
+                        "mobility_source": mobility_source,
+                    },
+                ).scalar_one()
+            )
+            self._clear_demand_allocation_run(conn, run_id)
+        return run_id
+
+    def default_demand_allocation_run_name(
+        self,
+        scenario_key: str,
+        profiles: str,
+        mobility_source: str,
+    ) -> str:
+        return f"{scenario_key}_{profiles}_{mobility_source}_demand_allocation"
+
+    def _clear_demand_allocation_run(self, conn, run_id: int) -> None:
+        for table_name in (
+            "allocated_vehicle",
+            "allocated_eff_factor",
+            "allocated_demand",
+        ):
+            conn.execute(
+                text(
+                    f"DELETE FROM surrogrid.{table_name} "
+                    "WHERE demand_allocation_run_id = :run_id"
+                ),
+                {"run_id": run_id},
+            )
+
+    def write_allocated_demand(self, run_id: int, df: pd.DataFrame) -> None:
+        self._write_allocated_timeseries(run_id, df, "commodity", "allocated_demand")
+
+    def write_allocated_eff_factor(self, run_id: int, df: pd.DataFrame) -> None:
+        self._write_allocated_timeseries(run_id, df, "component", "allocated_eff_factor")
+
+    def write_allocated_vehicles(self, run_id: int, df_buildings: pd.DataFrame, battery_dict: dict | None = None) -> None:
+        battery_dict = battery_dict or {}
+        rows = []
+        for car_dict in df_buildings.get("car_dict", []):
+            if not isinstance(car_dict, dict):
+                continue
+            for (bus, vehicle_id), cfg in car_dict.items():
+                rows.append(
+                    {
+                        "demand_allocation_run_id": run_id,
+                        "bus": int(bus),
+                        "vehicle_id": int(vehicle_id),
+                        "model": str(cfg["model"]),
+                        "schedule": str(cfg["schedule"]),
+                        "seed": int(cfg["seed"]),
+                        "profile_id": cfg.get("profile_id"),
+                        "battery_cap_kwh": cfg.get("battery_cap_kwh", battery_dict.get((int(bus), int(vehicle_id)))),
+                    }
+                )
+        if rows:
+            self._append(pd.DataFrame(rows), "allocated_vehicle")
+
+    def _write_allocated_timeseries(
+        self,
+        run_id: int,
+        df: pd.DataFrame,
+        label_column: str,
+        table_name: str,
+    ) -> None:
+        if df.empty:
+            return
+        if not isinstance(df.columns, pd.MultiIndex) or df.columns.nlevels < 2:
+            raise ValueError(f"Expected MultiIndex columns for {table_name}.")
+
+        out = df.copy().reset_index(drop=True)
+        out.columns = pd.MultiIndex.from_tuples(
+            [(int(col[0]), str(col[1])) for col in out.columns.to_flat_index()],
+            names=["bus", label_column],
+        )
+        out.index = pd.RangeIndex(len(out), name="t_index")
+        out = out.stack(["bus", label_column], future_stack=True).rename("value").reset_index()
+        out.insert(1, "ts", self._timestamps(len(df)).take(out["t_index"].to_numpy()))
+        out.insert(0, "demand_allocation_run_id", run_id)
+        out = out.dropna(subset=["value"])
+        self._append(out, table_name)
+
     def create_powerflow_run(
         self,
         grid_ref: dict[str, Any],
@@ -661,18 +834,24 @@ class SurroGridDatabase:
             scenario_key=scenario_key,
             scenario_label=scenario_label,
         )
+        pipeline_run_id = self.ensure_pipeline_run(
+            grid_case_id=grid_case_id,
+            scenario_id=scenario_id,
+            run_name=self.default_pipeline_run_name(scenario_key),
+        )
         run_name = run_name or self.default_powerflow_run_name(scenario_key, pre_only)
         query = text(
             """
             INSERT INTO surrogrid.powerflow_run (
-                grid_case_id, scenario_id, run_name,
+                pipeline_run_id, grid_case_id, scenario_id, run_name,
                 urbs_input_file, storage_mode, pre_only
             )
             VALUES (
-                :grid_case_id, :scenario_id, :run_name,
+                :pipeline_run_id, :grid_case_id, :scenario_id, :run_name,
                 :urbs_input_file, 'db', :pre_only
             )
             ON CONFLICT (grid_case_id, scenario_id, run_name) DO UPDATE SET
+                pipeline_run_id = EXCLUDED.pipeline_run_id,
                 urbs_input_file = EXCLUDED.urbs_input_file,
                 storage_mode = EXCLUDED.storage_mode,
                 pre_only = EXCLUDED.pre_only,
@@ -685,6 +864,7 @@ class SurroGridDatabase:
                 conn.execute(
                     query,
                     {
+                        "pipeline_run_id": pipeline_run_id,
                         "grid_case_id": grid_case_id,
                         "scenario_id": scenario_id,
                         "run_name": run_name,
@@ -799,41 +979,6 @@ class SurroGridDatabase:
                 )
             )
         self._append(pd.concat(rows, ignore_index=True), "powerflow_reactive_component")
-
-    def load_mobility_profile_pool_csv(
-        self,
-        metadata_csv: str | Path,
-        demand_csv: str | Path,
-        availability_csv: str | Path,
-        *,
-        replace: bool = False,
-        chunksize: int = 10000,
-    ) -> None:
-        self.ensure_schema()
-        metadata_csv = Path(metadata_csv)
-        demand_csv = Path(demand_csv)
-        availability_csv = Path(availability_csv)
-
-        for csv_path in [metadata_csv, demand_csv, availability_csv]:
-            if not csv_path.exists():
-                raise FileNotFoundError(f"Mobility profile pool CSV not found: {csv_path}")
-
-        if replace:
-            with self.engine.begin() as conn:
-                conn.execute(text("DELETE FROM surrogrid.mobility_profile_availability"))
-                conn.execute(text("DELETE FROM surrogrid.mobility_profile_demand"))
-                conn.execute(text("DELETE FROM surrogrid.mobility_profile_pool"))
-
-        metadata = pd.read_csv(metadata_csv)
-        self._append(metadata, "mobility_profile_pool")
-
-        for chunk in pd.read_csv(demand_csv, chunksize=chunksize):
-            chunk = chunk.rename(columns={"t": "t_index"})
-            self._append(chunk, "mobility_profile_demand")
-
-        for chunk in pd.read_csv(availability_csv, chunksize=chunksize):
-            chunk = chunk.rename(columns={"t": "t_index"})
-            self._append(chunk, "mobility_profile_availability")
 
     def _append(self, df: pd.DataFrame, table_name: str) -> None:
         df.to_sql(

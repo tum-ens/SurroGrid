@@ -215,3 +215,17 @@
 - What was decided: Rename the generated mobility pool CSV files to mobility_profile_pool_metadata.csv, mobility_demand_pool.csv, mobility_availability_pool.csv, and mobility_weather_central_germany_tmy.csv.
 - Why: The pool is intended to be stored outside the repository and reused, so descriptive filenames make the data purpose clear without surrounding project context.
 - What was rejected and why: Keeping generic names such as metadata.csv, demand.csv, availability.csv, and central_germany_weather.csv was rejected because they are ambiguous once copied outside the mobility_profile_pool directory.
+
+## 2026-06-03 - CSV-only mobility pool and DB-stored allocated Step 2 demands
+
+- What was decided: Keep the reusable pregenerated mobility profile pool as CSV-only and remove the SurroGrid DB loader/schema tables for the generic pool. Store only run-specific Step 2 allocation outputs in the database: demand_allocation_run, allocated_demand, allocated_eff_factor, and allocated_vehicle.
+- Why: CSV access for the reusable pool is fast enough and avoids loading about 9.8 million generic pool rows into PostgreSQL. The database should instead hold the selected, grid-specific demand allocation outputs so electrical, heat, and mobility demand can be inspected per run.
+- What was rejected and why: Automatically loading the full pregenerated pool into DB during pipeline runs was rejected because it adds DB storage/load overhead without clear runtime benefit. Storing only mobility demand was rejected because electricity and heat demand should be queryable in the same Step 2 allocation result table.
+- Verification: DB-backed Step 2 passed for 9278140-00_94342_1_-1.h5 with mobility_source pool. The run baseline_static_all_pool_demand_allocation wrote 27 allocated_vehicle rows, 683280 allocated_demand rows, and 385440 allocated_eff_factor rows.
+
+## 2026-06-03 - SurroGrid pipeline_run identity and schema documentation
+
+- What was decided: Add `surrogrid.pipeline_run` as a shared parent for `demand_allocation_run` and `powerflow_run`, keyed by the same `grid_case` and `scenario`, and document the SurroGrid table structure in `GridExpand/SURROGRID_SCHEMA.md`.
+- Why: Step 2 and Step 4 runs are not fully uncoupled because they belong to the same grid/scenario pipeline execution, but they still need separate child metadata for allocation settings and power-flow settings. A parent run table makes this relationship explicit without merging unrelated step-specific result tables.
+- What was rejected and why: Collapsing `grid_case`, `scenario`, `demand_allocation_run`, and `powerflow_run` into one table was rejected because physical grid identity, scenario assumptions, and step execution metadata have different meanings and reuse patterns. Keeping Step 2 and Step 4 coupled only by matching names was rejected because it makes DB queries fragile.
+- Verification: `uv run --project GridExpand/2.demand_allocation python -m py_compile GridExpand/database.py` passed. `SurroGridDatabase().ensure_schema()` applied successfully on the configured DB, and the existing PLZ 94342 test grid now shows one `baseline_static_pipeline` parent with one demand allocation run and one power-flow run.

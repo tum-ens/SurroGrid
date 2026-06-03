@@ -82,6 +82,8 @@ Each step folder has its own `README.md` with more detail:
 - `3.urbs/README.md`
 - `4.powerflow/README.md`
 
+DB-backed SurroGrid storage is documented in `SURROGRID_SCHEMA.md`.
+
 ---
 
 ## HDF5 interface (inputs & outputs)
