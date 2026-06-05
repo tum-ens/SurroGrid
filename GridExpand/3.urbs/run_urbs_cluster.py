@@ -32,7 +32,12 @@ if __name__ == '__main__':
         h5_files = [fname for fname in all_entries if fname.endswith(".h5")]
         # find file with correct id prefix
         input_id_str = str(args.inputfile_id)
-        matched_files = [fname for fname in h5_files if fname.split('_', 1)[0] == input_id_str]
+        if input_id_str.endswith(".h5"):
+            matched_files = [fname for fname in h5_files if fname == input_id_str]
+        else:
+            matched_files = [fname for fname in h5_files if fname.split('_', 1)[0] == input_id_str]
+        if not matched_files:
+            raise FileNotFoundError(f"No Step 3 input file matches {input_id_str} in Input/.")
         input_file = matched_files[0]
 
 

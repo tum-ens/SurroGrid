@@ -11,6 +11,8 @@ import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
+from timeframe import build_full_year_metadata
+
 
 GRIDEXPAND_DIR = Path(__file__).resolve().parent
 ENV_PATH = GRIDEXPAND_DIR / "1.grid_sampling" / ".env"
@@ -25,6 +27,7 @@ DEFAULT_SCENARIO_DESCRIPTION = (
 DEFAULT_SCENARIO_ASSUMPTIONS = {
     "pipeline": "GridExpand",
     "variant": "static",
+    **build_full_year_metadata(),
 }
 
 
@@ -48,15 +51,54 @@ class SurroGridDatabase:
         )
 
     def ensure_schema(self) -> None:
+        if self._schema_ready():
+            return
         sql = SCHEMA_SQL_PATH.read_text(encoding="utf-8")
         statements = [statement.strip() for statement in sql.split(";") if statement.strip()]
         with self.engine.begin() as conn:
+            conn.execute(text("SELECT pg_advisory_xact_lock(916200005)"))
+            if self._schema_ready(conn):
+                return
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb"))
             conn.execute(text("CREATE SCHEMA IF NOT EXISTS surrogrid"))
             self._migrate_legacy_scenario_schema(conn)
             for statement in statements:
                 conn.execute(text(statement))
+
+    def _schema_ready(self, conn=None) -> bool:
+        query = text(
+            """
+            SELECT
+                to_regclass('surrogrid.grid_case') IS NOT NULL
+                AND to_regclass('surrogrid.scenario') IS NOT NULL
+                AND to_regclass('surrogrid.pipeline_run') IS NOT NULL
+                AND to_regclass('surrogrid.demand_allocation_run') IS NOT NULL
+                AND to_regclass('surrogrid.powerflow_run') IS NOT NULL
+                AND to_regclass('surrogrid.powerflow_reactive_component') IS NOT NULL
+                AND EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'surrogrid'
+                      AND table_name = 'demand_allocation_run'
+                      AND column_name = 'assumptions'
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'surrogrid'
+                      AND table_name = 'powerflow_run'
+                      AND column_name = 'assumptions'
+                ) AS ready
+            """
+        )
+        if conn is not None:
+            return bool(conn.execute(query).scalar_one())
+        try:
+            with self.engine.connect() as check_conn:
+                return bool(check_conn.execute(query).scalar_one())
+        except Exception:
+            return False
 
     def _migrate_legacy_scenario_schema(self, conn) -> None:
         exists = conn.execute(
@@ -139,7 +181,7 @@ class SurroGridDatabase:
                     'baseline_static',
                     'Baseline static assumptions',
                     'Initial static full-pipeline scenario. Explicit scenario dimensions will be added once scenario variation is introduced.',
-                    '{"pipeline": "GridExpand", "variant": "static"}'::JSONB
+                    '{"pipeline": "GridExpand", "variant": "static", "timeframe_mode": "full_year", "horizon_hours": 8760, "timeframe_start": "2009-01-01T00:00:00+00:00", "timeframe_end": "2009-12-31T23:00:00+00:00", "source_year_or_reference_year": 2009, "timeframe_kind": "full_year", "methodological_note": "Full 8760-hour reference-year run. Cost and investment outputs keep their existing annual interpretation.", "cost_investment_interpretation": "annual_valid", "annual_valid": true}'::JSONB
                 )
                 ON CONFLICT (scenario_key) DO NOTHING
                 """
@@ -199,19 +241,6 @@ class SurroGridDatabase:
                         'baseline_static_full_year_pre_powerflow',
                         'baseline_static_full_year_full_powerflow'
                     )
-                    """
-                )
-            )
-            conn.execute(
-                text(
-                    """
-                    DELETE FROM surrogrid.powerflow_run
-                    WHERE run_name LIKE '%max_electricity_demand_week%'
-                       OR run_name LIKE '%min_temperature_week%'
-                       OR run_name LIKE '%max_solar_generation_week%'
-                       OR run_name LIKE '%max_mobility_demand_week%'
-                       OR run_name LIKE '%max_reverse_power_flow_week%'
-                       OR run_name LIKE '%max_net_load_week%'
                     """
                 )
             )
@@ -628,7 +657,10 @@ class SurroGridDatabase:
             ON CONFLICT (scenario_key) DO UPDATE SET
                 scenario_label = EXCLUDED.scenario_label,
                 description = EXCLUDED.description,
-                assumptions = EXCLUDED.assumptions,
+                assumptions = CASE
+                    WHEN :has_assumptions THEN EXCLUDED.assumptions
+                    ELSE surrogrid.scenario.assumptions
+                END,
                 updated_at = NOW()
             RETURNING scenario_id
             """
@@ -642,6 +674,7 @@ class SurroGridDatabase:
                         "scenario_label": scenario_label,
                         "description": description,
                         "assumptions": json.dumps(scenario_assumptions),
+                        "has_assumptions": assumptions is not None,
                     },
                 ).scalar_one()
             )
@@ -691,11 +724,13 @@ class SurroGridDatabase:
         scenario_key: str = DEFAULT_SCENARIO_KEY,
         scenario_label: str = DEFAULT_SCENARIO_LABEL,
         run_name: str | None = None,
+        assumptions: dict[str, Any] | None = None,
     ) -> int:
         grid_case_id = self.get_or_create_grid_case(grid_ref)
         scenario_id = self.ensure_scenario(
             scenario_key=scenario_key,
             scenario_label=scenario_label,
+            assumptions=assumptions,
         )
         pipeline_run_id = self.ensure_pipeline_run(
             grid_case_id=grid_case_id,
@@ -711,11 +746,11 @@ class SurroGridDatabase:
             """
             INSERT INTO surrogrid.demand_allocation_run (
                 pipeline_run_id, grid_case_id, scenario_id, run_name, bridge_filename,
-                storage_mode, profiles, mobility_source
+                storage_mode, profiles, mobility_source, assumptions
             )
             VALUES (
                 :pipeline_run_id, :grid_case_id, :scenario_id, :run_name, :bridge_filename,
-                'db', :profiles, :mobility_source
+                'db', :profiles, :mobility_source, CAST(:assumptions AS JSONB)
             )
             ON CONFLICT (grid_case_id, scenario_id, run_name) DO UPDATE SET
                 pipeline_run_id = EXCLUDED.pipeline_run_id,
@@ -723,6 +758,7 @@ class SurroGridDatabase:
                 storage_mode = EXCLUDED.storage_mode,
                 profiles = EXCLUDED.profiles,
                 mobility_source = EXCLUDED.mobility_source,
+                assumptions = EXCLUDED.assumptions,
                 updated_at = NOW()
             RETURNING demand_allocation_run_id
             """
@@ -739,11 +775,26 @@ class SurroGridDatabase:
                         "bridge_filename": bridge_filename,
                         "profiles": profiles,
                         "mobility_source": mobility_source,
+                        "assumptions": json.dumps(assumptions or {}),
                     },
                 ).scalar_one()
             )
             self._clear_demand_allocation_run(conn, run_id)
         return run_id
+
+    def update_demand_allocation_run_assumptions(self, run_id: int, assumptions: dict[str, Any]) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE surrogrid.demand_allocation_run
+                    SET assumptions = CAST(:assumptions AS JSONB),
+                        updated_at = NOW()
+                    WHERE demand_allocation_run_id = :run_id
+                    """
+                ),
+                {"run_id": int(run_id), "assumptions": json.dumps(assumptions)},
+            )
 
     def default_demand_allocation_run_name(
         self,
@@ -814,7 +865,7 @@ class SurroGridDatabase:
         )
         out.index = pd.RangeIndex(len(out), name="t_index")
         out = out.stack(["bus", label_column], future_stack=True).rename("value").reset_index()
-        out.insert(1, "ts", self._timestamps(len(df)).take(out["t_index"].to_numpy()))
+        out.insert(1, "ts", self._timestamps_for_demand_allocation_run(run_id, len(df)).take(out["t_index"].to_numpy()))
         out.insert(0, "demand_allocation_run_id", run_id)
         out = out.dropna(subset=["value"])
         self._append(out, table_name)
@@ -828,11 +879,13 @@ class SurroGridDatabase:
         scenario_key: str = DEFAULT_SCENARIO_KEY,
         scenario_label: str = DEFAULT_SCENARIO_LABEL,
         run_name: str | None = None,
+        assumptions: dict[str, Any] | None = None,
     ) -> int:
         grid_case_id = self.get_or_create_grid_case(grid_ref)
         scenario_id = self.ensure_scenario(
             scenario_key=scenario_key,
             scenario_label=scenario_label,
+            assumptions=assumptions,
         )
         pipeline_run_id = self.ensure_pipeline_run(
             grid_case_id=grid_case_id,
@@ -844,17 +897,18 @@ class SurroGridDatabase:
             """
             INSERT INTO surrogrid.powerflow_run (
                 pipeline_run_id, grid_case_id, scenario_id, run_name,
-                urbs_input_file, storage_mode, pre_only
+                urbs_input_file, storage_mode, pre_only, assumptions
             )
             VALUES (
                 :pipeline_run_id, :grid_case_id, :scenario_id, :run_name,
-                :urbs_input_file, 'db', :pre_only
+                :urbs_input_file, 'db', :pre_only, CAST(:assumptions AS JSONB)
             )
             ON CONFLICT (grid_case_id, scenario_id, run_name) DO UPDATE SET
                 pipeline_run_id = EXCLUDED.pipeline_run_id,
                 urbs_input_file = EXCLUDED.urbs_input_file,
                 storage_mode = EXCLUDED.storage_mode,
                 pre_only = EXCLUDED.pre_only,
+                assumptions = EXCLUDED.assumptions,
                 updated_at = NOW()
             RETURNING powerflow_run_id
             """
@@ -870,6 +924,7 @@ class SurroGridDatabase:
                         "run_name": run_name,
                         "urbs_input_file": urbs_input_file,
                         "pre_only": bool(pre_only),
+                        "assumptions": json.dumps(assumptions or {}),
                     },
                 ).scalar_one()
             )
@@ -894,7 +949,7 @@ class SurroGridDatabase:
             )
 
     def write_powerflow_demand(self, run_id: int, stage: str, df: pd.DataFrame) -> None:
-        ts = self._timestamps(len(df))
+        ts = self._timestamps_for_powerflow_run(run_id, len(df))
         buses = sorted({int(col[0]) for col in df.columns})
         chunk_size = 25
         for start in range(0, len(buses), chunk_size):
@@ -921,7 +976,7 @@ class SurroGridDatabase:
             {
                 "powerflow_run_id": run_id,
                 "stage": stage,
-                "ts": self._timestamps(len(df)),
+                "ts": self._timestamps_for_powerflow_run(run_id, len(df)),
                 "t_index": range(len(df)),
                 "p_mw": df.get("p_mw"),
                 "q_mvar": df.get("q_mvar"),
@@ -931,7 +986,7 @@ class SurroGridDatabase:
 
     def write_powerflow_bus_voltage(self, run_id: int, stage: str, df: pd.DataFrame) -> None:
         columns = [int(col) for col in df.columns]
-        ts = self._timestamps(len(df))
+        ts = self._timestamps_for_powerflow_run(run_id, len(df))
         chunk_size = 25
         for start in range(0, len(columns), chunk_size):
             chunk_columns = columns[start:start + chunk_size]
@@ -949,7 +1004,7 @@ class SurroGridDatabase:
             self._append(out, "powerflow_bus_voltage")
 
     def write_powerflow_line_result(self, run_id: int, stage: str, df: pd.DataFrame) -> None:
-        ts = self._timestamps(len(df))
+        ts = self._timestamps_for_powerflow_run(run_id, len(df))
         lines = sorted({int(col[0]) for col in df.columns})
         chunk_size = 25
         for start in range(0, len(lines), chunk_size):
@@ -973,7 +1028,7 @@ class SurroGridDatabase:
                 self._append(pd.concat(rows, ignore_index=True), "powerflow_line_result")
 
     def write_powerflow_reactive(self, run_id: int, df: pd.DataFrame) -> None:
-        ts = self._timestamps(len(df))
+        ts = self._timestamps_for_powerflow_run(run_id, len(df))
         columns = list(df.columns)
         chunk_size = 25
         for start in range(0, len(columns), chunk_size):
@@ -995,6 +1050,53 @@ class SurroGridDatabase:
             if rows:
                 self._append(pd.concat(rows, ignore_index=True), "powerflow_reactive_component")
 
+
+    def _timestamps_for_demand_allocation_run(self, run_id: int, n_rows: int) -> pd.DatetimeIndex:
+        return self._timestamps_for_run(
+            "demand_allocation_run",
+            "demand_allocation_run_id",
+            run_id,
+            n_rows,
+        )
+
+    def _timestamps_for_powerflow_run(self, run_id: int, n_rows: int) -> pd.DatetimeIndex:
+        return self._timestamps_for_run(
+            "powerflow_run",
+            "powerflow_run_id",
+            run_id,
+            n_rows,
+        )
+
+    def _timestamps_for_run(
+        self,
+        run_table: str,
+        id_column: str,
+        run_id: int,
+        n_rows: int,
+    ) -> pd.DatetimeIndex:
+        query = text(
+            f"""
+            SELECT CASE
+                WHEN r.assumptions <> '{{}}'::JSONB THEN r.assumptions
+                ELSE sc.assumptions
+            END AS assumptions
+            FROM surrogrid.{run_table} r
+            JOIN surrogrid.scenario sc
+              ON sc.scenario_id = r.scenario_id
+            WHERE r.{id_column} = :run_id
+            """
+        )
+        with self.engine.connect() as conn:
+            assumptions = conn.execute(query, {"run_id": int(run_id)}).scalar_one_or_none()
+        if isinstance(assumptions, str):
+            try:
+                assumptions = json.loads(assumptions)
+            except json.JSONDecodeError:
+                assumptions = {}
+        if not isinstance(assumptions, dict):
+            assumptions = {}
+        return self._timestamps(n_rows, start=assumptions.get("timeframe_start") or TIME_INDEX_START)
+
     def _append(self, df: pd.DataFrame, table_name: str) -> None:
         df.to_sql(
             table_name,
@@ -1006,8 +1108,8 @@ class SurroGridDatabase:
             method="multi",
         )
 
-    def _timestamps(self, n_rows: int) -> pd.DatetimeIndex:
-        return pd.date_range(TIME_INDEX_START, periods=n_rows, freq="h")
+    def _timestamps(self, n_rows: int, start: str = TIME_INDEX_START) -> pd.DatetimeIndex:
+        return pd.date_range(start, periods=n_rows, freq="h")
 
     def _series_or_none(self, df: pd.DataFrame, column: tuple[Any, str]) -> pd.Series:
         if column in df.columns:

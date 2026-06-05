@@ -14,6 +14,7 @@ if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
 from database import SurroGridDatabase
+from timeframe import output_filename_for_timeframe, write_hdf_metadata
 
 
 class SaveFile:
@@ -26,18 +27,25 @@ class SaveFile:
         self.db = SurroGridDatabase() if self.storage == "db" else None
         self.grid_ref = grid_ref
         self.demand_allocation_run_id = None
+        self.timeframe_mode = allocation_settings.get("timeframe_mode", "full_year")
+        self.timeframe_metadata = allocation_settings.get("timeframe_metadata", {})
+        self.scenario_key = allocation_settings.get("scenario_key", "baseline_static")
         if self.storage == "db":
             if self.grid_ref is None:
                 self.grid_ref = self.db.resolve_grid_identifier(filename)
             self.db.get_or_create_grid_case(self.grid_ref)
-            filename = self.grid_ref["bridge_filename"]
+            filename = output_filename_for_timeframe(self.grid_ref["bridge_filename"], self.timeframe_mode)
+            scenario_assumptions = allocation_settings.get("scenario_assumptions")
             self.demand_allocation_run_id = self.db.create_demand_allocation_run(
                 self.grid_ref,
                 bridge_filename=filename,
                 profiles=allocation_settings.get("profiles", "all"),
                 mobility_source=allocation_settings.get("mobility_source", "emobpy"),
+                scenario_key=self.scenario_key,
+                assumptions=self._ready_timeframe_assumptions(scenario_assumptions),
             )
-        self.filename = filename
+        self.input_filename = allocation_settings.get("grid_filename", filename)
+        self.filename = output_filename_for_timeframe(filename, self.timeframe_mode)
         self.input_path = self._get_readpath()
         self.output_path = self._generate_savepath()
 
@@ -50,7 +58,7 @@ class SaveFile:
         if self.storage == "db":
             return None
         directory = config.DATA_GRID_DIR
-        return os.path.join(directory, self.filename)
+        return os.path.join(directory, self.input_filename)
 
     def _generate_savepath(self):
         directory = config.STORAGE_DIR
@@ -72,6 +80,33 @@ class SaveFile:
                 os.remove(self.output_path)
             return
         shutil.copy2(self.input_path, self.output_path)
+
+    def update_timeframe_metadata(self, metadata):
+        self.timeframe_metadata = dict(metadata)
+        if self.storage == "db":
+            ready = self._ready_timeframe_assumptions(self.timeframe_metadata)
+            if self.demand_allocation_run_id is not None and ready is not None:
+                self.db.update_demand_allocation_run_assumptions(
+                    self.demand_allocation_run_id,
+                    ready,
+                )
+            self.db.ensure_scenario(
+                scenario_key=self.scenario_key,
+                assumptions=ready,
+            )
+
+    @staticmethod
+    def _ready_timeframe_assumptions(metadata):
+        if not isinstance(metadata, dict):
+            return None
+        timeframe_mode = metadata.get("timeframe_mode", "full_year")
+        if timeframe_mode != "full_year" and not metadata.get("timeframe_start"):
+            return None
+        return metadata
+
+    def save_timeframe_metadata(self):
+        if self.timeframe_metadata:
+            write_hdf_metadata(self.output_path, self.timeframe_metadata)
 
     def save_df(self, df, dir):
         if self.storage == "db" and dir.startswith("raw_data/"):

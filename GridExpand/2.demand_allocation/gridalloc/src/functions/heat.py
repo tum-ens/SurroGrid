@@ -106,10 +106,17 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip):
     scenario["retrofit"] = 0
 
     # Extract location data
+    zip_code = str(zip)
     site_data = pd.read_csv(f"{config.DISTGEN_DATA_PATH}/site_data.txt", delimiter='\t', dtype={'Zip': str})
+    if zip_code not in set(site_data["Zip"]):
+        site_data = site_data.copy()
+        nearest_idx = (site_data["Zip"].astype(int) - int(zip_code)).abs().idxmin()
+        fallback = site_data.loc[nearest_idx].copy()
+        fallback["Zip"] = zip_code
+        site_data = pd.concat([site_data, fallback.to_frame().T], ignore_index=True)
     # print(site_data)
     # Simulate heating
-    heat_data = Datahandler(scenario, scenario_name = "example", zip_code = str(zip))
+    heat_data = Datahandler(scenario, scenario_name = "example", zip_code = zip_code)
     heat_data.generateEnvironment(weather_data, site_data)
     heat_data.initializeBuildings()
     with warnings.catch_warnings():

@@ -28,6 +28,14 @@ import h5py
 import pandas as pd
 from sqlalchemy import text
 
+from timeframe import (
+    TIMEFRAME_MODES,
+    build_initial_metadata,
+    horizon_hours_from_hdf,
+    output_filename_for_timeframe,
+    read_hdf_metadata,
+)
+
 
 EXPECTED_POWERFLOW_TABLES = {
     "powerflow_demand": ("pre", "post"),
@@ -54,6 +62,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step3-cluster-concurrency", type=int, default=1)
     parser.add_argument("--step4-cpus", type=int, default=4)
     parser.add_argument("--step2-timeseries-storage", choices=["db", "temp", "both"], default="temp")
+    parser.add_argument(
+        "--timeframe-mode",
+        choices=TIMEFRAME_MODES,
+        default="full_year",
+        help="Simulation timeframe passed to Step 2; one-week modes produce 168-hour stress runs.",
+    )
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--pilot-index", type=int, default=0)
     parser.add_argument("--no-pilot-gate", action="store_true")
@@ -120,6 +134,10 @@ class StatusLog:
             "bcid",
             "n_buildings",
             "bridge_filename",
+            "timeframe_mode",
+            "horizon_hours",
+            "timeframe_start",
+            "timeframe_end",
             "status",
             "stage",
             "started_at",
@@ -294,6 +312,9 @@ def choose_step3_settings(step2_output: Path, args: argparse.Namespace) -> tuple
 
 def validate_powerflow_db(repo_root: Path, scenario_filename: str) -> dict[str, Any]:
     configure_imports(repo_root)
+    scenario_path = repo_root / "GridExpand" / "4.powerflow" / "Input" / scenario_filename
+    expected_horizon = horizon_hours_from_hdf(scenario_path)
+    expected_max_t = expected_horizon - 1
     from database import SurroGridDatabase
 
     db = SurroGridDatabase()
@@ -318,6 +339,7 @@ def validate_powerflow_db(repo_root: Path, scenario_filename: str) -> dict[str, 
             "powerflow_run_id": run_id,
             "run_name": run["run_name"],
             "tables": {},
+            "expected_horizon_hours": expected_horizon,
         }
         missing: list[str] = []
         for table_name, expected_stages in EXPECTED_POWERFLOW_TABLES.items():
@@ -340,7 +362,7 @@ def validate_powerflow_db(repo_root: Path, scenario_filename: str) -> dict[str, 
                 if not row:
                     missing.append(f"{table_name}:{stage}:missing")
                     continue
-                if int(row["rows"]) <= 0 or int(row["min_t"]) != 0 or int(row["max_t"]) != 8759:
+                if int(row["rows"]) <= 0 or int(row["min_t"]) != 0 or int(row["max_t"]) != expected_max_t:
                     missing.append(f"{table_name}:{stage}:incomplete")
 
         reactive_rows = conn.execute(
@@ -354,7 +376,7 @@ def validate_powerflow_db(repo_root: Path, scenario_filename: str) -> dict[str, 
             {"run_id": run_id},
         ).mappings().one()
         validation["tables"]["powerflow_reactive_component"] = {"all": dict(reactive_rows)}
-        if int(reactive_rows["rows"]) <= 0 or int(reactive_rows["min_t"]) != 0 or int(reactive_rows["max_t"]) != 8759:
+        if int(reactive_rows["rows"]) <= 0 or int(reactive_rows["min_t"]) != 0 or int(reactive_rows["max_t"]) != expected_max_t:
             missing.append("powerflow_reactive_component:all:incomplete")
 
         if missing:
@@ -398,14 +420,16 @@ def run_candidate(
     step4_dir = gridexpand / "4.powerflow"
     candidate_index = int(candidate["candidate_index"])
     bridge_filename = str(candidate["bridge_filename"])
-    prefix = bridge_filename.split("_", 1)[0]
-    scenario_filename = bridge_filename.replace(
+    step2_filename = output_filename_for_timeframe(bridge_filename, args.timeframe_mode)
+    prefix = step2_filename.split("_", 1)[0]
+    scenario_filename = step2_filename.replace(
         ".h5",
         "_PV100_HP100_EV100_VarTar0_CapPr0.h5",
     )
-    log_file = args.run_dir / "logs" / f"candidate_{candidate_index:03d}_{bridge_filename}.log"
+    log_file = args.run_dir / "logs" / f"candidate_{candidate_index:03d}_{step2_filename}.log"
     started = time.monotonic()
     current_stage = "queued"
+    timeframe_metadata = build_initial_metadata(args.timeframe_mode)
     status.update(
         candidate_index,
         ags=candidate.get("ags", ags),
@@ -413,7 +437,11 @@ def run_candidate(
         kcid=candidate.get("kcid", ""),
         bcid=candidate.get("bcid", ""),
         n_buildings=candidate.get("n_buildings", ""),
-        bridge_filename=bridge_filename,
+        bridge_filename=step2_filename,
+        timeframe_mode=args.timeframe_mode,
+        horizon_hours=timeframe_metadata["horizon_hours"],
+        timeframe_start=timeframe_metadata["timeframe_start"],
+        timeframe_end=timeframe_metadata["timeframe_end"],
         status="queued",
         stage="queued",
         started_at=utc_now(),
@@ -448,6 +476,8 @@ def run_candidate(
                 "pool",
                 "--timeseries-storage",
                 args.step2_timeseries_storage,
+                "--timeframe-mode",
+                args.timeframe_mode,
                 "--n_cpu",
                 str(args.step2_cpus),
             ],
@@ -457,10 +487,17 @@ def run_candidate(
             candidate_index=candidate_index,
             stage=current_stage,
         )
-        step2_output = step2_dir / "results" / bridge_filename
+        step2_output = step2_dir / "results" / step2_filename
         if not step2_output.exists():
             raise FileNotFoundError(f"Missing Step 2 output {step2_output}")
-        shutil.copy2(step2_output, step3_dir / "Input" / bridge_filename)
+        timeframe_metadata = read_hdf_metadata(step2_output)
+        status.update(
+            candidate_index,
+            horizon_hours=timeframe_metadata.get("horizon_hours", ""),
+            timeframe_start=timeframe_metadata.get("timeframe_start", ""),
+            timeframe_end=timeframe_metadata.get("timeframe_end", ""),
+        )
+        shutil.copy2(step2_output, step3_dir / "Input" / step2_filename)
 
         step3_cpus, cluster_concurrency, step3_stats = choose_step3_settings(step2_output, args)
         status.update(
@@ -477,7 +514,7 @@ def run_candidate(
                 "run",
                 "python",
                 "run_urbs_cluster.py",
-                prefix,
+                step2_filename,
                 "--n_cpu",
                 str(step3_cpus),
             ],
@@ -588,6 +625,7 @@ def main() -> int:
         workers=args.workers,
         step2_cpus=args.step2_cpus,
         step2_timeseries_storage=args.step2_timeseries_storage,
+        timeframe_mode=args.timeframe_mode,
         step3_cpus=args.step3_cpus,
         step3_max_cpus=args.step3_max_cpus,
         step3_cluster_concurrency=args.step3_cluster_concurrency,

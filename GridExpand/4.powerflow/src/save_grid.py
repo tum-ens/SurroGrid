@@ -15,6 +15,7 @@ if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
 from database import SurroGridDatabase
+from timeframe import read_hdf_metadata, scenario_key_for_timeframe
 
 
 class SaveFile:
@@ -28,6 +29,7 @@ class SaveFile:
         self.input_path = self._get_readpath()
         print(self.input_path)
         self.output_path = self._generate_savepath()
+        self.timeframe_metadata = read_hdf_metadata(self.input_path)
         if self.storage == "h5":
             shutil.copy2(self.input_path, self.output_path)
         else:
@@ -36,6 +38,8 @@ class SaveFile:
                 self.grid_ref,
                 urbs_input_file=filename,
                 pre_only=pre_only,
+                scenario_key=scenario_key_for_timeframe(self.timeframe_metadata.get("timeframe_mode", "full_year")),
+                assumptions=self.timeframe_metadata,
             )
 
         # Dirs from which to extract data within .h5 file
@@ -56,9 +60,11 @@ class SaveFile:
         if self.storage == "db":
             return self.db.read_pandapower_grid(self.grid_ref)
         with h5py.File(self.input_path, 'r') as f:
-            json_data = f['raw_data/net'][()]
-            grid = pp.from_json_string(json_data)
-        return grid
+            if 'raw_data/net' in f:
+                json_data = f['raw_data/net'][()]
+                return pp.from_json_string(json_data)
+        db = SurroGridDatabase()
+        return db.read_pandapower_grid(db.resolve_grid_identifier(self.filename))
 
     def get_input_demands(self):
         df_raw_demand = pd.read_hdf(self.input_path, key=self.raw_demand_dir)

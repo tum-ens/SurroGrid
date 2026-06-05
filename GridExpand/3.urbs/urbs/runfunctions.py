@@ -131,7 +131,6 @@ def run_lvds_opt(input_path,        # path to input file
     ### Add additional input settings: ###
     forced_settings = {
         # only change if you know what you are doing
-        "timesteps": range(0,8761), # possible timestep values + 1 (for storage initialization at time=0)
         "dt": 1,                    # length of time steps in hours
         "solver_name": "gurobi",    # "gurobi"  # current code optimized for gurobi, might need to adjust hyperparameters down the pipeline
         "parallel": True,           # True      # makes no sense to not be parallel anymore, as then just increased computation time for building models 
@@ -148,6 +147,10 @@ def run_lvds_opt(input_path,        # path to input file
     if os.path.splitext(global_settings["input_file"])[1] == ".h5": data = read_input_h5(input_path)
     else: data = read_input(input_path)    # standard Excel readout: read out support timeframes, commodities, commodity-process, processes, demand, weight typeperiod, intermediate supply, transmission, storage, DSM, buy-sell-price, timevareff, availability, uhp
     # validate_input(data)          # check vertex rules, no duplicates, infeasible capacities, check if sites/processes/commodities/storage/dsm if present in each others sheets 
+
+    max_timestep = int(data["demand"].index.get_level_values("t").max())
+    global_settings["timesteps"] = range(0, max_timestep + 1)
+    print(f"Using {max_timestep} modeled demand hour(s) plus storage initialization timestep.")
 
 
     ### Insert settings into data and read out modes/name: ###

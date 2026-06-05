@@ -10,6 +10,11 @@ if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
 from database import SurroGridDatabase
+from timeframe import (
+    TIMEFRAME_MODES,
+    build_initial_metadata,
+    scenario_key_for_timeframe,
+)
 import src.classes.grid as grd
 from src.classes.resource_report import resource_report
 
@@ -83,7 +88,18 @@ if __name__ == '__main__':
                 "and 'both' preserve the current DB persistence plus HDF5 handoff behavior."
             ),
         )
+        parser.add_argument(
+            "--timeframe-mode",
+            choices=TIMEFRAME_MODES,
+            default="full_year",
+            help="Simulation timeframe. One-week modes produce 168-hour operational stress runs.",
+        )
         args = parser.parse_args()
+        if args.timeframe_mode != "full_year" and args.mobility_source != "pool":
+            parser.error("Timeslice modes require --mobility-source pool.")
+
+        timeframe_metadata = build_initial_metadata(args.timeframe_mode)
+        scenario_key = scenario_key_for_timeframe(args.timeframe_mode)
 
         #### Obtain relevant input file ####
         grid_ref = None
@@ -120,12 +136,16 @@ if __name__ == '__main__':
             "profiles": args.profiles,
             "mobility_source": args.mobility_source,
             "timeseries_storage": args.timeseries_storage,
+            "timeframe_mode": args.timeframe_mode,
+            "timeframe_metadata": timeframe_metadata,
+            "scenario_key": scenario_key,
+            "scenario_assumptions": timeframe_metadata,
             **profile_settings,
         }
 
         print(
             f"Running input file {inputfile} (ID {args.inputfile_id}, storage {args.storage}) "
-            f"with {settings['n_cpu']} CPUs!"
+            f"with {settings['n_cpu']} CPUs and timeframe {args.timeframe_mode}!"
         )
         #----------------------------------------------------------------------------------------#
         #----------------------------------------------------------------------------------------#
@@ -140,8 +160,11 @@ if __name__ == '__main__':
             with resource_report(include_children=True, name="Electricity Generation") as rr:
                 GRD.generate_electricity()
             GRD.align_electricity_output_time()
+            GRD.select_timeframe_after_electricity()
+            GRD.apply_timeframe_slice()
             GRD.create_demand()
             GRD.SF.copy_save_file()
+            GRD.SF.save_timeframe_metadata()
             GRD.SF.save_df(GRD.df_buildings, "raw_data/buildings")
             if GRD.df_weather_raw is not None and not GRD.df_weather_raw.empty:
                 GRD.SF.save_df(GRD.df_weather_raw, "raw_data/weather")
@@ -149,11 +172,13 @@ if __name__ == '__main__':
             print("Status-quo profile generation complete. Run Step 4 with --pre-only.")
         else:
             GRD.retrieve_weather()          # Weather
+            GRD.select_timeframe_from_weather()
 
             with resource_report(include_children=True, name="Solar Generation") as rr:
                 GRD.generate_solar()        # Solar data
             with resource_report(include_children=True, name="Electricity Generation") as rr:
                 GRD.generate_electricity()  # Electricity
+            GRD.select_timeframe_after_electricity()
             if settings["include_heat"]:
                 with resource_report(include_children=True, name="Heat Generation") as rr:
                     GRD.generate_heat()     # Heat
@@ -162,6 +187,7 @@ if __name__ == '__main__':
             if settings["include_mobility"]:
                 with resource_report(include_children=True, name="Mobility Generation") as rr:
                     GRD.generate_mobility() # Mobility
+            GRD.apply_timeframe_slice()
 
             ### Conversion of generated data to urbs outputs
             GRD.create_weather_urbs()       # Weather

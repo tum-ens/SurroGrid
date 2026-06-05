@@ -43,3 +43,14 @@ No repeated failed approaches logged yet.
 - What worked instead: Restore the README from `git show HEAD:<path>` inside a single-quoted Python command, then apply exact string replacements with triple-double-quoted Python strings so Markdown backticks remain literal.
 - Note for next time: For Markdown-heavy scripted edits, use single-quoted shell Python or a temporary script file pattern instead of double-quoted `python -c` strings containing backticks.
 
+## 2026-06-05 - Local edit fallback after sandbox loopback
+
+- What didn't work: `apply_patch` and one `uv run python -c` edit hit the recurring `bwrap: loopback: Failed RTM_NEWADDR` sandbox failure while updating `GridExpand/database.py`. A first escalated `python -c` retry then failed because nested triple-quoted replacement text broke shell quoting.
+- What worked instead: Use an escalated `uv run python` heredoc with explicit `Path.read_text()` / `write_text()` replacements, avoiding shell interpolation inside the replacement strings.
+- Note for next time: For multi-line Python fallback edits after `apply_patch` loopback failures, use a heredoc directly and do not compress complex replacements into `python -c`.
+
+## 2026-06-05 - Concurrent schema setup deadlocks in Munich runner
+
+- What didn't work: Running Munich timeslice batches with multiple workers while every Step 2 and Step 4 process independently called `SurroGridDatabase.ensure_schema()`. Workers intermittently deadlocked in PostgreSQL during `pipeline_run` registration or `CREATE INDEX IF NOT EXISTS` schema setup.
+- What worked instead: Add a fast schema-readiness check so already-current databases skip DDL during candidate startup, and keep a PostgreSQL transaction advisory lock for the rare case where schema/migration DDL is actually needed. Keep candidate concurrency at 3 unless a later run proves higher DB startup concurrency is safe.
+- Note for next time: If concurrent AGS runs fail immediately with `psycopg2.errors.DeadlockDetected` near schema/index creation or run registration, check for unguarded DDL in per-candidate startup before tuning solver memory.

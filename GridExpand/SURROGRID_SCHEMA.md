@@ -39,7 +39,7 @@ Key columns:
 - `scenario_id`: surrogate primary key.
 - `scenario_key`: readable unique key, currently `baseline_static` by default.
 - `scenario_label`, `description`: human-readable metadata.
-- `assumptions`: JSONB scenario assumptions.
+- `assumptions`: JSONB scenario assumptions, including timeframe metadata such as `timeframe_mode`, `horizon_hours`, `timeframe_start`, `timeframe_end`, and interpretation notes.
 
 ### `surrogrid.pipeline_run`
 

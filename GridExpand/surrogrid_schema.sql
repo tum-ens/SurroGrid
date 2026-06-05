@@ -40,10 +40,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_scenario_key ON surrogrid.scenario (scenari
 
 ALTER TABLE IF EXISTS surrogrid.scenario DROP COLUMN IF EXISTS timeframe_mode;
 
-UPDATE surrogrid.scenario
-SET assumptions = assumptions - 'timeframe_mode'
-WHERE assumptions ? 'timeframe_mode';
-
 INSERT INTO surrogrid.scenario (
     scenario_key, scenario_label, description, assumptions
 )
@@ -51,7 +47,7 @@ VALUES (
     'baseline_static',
     'Baseline static assumptions',
     'Initial static full-pipeline scenario. Explicit scenario dimensions will be added once scenario variation is introduced.',
-    '{"pipeline": "GridExpand", "variant": "static"}'::JSONB
+    '{"pipeline": "GridExpand", "variant": "static", "timeframe_mode": "full_year", "horizon_hours": 8760, "timeframe_start": "2009-01-01T00:00:00+00:00", "timeframe_end": "2009-12-31T23:00:00+00:00", "source_year_or_reference_year": 2009, "timeframe_kind": "full_year", "methodological_note": "Full 8760-hour reference-year run. Cost and investment outputs keep their existing annual interpretation.", "cost_investment_interpretation": "annual_valid", "annual_valid": true}'::JSONB
 )
 ON CONFLICT (scenario_key) DO UPDATE SET
     scenario_label = EXCLUDED.scenario_label,
@@ -81,6 +77,7 @@ CREATE TABLE IF NOT EXISTS surrogrid.powerflow_run (
     urbs_input_file TEXT NOT NULL DEFAULT '',
     storage_mode TEXT NOT NULL DEFAULT 'db',
     pre_only BOOLEAN NOT NULL DEFAULT FALSE,
+    assumptions JSONB NOT NULL DEFAULT '{}'::JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -89,6 +86,7 @@ ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD COLUMN IF NOT EXISTS pipeline_
 ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD COLUMN IF NOT EXISTS scenario_id BIGINT;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD COLUMN IF NOT EXISTS run_name TEXT;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD COLUMN IF NOT EXISTS urbs_input_file TEXT;
+ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD COLUMN IF NOT EXISTS assumptions JSONB NOT NULL DEFAULT '{}'::JSONB;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 UPDATE surrogrid.powerflow_run pr
 SET scenario_id = sc.scenario_id
@@ -103,13 +101,6 @@ WHERE run_name IS NULL
        'baseline_static_full_year_pre_powerflow',
        'baseline_static_full_year_full_powerflow'
    );
-DELETE FROM surrogrid.powerflow_run
-WHERE run_name LIKE '%max_electricity_demand_week%'
-   OR run_name LIKE '%min_temperature_week%'
-   OR run_name LIKE '%max_solar_generation_week%'
-   OR run_name LIKE '%max_mobility_demand_week%'
-   OR run_name LIKE '%max_reverse_power_flow_week%'
-   OR run_name LIKE '%max_net_load_week%';
 UPDATE surrogrid.powerflow_run SET urbs_input_file = COALESCE(urbs_input_file, '') WHERE urbs_input_file IS NULL;
 INSERT INTO surrogrid.pipeline_run (grid_case_id, scenario_id, run_name)
 SELECT DISTINCT grid_case_id, scenario_id, 'baseline_static_pipeline'
@@ -204,11 +195,13 @@ CREATE TABLE IF NOT EXISTS surrogrid.demand_allocation_run (
     storage_mode TEXT NOT NULL DEFAULT 'db',
     profiles TEXT NOT NULL DEFAULT 'all',
     mobility_source TEXT NOT NULL DEFAULT 'emobpy',
+    assumptions JSONB NOT NULL DEFAULT '{}'::JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE IF EXISTS surrogrid.demand_allocation_run ADD COLUMN IF NOT EXISTS pipeline_run_id BIGINT;
+ALTER TABLE IF EXISTS surrogrid.demand_allocation_run ADD COLUMN IF NOT EXISTS assumptions JSONB NOT NULL DEFAULT '{}'::JSONB;
 INSERT INTO surrogrid.pipeline_run (grid_case_id, scenario_id, run_name)
 SELECT DISTINCT grid_case_id, scenario_id, 'baseline_static_pipeline'
 FROM surrogrid.demand_allocation_run
