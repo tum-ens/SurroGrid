@@ -278,3 +278,39 @@
 - What was rejected and why: Comparing only the two absolute maximum line loadings was rejected because it overweights one line and one timestep and gives little sense of whole-grid stress.
 - Verification: Step 5 helper compiles, notebook validates with 13 cells, synthetic Plotly smoke tests pass, and the existing dummy DB grid returns 36 lines per stage with pre/post stress metrics.
 
+
+## 2026-06-03 - Munich full-pipeline tmux batch
+
+- What was decided: Launch AGS 09162000 as a tmux-managed DB-backed full pipeline using `surrogrid_munich_09162000`, first gating on candidate 0 (`9162000-00_80336_1_-4.h5`) and then continuing through the remaining 297 candidates with 2 parallel grid workers.
+- Why: The user wanted candidate 0 validated before the full Munich run, but also wanted the long full-region run to continue in tmux with progress checks and total runtime logging. The machine has 32 logical CPUs but only about 7 GiB available memory with swap already in use, so the batch uses Step 2 `--n_cpu 4`, Step 3 `--n_cpu 1`, and Step 4 `--n_cpu 4` per worker to use more CPU without repeating the previous Step 3 memory-pressure failure mode.
+- What was rejected and why: Running many Step 3 solves at high `--n_cpu` was rejected because each URBS worker can also use Gurobi threads and memory, making code-137 failures more likely. Running all 298 grids serially was rejected because the user explicitly asked to use more CPUs for pipeline parallelism.
+
+
+## 2026-06-04 - Munich tmux pilot stopped at URBS
+
+- What was decided: Treat the AGS 09162000 tmux batch as not completed because the pilot gate failed in Step 3 before the full Munich candidate pool was launched.
+- Why: Candidate 0 (`9162000-00_80336_1_-4.h5`) completed DB-backed Step 2 in about 534 seconds and wrote 285 allocated vehicles, 3,994,560 allocated demand rows, and 2,995,920 allocated efficiency-factor rows, but URBS Step 3 exited after about 460 seconds with `RuntimeError: Worker 0 exited without returning a result.` No per-worker Gurobi log was created for this candidate, so the child likely died before solver logging; kernel logs were not readable to confirm OOM.
+- What was rejected and why: Reporting the Munich run as partially successful was rejected because the orchestrator intentionally gates the full batch on candidate 0 completing Step 2, Step 3, and Step 4. Continuing to all 298 candidates after this failure was rejected by the gate condition.
+
+## 2026-06-04 - Munich candidate 0 debug result
+
+- What was decided: Use more URBS clusters with limited cluster concurrency for large Munich grids; candidate 0 completed Step 3 with `--n_cpu 16` and `URBS_CLUSTER_CONCURRENCY=1`.
+- Why: Lower cluster counts produced very large individual Pyomo/Gurobi models that were killed with exit code `-9`; `--n_cpu 16` reduced each cluster enough for the full URBS solve to finish in about 28.5 minutes on this machine.
+- What was rejected and why: Retrying candidate 0 with only higher cluster concurrency was rejected because even one `--n_cpu 4` cluster exceeded available memory. Treating the full candidate as cleanly complete was rejected because Step 4 DB mode wrote pre-expansion results and post-import rows, but post voltage and post line-result rows were missing after the process ended.
+
+## 2026-06-04 - Munich robust runner and temporary Step 2 time-series storage
+
+- What was decided: Add Step 2 `--timeseries-storage` with Munich runs using `temp`, harden `munich_pipeline_runner.py` with resume/failed-grid logging/dynamic URBS sizing/Step 4 DB completeness validation, and chunk Step 4 DB writes for large powerflow result tables.
+- Why: Candidate 0 showed that persistent allocated demand and efficiency-factor DB writes are large, URBS needs many clusters with low concurrency on a 24 GB machine, and Step 4 can leave partial DB results after post-expansion powerflow.
+- What was rejected and why: Replacing the HDF5 handoff immediately was rejected because Step 3 and Step 4 already consume HDF5 and changing the interchange format would add risk before the Munich rerun. Launching the full region without a pilot gate was rejected because candidate 0 still needs to prove that Step 4 completes after the DB-write hardening.
+
+## 2026-06-05 - Munich runner candidates are individual grids
+
+- Why: The robust runner completed candidates 0 through 24 stably with no failed-grid log, proving the temporary Step 2 storage, URBS cluster concurrency, and Step 4 DB validation approach works for multiple grids. However, the full AGS has 298 grid candidates and the observed runtime makes completing all of Munich in this configuration too long.
+- What was rejected and why: Continuing the full AGS run was rejected because runtime is the limiting issue, not immediate stability. Treating candidates as PLZ-level progress was rejected because several candidates share the same PLZ and differ by KCID/BCID grid case.
+
+## 2026-06-05 - Generalize Munich runner to AGS runner
+
+- What was decided: Move the reusable long-run orchestration logic into `GridExpand/ags_pipeline_runner.py` and keep `GridExpand/munich_pipeline_runner.py` as a compatibility wrapper that defaults `--ags` to `09162000` when omitted.
+- Why: The runner operates on AGS-selected grid candidates and is useful for other regions, while old Munich commands and tmux notes should remain usable.
+- What was rejected and why: Deleting the Munich runner path was rejected because it would break existing command history and scripts. Adding broader region-label/run-directory features was rejected because the immediate need was a simple generalization with minimal behavior change.

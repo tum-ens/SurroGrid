@@ -894,24 +894,27 @@ class SurroGridDatabase:
             )
 
     def write_powerflow_demand(self, run_id: int, stage: str, df: pd.DataFrame) -> None:
-        rows = []
         ts = self._timestamps(len(df))
         buses = sorted({int(col[0]) for col in df.columns})
-        for bus in buses:
-            rows.append(
-                pd.DataFrame(
-                    {
-                        "powerflow_run_id": run_id,
-                        "stage": stage,
-                        "ts": ts,
-                        "t_index": range(len(df)),
-                        "bus": bus,
-                        "p_kw": self._series_or_none(df, (bus, "electricity")),
-                        "q_kvar": self._series_or_none(df, (bus, "electricity-reactive")),
-                    }
+        chunk_size = 25
+        for start in range(0, len(buses), chunk_size):
+            rows = []
+            for bus in buses[start:start + chunk_size]:
+                rows.append(
+                    pd.DataFrame(
+                        {
+                            "powerflow_run_id": run_id,
+                            "stage": stage,
+                            "ts": ts,
+                            "t_index": range(len(df)),
+                            "bus": bus,
+                            "p_kw": self._series_or_none(df, (bus, "electricity")),
+                            "q_kvar": self._series_or_none(df, (bus, "electricity-reactive")),
+                        }
+                    )
                 )
-            )
-        self._append(pd.concat(rows, ignore_index=True), "powerflow_demand")
+            if rows:
+                self._append(pd.concat(rows, ignore_index=True), "powerflow_demand")
 
     def write_powerflow_import(self, run_id: int, stage: str, df: pd.DataFrame) -> None:
         out = pd.DataFrame(
@@ -927,58 +930,70 @@ class SurroGridDatabase:
         self._append(out, "powerflow_import")
 
     def write_powerflow_bus_voltage(self, run_id: int, stage: str, df: pd.DataFrame) -> None:
-        out = df.copy()
-        out.columns = [int(col) for col in out.columns]
-        out.insert(0, "t_index", range(len(out)))
-        out.insert(0, "ts", self._timestamps(len(out)))
-        out.insert(0, "stage", stage)
-        out.insert(0, "powerflow_run_id", run_id)
-        out = out.melt(
-            id_vars=["powerflow_run_id", "stage", "ts", "t_index"],
-            var_name="bus",
-            value_name="vm_pu",
-        )
-        self._append(out, "powerflow_bus_voltage")
+        columns = [int(col) for col in df.columns]
+        ts = self._timestamps(len(df))
+        chunk_size = 25
+        for start in range(0, len(columns), chunk_size):
+            chunk_columns = columns[start:start + chunk_size]
+            out = df.iloc[:, start:start + chunk_size].copy()
+            out.columns = chunk_columns
+            out.insert(0, "t_index", range(len(out)))
+            out.insert(0, "ts", ts)
+            out.insert(0, "stage", stage)
+            out.insert(0, "powerflow_run_id", run_id)
+            out = out.melt(
+                id_vars=["powerflow_run_id", "stage", "ts", "t_index"],
+                var_name="bus",
+                value_name="vm_pu",
+            )
+            self._append(out, "powerflow_bus_voltage")
 
     def write_powerflow_line_result(self, run_id: int, stage: str, df: pd.DataFrame) -> None:
-        rows = []
         ts = self._timestamps(len(df))
         lines = sorted({int(col[0]) for col in df.columns})
-        for line in lines:
-            rows.append(
-                pd.DataFrame(
-                    {
-                        "powerflow_run_id": run_id,
-                        "stage": stage,
-                        "ts": ts,
-                        "t_index": range(len(df)),
-                        "line": line,
-                        "p_from_mw": self._series_or_none(df, (line, "p_from_mw")),
-                        "q_from_mvar": self._series_or_none(df, (line, "q_from_mvar")),
-                        "i_from_ka": self._series_or_none(df, (line, "i_from_ka")),
-                    }
+        chunk_size = 25
+        for start in range(0, len(lines), chunk_size):
+            rows = []
+            for line in lines[start:start + chunk_size]:
+                rows.append(
+                    pd.DataFrame(
+                        {
+                            "powerflow_run_id": run_id,
+                            "stage": stage,
+                            "ts": ts,
+                            "t_index": range(len(df)),
+                            "line": line,
+                            "p_from_mw": self._series_or_none(df, (line, "p_from_mw")),
+                            "q_from_mvar": self._series_or_none(df, (line, "q_from_mvar")),
+                            "i_from_ka": self._series_or_none(df, (line, "i_from_ka")),
+                        }
+                    )
                 )
-            )
-        self._append(pd.concat(rows, ignore_index=True), "powerflow_line_result")
+            if rows:
+                self._append(pd.concat(rows, ignore_index=True), "powerflow_line_result")
 
     def write_powerflow_reactive(self, run_id: int, df: pd.DataFrame) -> None:
-        rows = []
         ts = self._timestamps(len(df))
-        for bus, component, source in df.columns:
-            rows.append(
-                pd.DataFrame(
-                    {
-                        "powerflow_run_id": run_id,
-                        "ts": ts,
-                        "t_index": range(len(df)),
-                        "bus": int(bus),
-                        "component": str(component),
-                        "source": str(source),
-                        "q_kvar": df[(bus, component, source)].to_numpy(),
-                    }
+        columns = list(df.columns)
+        chunk_size = 25
+        for start in range(0, len(columns), chunk_size):
+            rows = []
+            for bus, component, source in columns[start:start + chunk_size]:
+                rows.append(
+                    pd.DataFrame(
+                        {
+                            "powerflow_run_id": run_id,
+                            "ts": ts,
+                            "t_index": range(len(df)),
+                            "bus": int(bus),
+                            "component": str(component),
+                            "source": str(source),
+                            "q_kvar": df[(bus, component, source)].to_numpy(),
+                        }
+                    )
                 )
-            )
-        self._append(pd.concat(rows, ignore_index=True), "powerflow_reactive_component")
+            if rows:
+                self._append(pd.concat(rows, ignore_index=True), "powerflow_reactive_component")
 
     def _append(self, df: pd.DataFrame, table_name: str) -> None:
         df.to_sql(

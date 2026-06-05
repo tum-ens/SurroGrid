@@ -74,6 +74,7 @@ class SaveFile:
 
     def _save_df_to_db(self, df, dir):
         clean_dir = dir.strip("/")
+        print(f"Saving {clean_dir} to DB for powerflow_run_id={self.powerflow_run_id} shape={df.shape}", flush=True)
         if clean_dir == "pwrflw/input/demand_pre":
             self.db.write_powerflow_demand(self.powerflow_run_id, "pre", df)
         elif clean_dir == "pwrflw/input/demand_post":
@@ -94,3 +95,4 @@ class SaveFile:
             self.db.write_powerflow_reactive(self.powerflow_run_id, df)
         else:
             raise ValueError(f"No DB writer is defined for HDF5 key '{dir}'.")
+        print(f"Finished saving {clean_dir} to DB for powerflow_run_id={self.powerflow_run_id}", flush=True)

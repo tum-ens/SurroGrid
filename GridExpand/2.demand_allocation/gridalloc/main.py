@@ -73,6 +73,16 @@ if __name__ == '__main__':
             default="emobpy",
             help="Generate mobility with emobpy or assign pregenerated mobility profile pool entries.",
         )
+        parser.add_argument(
+            "--timeseries-storage",
+            choices=["db", "temp", "both"],
+            default="db",
+            help=(
+                "DB mode: choose whether large allocated urbs_in demand/efficiency time series "
+                "are persisted to PostgreSQL. 'temp' writes only the HDF5 handoff file; 'db' "
+                "and 'both' preserve the current DB persistence plus HDF5 handoff behavior."
+            ),
+        )
         args = parser.parse_args()
 
         #### Obtain relevant input file ####
@@ -109,6 +119,7 @@ if __name__ == '__main__':
             "n_cpu": int(args.n_cpu),           # cpus if parallel
             "profiles": args.profiles,
             "mobility_source": args.mobility_source,
+            "timeseries_storage": args.timeseries_storage,
             **profile_settings,
         }
 

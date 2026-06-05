@@ -205,9 +205,24 @@ def run_lvds_opt(input_path,        # path to input file
         print(f"Parallelize building nodes...")
         clusters = get_parallel_building_clusters(data, global_settings["n_cpu"])
 
-        procs = []                     # list constaining the parallel processes
         manager = mp.Manager()         # parallel process manager
         return_dict = manager.dict()   # shared dictionary among parent and daughter processes in which date can be written
+        cluster_concurrency = int(os.getenv("URBS_CLUSTER_CONCURRENCY", len(clusters)))
+        cluster_concurrency = max(1, min(cluster_concurrency, len(clusters)))
+        print(f"Running up to {cluster_concurrency} optimization worker(s) concurrently.")
+        running = []
+
+        def collect_worker(worker_i, worker_proc):
+            worker_proc.join()
+            result = return_dict.get(worker_i)
+            if isinstance(result, dict) and "__error__" in result:
+                raise RuntimeError(f"Worker {worker_i} failed:\n{result['__error__']}")
+            if result is None:
+                raise RuntimeError(
+                    f"Worker {worker_i} exited without returning a result "
+                    f"(exitcode={worker_proc.exitcode})."
+                )
+            model_results[worker_i] = result
 
         for i, cluster in enumerate(clusters):
             print(i)
@@ -220,18 +235,13 @@ def run_lvds_opt(input_path,        # path to input file
                                     scenario_name,          # name of the scenario for saving files
                                     return_dict,            # shared dict in which to save data 
                                     i))                     # location in dict in which to save    
-            procs.append(proc)
+            running.append((i, proc))
             proc.start()
+            if len(running) >= cluster_concurrency:
+                collect_worker(*running.pop(0))
 
-        for i, proc in enumerate(procs):
-            ### Retrieve data from child processes
-            proc.join()
-            result = return_dict.get(i)
-            if isinstance(result, dict) and "__error__" in result:
-                raise RuntimeError(f"Worker {i} failed:\n{result['__error__']}")
-            if result is None:
-                raise RuntimeError(f"Worker {i} exited without returning a result.")
-            model_results[i] = result  # solved model instances
+        for i, proc in running:
+            collect_worker(i, proc)
     else:
         model_results = run_worker(data,                   # whole data
                                 global_settings,        # settings of the run

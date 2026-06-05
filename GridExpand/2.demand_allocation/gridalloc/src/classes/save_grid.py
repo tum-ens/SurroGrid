@@ -20,6 +20,9 @@ class SaveFile:
     def __init__(self, filename, storage="h5", grid_ref=None, allocation_settings=None):
         # Copy input file to destination directory
         self.storage = storage
+        allocation_settings = allocation_settings or {}
+        self.timeseries_storage = allocation_settings.get("timeseries_storage", "db")
+        self.persist_allocated_timeseries = self.timeseries_storage in {"db", "both"}
         self.db = SurroGridDatabase() if self.storage == "db" else None
         self.grid_ref = grid_ref
         self.demand_allocation_run_id = None
@@ -28,7 +31,6 @@ class SaveFile:
                 self.grid_ref = self.db.resolve_grid_identifier(filename)
             self.db.get_or_create_grid_case(self.grid_ref)
             filename = self.grid_ref["bridge_filename"]
-            allocation_settings = allocation_settings or {}
             self.demand_allocation_run_id = self.db.create_demand_allocation_run(
                 self.grid_ref,
                 bridge_filename=filename,
@@ -74,7 +76,7 @@ class SaveFile:
     def save_df(self, df, dir):
         if self.storage == "db" and dir.startswith("raw_data/"):
             return
-        if self.storage == "db":
+        if self.storage == "db" and self.persist_allocated_timeseries:
             clean_dir = dir.strip("/")
             if clean_dir == "urbs_in/demand":
                 self.db.write_allocated_demand(self.demand_allocation_run_id, df)
