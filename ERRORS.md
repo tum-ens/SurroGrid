@@ -54,3 +54,9 @@ No repeated failed approaches logged yet.
 - What didn't work: Running Munich timeslice batches with multiple workers while every Step 2 and Step 4 process independently called `SurroGridDatabase.ensure_schema()`. Workers intermittently deadlocked in PostgreSQL during `pipeline_run` registration or `CREATE INDEX IF NOT EXISTS` schema setup.
 - What worked instead: Add a fast schema-readiness check so already-current databases skip DDL during candidate startup, and keep a PostgreSQL transaction advisory lock for the rare case where schema/migration DDL is actually needed. Keep candidate concurrency at 3 unless a later run proves higher DB startup concurrency is safe.
 - Note for next time: If concurrent AGS runs fail immediately with `psycopg2.errors.DeadlockDetected` near schema/index creation or run registration, check for unguarded DDL in per-candidate startup before tuning solver memory.
+
+## 2026-06-05 - Open-Meteo transient failures in Munich timeslice
+
+- What didn't work: Treating Step 2 Open-Meteo soil-temperature request failures as candidate/model failures. Candidate 48 first hit a read timeout, candidate 231 hit a long timeout, and candidate 255 hit `Network is unreachable` while requesting `archive-api.open-meteo.com`.
+- What worked instead: Leave the failed candidates recorded by the AGS runner and rerun them with `--resume --rerun-failed`; all Open-Meteo failures passed on the failed-only rerun without code changes.
+- Note for next time: If Step 2 fails in `get_open_meteo_soil_temperature`, inspect the candidate log before changing code. Prefer a failed-only rerun first; add request retry/caching only if the same candidate repeatedly fails across rerun windows.

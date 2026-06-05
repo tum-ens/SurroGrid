@@ -1067,18 +1067,37 @@ def plot_transformer_import_distributions(
     return fig
 
 
-def _wide_transformer_frame(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
+def _uses_relative_timeslice_axis(df: pd.DataFrame) -> bool:
+    if "t_index" not in df.columns:
+        return False
+    max_horizon = df.groupby("powerflow_run_id")["t_index"].nunique().max()
+    return bool(pd.notna(max_horizon) and int(max_horizon) <= 24 * 14)
+
+
+def _wide_transformer_frame(
+    df: pd.DataFrame,
+    value_col: str,
+    *,
+    relative_axis: bool,
+) -> pd.DataFrame:
+    index_col = "t_index" if relative_axis else "ts"
+    if index_col not in df.columns:
+        raise ValueError(f"Transformer import plotting requires a {index_col!r} column.")
     wide = df.pivot_table(
-        index="ts",
+        index=index_col,
         columns="powerflow_run_id",
         values=value_col,
         aggfunc="mean",
     ).sort_index()
     if wide.empty:
         raise ValueError(f"No transformer import values available for {value_col}.")
-    wide.index = pd.to_datetime(wide.index)
-    if wide.index.isna().any():
-        wide.index = pd.date_range("2009-01-01", periods=len(wide), freq="h")
+    if relative_axis:
+        wide.index = wide.index.astype(int)
+        wide.index.name = "t_index"
+    else:
+        wide.index = pd.to_datetime(wide.index)
+        if wide.index.isna().any():
+            wide.index = pd.date_range("2009-01-01", periods=len(wide), freq="h")
     return wide
 
 
@@ -1095,9 +1114,18 @@ def _matplotlib_quantile_summary(wide: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _daily_matplotlib_transformer_bands(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
-    wide = _wide_transformer_frame(df, value_col)
-    daily = wide.resample("24h").mean()
+def _daily_matplotlib_transformer_bands(
+    df: pd.DataFrame,
+    value_col: str,
+    *,
+    relative_axis: bool,
+) -> pd.DataFrame:
+    wide = _wide_transformer_frame(df, value_col, relative_axis=relative_axis)
+    if relative_axis:
+        daily = wide.groupby(wide.index // 24).mean()
+        daily.index.name = "day_index"
+    else:
+        daily = wide.resample("24h").mean()
     return _matplotlib_quantile_summary(daily)
 
 
@@ -1105,8 +1133,10 @@ def _ldc_matplotlib_transformer_bands(
     df: pd.DataFrame,
     value_col: str,
     n_points: int = 101,
+    *,
+    relative_axis: bool,
 ) -> pd.DataFrame:
-    wide = _wide_transformer_frame(df, value_col)
+    wide = _wide_transformer_frame(df, value_col, relative_axis=relative_axis)
     duration_percent = np.linspace(0.0, 100.0, n_points)
     curves = []
     for column in wide.columns:
@@ -1144,6 +1174,42 @@ def _format_month_axis(ax, index: pd.DatetimeIndex) -> None:
     ax.tick_params(axis="x", which="major", length=0)
     ax.tick_params(axis="x", which="minor", direction="out", length=5, width=0.8)
     ax.set_xlim(index[0], index[-1])
+
+
+def _format_relative_day_axis(ax, day_index: pd.Index) -> None:
+    if len(day_index) == 0:
+        return
+    first_day = int(day_index.min())
+    last_day = int(day_index.max())
+    n_days = last_day - first_day + 1
+    if n_days <= 14:
+        ticks = np.arange(first_day, last_day + 1)
+        labels = [f"Day {int(day - first_day + 1)}" for day in ticks]
+    else:
+        month_days = np.array([0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334])
+        month_labels = np.array([
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ])
+        mask = (month_days >= first_day) & (month_days <= last_day)
+        ticks = month_days[mask]
+        labels = month_labels[mask].tolist()
+        if len(ticks) == 0:
+            ticks = np.linspace(first_day, last_day, min(6, n_days))
+            labels = [f"Day {int(round(day - first_day + 1))}" for day in ticks]
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(labels)
+    ax.set_xlim(first_day, last_day)
 
 
 def _plot_matplotlib_band(
@@ -1246,13 +1312,25 @@ def plot_transformer_import_distributions_matplotlib(
         }
     ):
         fig, axes = plt.subplots(3, 2, figsize=(10, 9.2), dpi=150)
+        relative_axis = _uses_relative_timeslice_axis(df)
         for row, spec in enumerate(specs):
-            ts_band = _daily_matplotlib_transformer_bands(df, spec["ts_col"])
-            ldc_band = _ldc_matplotlib_transformer_bands(df, spec["ldc_col"])
+            ts_band = _daily_matplotlib_transformer_bands(
+                df,
+                spec["ts_col"],
+                relative_axis=relative_axis,
+            )
+            ldc_band = _ldc_matplotlib_transformer_bands(
+                df,
+                spec["ldc_col"],
+                relative_axis=relative_axis,
+            )
 
             ax_ts = axes[row, 0]
             ax_ldc = axes[row, 1]
-            x_ts = mdates.date2num(ts_band.index.to_pydatetime())
+            if relative_axis:
+                x_ts = ts_band.index.to_numpy(dtype=float)
+            else:
+                x_ts = mdates.date2num(ts_band.index.to_pydatetime())
             x_ldc = ldc_band.index.to_numpy(dtype=float)
 
             _plot_matplotlib_band(
@@ -1276,8 +1354,11 @@ def plot_transformer_import_distributions_matplotlib(
                 show_legend=True,
             )
 
-            ax_ts.xaxis_date()
-            _format_month_axis(ax_ts, ts_band.index)
+            if relative_axis:
+                _format_relative_day_axis(ax_ts, ts_band.index)
+            else:
+                ax_ts.xaxis_date()
+                _format_month_axis(ax_ts, ts_band.index)
             ax_ldc.set_xlim(0, 100)
             ax_ldc.set_xticks(np.arange(0, 101, 20))
             ax_ldc.set_xticklabels([f"{value}%" for value in range(0, 101, 20)])
@@ -1320,8 +1401,16 @@ def plot_transformer_apparent_power_stage_comparison_matplotlib(
     ):
         fig, axes = plt.subplots(1, 2, figsize=(10, 3.2), dpi=150, sharey=True)
         for ax, (df, title) in zip(axes, datasets):
-            band = _daily_matplotlib_transformer_bands(df, "s_ts_norm")
-            x_values = mdates.date2num(band.index.to_pydatetime())
+            relative_axis = _uses_relative_timeslice_axis(df)
+            band = _daily_matplotlib_transformer_bands(
+                df,
+                "s_ts_norm",
+                relative_axis=relative_axis,
+            )
+            if relative_axis:
+                x_values = band.index.to_numpy(dtype=float)
+            else:
+                x_values = mdates.date2num(band.index.to_pydatetime())
             _plot_matplotlib_band(
                 ax,
                 band,
@@ -1332,8 +1421,11 @@ def plot_transformer_apparent_power_stage_comparison_matplotlib(
                 "Expected Timeseries (24 h Agg.)",
                 show_legend=True,
             )
-            ax.xaxis_date()
-            _format_month_axis(ax, band.index)
+            if relative_axis:
+                _format_relative_day_axis(ax, band.index)
+            else:
+                ax.xaxis_date()
+                _format_month_axis(ax, band.index)
             ax.set_title(title)
             ax.set_ylabel(r"Norm. Apparent Power Load $|S_i(t)| / \langle |S_i| \rangle$")
 
