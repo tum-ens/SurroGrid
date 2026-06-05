@@ -325,3 +325,9 @@
 - What was decided: Split line-loading analysis into separate cells for stress table, ECDF, and a new timestep stress scatter. Add `line_loading_timestep_stress_db()` and `plot_line_loading_timestep_stress_scatter()` with t_index on x-axis, p95 line loading on y-axis, overloaded-line share in marker color, and maximum line loading in marker size. Delete the old pre-vs-post grid scatter.
 - Why: The pre/post scatter was not meaningful because electrification is expected to increase stress. The timestep scatter keeps the useful marker-size/color encoding while showing when during the year grids become critical.
 - What was rejected and why: Reusing `line_loading_distribution_db()` for timestep plots was rejected because it collapses the timestep dimension by design. Keeping the old scatter was rejected because it added clutter and drew attention away from more useful analysis.
+
+## 2026-06-05 - Scenario-aware Step 5 plotting selection
+
+- What was decided: Add `scenario_id` as a first-class Step 5 plotting selector. The result catalog now includes scenario metadata, the notebook has a Scenario dropdown, and DB plotting helpers can filter/resolve by `scenario_id` so identical `run_name` values across scenarios do not collide.
+- Why: Future analyses may run the same grid and run name under multiple scenarios, and resolving only by `run_name` could silently select the newest matching power-flow run.
+- What was rejected and why: Encoding scenario only in `run_name` was rejected because the database already has a normalized `surrogrid.scenario` table and `powerflow_run.scenario_id` key.

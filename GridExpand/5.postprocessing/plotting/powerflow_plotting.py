@@ -375,19 +375,23 @@ def _resolve_powerflow_run(
     db: SurroGridDatabase,
     grid_ref: dict,
     run_name: str,
+    scenario_id: int | None = None,
 ) -> dict:
     query = text(
         """
-        SELECT pr.powerflow_run_id, pr.run_name, pr.pre_only, pr.updated_at
+        SELECT pr.powerflow_run_id, pr.run_name, pr.pre_only, pr.scenario_id, sc.scenario_key, pr.updated_at
         FROM surrogrid.grid_case gc
         JOIN surrogrid.powerflow_run pr
           ON pr.grid_case_id = gc.grid_case_id
+        JOIN surrogrid.scenario sc
+          ON sc.scenario_id = pr.scenario_id
         WHERE gc.ags = :ags
           AND gc.plz = :plz
           AND gc.kcid = :kcid
           AND gc.bcid = :bcid
           AND gc.pylovo_grid_result_id = :grid_result_id
           AND pr.run_name = :run_name
+          AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
         ORDER BY pr.updated_at DESC, pr.powerflow_run_id DESC
         LIMIT 1
         """
@@ -402,13 +406,15 @@ def _resolve_powerflow_run(
                 "bcid": grid_ref["bcid"],
                 "grid_result_id": grid_ref["grid_result_id"],
                 "run_name": run_name,
+                "scenario_id": scenario_id,
             },
         ).mappings().first()
 
     if row is None:
         raise ValueError(
             f"No DB power-flow run named {run_name!r} found for "
-            f"PLZ={grid_ref['plz']}, KCID={grid_ref['kcid']}, BCID={grid_ref['bcid']}."
+            f"scenario_id={scenario_id!r}, PLZ={grid_ref['plz']}, "
+            f"KCID={grid_ref['kcid']}, BCID={grid_ref['bcid']}."
         )
     return dict(row)
 
@@ -418,6 +424,7 @@ def db_powerflow_timestep_bounds(
     input_id: str,
     stage: str,
     run_name: str = "baseline_static_full_powerflow",
+    scenario_id: int | None = None,
     plz: int | None = None,
     kcid: int | None = None,
     bcid: int | None = None,
@@ -426,7 +433,7 @@ def db_powerflow_timestep_bounds(
 ) -> dict:
     db = SurroGridDatabase()
     grid_ref = _resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
-    run = _resolve_powerflow_run(db, grid_ref, run_name)
+    run = _resolve_powerflow_run(db, grid_ref, run_name, scenario_id)
 
     query = text(
         """
@@ -515,6 +522,7 @@ def plot_powerflow_heatmap_db(
     show_household_buses: bool = False,
     show: bool = True,
     run_name: str = "baseline_static_full_powerflow",
+    scenario_id: int | None = None,
     plz: int | None = None,
     kcid: int | None = None,
     bcid: int | None = None,
@@ -529,7 +537,7 @@ def plot_powerflow_heatmap_db(
     """
     db = SurroGridDatabase()
     grid_ref = _resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
-    run = _resolve_powerflow_run(db, grid_ref, run_name)
+    run = _resolve_powerflow_run(db, grid_ref, run_name, scenario_id)
     net = db.read_pandapower_grid(grid_ref)
 
     bus_vm, i_from_ka = _read_db_timestep_results(
@@ -571,6 +579,7 @@ def voltage_deviation_summary_db(
     input_id: str | None = None,
     run_name: str = "baseline_static_full_powerflow",
     stages: tuple[str, ...] = ("post",),
+    scenario_id: int | None = None,
     ags: str | int | None = None,
     plz: int | None = None,
     kcid: int | None = None,
@@ -581,20 +590,22 @@ def voltage_deviation_summary_db(
     """Summarize DB voltage extrema for one grid or a population scope.
 
     Pass ``input_id`` for one concrete grid. Leave ``input_id`` as ``None`` to
-    include all matching results, optionally narrowed by ``ags``, ``plz``,
+    include all matching results, optionally narrowed by ``scenario_id``, ``ags``, ``plz``,
     ``kcid``, or ``bcid``.
     """
     db = SurroGridDatabase()
     run_id = None
     if input_id is not None:
         grid_ref = _resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
-        run = _resolve_powerflow_run(db, grid_ref, run_name)
+        run = _resolve_powerflow_run(db, grid_ref, run_name, scenario_id)
         run_id = int(run["powerflow_run_id"])
 
     query = text(
         """
         SELECT pr.powerflow_run_id,
                pr.run_name,
+               pr.scenario_id,
+               sc.scenario_key,
                gc.ags,
                gc.plz,
                gc.kcid,
@@ -607,15 +618,17 @@ def voltage_deviation_summary_db(
                COUNT(DISTINCT pbv.bus) AS n_buses
         FROM surrogrid.powerflow_bus_voltage pbv
         JOIN surrogrid.powerflow_run pr USING (powerflow_run_id)
+        JOIN surrogrid.scenario sc USING (scenario_id)
         JOIN surrogrid.grid_case gc USING (grid_case_id)
         WHERE pr.run_name = :run_name
           AND pbv.stage = ANY(:stages)
           AND (:run_id IS NULL OR pbv.powerflow_run_id = :run_id)
+          AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
           AND (:ags IS NULL OR gc.ags = :ags)
           AND (:filter_plz IS NULL OR gc.plz = :filter_plz)
           AND (:filter_kcid IS NULL OR gc.kcid = :filter_kcid)
           AND (:filter_bcid IS NULL OR gc.bcid = :filter_bcid)
-        GROUP BY pr.powerflow_run_id, pr.run_name, gc.ags, gc.plz, gc.kcid, gc.bcid,
+        GROUP BY pr.powerflow_run_id, pr.run_name, pr.scenario_id, sc.scenario_key, gc.ags, gc.plz, gc.kcid, gc.bcid,
                  gc.pylovo_grid_result_id, pbv.stage
         ORDER BY pr.powerflow_run_id, pbv.stage
         """
@@ -628,6 +641,7 @@ def voltage_deviation_summary_db(
                 "run_name": run_name,
                 "stages": list(stages),
                 "run_id": run_id,
+                "scenario_id": scenario_id,
                 "ags": _normalize_optional_ags(ags),
                 "filter_plz": plz if input_id is None else None,
                 "filter_kcid": kcid if input_id is None else None,
@@ -644,6 +658,8 @@ def voltage_deviation_summary_db(
             "grid",
             "powerflow_run_id",
             "run_name",
+            "scenario_id",
+            "scenario_key",
             "stage",
             "ags",
             "plz",
@@ -739,6 +755,7 @@ def transformer_import_distribution_db(
     run_name: str = "baseline_static_full_powerflow",
     stage: str = "post",
     reactive_magnitude: bool = True,
+    scenario_id: int | None = None,
     ags: str | int | None = None,
     plz: int | None = None,
     kcid: int | None = None,
@@ -749,20 +766,22 @@ def transformer_import_distribution_db(
     """Read transformer import time series for one grid or a population scope.
 
     Pass ``input_id`` for one concrete grid. Leave ``input_id`` as ``None`` to
-    aggregate all matching DB runs, optionally narrowed by ``ags``, ``plz``,
+    aggregate all matching DB runs, optionally narrowed by ``scenario_id``, ``ags``, ``plz``,
     ``kcid``, or ``bcid``.
     """
     db = SurroGridDatabase()
     run_id = None
     if input_id is not None:
         grid_ref = _resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
-        run = _resolve_powerflow_run(db, grid_ref, run_name)
+        run = _resolve_powerflow_run(db, grid_ref, run_name, scenario_id)
         run_id = int(run["powerflow_run_id"])
 
     query = text(
         """
         SELECT pr.powerflow_run_id,
                pr.run_name,
+               pr.scenario_id,
+               sc.scenario_key,
                gc.ags,
                gc.plz,
                gc.kcid,
@@ -775,10 +794,12 @@ def transformer_import_distribution_db(
                pi.q_mvar
         FROM surrogrid.powerflow_import pi
         JOIN surrogrid.powerflow_run pr USING (powerflow_run_id)
+        JOIN surrogrid.scenario sc USING (scenario_id)
         JOIN surrogrid.grid_case gc USING (grid_case_id)
         WHERE pr.run_name = :run_name
           AND pi.stage = :stage
           AND (:run_id IS NULL OR pi.powerflow_run_id = :run_id)
+          AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
           AND (:ags IS NULL OR gc.ags = :ags)
           AND (:filter_plz IS NULL OR gc.plz = :filter_plz)
           AND (:filter_kcid IS NULL OR gc.kcid = :filter_kcid)
@@ -794,6 +815,7 @@ def transformer_import_distribution_db(
                 "run_name": run_name,
                 "stage": stage,
                 "run_id": run_id,
+                "scenario_id": scenario_id,
                 "ags": _normalize_optional_ags(ags),
                 "filter_plz": plz if input_id is None else None,
                 "filter_kcid": kcid if input_id is None else None,
@@ -1330,6 +1352,7 @@ def _normalize_optional_ags(ags: str | int | None) -> int | None:
 def available_powerflow_results_db(
     run_name: str | None = None,
     stages: tuple[str, ...] = ("pre", "post"),
+    scenario_id: int | None = None,
     ags: str | int | None = None,
     plz: int | None = None,
     kcid: int | None = None,
@@ -1339,7 +1362,7 @@ def available_powerflow_results_db(
 
     The returned ``grid`` column is the bridge-style grid identifier used by
     single-grid heatmap helpers. Population plots can use this catalog to choose
-    all results or filter by AGS, PLZ, KCID, and BCID.
+    all results or filter by scenario, AGS, PLZ, KCID, and BCID.
     """
     db = SurroGridDatabase()
     query = text(
@@ -1347,6 +1370,9 @@ def available_powerflow_results_db(
         SELECT pr.powerflow_run_id,
                pr.run_name,
                pr.pre_only,
+               pr.scenario_id,
+               sc.scenario_key,
+               sc.scenario_label,
                gc.grid_case_id,
                gc.ags,
                gc.plz,
@@ -1361,8 +1387,10 @@ def available_powerflow_results_db(
                pr.updated_at
         FROM surrogrid.powerflow_run pr
         JOIN surrogrid.grid_case gc USING (grid_case_id)
+        JOIN surrogrid.scenario sc USING (scenario_id)
         JOIN surrogrid.powerflow_bus_voltage pbv USING (powerflow_run_id)
         WHERE (:run_name IS NULL OR pr.run_name = :run_name)
+          AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
           AND (:ags IS NULL OR gc.ags = :ags)
           AND (:plz IS NULL OR gc.plz = :plz)
           AND (:kcid IS NULL OR gc.kcid = :kcid)
@@ -1371,6 +1399,9 @@ def available_powerflow_results_db(
         GROUP BY pr.powerflow_run_id,
                  pr.run_name,
                  pr.pre_only,
+                 pr.scenario_id,
+                 sc.scenario_key,
+                 sc.scenario_label,
                  gc.grid_case_id,
                  gc.ags,
                  gc.plz,
@@ -1389,6 +1420,7 @@ def available_powerflow_results_db(
             params={
                 "run_name": run_name,
                 "stages": list(stages),
+                "scenario_id": scenario_id,
                 "ags": _normalize_optional_ags(ags),
                 "plz": plz,
                 "kcid": kcid,
@@ -1413,6 +1445,8 @@ def available_powerflow_results_db(
     df["label"] = (
         df["grid"]
         + " | "
+        + df["scenario_key"]
+        + " | "
         + df["run_name"]
         + " | "
         + df["n_timesteps"].astype(int).astype(str)
@@ -1425,6 +1459,9 @@ def available_powerflow_results_db(
             "powerflow_run_id",
             "run_name",
             "pre_only",
+            "scenario_id",
+            "scenario_key",
+            "scenario_label",
             "ags",
             "ags_label",
             "plz",
@@ -1445,6 +1482,7 @@ def line_loading_distribution_db(
     input_id: str | None = None,
     run_name: str = "baseline_static_full_powerflow",
     stages: tuple[str, ...] = ("pre", "post"),
+    scenario_id: int | None = None,
     ags: str | int | None = None,
     plz: int | None = None,
     kcid: int | None = None,
@@ -1455,20 +1493,22 @@ def line_loading_distribution_db(
     """Compute per-line maximum loading for one grid or a population scope.
 
     Pass ``input_id`` for one concrete grid. Leave ``input_id`` as ``None`` to
-    include all matching DB runs, optionally narrowed by ``ags``, ``plz``,
+    include all matching DB runs, optionally narrowed by ``scenario_id``, ``ags``, ``plz``,
     ``kcid``, or ``bcid``.
     """
     db = SurroGridDatabase()
     run_id = None
     if input_id is not None:
         grid_ref = _resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
-        run = _resolve_powerflow_run(db, grid_ref, run_name)
+        run = _resolve_powerflow_run(db, grid_ref, run_name, scenario_id)
         run_id = int(run["powerflow_run_id"])
 
     query = text(
         """
         SELECT pr.powerflow_run_id,
                pr.run_name,
+               pr.scenario_id,
+               sc.scenario_key,
                gc.grid_case_id,
                gc.ags,
                gc.plz,
@@ -1483,16 +1523,20 @@ def line_loading_distribution_db(
                COUNT(*) AS n_timesteps
         FROM surrogrid.powerflow_line_result lr
         JOIN surrogrid.powerflow_run pr USING (powerflow_run_id)
+        JOIN surrogrid.scenario sc USING (scenario_id)
         JOIN surrogrid.grid_case gc USING (grid_case_id)
         WHERE pr.run_name = :run_name
           AND lr.stage = ANY(:stages)
           AND (:run_id IS NULL OR pr.powerflow_run_id = :run_id)
+          AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
           AND (:ags IS NULL OR gc.ags = :ags)
           AND (:filter_plz IS NULL OR gc.plz = :filter_plz)
           AND (:filter_kcid IS NULL OR gc.kcid = :filter_kcid)
           AND (:filter_bcid IS NULL OR gc.bcid = :filter_bcid)
         GROUP BY pr.powerflow_run_id,
                  pr.run_name,
+                 pr.scenario_id,
+                 sc.scenario_key,
                  gc.grid_case_id,
                  gc.ags,
                  gc.plz,
@@ -1514,6 +1558,7 @@ def line_loading_distribution_db(
                 "run_name": run_name,
                 "stages": list(stages),
                 "run_id": run_id,
+                "scenario_id": scenario_id,
                 "ags": _normalize_optional_ags(ags),
                 "filter_plz": plz if input_id is None else None,
                 "filter_kcid": kcid if input_id is None else None,
@@ -1572,6 +1617,8 @@ def line_loading_distribution_db(
             "grid",
             "powerflow_run_id",
             "run_name",
+            "scenario_id",
+            "scenario_key",
             "comparison",
             "stage",
             "line",
@@ -1605,6 +1652,8 @@ def grid_loading_stress_summary(
         "grid",
         "powerflow_run_id",
         "run_name",
+        "scenario_id",
+        "scenario_key",
         "comparison",
         "stage",
         "ags",
@@ -1688,223 +1737,12 @@ def plot_line_loading_ecdf(
 
 
 
-def line_loading_timestep_stress_db(
-    input_id: str | None = None,
-    run_name: str = "baseline_static_full_powerflow",
-    stages: tuple[str, ...] = ("pre", "post"),
-    ags: str | int | None = None,
-    plz: int | None = None,
-    kcid: int | None = None,
-    bcid: int | None = None,
-    candidate_index: int = 0,
-    min_buildings: int = 5,
-    high_threshold: float = 80.0,
-    overload_threshold: float = 100.0,
-) -> pd.DataFrame:
-    """Summarize line-loading stress per grid, stage, and timestep.
-
-    Pass ``input_id`` for one concrete grid. Leave ``input_id`` as ``None`` to
-    include all matching DB runs, optionally narrowed by ``ags``, ``plz``,
-    ``kcid``, or ``bcid``. Unlike ``line_loading_distribution_db``, this keeps
-    the timestep dimension so time-of-year stress patterns can be plotted.
-    """
-    db = SurroGridDatabase()
-    run_id = None
-    if input_id is not None:
-        grid_ref = _resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
-        run = _resolve_powerflow_run(db, grid_ref, run_name)
-        run_id = int(run["powerflow_run_id"])
-
-    query = text(
-        """
-        SELECT pr.powerflow_run_id,
-               pr.run_name,
-               gc.grid_case_id,
-               gc.ags,
-               gc.plz,
-               gc.kcid,
-               gc.bcid,
-               gc.cell_id,
-               gc.pylovo_grid_result_id,
-               gc.pylovo_version_id,
-               lr.stage,
-               lr.ts,
-               lr.t_index,
-               lr.line,
-               ABS(lr.i_from_ka) AS i_from_ka
-        FROM surrogrid.powerflow_line_result lr
-        JOIN surrogrid.powerflow_run pr USING (powerflow_run_id)
-        JOIN surrogrid.grid_case gc USING (grid_case_id)
-        WHERE pr.run_name = :run_name
-          AND lr.stage = ANY(:stages)
-          AND (:run_id IS NULL OR pr.powerflow_run_id = :run_id)
-          AND (:ags IS NULL OR gc.ags = :ags)
-          AND (:filter_plz IS NULL OR gc.plz = :filter_plz)
-          AND (:filter_kcid IS NULL OR gc.kcid = :filter_kcid)
-          AND (:filter_bcid IS NULL OR gc.bcid = :filter_bcid)
-        ORDER BY gc.ags, gc.plz, gc.kcid, gc.bcid, pr.powerflow_run_id, lr.stage, lr.t_index, lr.line
-        """
-    )
-    with db.engine.connect() as conn:
-        df = pd.read_sql_query(
-            query,
-            conn,
-            params={
-                "run_name": run_name,
-                "stages": list(stages),
-                "run_id": run_id,
-                "ags": _normalize_optional_ags(ags),
-                "filter_plz": plz if input_id is None else None,
-                "filter_kcid": kcid if input_id is None else None,
-                "filter_bcid": bcid if input_id is None else None,
-            },
-        )
-
-    if df.empty:
-        scope = input_id if input_id is not None else "all matching DB runs"
-        raise ValueError(f"No DB timestep line loading results found for {scope!r}.")
-
-    df["grid"] = (
-        df["cell_id"].astype(str)
-        + "_"
-        + df["plz"].astype(int).astype(str)
-        + "_"
-        + df["kcid"].astype(int).astype(str)
-        + "_"
-        + df["bcid"].astype(int).astype(str)
-        + ".h5"
-    )
-    df["line"] = df["line"].astype(int)
-
-    rating_frames = []
-    for run_id_value, group in df.groupby("powerflow_run_id", sort=False):
-        first = group.iloc[0]
-        net = db.read_pandapower_grid(
-            {
-                "grid_result_id": int(first["pylovo_grid_result_id"]),
-                "version_id": str(first["pylovo_version_id"]),
-            }
-        )
-        ratings = net.line[["max_i_ka"]].copy()
-        ratings["line"] = ratings.index.astype(int)
-        ratings["powerflow_run_id"] = int(run_id_value)
-        rating_frames.append(ratings.reset_index(drop=True))
-
-    ratings = pd.concat(rating_frames, ignore_index=True)
-    df = df.merge(ratings, on=["powerflow_run_id", "line"], how="left")
-    df["max_i_ka"] = df["max_i_ka"].astype(float).replace(0.0, np.nan)
-    df["loading_percent"] = (df["i_from_ka"].astype(float) / df["max_i_ka"]) * 100.0
-
-    group_cols = [
-        "grid",
-        "powerflow_run_id",
-        "run_name",
-        "stage",
-        "ags",
-        "plz",
-        "kcid",
-        "bcid",
-        "ts",
-        "t_index",
-    ]
-    rows = []
-    for keys, group in df.groupby(group_cols, dropna=False, sort=False):
-        values = group["loading_percent"].dropna().astype(float)
-        if values.empty:
-            continue
-        row = dict(zip(group_cols, keys))
-        row.update(
-            {
-                "n_lines": int(values.size),
-                "median_line_loading_percent": float(values.median()),
-                "p95_line_loading_percent": float(values.quantile(0.95)),
-                "max_line_loading_percent": float(values.max()),
-                "share_lines_above_80_percent": float((values >= high_threshold).mean() * 100.0),
-                "share_lines_above_100_percent": float((values >= overload_threshold).mean() * 100.0),
-            }
-        )
-        rows.append(row)
-
-    if not rows:
-        raise ValueError("No valid timestep line loading values available.")
-    result = pd.DataFrame(rows)
-    stage_order = {stage: order for order, stage in enumerate(stages)}
-    result["stage_order"] = result["stage"].map(stage_order).fillna(len(stage_order)).astype(int)
-    result.sort_values(["grid", "stage_order", "t_index"], inplace=True)
-    return result.reset_index(drop=True)
-
-
-def plot_line_loading_timestep_stress_scatter(
-    timestep_stress: pd.DataFrame,
-    y_metric: str = "p95_line_loading_percent",
-    color_metric: str = "share_lines_above_100_percent",
-    size_metric: str = "max_line_loading_percent",
-    show: bool = True,
-):
-    """Plot timestep-level line-loading stress with marker color and size.
-
-    The x-axis is ``t_index``. By default the y-axis is p95 line loading, marker
-    color is the share of overloaded lines, and marker size is the maximum line
-    loading at that timestep.
-    """
-    required = {"grid", "stage", "t_index", y_metric, color_metric, size_metric}
-    missing = required.difference(timestep_stress.columns)
-    if missing:
-        raise KeyError(f"Missing timestep stress columns: {sorted(missing)}")
-
-    fig = go.Figure()
-    symbols = {"pre": "circle", "post": "diamond"}
-    for stage, group in timestep_stress.groupby("stage", sort=False):
-        marker_size = np.clip(group[size_metric].astype(float) / 5.0, 6, 30)
-        fig.add_trace(
-            go.Scatter(
-                x=group["t_index"],
-                y=group[y_metric],
-                mode="markers",
-                name=str(stage),
-                marker={
-                    "size": marker_size,
-                    "color": group[color_metric].fillna(0.0),
-                    "colorscale": "Reds",
-                    "cmin": 0,
-                    "colorbar": {"title": "Lines >100% [%]"},
-                    "symbol": symbols.get(str(stage), "circle"),
-                    "opacity": 0.72,
-                    "line": {"width": 0.6, "color": "#333333"},
-                },
-                customdata=group[["grid", "max_line_loading_percent", "share_lines_above_80_percent", "n_lines"]],
-                hovertemplate=(
-                    "Grid: %{customdata[0]}<br>"
-                    "Stage: %{fullData.name}<br>"
-                    "Timestep: %{x}<br>"
-                    + f"{y_metric}: "
-                    + "%{y:.2f}%<br>"
-                    "Max loading: %{customdata[1]:.2f}%<br>"
-                    "Lines >80%: %{customdata[2]:.1f}%<br>"
-                    "Lines: %{customdata[3]}<extra></extra>"
-                ),
-            )
-        )
-
-    fig.update_layout(
-        title="Line Loading Stress by Timestep",
-        xaxis_title="Timestep index",
-        yaxis_title=y_metric.replace("_", " ") + " [%]",
-        legend_title="Stage",
-        margin={"l": 75, "r": 35, "t": 70, "b": 65},
-        height=520,
-    )
-    fig.update_xaxes(showgrid=True, gridcolor="#d8d8d8")
-    fig.update_yaxes(showgrid=True, gridcolor="#d8d8d8", rangemode="tozero")
-    if show:
-        fig.show()
-    return fig
-
 
 def max_line_loading_summary_db(
     input_id: str,
     run_name: str = "baseline_static_full_powerflow",
     stages: tuple[str, ...] = ("pre", "post"),
+    scenario_id: int | None = None,
     plz: int | None = None,
     kcid: int | None = None,
     bcid: int | None = None,
@@ -1913,7 +1751,7 @@ def max_line_loading_summary_db(
 ) -> pd.DataFrame:
     db = SurroGridDatabase()
     grid_ref = _resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
-    run = _resolve_powerflow_run(db, grid_ref, run_name)
+    run = _resolve_powerflow_run(db, grid_ref, run_name, scenario_id)
     net = db.read_pandapower_grid(grid_ref)
 
     query = text(
@@ -1948,6 +1786,8 @@ def max_line_loading_summary_db(
     summary["line_name"] = summary["line"].map(line_names.to_dict()).fillna(
         summary["line"].map(lambda line: f"Line {line}")
     )
+    summary.insert(0, "scenario_key", run.get("scenario_key"))
+    summary.insert(0, "scenario_id", int(run["scenario_id"]))
     summary.insert(0, "run_name", run["run_name"])
     summary.insert(0, "powerflow_run_id", int(run["powerflow_run_id"]))
     summary.insert(0, "grid", grid_ref["bridge_filename"])
@@ -1960,6 +1800,8 @@ def max_line_loading_summary_db(
             "grid",
             "powerflow_run_id",
             "run_name",
+            "scenario_id",
+            "scenario_key",
             "comparison",
             "stage",
             "ts",
