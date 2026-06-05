@@ -314,3 +314,14 @@
 - What was decided: Move the reusable long-run orchestration logic into `GridExpand/ags_pipeline_runner.py` and keep `GridExpand/munich_pipeline_runner.py` as a compatibility wrapper that defaults `--ags` to `09162000` when omitted.
 - Why: The runner operates on AGS-selected grid candidates and is useful for other regions, while old Munich commands and tmux notes should remain usable.
 - What was rejected and why: Deleting the Munich runner path was rejected because it would break existing command history and scripts. Adding broader region-label/run-directory features was rejected because the immediate need was a simple generalization with minimal behavior change.
+## 2026-06-05 - Step 5 plotting notebook scope and grid selection architecture
+
+- What was decided: Add DB-backed scope controls (all results, AGS, PLZ, or selected grid) and display one plain grid overview table. Population plots use `input_id=None` with optional AGS/PLZ filters. Single-grid plots use `network_grid_row` parameter inside the network plot cell, selected from `line_stress` sorted by `median_line_max_loading_percent` descending. Reorder plots so network heatmap appears at bottom after voltage and line-loading criticality analysis.
+- Why: The previous notebook hardcoded one grid and mixed population-scope controls with one-grid selection across separate widgets, making it unclear what each control affected. The new layout guides analysis from population metrics to critical single-grid diagnostics.
+- What was rejected and why: A notebook-only SQL selector was rejected because the catalog is useful outside the notebook. Keeping an auto-updating table widget was rejected because it stacked visible displays when rerunning cells.
+
+## 2026-06-05 - Timestep stress scatter replaces pre/post grid comparison
+
+- What was decided: Split line-loading analysis into separate cells for stress table, ECDF, and a new timestep stress scatter. Add `line_loading_timestep_stress_db()` and `plot_line_loading_timestep_stress_scatter()` with t_index on x-axis, p95 line loading on y-axis, overloaded-line share in marker color, and maximum line loading in marker size. Delete the old pre-vs-post grid scatter.
+- Why: The pre/post scatter was not meaningful because electrification is expected to increase stress. The timestep scatter keeps the useful marker-size/color encoding while showing when during the year grids become critical.
+- What was rejected and why: Reusing `line_loading_distribution_db()` for timestep plots was rejected because it collapses the timestep dimension by design. Keeping the old scatter was rejected because it added clutter and drew attention away from more useful analysis.

@@ -2,9 +2,10 @@
 
 This module reads Step 4 power-flow results from HDF5 files or the SurroGrid
 database and uses pandapower/Plotly/Matplotlib visualizations to draw:
-- bus voltage magnitudes as a heatmap
-- line loadings as a heatmap
-- voltage deviation and transformer import distribution plots
+- bus voltage magnitudes as a single-grid heatmap
+- line loadings as a single-grid heatmap
+- voltage deviation and transformer import distribution plots across one grid,
+  one AGS/PLZ subset, or all matching DB results
 
 Example:
     cd GridExpand/5.postprocessing
@@ -520,6 +521,12 @@ def plot_powerflow_heatmap_db(
     candidate_index: int = 0,
     min_buildings: int = 5,
 ):
+    """Plot one DB-backed grid and stage at one timestep.
+
+    This helper intentionally takes one concrete ``input_id``. Population
+    selection happens before calling it, for example by ranking
+    ``grid_loading_stress_summary`` rows and passing the selected grid/stage.
+    """
     db = SurroGridDatabase()
     grid_ref = _resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
     run = _resolve_powerflow_run(db, grid_ref, run_name)
@@ -564,12 +571,19 @@ def voltage_deviation_summary_db(
     input_id: str | None = None,
     run_name: str = "baseline_static_full_powerflow",
     stages: tuple[str, ...] = ("post",),
+    ags: str | int | None = None,
     plz: int | None = None,
     kcid: int | None = None,
     bcid: int | None = None,
     candidate_index: int = 0,
     min_buildings: int = 5,
 ) -> pd.DataFrame:
+    """Summarize DB voltage extrema for one grid or a population scope.
+
+    Pass ``input_id`` for one concrete grid. Leave ``input_id`` as ``None`` to
+    include all matching results, optionally narrowed by ``ags``, ``plz``,
+    ``kcid``, or ``bcid``.
+    """
     db = SurroGridDatabase()
     run_id = None
     if input_id is not None:
@@ -597,6 +611,10 @@ def voltage_deviation_summary_db(
         WHERE pr.run_name = :run_name
           AND pbv.stage = ANY(:stages)
           AND (:run_id IS NULL OR pbv.powerflow_run_id = :run_id)
+          AND (:ags IS NULL OR gc.ags = :ags)
+          AND (:filter_plz IS NULL OR gc.plz = :filter_plz)
+          AND (:filter_kcid IS NULL OR gc.kcid = :filter_kcid)
+          AND (:filter_bcid IS NULL OR gc.bcid = :filter_bcid)
         GROUP BY pr.powerflow_run_id, pr.run_name, gc.ags, gc.plz, gc.kcid, gc.bcid,
                  gc.pylovo_grid_result_id, pbv.stage
         ORDER BY pr.powerflow_run_id, pbv.stage
@@ -606,7 +624,15 @@ def voltage_deviation_summary_db(
         summary = pd.read_sql_query(
             query,
             conn,
-            params={"run_name": run_name, "stages": list(stages), "run_id": run_id},
+            params={
+                "run_name": run_name,
+                "stages": list(stages),
+                "run_id": run_id,
+                "ags": _normalize_optional_ags(ags),
+                "filter_plz": plz if input_id is None else None,
+                "filter_kcid": kcid if input_id is None else None,
+                "filter_bcid": bcid if input_id is None else None,
+            },
         )
 
     if summary.empty:
@@ -713,12 +739,19 @@ def transformer_import_distribution_db(
     run_name: str = "baseline_static_full_powerflow",
     stage: str = "post",
     reactive_magnitude: bool = True,
+    ags: str | int | None = None,
     plz: int | None = None,
     kcid: int | None = None,
     bcid: int | None = None,
     candidate_index: int = 0,
     min_buildings: int = 5,
 ) -> pd.DataFrame:
+    """Read transformer import time series for one grid or a population scope.
+
+    Pass ``input_id`` for one concrete grid. Leave ``input_id`` as ``None`` to
+    aggregate all matching DB runs, optionally narrowed by ``ags``, ``plz``,
+    ``kcid``, or ``bcid``.
+    """
     db = SurroGridDatabase()
     run_id = None
     if input_id is not None:
@@ -746,6 +779,10 @@ def transformer_import_distribution_db(
         WHERE pr.run_name = :run_name
           AND pi.stage = :stage
           AND (:run_id IS NULL OR pi.powerflow_run_id = :run_id)
+          AND (:ags IS NULL OR gc.ags = :ags)
+          AND (:filter_plz IS NULL OR gc.plz = :filter_plz)
+          AND (:filter_kcid IS NULL OR gc.kcid = :filter_kcid)
+          AND (:filter_bcid IS NULL OR gc.bcid = :filter_bcid)
         ORDER BY pr.powerflow_run_id, pi.t_index
         """
     )
@@ -753,7 +790,15 @@ def transformer_import_distribution_db(
         df = pd.read_sql_query(
             query,
             conn,
-            params={"run_name": run_name, "stage": stage, "run_id": run_id},
+            params={
+                "run_name": run_name,
+                "stage": stage,
+                "run_id": run_id,
+                "ags": _normalize_optional_ags(ags),
+                "filter_plz": plz if input_id is None else None,
+                "filter_kcid": kcid if input_id is None else None,
+                "filter_bcid": bcid if input_id is None else None,
+            },
         )
 
     if df.empty:
@@ -1276,12 +1321,124 @@ def plot_transformer_apparent_power_stage_comparison_matplotlib(
         return fig
 
 
-
-
 def _normalize_optional_ags(ags: str | int | None) -> int | None:
     if ags is None:
         return None
     return int(str(ags).lstrip("0") or "0")
+
+
+def available_powerflow_results_db(
+    run_name: str | None = None,
+    stages: tuple[str, ...] = ("pre", "post"),
+    ags: str | int | None = None,
+    plz: int | None = None,
+    kcid: int | None = None,
+    bcid: int | None = None,
+) -> pd.DataFrame:
+    """List DB-backed power-flow result rows available for plotting.
+
+    The returned ``grid`` column is the bridge-style grid identifier used by
+    single-grid heatmap helpers. Population plots can use this catalog to choose
+    all results or filter by AGS, PLZ, KCID, and BCID.
+    """
+    db = SurroGridDatabase()
+    query = text(
+        """
+        SELECT pr.powerflow_run_id,
+               pr.run_name,
+               pr.pre_only,
+               gc.grid_case_id,
+               gc.ags,
+               gc.plz,
+               gc.kcid,
+               gc.bcid,
+               gc.cell_id,
+               gc.pylovo_grid_result_id,
+               MIN(pbv.t_index) AS min_timestep,
+               MAX(pbv.t_index) AS max_timestep,
+               COUNT(DISTINCT pbv.t_index) AS n_timesteps,
+               ARRAY_AGG(DISTINCT pbv.stage ORDER BY pbv.stage) AS stages,
+               pr.updated_at
+        FROM surrogrid.powerflow_run pr
+        JOIN surrogrid.grid_case gc USING (grid_case_id)
+        JOIN surrogrid.powerflow_bus_voltage pbv USING (powerflow_run_id)
+        WHERE (:run_name IS NULL OR pr.run_name = :run_name)
+          AND (:ags IS NULL OR gc.ags = :ags)
+          AND (:plz IS NULL OR gc.plz = :plz)
+          AND (:kcid IS NULL OR gc.kcid = :kcid)
+          AND (:bcid IS NULL OR gc.bcid = :bcid)
+          AND pbv.stage = ANY(:stages)
+        GROUP BY pr.powerflow_run_id,
+                 pr.run_name,
+                 pr.pre_only,
+                 gc.grid_case_id,
+                 gc.ags,
+                 gc.plz,
+                 gc.kcid,
+                 gc.bcid,
+                 gc.cell_id,
+                 gc.pylovo_grid_result_id,
+                 pr.updated_at
+        ORDER BY gc.ags, gc.plz, gc.kcid, gc.bcid, pr.run_name, pr.powerflow_run_id
+        """
+    )
+    with db.engine.connect() as conn:
+        df = pd.read_sql_query(
+            query,
+            conn,
+            params={
+                "run_name": run_name,
+                "stages": list(stages),
+                "ags": _normalize_optional_ags(ags),
+                "plz": plz,
+                "kcid": kcid,
+                "bcid": bcid,
+            },
+        )
+
+    if df.empty:
+        raise ValueError("No DB power-flow results found for the selected filters.")
+
+    df["grid"] = (
+        df["cell_id"].astype(str)
+        + "_"
+        + df["plz"].astype(int).astype(str)
+        + "_"
+        + df["kcid"].astype(int).astype(str)
+        + "_"
+        + df["bcid"].astype(int).astype(str)
+        + ".h5"
+    )
+    df["ags_label"] = df["ags"].astype(int).map(lambda value: str(value).zfill(8))
+    df["label"] = (
+        df["grid"]
+        + " | "
+        + df["run_name"]
+        + " | "
+        + df["n_timesteps"].astype(int).astype(str)
+        + " timesteps"
+    )
+    return df[
+        [
+            "label",
+            "grid",
+            "powerflow_run_id",
+            "run_name",
+            "pre_only",
+            "ags",
+            "ags_label",
+            "plz",
+            "kcid",
+            "bcid",
+            "grid_case_id",
+            "pylovo_grid_result_id",
+            "min_timestep",
+            "max_timestep",
+            "n_timesteps",
+            "stages",
+            "updated_at",
+        ]
+    ].reset_index(drop=True)
 
 
 def line_loading_distribution_db(
@@ -1295,6 +1452,12 @@ def line_loading_distribution_db(
     candidate_index: int = 0,
     min_buildings: int = 5,
 ) -> pd.DataFrame:
+    """Compute per-line maximum loading for one grid or a population scope.
+
+    Pass ``input_id`` for one concrete grid. Leave ``input_id`` as ``None`` to
+    include all matching DB runs, optionally narrowed by ``ags``, ``plz``,
+    ``kcid``, or ``bcid``.
+    """
     db = SurroGridDatabase()
     run_id = None
     if input_id is not None:
@@ -1430,6 +1593,13 @@ def grid_loading_stress_summary(
     high_threshold: float = 80.0,
     overload_threshold: float = 100.0,
 ) -> pd.DataFrame:
+    """Summarize line-loading stress per grid, run, and stage.
+
+    The returned table includes robust ranking metrics such as
+    ``median_line_max_loading_percent`` and ``p95_line_max_loading_percent``.
+    The plotting notebook uses these columns to sort candidate grids before
+    opening a single-grid network heatmap.
+    """
     rows = []
     group_cols = [
         "grid",
@@ -1517,87 +1687,219 @@ def plot_line_loading_ecdf(
     return fig
 
 
-def plot_grid_loading_stress_scatter(
-    stress_summary: pd.DataFrame,
-    metric: str = "p95_line_max_loading_percent",
+
+def line_loading_timestep_stress_db(
+    input_id: str | None = None,
+    run_name: str = "baseline_static_full_powerflow",
+    stages: tuple[str, ...] = ("pre", "post"),
+    ags: str | int | None = None,
+    plz: int | None = None,
+    kcid: int | None = None,
+    bcid: int | None = None,
+    candidate_index: int = 0,
+    min_buildings: int = 5,
+    high_threshold: float = 80.0,
+    overload_threshold: float = 100.0,
+) -> pd.DataFrame:
+    """Summarize line-loading stress per grid, stage, and timestep.
+
+    Pass ``input_id`` for one concrete grid. Leave ``input_id`` as ``None`` to
+    include all matching DB runs, optionally narrowed by ``ags``, ``plz``,
+    ``kcid``, or ``bcid``. Unlike ``line_loading_distribution_db``, this keeps
+    the timestep dimension so time-of-year stress patterns can be plotted.
+    """
+    db = SurroGridDatabase()
+    run_id = None
+    if input_id is not None:
+        grid_ref = _resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
+        run = _resolve_powerflow_run(db, grid_ref, run_name)
+        run_id = int(run["powerflow_run_id"])
+
+    query = text(
+        """
+        SELECT pr.powerflow_run_id,
+               pr.run_name,
+               gc.grid_case_id,
+               gc.ags,
+               gc.plz,
+               gc.kcid,
+               gc.bcid,
+               gc.cell_id,
+               gc.pylovo_grid_result_id,
+               gc.pylovo_version_id,
+               lr.stage,
+               lr.ts,
+               lr.t_index,
+               lr.line,
+               ABS(lr.i_from_ka) AS i_from_ka
+        FROM surrogrid.powerflow_line_result lr
+        JOIN surrogrid.powerflow_run pr USING (powerflow_run_id)
+        JOIN surrogrid.grid_case gc USING (grid_case_id)
+        WHERE pr.run_name = :run_name
+          AND lr.stage = ANY(:stages)
+          AND (:run_id IS NULL OR pr.powerflow_run_id = :run_id)
+          AND (:ags IS NULL OR gc.ags = :ags)
+          AND (:filter_plz IS NULL OR gc.plz = :filter_plz)
+          AND (:filter_kcid IS NULL OR gc.kcid = :filter_kcid)
+          AND (:filter_bcid IS NULL OR gc.bcid = :filter_bcid)
+        ORDER BY gc.ags, gc.plz, gc.kcid, gc.bcid, pr.powerflow_run_id, lr.stage, lr.t_index, lr.line
+        """
+    )
+    with db.engine.connect() as conn:
+        df = pd.read_sql_query(
+            query,
+            conn,
+            params={
+                "run_name": run_name,
+                "stages": list(stages),
+                "run_id": run_id,
+                "ags": _normalize_optional_ags(ags),
+                "filter_plz": plz if input_id is None else None,
+                "filter_kcid": kcid if input_id is None else None,
+                "filter_bcid": bcid if input_id is None else None,
+            },
+        )
+
+    if df.empty:
+        scope = input_id if input_id is not None else "all matching DB runs"
+        raise ValueError(f"No DB timestep line loading results found for {scope!r}.")
+
+    df["grid"] = (
+        df["cell_id"].astype(str)
+        + "_"
+        + df["plz"].astype(int).astype(str)
+        + "_"
+        + df["kcid"].astype(int).astype(str)
+        + "_"
+        + df["bcid"].astype(int).astype(str)
+        + ".h5"
+    )
+    df["line"] = df["line"].astype(int)
+
+    rating_frames = []
+    for run_id_value, group in df.groupby("powerflow_run_id", sort=False):
+        first = group.iloc[0]
+        net = db.read_pandapower_grid(
+            {
+                "grid_result_id": int(first["pylovo_grid_result_id"]),
+                "version_id": str(first["pylovo_version_id"]),
+            }
+        )
+        ratings = net.line[["max_i_ka"]].copy()
+        ratings["line"] = ratings.index.astype(int)
+        ratings["powerflow_run_id"] = int(run_id_value)
+        rating_frames.append(ratings.reset_index(drop=True))
+
+    ratings = pd.concat(rating_frames, ignore_index=True)
+    df = df.merge(ratings, on=["powerflow_run_id", "line"], how="left")
+    df["max_i_ka"] = df["max_i_ka"].astype(float).replace(0.0, np.nan)
+    df["loading_percent"] = (df["i_from_ka"].astype(float) / df["max_i_ka"]) * 100.0
+
+    group_cols = [
+        "grid",
+        "powerflow_run_id",
+        "run_name",
+        "stage",
+        "ags",
+        "plz",
+        "kcid",
+        "bcid",
+        "ts",
+        "t_index",
+    ]
+    rows = []
+    for keys, group in df.groupby(group_cols, dropna=False, sort=False):
+        values = group["loading_percent"].dropna().astype(float)
+        if values.empty:
+            continue
+        row = dict(zip(group_cols, keys))
+        row.update(
+            {
+                "n_lines": int(values.size),
+                "median_line_loading_percent": float(values.median()),
+                "p95_line_loading_percent": float(values.quantile(0.95)),
+                "max_line_loading_percent": float(values.max()),
+                "share_lines_above_80_percent": float((values >= high_threshold).mean() * 100.0),
+                "share_lines_above_100_percent": float((values >= overload_threshold).mean() * 100.0),
+            }
+        )
+        rows.append(row)
+
+    if not rows:
+        raise ValueError("No valid timestep line loading values available.")
+    result = pd.DataFrame(rows)
+    stage_order = {stage: order for order, stage in enumerate(stages)}
+    result["stage_order"] = result["stage"].map(stage_order).fillna(len(stage_order)).astype(int)
+    result.sort_values(["grid", "stage_order", "t_index"], inplace=True)
+    return result.reset_index(drop=True)
+
+
+def plot_line_loading_timestep_stress_scatter(
+    timestep_stress: pd.DataFrame,
+    y_metric: str = "p95_line_loading_percent",
     color_metric: str = "share_lines_above_100_percent",
+    size_metric: str = "max_line_loading_percent",
     show: bool = True,
 ):
-    required = {"grid", "stage", metric, color_metric, "n_lines", "max_line_loading_percent"}
-    missing = required.difference(stress_summary.columns)
+    """Plot timestep-level line-loading stress with marker color and size.
+
+    The x-axis is ``t_index``. By default the y-axis is p95 line loading, marker
+    color is the share of overloaded lines, and marker size is the maximum line
+    loading at that timestep.
+    """
+    required = {"grid", "stage", "t_index", y_metric, color_metric, size_metric}
+    missing = required.difference(timestep_stress.columns)
     if missing:
-        raise KeyError(f"Missing stress summary columns: {sorted(missing)}")
+        raise KeyError(f"Missing timestep stress columns: {sorted(missing)}")
 
-    wide = stress_summary.pivot(index="grid", columns="stage", values=metric)
-    color_wide = stress_summary.pivot(index="grid", columns="stage", values=color_metric)
-    max_wide = stress_summary.pivot(
-        index="grid", columns="stage", values="max_line_loading_percent"
-    )
-    n_lines = stress_summary.groupby("grid")["n_lines"].max()
-    plot_df = pd.DataFrame(
-        {
-            "grid": wide.index,
-            "pre": wide.get("pre"),
-            "post": wide.get("post"),
-            "post_overloaded_share": color_wide.get("post"),
-            "pre_max": max_wide.get("pre"),
-            "post_max": max_wide.get("post"),
-            "n_lines": n_lines.reindex(wide.index),
-        }
-    ).dropna(subset=["pre", "post"])
-    if plot_df.empty:
-        raise ValueError("Need both pre and post stages to build the stress scatter.")
-
-    max_axis = float(np.nanmax([plot_df["pre"].max(), plot_df["post"].max(), 100.0])) * 1.08
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=plot_df["pre"],
-            y=plot_df["post"],
-            mode="markers",
-            marker={
-                "size": np.clip(np.sqrt(plot_df["n_lines"].astype(float)) * 3.5, 8, 28),
-                "color": plot_df["post_overloaded_share"].fillna(0.0),
-                "colorscale": "Reds",
-                "colorbar": {"title": "Post lines >100% [%]"},
-                "line": {"width": 0.8, "color": "#333333"},
-            },
-            customdata=plot_df[["grid", "n_lines", "pre_max", "post_max"]],
-            hovertemplate=(
-                "Grid: %{customdata[0]}<br>"
-                + f"Pre {metric}: "
-                + "%{x:.2f}%<br>"
-                + f"Post {metric}: "
-                + "%{y:.2f}%<br>"
-                + "Lines: %{customdata[1]}<br>"
-                + "Pre max: %{customdata[2]:.2f}%<br>"
-                + "Post max: %{customdata[3]:.2f}%<extra></extra>"
-            ),
-            name="Grid",
+    symbols = {"pre": "circle", "post": "diamond"}
+    for stage, group in timestep_stress.groupby("stage", sort=False):
+        marker_size = np.clip(group[size_metric].astype(float) / 5.0, 6, 30)
+        fig.add_trace(
+            go.Scatter(
+                x=group["t_index"],
+                y=group[y_metric],
+                mode="markers",
+                name=str(stage),
+                marker={
+                    "size": marker_size,
+                    "color": group[color_metric].fillna(0.0),
+                    "colorscale": "Reds",
+                    "cmin": 0,
+                    "colorbar": {"title": "Lines >100% [%]"},
+                    "symbol": symbols.get(str(stage), "circle"),
+                    "opacity": 0.72,
+                    "line": {"width": 0.6, "color": "#333333"},
+                },
+                customdata=group[["grid", "max_line_loading_percent", "share_lines_above_80_percent", "n_lines"]],
+                hovertemplate=(
+                    "Grid: %{customdata[0]}<br>"
+                    "Stage: %{fullData.name}<br>"
+                    "Timestep: %{x}<br>"
+                    + f"{y_metric}: "
+                    + "%{y:.2f}%<br>"
+                    "Max loading: %{customdata[1]:.2f}%<br>"
+                    "Lines >80%: %{customdata[2]:.1f}%<br>"
+                    "Lines: %{customdata[3]}<extra></extra>"
+                ),
+            )
         )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=[0, max_axis],
-            y=[0, max_axis],
-            mode="lines",
-            line={"color": "#555555", "dash": "dash"},
-            hoverinfo="skip",
-            showlegend=False,
-        )
-    )
+
     fig.update_layout(
-        title="Per-Grid Line Loading Stress: Pre vs Post",
-        xaxis_title=f"Pre {metric.replace('_', ' ')} [%]",
-        yaxis_title=f"Post {metric.replace('_', ' ')} [%]",
-        xaxis={"range": [0, max_axis]},
-        yaxis={"range": [0, max_axis]},
-        margin={"l": 75, "r": 35, "t": 70, "b": 70},
+        title="Line Loading Stress by Timestep",
+        xaxis_title="Timestep index",
+        yaxis_title=y_metric.replace("_", " ") + " [%]",
+        legend_title="Stage",
+        margin={"l": 75, "r": 35, "t": 70, "b": 65},
         height=520,
     )
+    fig.update_xaxes(showgrid=True, gridcolor="#d8d8d8")
+    fig.update_yaxes(showgrid=True, gridcolor="#d8d8d8", rangemode="tozero")
     if show:
         fig.show()
     return fig
+
 
 def max_line_loading_summary_db(
     input_id: str,
