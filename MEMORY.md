@@ -375,3 +375,27 @@
 - What was decided: Replace the old blanket 305,000 EUR/km cable cost and transformer EUR/kVA-plus-fixed rule with literature-synthesis cost tiers. Cable costs now use added-parallel values by cable size for existing route/duct assumptions: 25,000 EUR/km for <=150 mm2, 45,000 EUR/km for 185 mm2, and 70,000 EUR/km for 240 mm2 or unknown. Transformer costs now use all-in replacement bins of 33,000 EUR to 400 kVA, 38,000 EUR to 630 kVA, 42,000 EUR to 800 kVA, 48,000 EUR to 1,000 kVA, and 100,000 EUR for >1,000 kVA station-rebuild boundary cases.
 - Why: The expansion heuristic estimates additional parallel capacity on existing LV geometries, so direct brownfield parallel-cable costs fit better than broad reopened-trench cable values. For transformers, all-in replacement bins better reflect brownfield Ortsnetztransformator work than a small incremental EUR/kVA formula.
 - What was rejected and why: Using dena 2025 broad NS-line survey costs as the default was rejected because those values are useful boundary checks but are not scope-matched to added parallel cables in existing routes. Applying rONT costs was rejected because the current heuristic is capacity-only and does not decide voltage-control measures.
+
+## 2026-06-08 - Scenario-key cleanup utility
+
+- What was decided: Implement a hybrid SurroGrid scenario cleanup path: core and expansion scenario foreign keys now cascade, and `GridExpand/delete_scenario_data.py` provides a dry-run-first CLI backed by `SurroGridDatabase.delete_scenario_data(...)`.
+- Why: Scenario cleanup should be easy to run by readable `scenario_key`, while PostgreSQL should enforce dependent run/result cleanup instead of relying only on manual delete order. The CLI keeps the scenario definition row by default, requires `--execute` for deletion, and requires `--allow-baseline-static` before deleting default scenario data.
+- What was rejected and why: A SQL-only delete was rejected because it lacks dry-run row counts and safety guards. A Python-only ordered delete without FK changes was rejected because it would leave the database model less explicit about scenario ownership.
+
+## 2026-06-08 - Scenario cleanup simplified
+
+- What was decided: Simplify `GridExpand/delete_scenario_data.py` so `--execute` deletes the scenario row by default, cascading all DB-backed scenario data, and add a single `--keep-demands` mode that preserves the scenario, pipeline, and Step 2 demand-allocation rows while deleting downstream power-flow, expansion, and Step 3 URBS artifacts. Step 3 cleanup scans known URBS Input/result/log folders for filenames containing the selected `scenario_key`.
+- Why: This matches the intended operational choices more directly: either remove a scenario completely, or keep allocated demand inputs so downstream runs can be regenerated without rerunning Step 2.
+- What was rejected and why: Keeping separate `--delete-scenario-row` and `--allow-baseline-static` flags was rejected because they made the common cleanup workflow harder to reason about. Deleting Step 3 files through database cascades was rejected because those artifacts live on disk, not in PostgreSQL.
+
+## 2026-06-08 - Step 3 scenario artifact cleanup uses DB filenames
+
+- What was decided: Make `GridExpand/delete_scenario_data.py` collect Step 3 cleanup tokens from the selected `scenario_key` plus DB-recorded `demand_allocation_run.bridge_filename` and `powerflow_run.urbs_input_file` values before deleting DB rows.
+- Why: Some Step 3 filenames include the timeframe part of a scenario key or the URBS bridge filename rather than the complete readable `scenario_key`, so DB metadata is the safest way to identify the exact HDF5/log artifacts belonging to a scenario.
+- What was rejected and why: Matching only `*scenario_key*` was rejected because it can miss Step 3 artifacts when filename generation stores only the timeframe suffix or bridge filename.
+
+## 2026-06-08 - Expansion QGIS layers simplified
+
+- What was decided: Keep only the materialized QGIS layers `surrogrid.expansion_line_qgis_mv` and `surrogrid.expansion_transformer_qgis_mv` for expansion visualization, with their SELECT definitions inlined in `5.postprocessing/expansion/schema.sql`.
+- Why: The normal views duplicated the same result surface and made the expansion output harder to understand. QGIS should load the materialized layers because they keep stable `qgis_id`, typed PostGIS geometry metadata, and faster map rendering.
+- What was rejected and why: Keeping both normal views and materialized views was rejected because the extra database objects were not needed for the simple, transparent workflow.

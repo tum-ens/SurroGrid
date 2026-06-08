@@ -58,12 +58,18 @@ ON CONFLICT (scenario_key) DO UPDATE SET
 CREATE TABLE IF NOT EXISTS surrogrid.pipeline_run (
     pipeline_run_id BIGSERIAL PRIMARY KEY,
     grid_case_id BIGINT NOT NULL REFERENCES surrogrid.grid_case(grid_case_id) ON DELETE CASCADE,
-    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id),
+    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE,
     run_name TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_pipeline_run_grid_scenario_name UNIQUE (grid_case_id, scenario_id, run_name)
 );
+
+ALTER TABLE IF EXISTS surrogrid.pipeline_run DROP CONSTRAINT IF EXISTS pipeline_run_scenario_id_fkey;
+ALTER TABLE IF EXISTS surrogrid.pipeline_run DROP CONSTRAINT IF EXISTS fk_pipeline_run_scenario;
+ALTER TABLE IF EXISTS surrogrid.pipeline_run
+    ADD CONSTRAINT fk_pipeline_run_scenario
+    FOREIGN KEY (scenario_id) REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE;
 
 CREATE INDEX IF NOT EXISTS idx_pipeline_run_grid_case ON surrogrid.pipeline_run (grid_case_id);
 CREATE INDEX IF NOT EXISTS idx_pipeline_run_scenario ON surrogrid.pipeline_run (scenario_id);
@@ -72,7 +78,7 @@ CREATE TABLE IF NOT EXISTS surrogrid.powerflow_run (
     powerflow_run_id BIGSERIAL PRIMARY KEY,
     pipeline_run_id BIGINT NOT NULL REFERENCES surrogrid.pipeline_run(pipeline_run_id) ON DELETE CASCADE,
     grid_case_id BIGINT NOT NULL REFERENCES surrogrid.grid_case(grid_case_id) ON DELETE CASCADE,
-    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id),
+    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE,
     run_name TEXT NOT NULL,
     urbs_input_file TEXT NOT NULL DEFAULT '',
     storage_mode TEXT NOT NULL DEFAULT 'db',
@@ -121,8 +127,9 @@ ALTER TABLE IF EXISTS surrogrid.powerflow_run ALTER COLUMN urbs_input_file SET N
 ALTER TABLE IF EXISTS surrogrid.powerflow_run DROP COLUMN IF EXISTS scenario_label;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run DROP COLUMN IF EXISTS scenario_key;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run DROP COLUMN IF EXISTS source_input_file;
+ALTER TABLE IF EXISTS surrogrid.powerflow_run DROP CONSTRAINT IF EXISTS powerflow_run_scenario_id_fkey;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run DROP CONSTRAINT IF EXISTS fk_powerflow_run_scenario;
-ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD CONSTRAINT fk_powerflow_run_scenario FOREIGN KEY (scenario_id) REFERENCES surrogrid.scenario(scenario_id);
+ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD CONSTRAINT fk_powerflow_run_scenario FOREIGN KEY (scenario_id) REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run DROP CONSTRAINT IF EXISTS fk_powerflow_run_pipeline;
 ALTER TABLE IF EXISTS surrogrid.powerflow_run ADD CONSTRAINT fk_powerflow_run_pipeline FOREIGN KEY (pipeline_run_id) REFERENCES surrogrid.pipeline_run(pipeline_run_id) ON DELETE CASCADE;
 
@@ -189,7 +196,7 @@ CREATE TABLE IF NOT EXISTS surrogrid.demand_allocation_run (
     demand_allocation_run_id BIGSERIAL PRIMARY KEY,
     pipeline_run_id BIGINT NOT NULL REFERENCES surrogrid.pipeline_run(pipeline_run_id) ON DELETE CASCADE,
     grid_case_id BIGINT NOT NULL REFERENCES surrogrid.grid_case(grid_case_id) ON DELETE CASCADE,
-    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id),
+    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE,
     run_name TEXT NOT NULL,
     bridge_filename TEXT NOT NULL DEFAULT '',
     storage_mode TEXT NOT NULL DEFAULT 'db',
@@ -217,6 +224,11 @@ WHERE dar.pipeline_run_id IS NULL
 ALTER TABLE IF EXISTS surrogrid.demand_allocation_run ALTER COLUMN pipeline_run_id SET NOT NULL;
 ALTER TABLE IF EXISTS surrogrid.demand_allocation_run DROP CONSTRAINT IF EXISTS fk_demand_allocation_run_pipeline;
 ALTER TABLE IF EXISTS surrogrid.demand_allocation_run ADD CONSTRAINT fk_demand_allocation_run_pipeline FOREIGN KEY (pipeline_run_id) REFERENCES surrogrid.pipeline_run(pipeline_run_id) ON DELETE CASCADE;
+ALTER TABLE IF EXISTS surrogrid.demand_allocation_run DROP CONSTRAINT IF EXISTS demand_allocation_run_scenario_id_fkey;
+ALTER TABLE IF EXISTS surrogrid.demand_allocation_run DROP CONSTRAINT IF EXISTS fk_demand_allocation_run_scenario;
+ALTER TABLE IF EXISTS surrogrid.demand_allocation_run
+    ADD CONSTRAINT fk_demand_allocation_run_scenario
+    FOREIGN KEY (scenario_id) REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_demand_allocation_run_grid_scenario_name
     ON surrogrid.demand_allocation_run (grid_case_id, scenario_id, run_name);

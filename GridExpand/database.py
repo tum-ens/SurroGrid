@@ -89,6 +89,27 @@ class SurroGridDatabase:
                     WHERE table_schema = 'surrogrid'
                       AND table_name = 'powerflow_run'
                       AND column_name = 'assumptions'
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conrelid = to_regclass('surrogrid.pipeline_run')
+                      AND conname = 'fk_pipeline_run_scenario'
+                      AND confdeltype = 'c'
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conrelid = to_regclass('surrogrid.demand_allocation_run')
+                      AND conname = 'fk_demand_allocation_run_scenario'
+                      AND confdeltype = 'c'
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conrelid = to_regclass('surrogrid.powerflow_run')
+                      AND conname = 'fk_powerflow_run_scenario'
+                      AND confdeltype = 'c'
                 ) AS ready
             """
         )
@@ -678,6 +699,166 @@ class SurroGridDatabase:
                     },
                 ).scalar_one()
             )
+
+    def count_scenario_data(self, scenario_key: str) -> dict[str, int]:
+        """Count SurroGrid rows related to one scenario key."""
+        self.ensure_schema()
+        with self.engine.connect() as conn:
+            scenario_id = self._scenario_id_for_key(conn, scenario_key)
+            if scenario_id is None:
+                raise ValueError(f"No surrogrid.scenario row found for scenario_key={scenario_key!r}.")
+            return self._count_scenario_data(conn, scenario_id)
+
+    def delete_scenario_data(
+        self,
+        scenario_key: str,
+        *,
+        keep_demands: bool = False,
+        dry_run: bool = True,
+        refresh_expansion_views: bool = True,
+    ) -> dict[str, int]:
+        """Delete DB-backed SurroGrid data for a scenario key.
+
+        By default the scenario row is deleted, cascading all dependent
+        SurroGrid data. Set ``keep_demands=True`` to keep the scenario,
+        pipeline, and Step 2 demand-allocation rows while deleting downstream
+        power-flow and expansion results.
+        """
+        self.ensure_schema()
+        with self.engine.begin() as conn:
+            scenario_id = self._scenario_id_for_key(conn, scenario_key)
+            if scenario_id is None:
+                raise ValueError(f"No surrogrid.scenario row found for scenario_key={scenario_key!r}.")
+            counts = self._count_scenario_data(conn, scenario_id)
+            if dry_run:
+                return counts
+
+            self._delete_expansion_scenario_data(conn, scenario_id)
+            if keep_demands:
+                if self._relation_exists(conn, "surrogrid.powerflow_run"):
+                    conn.execute(
+                        text("DELETE FROM surrogrid.powerflow_run WHERE scenario_id = :scenario_id"),
+                        {"scenario_id": scenario_id},
+                    )
+            else:
+                conn.execute(
+                    text("DELETE FROM surrogrid.scenario WHERE scenario_id = :scenario_id"),
+                    {"scenario_id": scenario_id},
+                )
+
+        if refresh_expansion_views:
+            self.refresh_expansion_materialized_views()
+        return counts
+
+    def refresh_expansion_materialized_views(self) -> None:
+        """Refresh optional Step 5 QGIS materialized views if they exist."""
+        with self.engine.begin() as conn:
+            for view_name in (
+                "surrogrid.expansion_line_qgis_mv",
+                "surrogrid.expansion_transformer_qgis_mv",
+            ):
+                if self._relation_exists(conn, view_name):
+                    conn.execute(text(f"REFRESH MATERIALIZED VIEW {view_name}"))
+
+    def _scenario_id_for_key(self, conn, scenario_key: str) -> int | None:
+        value = conn.execute(
+            text("SELECT scenario_id FROM surrogrid.scenario WHERE scenario_key = :scenario_key"),
+            {"scenario_key": scenario_key},
+        ).scalar_one_or_none()
+        return None if value is None else int(value)
+
+    def _relation_exists(self, conn, relation_name: str) -> bool:
+        return bool(
+            conn.execute(
+                text("SELECT to_regclass(:relation_name) IS NOT NULL"),
+                {"relation_name": relation_name},
+            ).scalar_one()
+        )
+
+    def _delete_expansion_scenario_data(self, conn, scenario_id: int) -> None:
+        for table_name in ("expansion_line_result", "expansion_transformer_result", "expansion_analysis_run"):
+            relation_name = f"surrogrid.{table_name}"
+            if self._relation_exists(conn, relation_name):
+                conn.execute(
+                    text(f"DELETE FROM {relation_name} WHERE scenario_id = :scenario_id"),
+                    {"scenario_id": scenario_id},
+                )
+
+    def _count_scenario_data(self, conn, scenario_id: int) -> dict[str, int]:
+        counts = {
+            "scenario": self._count_query(
+                conn,
+                "surrogrid.scenario",
+                "SELECT COUNT(*) FROM surrogrid.scenario WHERE scenario_id = :scenario_id",
+                scenario_id,
+            )
+        }
+        count_specs = (
+            ("pipeline_run", "surrogrid.pipeline_run", "SELECT COUNT(*) FROM surrogrid.pipeline_run WHERE scenario_id = :scenario_id"),
+            ("demand_allocation_run", "surrogrid.demand_allocation_run", "SELECT COUNT(*) FROM surrogrid.demand_allocation_run WHERE scenario_id = :scenario_id"),
+            ("allocated_demand", "surrogrid.allocated_demand", """
+                SELECT COUNT(*)
+                FROM surrogrid.allocated_demand child
+                JOIN surrogrid.demand_allocation_run parent USING (demand_allocation_run_id)
+                WHERE parent.scenario_id = :scenario_id
+            """),
+            ("allocated_eff_factor", "surrogrid.allocated_eff_factor", """
+                SELECT COUNT(*)
+                FROM surrogrid.allocated_eff_factor child
+                JOIN surrogrid.demand_allocation_run parent USING (demand_allocation_run_id)
+                WHERE parent.scenario_id = :scenario_id
+            """),
+            ("allocated_vehicle", "surrogrid.allocated_vehicle", """
+                SELECT COUNT(*)
+                FROM surrogrid.allocated_vehicle child
+                JOIN surrogrid.demand_allocation_run parent USING (demand_allocation_run_id)
+                WHERE parent.scenario_id = :scenario_id
+            """),
+            ("powerflow_run", "surrogrid.powerflow_run", "SELECT COUNT(*) FROM surrogrid.powerflow_run WHERE scenario_id = :scenario_id"),
+            ("powerflow_demand", "surrogrid.powerflow_demand", """
+                SELECT COUNT(*)
+                FROM surrogrid.powerflow_demand child
+                JOIN surrogrid.powerflow_run parent USING (powerflow_run_id)
+                WHERE parent.scenario_id = :scenario_id
+            """),
+            ("powerflow_import", "surrogrid.powerflow_import", """
+                SELECT COUNT(*)
+                FROM surrogrid.powerflow_import child
+                JOIN surrogrid.powerflow_run parent USING (powerflow_run_id)
+                WHERE parent.scenario_id = :scenario_id
+            """),
+            ("powerflow_bus_voltage", "surrogrid.powerflow_bus_voltage", """
+                SELECT COUNT(*)
+                FROM surrogrid.powerflow_bus_voltage child
+                JOIN surrogrid.powerflow_run parent USING (powerflow_run_id)
+                WHERE parent.scenario_id = :scenario_id
+            """),
+            ("powerflow_line_result", "surrogrid.powerflow_line_result", """
+                SELECT COUNT(*)
+                FROM surrogrid.powerflow_line_result child
+                JOIN surrogrid.powerflow_run parent USING (powerflow_run_id)
+                WHERE parent.scenario_id = :scenario_id
+            """),
+            ("powerflow_reactive_component", "surrogrid.powerflow_reactive_component", """
+                SELECT COUNT(*)
+                FROM surrogrid.powerflow_reactive_component child
+                JOIN surrogrid.powerflow_run parent USING (powerflow_run_id)
+                WHERE parent.scenario_id = :scenario_id
+            """),
+            ("expansion_analysis_run", "surrogrid.expansion_analysis_run", "SELECT COUNT(*) FROM surrogrid.expansion_analysis_run WHERE scenario_id = :scenario_id"),
+            ("expansion_line_result", "surrogrid.expansion_line_result", "SELECT COUNT(*) FROM surrogrid.expansion_line_result WHERE scenario_id = :scenario_id"),
+            ("expansion_transformer_result", "surrogrid.expansion_transformer_result", "SELECT COUNT(*) FROM surrogrid.expansion_transformer_result WHERE scenario_id = :scenario_id"),
+            ("expansion_line_qgis_mv", "surrogrid.expansion_line_qgis_mv", "SELECT COUNT(*) FROM surrogrid.expansion_line_qgis_mv WHERE scenario_id = :scenario_id"),
+            ("expansion_transformer_qgis_mv", "surrogrid.expansion_transformer_qgis_mv", "SELECT COUNT(*) FROM surrogrid.expansion_transformer_qgis_mv WHERE scenario_id = :scenario_id"),
+        )
+        for key, relation_name, query in count_specs:
+            counts[key] = self._count_query(conn, relation_name, query, scenario_id)
+        return counts
+
+    def _count_query(self, conn, relation_name: str, query: str, scenario_id: int) -> int:
+        if not self._relation_exists(conn, relation_name):
+            return 0
+        return int(conn.execute(text(query), {"scenario_id": scenario_id}).scalar_one())
 
     def ensure_pipeline_run(
         self,
