@@ -10,7 +10,7 @@ This step is the analysis and plotting workspace for GridExpand results. It is i
   expansion/
     cost_assumptions.md       # source notes and derivation for cost defaults
     grid_expansion.py         # DB-backed overload/cost materialization for QGIS
-    schema.sql                # expansion tables, assumptions, and QGIS views
+    schema.sql                # expansion tables, assumptions, and QGIS materialized views
   plotting/
     plotting_notebook.ipynb   # current DB-backed plotting notebook
     thesis_plots.ipynb        # original reference notebook for transformer distributions
@@ -44,7 +44,7 @@ The QGIS-facing materialized views are:
 - `surrogrid.expansion_line_qgis_mv`: cable expansion estimates joined to `pylovo.lines_result_with_grid`.
 - `surrogrid.expansion_transformer_qgis_mv`: transformer expansion estimates joined to `pylovo.transformer_positions_with_grid`.
 
-The same SELECT definitions also exist as normal views without the `_mv` suffix. The materialized views are refreshed by `expansion/grid_expansion.py` after each materialization run and include a stable `qgis_id` column for QGIS.
+The materialized views are refreshed by `expansion/grid_expansion.py` after each materialization run and include a stable `qgis_id` column for QGIS.
 
 Create the schema and default assumptions:
 

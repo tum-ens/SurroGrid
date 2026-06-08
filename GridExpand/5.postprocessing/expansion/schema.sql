@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_analysis_run (
     assumption_key TEXT NOT NULL REFERENCES surrogrid.expansion_cost_assumption(assumption_key),
     run_name TEXT NOT NULL,
     stage TEXT NOT NULL,
-    scenario_id BIGINT REFERENCES surrogrid.scenario(scenario_id),
+    scenario_id BIGINT REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE,
     ags BIGINT,
     plz INTEGER,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_line_result (
     expansion_analysis_run_id BIGINT NOT NULL REFERENCES surrogrid.expansion_analysis_run(expansion_analysis_run_id) ON DELETE CASCADE,
     powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.powerflow_run(powerflow_run_id) ON DELETE CASCADE,
     grid_case_id BIGINT NOT NULL REFERENCES surrogrid.grid_case(grid_case_id) ON DELETE CASCADE,
-    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id),
+    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE,
     ags BIGINT NOT NULL,
     plz INTEGER NOT NULL,
     kcid INTEGER NOT NULL,
@@ -162,7 +162,7 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_transformer_result (
     expansion_analysis_run_id BIGINT NOT NULL REFERENCES surrogrid.expansion_analysis_run(expansion_analysis_run_id) ON DELETE CASCADE,
     powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.powerflow_run(powerflow_run_id) ON DELETE CASCADE,
     grid_case_id BIGINT NOT NULL REFERENCES surrogrid.grid_case(grid_case_id) ON DELETE CASCADE,
-    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id),
+    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE,
     ags BIGINT NOT NULL,
     plz INTEGER NOT NULL,
     kcid INTEGER NOT NULL,
@@ -194,7 +194,25 @@ CREATE INDEX IF NOT EXISTS idx_expansion_transformer_result_grid
 CREATE INDEX IF NOT EXISTS idx_expansion_transformer_result_need
     ON surrogrid.expansion_transformer_result (expansion_analysis_run_id, requires_expansion, overloaded_at_100_percent);
 
-CREATE OR REPLACE VIEW surrogrid.expansion_line_qgis AS
+ALTER TABLE IF EXISTS surrogrid.expansion_analysis_run DROP CONSTRAINT IF EXISTS expansion_analysis_run_scenario_id_fkey;
+ALTER TABLE IF EXISTS surrogrid.expansion_analysis_run DROP CONSTRAINT IF EXISTS fk_expansion_analysis_run_scenario;
+ALTER TABLE IF EXISTS surrogrid.expansion_analysis_run
+    ADD CONSTRAINT fk_expansion_analysis_run_scenario
+    FOREIGN KEY (scenario_id) REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result DROP CONSTRAINT IF EXISTS expansion_line_result_scenario_id_fkey;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result DROP CONSTRAINT IF EXISTS fk_expansion_line_result_scenario;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result
+    ADD CONSTRAINT fk_expansion_line_result_scenario
+    FOREIGN KEY (scenario_id) REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS surrogrid.expansion_transformer_result DROP CONSTRAINT IF EXISTS expansion_transformer_result_scenario_id_fkey;
+ALTER TABLE IF EXISTS surrogrid.expansion_transformer_result DROP CONSTRAINT IF EXISTS fk_expansion_transformer_result_scenario;
+ALTER TABLE IF EXISTS surrogrid.expansion_transformer_result
+    ADD CONSTRAINT fk_expansion_transformer_result_scenario
+    FOREIGN KEY (scenario_id) REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS surrogrid.expansion_line_qgis_mv AS
 SELECT
     ROW_NUMBER() OVER (
         ORDER BY
@@ -214,9 +232,17 @@ JOIN pylovo.lines_result_with_grid lwg
  AND lwg.plz = elr.plz
  AND lwg.kcid = elr.kcid
  AND lwg.bcid = elr.bcid
- AND lwg.id = elr.visible_line_id;
+ AND lwg.id = elr.visible_line_id
+WITH DATA;
 
-CREATE OR REPLACE VIEW surrogrid.expansion_transformer_qgis AS
+CREATE UNIQUE INDEX IF NOT EXISTS idx_expansion_line_qgis_mv_qgis_id
+    ON surrogrid.expansion_line_qgis_mv (qgis_id);
+CREATE INDEX IF NOT EXISTS idx_expansion_line_qgis_mv_analysis
+    ON surrogrid.expansion_line_qgis_mv (analysis_key, requires_expansion, overloaded_at_100_percent);
+CREATE INDEX IF NOT EXISTS idx_expansion_line_qgis_mv_geom
+    ON surrogrid.expansion_line_qgis_mv USING GIST (geom);
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS surrogrid.expansion_transformer_qgis_mv AS
 SELECT
     ROW_NUMBER() OVER (
         ORDER BY
@@ -239,23 +265,7 @@ JOIN pylovo.transformer_positions_with_grid tpwg
  AND tpwg.version_id = etr.pylovo_version_id
  AND tpwg.plz = etr.plz
  AND tpwg.kcid = etr.kcid
- AND tpwg.bcid = etr.bcid;
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS surrogrid.expansion_line_qgis_mv AS
-SELECT *
-FROM surrogrid.expansion_line_qgis
-WITH DATA;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_expansion_line_qgis_mv_qgis_id
-    ON surrogrid.expansion_line_qgis_mv (qgis_id);
-CREATE INDEX IF NOT EXISTS idx_expansion_line_qgis_mv_analysis
-    ON surrogrid.expansion_line_qgis_mv (analysis_key, requires_expansion, overloaded_at_100_percent);
-CREATE INDEX IF NOT EXISTS idx_expansion_line_qgis_mv_geom
-    ON surrogrid.expansion_line_qgis_mv USING GIST (geom);
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS surrogrid.expansion_transformer_qgis_mv AS
-SELECT *
-FROM surrogrid.expansion_transformer_qgis
+ AND tpwg.bcid = etr.bcid
 WITH DATA;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_expansion_transformer_qgis_mv_qgis_id
