@@ -351,3 +351,27 @@
 - What was decided: Make matplotlib transformer time-series distribution plots conditional on horizon length. Full-year or longer horizons keep calendar `ts` and seasonal month labels, while short horizons up to 14 days align by relative `t_index` and aggregate daily bands with `t_index // 24`.
 - Why: DB-backed one-week timeslice runs store `ts` as the selected reference-year week, so population plots over several grids showed sparse calendar islands and apparent gaps. Relative alignment makes the selected 168-hour operational horizon comparable across grids without losing the seasonal view for generated full-year time series.
 - What was rejected and why: Forcing all plots onto either calendar timestamps or relative timesteps was rejected because each is correct for only one horizon type. Adding a user-facing axis mode was rejected for now because the plotting helper can infer the current full-year versus one-week behavior from the available timestep horizon.
+
+## 2026-06-05 - DB-backed Step 5 expansion QGIS views
+
+- What was decided: Add Step 5 expansion postprocessing tables and QGIS views that materialize overload/cost estimates from DB power-flow results, joining cable results to `pylovo.lines_result_with_grid` and transformer results to `pylovo.transformer_positions_with_grid`.
+- Why: Large-region time-series result tables are too large to load directly into notebooks or QGIS; reducing them in PostgreSQL to peak cable/transformer expansion rows keeps the workflow scalable and preserves the existing QGIS-friendly pylovo geometries.
+- What was rejected and why: Reconstructing cable geometries from pandapower JSON was rejected because pylovo already provides the maintained QGIS line view. Writing expansion estimates back into Step 4 simulation outputs was rejected because this is a Step 5 postprocessing analysis artifact.
+
+## 2026-06-08 - Expansion assumptions doc and materialized QGIS views
+
+- What was decided: Add `GridExpand/5.postprocessing/expansion/cost_assumptions.md` and expose expansion map layers as typed materialized views `surrogrid.expansion_line_qgis_mv` and `surrogrid.expansion_transformer_qgis_mv`, refreshed by the Step 5 expansion CLI.
+- Why: The original `pylovo.lines_result_with_grid` and `pylovo.transformer_positions_with_grid` views are source geodata layers and should remain unchanged. QGIS is more likely to discover and render derived expansion layers when they are materialized, have stable `qgis_id` fields, and expose typed SRID 25832 geometries.
+- What was rejected and why: Writing expansion columns into the pylovo materialized views was rejected because it would mix source grid topology with scenario-specific postprocessing results and would require refreshing/redefining pylovo-owned objects.
+
+## 2026-06-08 - Expansion heuristic simplified to nominal capacity
+
+- What was decided: Remove `target_loading_percent` from the Step 5 expansion heuristic and derive required capacity directly from nominal 100 percent loading. Cable expansion now uses `ceil(peak_current_ka / max_i_ka)`, and transformer expansion uses peak apparent power rounded to the next configured kVA step.
+- Why: The expansion postprocessing should be simple and transparent for regional screening, with no hidden reserve margin or DSO-specific planning target.
+- What was rejected and why: Keeping an 80 percent target-loading reserve was rejected because it made the heuristic look more precise than intended and inflated expansion needs beyond the direct overload result.
+
+## 2026-06-08 - Expansion cost assumptions revised to brownfield tiers
+
+- What was decided: Replace the old blanket 305,000 EUR/km cable cost and transformer EUR/kVA-plus-fixed rule with literature-synthesis cost tiers. Cable costs now use added-parallel values by cable size for existing route/duct assumptions: 25,000 EUR/km for <=150 mm2, 45,000 EUR/km for 185 mm2, and 70,000 EUR/km for 240 mm2 or unknown. Transformer costs now use all-in replacement bins of 33,000 EUR to 400 kVA, 38,000 EUR to 630 kVA, 42,000 EUR to 800 kVA, 48,000 EUR to 1,000 kVA, and 100,000 EUR for >1,000 kVA station-rebuild boundary cases.
+- Why: The expansion heuristic estimates additional parallel capacity on existing LV geometries, so direct brownfield parallel-cable costs fit better than broad reopened-trench cable values. For transformers, all-in replacement bins better reflect brownfield Ortsnetztransformator work than a small incremental EUR/kVA formula.
+- What was rejected and why: Using dena 2025 broad NS-line survey costs as the default was rejected because those values are useful boundary checks but are not scope-matched to added parallel cables in existing routes. Applying rONT costs was rejected because the current heuristic is capacity-only and does not decide voltage-control measures.

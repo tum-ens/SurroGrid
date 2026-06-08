@@ -1,0 +1,123 @@
+# Expansion Cost Assumptions
+
+This note documents the cost assumptions used by `expansion/grid_expansion.py` and `expansion/schema.sql`.
+
+Default assumption key: `de_lv_heuristic_2026`
+
+These values are transparent screening assumptions for spatial postprocessing. They are not construction offers, DSO work-order costs, or a substitute for site-specific grid planning. The capacity heuristic remains deliberately simple: reinforce only where the simulated peak exceeds nominal existing capacity.
+
+## Current Defaults Used in the Calculation
+
+| Parameter | Value used | Unit | Use in this model |
+| --- | ---: | --- | --- |
+| Expansion threshold | 100 | % nominal loading | No target loading margin. Reinforcement is triggered only when simulated peak loading exceeds the existing rating. |
+| Parallel LV cable <=150 mm2 in existing route/duct | 25,000 | EUR/km | Applied to overloaded visible line sections whose `std_type` indicates <=150 mm2, including small service cable classes. |
+| Parallel LV cable 185 mm2 in existing route/duct | 45,000 | EUR/km | Applied when `std_type` indicates 185 mm2. |
+| Parallel LV cable 240 mm2 in existing route/duct | 70,000 | EUR/km | Applied when `std_type` indicates 240 mm2. Also used as the default for unknown cable size. |
+| Reopened-route rural reference | 90,000 | EUR/km | Stored in the assumption table as context/sensitivity, not used by the default cost formula. |
+| Reopened-route suburban reference | 95,000 | EUR/km | Stored in the assumption table as context/sensitivity, not used by the default cost formula. |
+| Reopened-route urban reference | 165,000 | EUR/km | Stored in the assumption table as context/sensitivity, not used by the default cost formula. |
+| All-in transformer replacement to 400 kVA | 33,000 | EUR/unit | Used when required transformer capacity is > existing rating and <=400 kVA. |
+| All-in transformer replacement to 630 kVA | 38,000 | EUR/unit | Used when required transformer capacity is >400 and <=630 kVA. |
+| All-in transformer replacement to 800 kVA | 42,000 | EUR/unit | Used when required transformer capacity is >630 and <=800 kVA. |
+| All-in transformer replacement to 1,000 kVA | 48,000 | EUR/unit | Used when required transformer capacity is >800 and <=1,000 kVA. |
+| Full station rebuild boundary case | 100,000 | EUR/station | Used when required transformer capacity exceeds 1,000 kVA. |
+| Transformer capacity step | 50 | kVA | Required transformer capacity is rounded up to this increment. |
+
+## Why These Defaults Fit This Heuristic
+
+The model does not replace existing cables with a newly routed underground line. It estimates the capacity/cost impact of adding enough parallel cable capacity on already represented LV cable sections. Therefore the default cable cost should not be the broad dense-urban reopened-trench value. The direct brownfield parallel-cable values are the best match for this specific calculation.
+
+The reopened-route values are still important, especially for dense urban streets, but they are a sensitivity/boundary case. If the result is later interpreted as a full trench reopening or route rebuild, use the reopened-route references instead of the direct-parallel defaults.
+
+For transformers, the previous `additional_kVA * EUR/kVA + fixed handling` rule was too abstract and too low for brownfield replacement. The model now uses all-in replacement bins, which better match the planning question: if a local transformer is overloaded, what replacement size is implied and what is the approximate all-in replacement cost?
+
+## Capacity Heuristic
+
+Cable capacity:
+
+```text
+loading_percent = peak_current_ka / max_i_ka * 100
+required_parallel = ceil(peak_current_ka / max_i_ka)
+additional_parallel = max(required_parallel - existing_parallel, 0)
+requires_expansion = additional_parallel > 0
+```
+
+Cable cost:
+
+```text
+estimated_cost_eur = additional_parallel * length_km * selected_parallel_cable_cost_eur_per_km
+```
+
+The selected line cost is stored per row in:
+
+- `line_cost_eur_per_km`
+- `line_cost_basis`
+
+Transformer capacity:
+
+```text
+peak_s_kva = sqrt(P_mW^2 + Q_mvar^2) * 1000
+loading_percent = peak_s_kva / rated_kva * 100
+required_transformer_kva = ceil(peak_s_kva / transformer_capacity_step_kva) * transformer_capacity_step_kva
+additional_transformer_kva = max(required_transformer_kva - rated_kva, 0)
+requires_expansion = additional_transformer_kva > 0
+```
+
+Transformer cost:
+
+```text
+if required_transformer_kva <= existing_rated_kva: 0 EUR
+elif required_transformer_kva <= 400: 33,000 EUR
+elif required_transformer_kva <= 630: 38,000 EUR
+elif required_transformer_kva <= 800: 42,000 EUR
+elif required_transformer_kva <= 1000: 48,000 EUR
+else: 100,000 EUR boundary case
+```
+
+The selected transformer basis is stored per row in `transformer_cost_basis`.
+
+## Literature Synthesis Behind the Defaults
+
+| Cost item | Literature values from synthesis | Value selected here | Reason |
+| --- | ---: | ---: | --- |
+| Parallel LV cable 150 mm2, existing route/duct | Wintzek: +20k EUR/km; 2025 qualitative uplift 20k-35k EUR/km | 25k EUR/km | Direct match to this model's added-parallel-cable interpretation. |
+| Parallel LV cable 185 mm2, existing route/duct | Wintzek: +40k EUR/km; 2025 qualitative range 40k-55k EUR/km | 45k EUR/km | Direct source plus modest current-cost uplift. |
+| Parallel LV cable 240 mm2, existing route/duct | Wintzek: +60k EUR/km; Agora/FfE and WEI/GridSim material benchmarks about 25k-28k EUR/km | 70k EUR/km | Direct brownfield value with 2025 uplift and material-cost consistency check. |
+| Reopened rural brownfield cable route | Agora/FfE decomposition and WEI/GridSim installation anchor, roughly 67k-120k EUR/km | 90k EUR/km | Stored as sensitivity/context. |
+| Reopened suburban brownfield cable route | Agora/FfE rural/suburban laying plus WEI/GridSim German-average installation, roughly 67k-130k EUR/km | 95k EUR/km | Stored as sensitivity/context. |
+| Reopened dense urban brownfield cable route | Agora/FfE about 115k EUR/km, Wintzek urban all-in 240 mm2 about 200k EUR/km, dena 2025 Musterhausen NS-line benchmark 182k EUR/km | 165k EUR/km | Stored as sensitivity/context for paved-street reopening. |
+| DSO-survey difficult NS line boundary | dena 2025: 80k / 182k / 380k EUR/km low / Musterhausen / high | 182k EUR/km reference only | Useful boundary check, not default because scope is broader than added parallel cable. |
+| Cable material only, NAYY-J 4x240 | Agora/FfE 28k EUR/km; WEI/GridSim 25k EUR/km | 28k EUR/km reference only | Confirms material is not the dominant driver. |
+| Transformer equipment only 630-1000 kVA | Wintzek 10k/12.5k/15k EUR; Agora/FfE 15k EUR; dena 2012 10k EUR | not used directly | Equipment-only lower bound, insufficient for brownfield replacement. |
+| All-in transformer replacement to 400 kVA | WEI/GridSim 30k EUR plus planning uplift | 33k EUR | Direct all-in replacement bin. |
+| All-in transformer replacement to 630 kVA | WEI/GridSim 35k EUR, checked against equipment lower bounds | 38k EUR | Direct all-in replacement bin with uplift. |
+| All-in transformer replacement to 800 kVA | Interpolation between 630 kVA and 1 MVA; Wintzek 800 kVA equipment 12.5k EUR | 42k EUR | Interpolated all-in replacement bin. |
+| All-in transformer replacement to 1,000 kVA | WEI/GridSim 45k EUR, checked against Wintzek equipment 15k EUR | 48k EUR | Direct all-in replacement bin with uplift. |
+| rONT equipment / incremental cost | Wintzek 21.2k-27.5k EUR equipment, Agora/FfE 28k EUR, WEI/GridSim +4k EUR all-in premium | not used by default | rONT can be a voltage/flexibility measure, but this capacity-only overload heuristic does not decide voltage-control measures. |
+| Full ONS renewal / rebuild | dena 2025 80k/101k/140k EUR station incl. transformer; WEI/GridSim rebuild 100k EUR | 100k EUR | Boundary case when required transformer size exceeds the simple <=1 MVA replacement bins. |
+
+## Source Notes
+
+The source synthesis behind these defaults emphasizes that civil works dominate LV cable cost. Cable material-only values around 25k-28k EUR/km are much lower than full underground-cable costs. Therefore the decisive modeling choice is whether an added parallel cable can use an existing route/duct or whether a paved route must be reopened.
+
+The default calculation assumes the former because the model output is an additional-parallel capacity estimate on existing pylovo cable geometries. For urban construction budgeting, the `line_reopen_urban_eur_per_km = 165000` value should be used as a sensitivity.
+
+Primary/context sources from the synthesis:
+
+- BNetzA distribution-grid status and expansion context: https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/VerteilerNetz/start.html
+- dena Verteilnetzstudie II Gutachten, 2025: https://www.dena.de/fileadmin/dena/Publikationen/PDFs/2025/Gutachten_VNSII.pdf
+- Consentec/Fraunhofer VN-Zukunft, 2025: https://consentec.de/app/uploads/2025/08/Consentec_ISI_IEG_BMWK_VN-Zukunft_AbschlussBer_20250627-1.pdf
+- Destatis construction/civil-engineering price indices: https://www.destatis.de/DE/Themen/Wirtschaft/Konjunkturindikatoren/Preise/bpr210.html
+
+Additional source names used in the synthesis and retained for traceability: Wintzek 2021, Agora/FfE 2023, WEI/GridSim 2025, dena 2012, and FfE MONA.
+
+## Interpretation Guidance
+
+Use the default result as an order-of-magnitude spatial screening layer:
+
+- Good for mapping which cable routes and transformer positions become critical.
+- Good for comparing regional cost pressure across scenarios.
+- Not suitable for final construction budgeting without checking route feasibility, trench reopening, switchgear, protection, voltage constraints, station constraints, and DSO-specific planning rules.
+
+The output deliberately keeps `line_cost_basis`, `line_cost_eur_per_km`, and `transformer_cost_basis` in the result tables so QGIS users can see why a feature received its cost.
