@@ -6,14 +6,16 @@ Default assumption key: `de_lv_heuristic_2026`
 
 These values are transparent screening assumptions for spatial postprocessing. They are not construction offers, DSO work-order costs, or a substitute for site-specific grid planning. The capacity heuristic remains deliberately simple: reinforce only where the simulated peak exceeds nominal existing capacity.
 
+Important topology note: cable capacity must be derived from the raw electrical pandapower/pylovo line components, not from `pylovo.lines_result_with_grid`. The `lines_result_with_grid` object is a QGIS-friendly display layer. It can contain artificial helper geometries, offset geometries, merged feeder chains, and visual lines that share geometry without being electrically parallel. It is suitable for displaying and joining final results in QGIS, but it must not be used as the source of installed electrical capacity.
+
 ## Current Defaults Used in the Calculation
 
 | Parameter | Value used | Unit | Use in this model |
 | --- | ---: | --- | --- |
 | Expansion threshold | 100 | % nominal loading | No target loading margin. Reinforcement is triggered only when simulated peak loading exceeds the existing rating. |
-| Parallel LV cable <=150 mm2 in existing route/duct | 25,000 | EUR/km | Applied to overloaded visible line sections whose `std_type` indicates <=150 mm2, including small service cable classes. |
-| Parallel LV cable 185 mm2 in existing route/duct | 45,000 | EUR/km | Applied when `std_type` indicates 185 mm2. |
-| Parallel LV cable 240 mm2 in existing route/duct | 70,000 | EUR/km | Applied when `std_type` indicates 240 mm2. Also used as the default for unknown cable size. |
+| Parallel LV cable <=150 mm2 in existing route/duct | 25,000 | EUR/km | Applied per overloaded raw electrical cable component whose `std_type` indicates <=150 mm2, including small service cable classes. |
+| Parallel LV cable 185 mm2 in existing route/duct | 45,000 | EUR/km | Applied per overloaded raw electrical cable component when `std_type` indicates 185 mm2. |
+| Parallel LV cable 240 mm2 in existing route/duct | 70,000 | EUR/km | Applied per overloaded raw electrical cable component when `std_type` indicates 240 mm2. Also used as the default for unknown cable size. |
 | Reopened-route rural reference | 90,000 | EUR/km | Stored in the assumption table as context/sensitivity, not used by the default cost formula. |
 | Reopened-route suburban reference | 95,000 | EUR/km | Stored in the assumption table as context/sensitivity, not used by the default cost formula. |
 | Reopened-route urban reference | 165,000 | EUR/km | Stored in the assumption table as context/sensitivity, not used by the default cost formula. |
@@ -26,7 +28,7 @@ These values are transparent screening assumptions for spatial postprocessing. T
 
 ## Why These Defaults Fit This Heuristic
 
-The model does not replace existing cables with a newly routed underground line. It estimates the capacity/cost impact of adding enough parallel cable capacity on already represented LV cable sections. Therefore the default cable cost should not be the broad dense-urban reopened-trench value. The direct brownfield parallel-cable values are the best match for this specific calculation.
+The model does not replace existing cables with a newly routed underground line. It estimates the capacity/cost impact of adding enough parallel cable capacity on already represented LV cable components. Therefore the default cable cost should not be the broad dense-urban reopened-trench value. The direct brownfield parallel-cable values are the best match for this specific calculation.
 
 The reopened-route values are still important, especially for dense urban streets, but they are a sensitivity/boundary case. If the result is later interpreted as a full trench reopening or route rebuild, use the reopened-route references instead of the direct-parallel defaults.
 
@@ -34,10 +36,11 @@ For transformers, the previous `additional_kVA * EUR/kVA + fixed handling` rule 
 
 ## Capacity Heuristic
 
-Cable capacity:
+Cable capacity is evaluated on raw electrical line components, ideally `pylovo.pandapower_line` joined to `surrogrid.powerflow_line_result`. The line current from the power-flow result is compared with the installed capacity of the same electrical component.
 
 ```text
-loading_percent = peak_current_ka / max_i_ka * 100
+installed_capacity_ka = max_i_ka * existing_parallel
+loading_percent = peak_current_ka / installed_capacity_ka * 100
 required_parallel = ceil(peak_current_ka / max_i_ka)
 additional_parallel = max(required_parallel - existing_parallel, 0)
 requires_expansion = additional_parallel > 0
@@ -46,13 +49,16 @@ requires_expansion = additional_parallel > 0
 Cable cost:
 
 ```text
-estimated_cost_eur = additional_parallel * length_km * selected_parallel_cable_cost_eur_per_km
+component_cost_eur = additional_parallel * component_length_km * selected_parallel_cable_cost_eur_per_km
+estimated_cost_eur = sum(component_cost_eur) for the displayed QGIS feature
 ```
 
 The selected line cost is stored per row in:
 
 - `line_cost_eur_per_km`
 - `line_cost_basis`
+
+`pylovo.lines_result_with_grid` should only be used after the raw electrical calculation, to attach final component or aggregated component results to QGIS-friendly geometries. In particular, do not derive `existing_parallel`, `required_parallel`, or installed capacity from a merged helper row in `lines_result_with_grid`. A visual helper can combine multiple feeder pieces using display-oriented rules such as `max(parallel)` and `sum(length_km)`, which can overstate or misassign electrical capacity when independent lines share a lane or when predefined pandapower parallel cables are not visualized as separate geometries.
 
 Transformer capacity:
 
@@ -101,16 +107,22 @@ The selected transformer basis is stored per row in `transformer_cost_basis`.
 
 The source synthesis behind these defaults emphasizes that civil works dominate LV cable cost. Cable material-only values around 25k-28k EUR/km are much lower than full underground-cable costs. Therefore the decisive modeling choice is whether an added parallel cable can use an existing route/duct or whether a paved route must be reopened.
 
-The default calculation assumes the former because the model output is an additional-parallel capacity estimate on existing pylovo cable geometries. For urban construction budgeting, the `line_reopen_urban_eur_per_km = 165000` value should be used as a sensitivity.
+The default calculation assumes the former because the model output is an additional-parallel capacity estimate on existing pylovo electrical cable components. For urban construction budgeting, the `line_reopen_urban_eur_per_km = 165000` value should be used as a sensitivity.
 
-Primary/context sources from the synthesis:
+Primary/context sources and how they are used:
 
-- BNetzA distribution-grid status and expansion context: https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/VerteilerNetz/start.html
-- dena Verteilnetzstudie II Gutachten, 2025: https://www.dena.de/fileadmin/dena/Publikationen/PDFs/2025/Gutachten_VNSII.pdf
-- Consentec/Fraunhofer VN-Zukunft, 2025: https://consentec.de/app/uploads/2025/08/Consentec_ISI_IEG_BMWK_VN-Zukunft_AbschlussBer_20250627-1.pdf
-- Destatis construction/civil-engineering price indices: https://www.destatis.de/DE/Themen/Wirtschaft/Konjunkturindikatoren/Preise/bpr210.html
+- Bundesnetzagentur, "Zustand und Ausbau der Strom-Verteilernetze": context for why distribution-grid expansion is driven by renewable generation, electromobility, and heat-sector electrification. The page also states that the 2024 distribution-grid expansion plans use regional scenarios and include the legal 2045 climate-neutrality targets. https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/VerteilerNetz/start.html
+- Deutsche Energie-Agentur, dena-Verteilnetzstudie II Gutachten, 2025: recent DSO-informed boundary values for broad NS-line and station-cost assumptions. Table 12 reports low / Musterhausen / high cost assumptions of 80k / 182k / 380k EUR per km for NS lines and 80k / 101k / 140k EUR per network station including transformer. These values are used as conservative boundary checks, not as the default direct-parallel-cable cost. https://www.dena.de/fileadmin/dena/Publikationen/PDFs/2025/Gutachten_VNSII.pdf
+- Consentec, Fraunhofer ISI, Fraunhofer IEG, "Planung von Verteilnetzen der Zukunft", 2025: context for future planning practice and flexibility. The study frames flexibility as a lever that can reduce dimensioning-relevant peaks and long-term grid expansion quantities, rather than as a direct reduction in civil-work unit costs. https://consentec.de/app/uploads/2025/08/Consentec_ISI_IEG_BMWK_VN-Zukunft_AbschlussBer_20250627-1.pdf
+- Statistisches Bundesamt, construction/civil-engineering price indices: context for treating older cable and civil-work values cautiously and applying a qualitative 2025 planning uplift where the direct source is older. https://www.destatis.de/DE/Themen/Wirtschaft/Konjunkturindikatoren/Preise/bpr210.html
 
-Additional source names used in the synthesis and retained for traceability: Wintzek 2021, Agora/FfE 2023, WEI/GridSim 2025, dena 2012, and FfE MONA.
+Additional source names used in the synthesis and retained for traceability:
+
+- Wintzek 2021: direct brownfield parallel-cable values and transformer equipment anchors. Used as the strongest match for the default existing-route parallel-cable cost tiers.
+- Agora/FfE 2023: cable material and laying decomposition, transformer and rONT equipment anchors, and rONT/flexibility context. Used for consistency checks and reopened-route sensitivity values.
+- WEI/GridSim 2025: recent modelling assumptions for cable material, installation, transformer replacements, and station rebuilds. Used for all-in transformer replacement bins and reopened-route sensitivity checks.
+- dena 2012: older DSO-validated lower-bound plausibility check. Not used as the primary default because the cost base is historical.
+- FfE MONA and related FfE distribution-grid modelling: retained for methodological traceability around LV-grid simulations and technology options.
 
 ## Interpretation Guidance
 
@@ -119,5 +131,6 @@ Use the default result as an order-of-magnitude spatial screening layer:
 - Good for mapping which cable routes and transformer positions become critical.
 - Good for comparing regional cost pressure across scenarios.
 - Not suitable for final construction budgeting without checking route feasibility, trench reopening, switchgear, protection, voltage constraints, station constraints, and DSO-specific planning rules.
+- Not suitable for inferring electrical parallel cables from QGIS helper geometries. Raw electrical line components must remain the source for installed capacity and additional cable counts.
 
 The output deliberately keeps `line_cost_basis`, `line_cost_eur_per_km`, and `transformer_cost_basis` in the result tables so QGIS users can see why a feature received its cost.
