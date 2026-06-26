@@ -19,7 +19,7 @@ from timeframe import read_hdf_metadata, scenario_key_for_timeframe
 
 
 class SaveFile:
-    def __init__(self, filename, storage="h5", pre_only=False):
+    def __init__(self, filename, storage="h5", pre_only=False, run_name=None):
         # Copy input file to destination directory
         self.filename = filename
         self.storage = storage
@@ -39,6 +39,7 @@ class SaveFile:
                 urbs_input_file=filename,
                 pre_only=pre_only,
                 scenario_key=scenario_key_for_timeframe(self.timeframe_metadata.get("timeframe_mode", "full_year")),
+                run_name=run_name,
                 assumptions=self.timeframe_metadata,
             )
 
@@ -77,6 +78,21 @@ class SaveFile:
             return
         with pd.HDFStore(self.output_path, mode="a", complib='blosc', complevel=9) as store:
             store.put(dir, df)
+
+    def save_summary(self, summary, stage):
+        if self.storage != "db":
+            raise ValueError("Summary-only powerflow currently supports --storage db only.")
+        grid_summary = summary.get("grid_summary", summary)
+        cable_rows = len(summary.get("cable_summary", [])) if isinstance(summary, dict) else 0
+        bus_rows = len(summary.get("bus_voltage_summary", [])) if isinstance(summary, dict) else 0
+        tail_rows = len(summary.get("tail_summary", [])) if isinstance(summary, dict) else 0
+        print(
+            f"Saving pwrflw/summary/{stage} to DB for powerflow_run_id={self.powerflow_run_id} ",
+            f"metrics={grid_summary} cable_rows={cable_rows} bus_rows={bus_rows} tail_rows={tail_rows}",
+            flush=True,
+        )
+        self.db.write_powerflow_summary(self.powerflow_run_id, stage, summary)
+        print(f"Finished saving pwrflw/summary/{stage} to DB for powerflow_run_id={self.powerflow_run_id}", flush=True)
 
     def _save_df_to_db(self, df, dir):
         clean_dir = dir.strip("/")

@@ -43,7 +43,22 @@ if __name__ == "__main__":
         action="store_true",
         help="Run only pre-expansion powerflow from urbs_in/demand; does not require urbs_out/MILP/tau_pro.",
     )
+    parser.add_argument(
+        "--summary-only",
+        action="store_true",
+        help=(
+            "DB/pre-only mode: run all timesteps but save only compact headline "
+            "metrics to surrogrid.powerflow_summary instead of full time-series tables."
+        ),
+    )
+    parser.add_argument(
+        "--run-name",
+        default=None,
+        help="Optional DB powerflow run name. Useful for storing backbone-only summaries separately.",
+    )
     args = parser.parse_args()
+    if args.summary_only and (args.storage != "db" or not args.pre_only):
+        parser.error("--summary-only currently requires --storage db --pre-only.")
 
     # list all .h5 files in your directory
     all_entries = os.listdir("Input/")
@@ -74,6 +89,7 @@ if __name__ == "__main__":
         settings["file"],
         storage=args.storage,
         pre_only=args.pre_only,
+        run_name=args.run_name,
     )
 
 
@@ -85,25 +101,46 @@ if __name__ == "__main__":
     else:
         df_pre_demand, df_post_demand = dmnds.obtain_demand(SF)
 
-    # Save to be retrieved later by ML model
-    SF.save_df(df_pre_demand, "/pwrflw/input/demand_pre")
-    if df_post_demand is not None:
-        SF.save_df(df_post_demand, "/pwrflw/input/demand_post")
+    # Save to be retrieved later by ML model unless this run is intentionally summary-only.
+    if not args.summary_only:
+        SF.save_df(df_pre_demand, "/pwrflw/input/demand_pre")
+        if df_post_demand is not None:
+            SF.save_df(df_post_demand, "/pwrflw/input/demand_post")
 
 
     ##### Powerflow #####
     # Readout grid from file
     grid = SF.get_input_grid()
+    transformer_s_rated_mva = float(grid.trafo["sn_mva"].sum()) if "sn_mva" in grid.trafo.columns else float("nan")
+    cable_max_i_ka = grid.line.get("max_i_ka")
+    if cable_max_i_ka is None:
+        cable_max_i_ka = grid.line.assign(max_i_ka=float("nan"))["max_i_ka"]
+    load_buses = grid.load["bus"].dropna().astype(int).unique().tolist() if "bus" in grid.load.columns else []
+    voltage_buses = load_buses or grid.bus.index.tolist()
     # Remove any load restrictions and replace transformer with switch
     grid = pwrflw.prepare_grid(grid)
+    backbone_cable_ids, voltage_buses = pwrflw.comparison_backbone_scope(grid, load_buses)
+    if not voltage_buses:
+        voltage_buses = load_buses or grid.bus.index.tolist()
 
     # Run powerflow pre DER expansion
     with resource_report(name="Pre-Expansion Powerflow Run", include_children=True):
-        ext_import_pre, vm_pre, line_loads_pre = pwrflw.pf(grid, df_pre_demand, settings["parallel"], settings["n_cpu"])
-        # Save results
-        SF.save_df(ext_import_pre, "/pwrflw/output/pre/demand_import")
-        SF.save_df(vm_pre, "/pwrflw/output/pre/vm")
-        SF.save_df(line_loads_pre, "/pwrflw/output/pre/line_loads")
+        if args.summary_only:
+            summary_pre = pwrflw.pf_summary(
+                grid,
+                df_pre_demand,
+                transformer_s_rated_mva=transformer_s_rated_mva,
+                cable_max_i_ka=cable_max_i_ka,
+                voltage_buses=voltage_buses,
+                cable_ids=backbone_cable_ids,
+            )
+            SF.save_summary(summary_pre, "pre")
+        else:
+            ext_import_pre, vm_pre, line_loads_pre = pwrflw.pf(grid, df_pre_demand, settings["parallel"], settings["n_cpu"])
+            # Save results
+            SF.save_df(ext_import_pre, "/pwrflw/output/pre/demand_import")
+            SF.save_df(vm_pre, "/pwrflw/output/pre/vm")
+            SF.save_df(line_loads_pre, "/pwrflw/output/pre/line_loads")
 
     if not args.pre_only:
         # Run powerflow post DER expansion
