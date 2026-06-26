@@ -51,24 +51,260 @@ class SurroGridDatabase:
         )
 
     def ensure_schema(self) -> None:
-        if self._schema_ready():
-            return
-        sql = SCHEMA_SQL_PATH.read_text(encoding="utf-8")
-        statements = [statement.strip() for statement in sql.split(";") if statement.strip()]
         with self.engine.begin() as conn:
+            if self._schema_ready(conn):
+                return
             conn.execute(text("SELECT pg_advisory_xact_lock(916200005)"))
             if self._schema_ready(conn):
                 return
+            sql = SCHEMA_SQL_PATH.read_text(encoding="utf-8")
+            statements = [statement.strip() for statement in sql.split(";") if statement.strip()]
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb"))
             conn.execute(text("CREATE SCHEMA IF NOT EXISTS surrogrid"))
             self._migrate_legacy_scenario_schema(conn)
             for statement in statements:
                 conn.execute(text(statement))
+            self._ensure_powerflow_summary_columns(conn)
+            self._ensure_real_powerflow_schema(conn)
+
+    def _ensure_powerflow_summary_columns(self, conn) -> None:
+        column_specs = {
+            "powerflow_summary": {
+                "trafo_loading_p50_time_percent": "DOUBLE PRECISION",
+                "trafo_loading_p90_time_percent": "DOUBLE PRECISION",
+                "trafo_loading_p99_time_percent": "DOUBLE PRECISION",
+                "trafo_loading_max_time_percent": "DOUBLE PRECISION",
+                "trafo_loading_hours_above_100": "INTEGER",
+                "cable_hours_above_100_p95_asset": "DOUBLE PRECISION",
+                "voltage_hours_below_0_90_p95_asset": "DOUBLE PRECISION",
+            },
+            "powerflow_cable_summary": {
+                "cable_loading_p50_time_percent": "DOUBLE PRECISION",
+                "cable_loading_p90_time_percent": "DOUBLE PRECISION",
+                "cable_loading_p95_time_percent": "DOUBLE PRECISION",
+                "cable_loading_p99_time_percent": "DOUBLE PRECISION",
+                "cable_loading_hours_above_100": "INTEGER",
+            },
+            "powerflow_bus_voltage_summary": {
+                "voltage_p50_time_pu": "DOUBLE PRECISION",
+                "voltage_p10_time_pu": "DOUBLE PRECISION",
+                "voltage_p01_time_pu": "DOUBLE PRECISION",
+                "voltage_min_time_pu": "DOUBLE PRECISION",
+                "voltage_hours_below_0_90": "INTEGER",
+            },
+        }
+        for table_name, columns in column_specs.items():
+            for column_name, column_type in columns.items():
+                conn.execute(
+                    text(
+                        f"ALTER TABLE IF EXISTS surrogrid.{table_name} "
+                        f"ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+                    )
+                )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS surrogrid.powerflow_tail_value (
+                    powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.powerflow_run(powerflow_run_id) ON DELETE CASCADE,
+                    stage TEXT NOT NULL,
+                    metric TEXT NOT NULL,
+                    asset_type TEXT NOT NULL,
+                    asset_id INTEGER NOT NULL,
+                    tail TEXT NOT NULL,
+                    threshold_value DOUBLE PRECISION,
+                    t_index INTEGER NOT NULL,
+                    value DOUBLE PRECISION NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_powerflow_tail_value UNIQUE (
+                        powerflow_run_id, stage, metric, asset_type, asset_id, tail, t_index
+                    )
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_powerflow_tail_value_run_stage_metric
+                    ON surrogrid.powerflow_tail_value (powerflow_run_id, stage, metric)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_powerflow_tail_value_asset
+                    ON surrogrid.powerflow_tail_value (metric, asset_type, asset_id)
+                """
+            )
+        )
+
+    def _ensure_real_powerflow_schema(self, conn) -> None:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS surrogrid.real_grid_case (
+                    real_grid_case_id BIGSERIAL PRIMARY KEY,
+                    source TEXT NOT NULL,
+                    plz INTEGER,
+                    lv_id TEXT NOT NULL,
+                    variant TEXT,
+                    category TEXT,
+                    load_status TEXT,
+                    status TEXT,
+                    source_file TEXT NOT NULL,
+                    bus_count INTEGER,
+                    line_count INTEGER,
+                    load_count INTEGER,
+                    assumptions JSONB NOT NULL DEFAULT '{}'::JSONB,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_real_grid_case_source_file UNIQUE (source, source_file)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS surrogrid.real_powerflow_run (
+                    real_powerflow_run_id BIGSERIAL PRIMARY KEY,
+                    real_grid_case_id BIGINT NOT NULL REFERENCES surrogrid.real_grid_case(real_grid_case_id) ON DELETE CASCADE,
+                    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE,
+                    run_name TEXT NOT NULL,
+                    storage_mode TEXT NOT NULL DEFAULT 'db',
+                    pre_only BOOLEAN NOT NULL DEFAULT TRUE,
+                    assumptions JSONB NOT NULL DEFAULT '{}'::JSONB,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_real_powerflow_run_case_scenario_name UNIQUE (real_grid_case_id, scenario_id, run_name)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS surrogrid.real_powerflow_summary (
+                    real_powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.real_powerflow_run(real_powerflow_run_id) ON DELETE CASCADE,
+                    stage TEXT NOT NULL,
+                    n_timesteps INTEGER NOT NULL,
+                    n_voltage_buses INTEGER NOT NULL,
+                    n_cables INTEGER NOT NULL,
+                    transformer_s_rated_mva DOUBLE PRECISION,
+                    trafo_loading_p50_time_percent DOUBLE PRECISION,
+                    trafo_loading_p90_time_percent DOUBLE PRECISION,
+                    trafo_loading_p95_time_percent DOUBLE PRECISION,
+                    trafo_loading_p99_time_percent DOUBLE PRECISION,
+                    trafo_loading_max_time_percent DOUBLE PRECISION,
+                    trafo_loading_hours_above_100 INTEGER,
+                    cable_loading_p95_asset_percent DOUBLE PRECISION,
+                    cable_hours_above_100_p95_asset DOUBLE PRECISION,
+                    voltage_p05_load_bus_hour_pu DOUBLE PRECISION,
+                    voltage_hours_below_0_90_p95_asset DOUBLE PRECISION,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_real_powerflow_summary_run_stage UNIQUE (real_powerflow_run_id, stage)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS surrogrid.real_powerflow_cable_summary (
+                    real_powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.real_powerflow_run(real_powerflow_run_id) ON DELETE CASCADE,
+                    stage TEXT NOT NULL,
+                    cable INTEGER NOT NULL,
+                    cable_loading_p50_time_percent DOUBLE PRECISION,
+                    cable_loading_p90_time_percent DOUBLE PRECISION,
+                    cable_loading_p95_time_percent DOUBLE PRECISION,
+                    cable_loading_p99_time_percent DOUBLE PRECISION,
+                    cable_loading_max_time_percent DOUBLE PRECISION,
+                    cable_loading_hours_above_100 INTEGER,
+                    cable_max_i_ka DOUBLE PRECISION,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_real_powerflow_cable_summary_run_stage_cable UNIQUE (real_powerflow_run_id, stage, cable)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS surrogrid.real_powerflow_bus_voltage_summary (
+                    real_powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.real_powerflow_run(real_powerflow_run_id) ON DELETE CASCADE,
+                    stage TEXT NOT NULL,
+                    bus INTEGER NOT NULL,
+                    voltage_p50_time_pu DOUBLE PRECISION,
+                    voltage_p10_time_pu DOUBLE PRECISION,
+                    voltage_p05_time_pu DOUBLE PRECISION,
+                    voltage_p01_time_pu DOUBLE PRECISION,
+                    voltage_min_time_pu DOUBLE PRECISION,
+                    voltage_hours_below_0_90 INTEGER,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_real_powerflow_bus_voltage_summary_run_stage_bus UNIQUE (real_powerflow_run_id, stage, bus)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS surrogrid.real_powerflow_tail_value (
+                    real_powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.real_powerflow_run(real_powerflow_run_id) ON DELETE CASCADE,
+                    stage TEXT NOT NULL,
+                    metric TEXT NOT NULL,
+                    asset_type TEXT NOT NULL,
+                    asset_id INTEGER NOT NULL,
+                    tail TEXT NOT NULL,
+                    threshold_value DOUBLE PRECISION,
+                    t_index INTEGER NOT NULL,
+                    value DOUBLE PRECISION NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_real_powerflow_tail_value UNIQUE (
+                        real_powerflow_run_id, stage, metric, asset_type, asset_id, tail, t_index
+                    )
+                )
+                """
+            )
+        )
+        for index_sql in (
+            "CREATE INDEX IF NOT EXISTS idx_real_grid_case_plz ON surrogrid.real_grid_case (plz)",
+            "CREATE INDEX IF NOT EXISTS idx_real_powerflow_run_scenario ON surrogrid.real_powerflow_run (scenario_id)",
+            "CREATE INDEX IF NOT EXISTS idx_real_powerflow_summary_run_stage ON surrogrid.real_powerflow_summary (real_powerflow_run_id, stage)",
+            "CREATE INDEX IF NOT EXISTS idx_real_powerflow_cable_summary_run_stage ON surrogrid.real_powerflow_cable_summary (real_powerflow_run_id, stage)",
+            "CREATE INDEX IF NOT EXISTS idx_real_powerflow_bus_voltage_summary_run_stage ON surrogrid.real_powerflow_bus_voltage_summary (real_powerflow_run_id, stage)",
+            "CREATE INDEX IF NOT EXISTS idx_real_powerflow_tail_value_run_stage_metric ON surrogrid.real_powerflow_tail_value (real_powerflow_run_id, stage, metric)",
+        ):
+            conn.execute(text(index_sql))
 
     def _schema_ready(self, conn=None) -> bool:
         query = text(
             """
+            WITH required_columns(table_name, column_name) AS (
+                VALUES
+                    ('demand_allocation_run', 'assumptions'),
+                    ('powerflow_run', 'assumptions'),
+                    ('powerflow_summary', 'trafo_loading_p50_time_percent'),
+                    ('powerflow_summary', 'trafo_loading_p90_time_percent'),
+                    ('powerflow_summary', 'trafo_loading_p99_time_percent'),
+                    ('powerflow_summary', 'trafo_loading_max_time_percent'),
+                    ('powerflow_summary', 'trafo_loading_hours_above_100'),
+                    ('powerflow_summary', 'cable_hours_above_100_p95_asset'),
+                    ('powerflow_summary', 'voltage_hours_below_0_90_p95_asset'),
+                    ('powerflow_cable_summary', 'cable_loading_p50_time_percent'),
+                    ('powerflow_cable_summary', 'cable_loading_p90_time_percent'),
+                    ('powerflow_cable_summary', 'cable_loading_p95_time_percent'),
+                    ('powerflow_cable_summary', 'cable_loading_p99_time_percent'),
+                    ('powerflow_cable_summary', 'cable_loading_hours_above_100'),
+                    ('powerflow_bus_voltage_summary', 'voltage_p50_time_pu'),
+                    ('powerflow_bus_voltage_summary', 'voltage_p10_time_pu'),
+                    ('powerflow_bus_voltage_summary', 'voltage_p01_time_pu'),
+                    ('powerflow_bus_voltage_summary', 'voltage_min_time_pu'),
+                    ('powerflow_bus_voltage_summary', 'voltage_hours_below_0_90')
+            )
             SELECT
                 to_regclass('surrogrid.grid_case') IS NOT NULL
                 AND to_regclass('surrogrid.scenario') IS NOT NULL
@@ -76,19 +312,26 @@ class SurroGridDatabase:
                 AND to_regclass('surrogrid.demand_allocation_run') IS NOT NULL
                 AND to_regclass('surrogrid.powerflow_run') IS NOT NULL
                 AND to_regclass('surrogrid.powerflow_reactive_component') IS NOT NULL
-                AND EXISTS (
+                AND to_regclass('surrogrid.powerflow_summary') IS NOT NULL
+                AND to_regclass('surrogrid.powerflow_cable_summary') IS NOT NULL
+                AND to_regclass('surrogrid.powerflow_bus_voltage_summary') IS NOT NULL
+                AND to_regclass('surrogrid.powerflow_tail_value') IS NOT NULL
+                AND to_regclass('surrogrid.real_grid_case') IS NOT NULL
+                AND to_regclass('surrogrid.real_powerflow_run') IS NOT NULL
+                AND to_regclass('surrogrid.real_powerflow_summary') IS NOT NULL
+                AND to_regclass('surrogrid.real_powerflow_cable_summary') IS NOT NULL
+                AND to_regclass('surrogrid.real_powerflow_bus_voltage_summary') IS NOT NULL
+                AND to_regclass('surrogrid.real_powerflow_tail_value') IS NOT NULL
+                AND NOT EXISTS (
                     SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_schema = 'surrogrid'
-                      AND table_name = 'demand_allocation_run'
-                      AND column_name = 'assumptions'
-                )
-                AND EXISTS (
-                    SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_schema = 'surrogrid'
-                      AND table_name = 'powerflow_run'
-                      AND column_name = 'assumptions'
+                    FROM required_columns rc
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns c
+                        WHERE c.table_schema = 'surrogrid'
+                          AND c.table_name = rc.table_name
+                          AND c.column_name = rc.column_name
+                    )
                 )
                 AND EXISTS (
                     SELECT 1
@@ -1051,6 +1294,159 @@ class SurroGridDatabase:
         out = out.dropna(subset=["value"])
         self._append(out, table_name)
 
+    def get_or_create_real_grid_case(self, grid_ref: dict[str, Any]) -> int:
+        self.ensure_schema()
+        query = text(
+            """
+            INSERT INTO surrogrid.real_grid_case (
+                source, plz, lv_id, variant, category, load_status, status,
+                source_file, bus_count, line_count, load_count, assumptions
+            )
+            VALUES (
+                :source, :plz, :lv_id, :variant, :category, :load_status, :status,
+                :source_file, :bus_count, :line_count, :load_count, CAST(:assumptions AS JSONB)
+            )
+            ON CONFLICT (source, source_file) DO UPDATE SET
+                plz = EXCLUDED.plz,
+                lv_id = EXCLUDED.lv_id,
+                variant = EXCLUDED.variant,
+                category = EXCLUDED.category,
+                load_status = EXCLUDED.load_status,
+                status = EXCLUDED.status,
+                bus_count = EXCLUDED.bus_count,
+                line_count = EXCLUDED.line_count,
+                load_count = EXCLUDED.load_count,
+                assumptions = EXCLUDED.assumptions,
+                updated_at = NOW()
+            RETURNING real_grid_case_id
+            """
+        )
+        params = {
+            "source": str(grid_ref.get("source", "swf")),
+            "plz": grid_ref.get("plz"),
+            "lv_id": str(grid_ref["lv_id"]),
+            "variant": grid_ref.get("variant"),
+            "category": grid_ref.get("category"),
+            "load_status": grid_ref.get("load_status"),
+            "status": grid_ref.get("status"),
+            "source_file": str(grid_ref["source_file"]),
+            "bus_count": grid_ref.get("bus_count"),
+            "line_count": grid_ref.get("line_count"),
+            "load_count": grid_ref.get("load_count"),
+            "assumptions": json.dumps(grid_ref.get("assumptions") or {}),
+        }
+        with self.engine.begin() as conn:
+            return int(conn.execute(query, params).scalar_one())
+
+    def create_real_powerflow_run(
+        self,
+        grid_ref: dict[str, Any],
+        *,
+        run_name: str,
+        scenario_key: str = DEFAULT_SCENARIO_KEY,
+        scenario_label: str = DEFAULT_SCENARIO_LABEL,
+        assumptions: dict[str, Any] | None = None,
+    ) -> int:
+        real_grid_case_id = self.get_or_create_real_grid_case(grid_ref)
+        scenario_id = self.ensure_scenario(
+            scenario_key=scenario_key,
+            scenario_label=scenario_label,
+            assumptions=assumptions,
+        )
+        query = text(
+            """
+            INSERT INTO surrogrid.real_powerflow_run (
+                real_grid_case_id, scenario_id, run_name, storage_mode, pre_only, assumptions
+            )
+            VALUES (
+                :real_grid_case_id, :scenario_id, :run_name, 'db', TRUE, CAST(:assumptions AS JSONB)
+            )
+            ON CONFLICT (real_grid_case_id, scenario_id, run_name) DO UPDATE SET
+                storage_mode = EXCLUDED.storage_mode,
+                pre_only = EXCLUDED.pre_only,
+                assumptions = EXCLUDED.assumptions,
+                updated_at = NOW()
+            RETURNING real_powerflow_run_id
+            """
+        )
+        with self.engine.begin() as conn:
+            run_id = int(
+                conn.execute(
+                    query,
+                    {
+                        "real_grid_case_id": real_grid_case_id,
+                        "scenario_id": scenario_id,
+                        "run_name": run_name,
+                        "assumptions": json.dumps(assumptions or {}),
+                    },
+                ).scalar_one()
+            )
+            self._clear_real_powerflow_run(conn, run_id)
+        return run_id
+
+    def _clear_real_powerflow_run(self, conn, run_id: int) -> None:
+        for table_name in (
+            "real_powerflow_tail_value",
+            "real_powerflow_cable_summary",
+            "real_powerflow_bus_voltage_summary",
+            "real_powerflow_summary",
+        ):
+            conn.execute(
+                text(f"DELETE FROM surrogrid.{table_name} WHERE real_powerflow_run_id = :run_id"),
+                {"run_id": run_id},
+            )
+
+    def write_real_powerflow_summary(self, run_id: int, stage: str, summary: dict[str, Any]) -> None:
+        grid_summary = summary.get("grid_summary", summary)
+        out = pd.DataFrame(
+            [
+                {
+                    "real_powerflow_run_id": int(run_id),
+                    "stage": stage,
+                    "n_timesteps": int(grid_summary.get("n_timesteps", 0)),
+                    "n_voltage_buses": int(grid_summary.get("n_voltage_buses", 0)),
+                    "n_cables": int(grid_summary.get("n_cables", 0)),
+                    "transformer_s_rated_mva": grid_summary.get("transformer_s_rated_mva"),
+                    "trafo_loading_p50_time_percent": grid_summary.get("trafo_loading_p50_time_percent"),
+                    "trafo_loading_p90_time_percent": grid_summary.get("trafo_loading_p90_time_percent"),
+                    "trafo_loading_p95_time_percent": grid_summary.get("trafo_loading_p95_time_percent"),
+                    "trafo_loading_p99_time_percent": grid_summary.get("trafo_loading_p99_time_percent"),
+                    "trafo_loading_max_time_percent": grid_summary.get("trafo_loading_max_time_percent"),
+                    "trafo_loading_hours_above_100": grid_summary.get("trafo_loading_hours_above_100"),
+                    "cable_loading_p95_asset_percent": grid_summary.get("cable_loading_p95_asset_percent"),
+                    "cable_hours_above_100_p95_asset": grid_summary.get("cable_hours_above_100_p95_asset"),
+                    "voltage_p05_load_bus_hour_pu": grid_summary.get("voltage_p05_load_bus_hour_pu"),
+                    "voltage_hours_below_0_90_p95_asset": grid_summary.get("voltage_hours_below_0_90_p95_asset"),
+                }
+            ]
+        )
+        self._append(out, "real_powerflow_summary")
+
+        cable_summary = summary.get("cable_summary")
+        if isinstance(cable_summary, pd.DataFrame) and not cable_summary.empty:
+            cable_out = cable_summary.copy()
+            cable_out.insert(0, "stage", stage)
+            cable_out.insert(0, "real_powerflow_run_id", int(run_id))
+            cable_out["cable"] = cable_out["cable"].astype(int)
+            self._append(cable_out, "real_powerflow_cable_summary")
+
+        bus_voltage_summary = summary.get("bus_voltage_summary")
+        if isinstance(bus_voltage_summary, pd.DataFrame) and not bus_voltage_summary.empty:
+            bus_out = bus_voltage_summary.copy()
+            bus_out.insert(0, "stage", stage)
+            bus_out.insert(0, "real_powerflow_run_id", int(run_id))
+            bus_out["bus"] = bus_out["bus"].astype(int)
+            self._append(bus_out, "real_powerflow_bus_voltage_summary")
+
+        tail_summary = summary.get("tail_summary")
+        if isinstance(tail_summary, pd.DataFrame) and not tail_summary.empty:
+            tail_out = tail_summary.copy()
+            tail_out.insert(0, "stage", stage)
+            tail_out.insert(0, "real_powerflow_run_id", int(run_id))
+            tail_out["asset_id"] = tail_out["asset_id"].astype(int)
+            tail_out["t_index"] = tail_out["t_index"].astype(int)
+            self._append(tail_out, "real_powerflow_tail_value")
+
     def create_powerflow_run(
         self,
         grid_ref: dict[str, Any],
@@ -1118,6 +1514,10 @@ class SurroGridDatabase:
 
     def _clear_powerflow_run(self, conn, run_id: int) -> None:
         for table_name in (
+            "powerflow_tail_value",
+            "powerflow_cable_summary",
+            "powerflow_bus_voltage_summary",
+            "powerflow_summary",
             "powerflow_reactive_component",
             "powerflow_line_result",
             "powerflow_bus_voltage",
@@ -1128,6 +1528,57 @@ class SurroGridDatabase:
                 text(f"DELETE FROM surrogrid.{table_name} WHERE powerflow_run_id = :run_id"),
                 {"run_id": run_id},
             )
+
+    def write_powerflow_summary(self, run_id: int, stage: str, summary: dict[str, Any]) -> None:
+        grid_summary = summary.get("grid_summary", summary)
+        out = pd.DataFrame(
+            [
+                {
+                    "powerflow_run_id": int(run_id),
+                    "stage": stage,
+                    "n_timesteps": int(grid_summary.get("n_timesteps", 0)),
+                    "n_voltage_buses": int(grid_summary.get("n_voltage_buses", 0)),
+                    "n_cables": int(grid_summary.get("n_cables", 0)),
+                    "transformer_s_rated_mva": grid_summary.get("transformer_s_rated_mva"),
+                    "trafo_loading_p50_time_percent": grid_summary.get("trafo_loading_p50_time_percent"),
+                    "trafo_loading_p90_time_percent": grid_summary.get("trafo_loading_p90_time_percent"),
+                    "trafo_loading_p95_time_percent": grid_summary.get("trafo_loading_p95_time_percent"),
+                    "trafo_loading_p99_time_percent": grid_summary.get("trafo_loading_p99_time_percent"),
+                    "trafo_loading_max_time_percent": grid_summary.get("trafo_loading_max_time_percent"),
+                    "trafo_loading_hours_above_100": grid_summary.get("trafo_loading_hours_above_100"),
+                    "cable_loading_p95_asset_percent": grid_summary.get("cable_loading_p95_asset_percent"),
+                    "cable_hours_above_100_p95_asset": grid_summary.get("cable_hours_above_100_p95_asset"),
+                    "voltage_p05_load_bus_hour_pu": grid_summary.get("voltage_p05_load_bus_hour_pu"),
+                    "voltage_hours_below_0_90_p95_asset": grid_summary.get("voltage_hours_below_0_90_p95_asset"),
+                }
+            ]
+        )
+        self._append(out, "powerflow_summary")
+
+        cable_summary = summary.get("cable_summary")
+        if isinstance(cable_summary, pd.DataFrame) and not cable_summary.empty:
+            cable_out = cable_summary.copy()
+            cable_out.insert(0, "stage", stage)
+            cable_out.insert(0, "powerflow_run_id", int(run_id))
+            cable_out["cable"] = cable_out["cable"].astype(int)
+            self._append(cable_out, "powerflow_cable_summary")
+
+        bus_voltage_summary = summary.get("bus_voltage_summary")
+        if isinstance(bus_voltage_summary, pd.DataFrame) and not bus_voltage_summary.empty:
+            bus_out = bus_voltage_summary.copy()
+            bus_out.insert(0, "stage", stage)
+            bus_out.insert(0, "powerflow_run_id", int(run_id))
+            bus_out["bus"] = bus_out["bus"].astype(int)
+            self._append(bus_out, "powerflow_bus_voltage_summary")
+
+        tail_summary = summary.get("tail_summary")
+        if isinstance(tail_summary, pd.DataFrame) and not tail_summary.empty:
+            tail_out = tail_summary.copy()
+            tail_out.insert(0, "stage", stage)
+            tail_out.insert(0, "powerflow_run_id", int(run_id))
+            tail_out["asset_id"] = tail_out["asset_id"].astype(int)
+            tail_out["t_index"] = tail_out["t_index"].astype(int)
+            self._append(tail_out, "powerflow_tail_value")
 
     def write_powerflow_demand(self, run_id: int, stage: str, df: pd.DataFrame) -> None:
         ts = self._timestamps_for_powerflow_run(run_id, len(df))

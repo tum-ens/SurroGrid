@@ -349,3 +349,84 @@ CREATE TABLE IF NOT EXISTS surrogrid.powerflow_reactive_component (
 CREATE INDEX IF NOT EXISTS idx_powerflow_reactive_run ON surrogrid.powerflow_reactive_component (powerflow_run_id, t_index);
 CREATE INDEX IF NOT EXISTS idx_powerflow_reactive_bus ON surrogrid.powerflow_reactive_component (bus);
 SELECT create_hypertable('surrogrid.powerflow_reactive_component', 'ts', if_not_exists => TRUE);
+
+CREATE TABLE IF NOT EXISTS surrogrid.powerflow_summary (
+    powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.powerflow_run(powerflow_run_id) ON DELETE CASCADE,
+    stage TEXT NOT NULL,
+    n_timesteps INTEGER NOT NULL,
+    n_voltage_buses INTEGER NOT NULL,
+    n_cables INTEGER NOT NULL,
+    transformer_s_rated_mva DOUBLE PRECISION,
+    trafo_loading_p50_time_percent DOUBLE PRECISION,
+    trafo_loading_p90_time_percent DOUBLE PRECISION,
+    trafo_loading_p95_time_percent DOUBLE PRECISION,
+    trafo_loading_p99_time_percent DOUBLE PRECISION,
+    trafo_loading_max_time_percent DOUBLE PRECISION,
+    trafo_loading_hours_above_100 INTEGER,
+    cable_loading_p95_asset_percent DOUBLE PRECISION,
+    cable_hours_above_100_p95_asset DOUBLE PRECISION,
+    voltage_p05_load_bus_hour_pu DOUBLE PRECISION,
+    voltage_hours_below_0_90_p95_asset DOUBLE PRECISION,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_powerflow_summary_run_stage UNIQUE (powerflow_run_id, stage)
+);
+
+CREATE INDEX IF NOT EXISTS idx_powerflow_summary_run_stage
+    ON surrogrid.powerflow_summary (powerflow_run_id, stage);
+
+CREATE TABLE IF NOT EXISTS surrogrid.powerflow_cable_summary (
+    powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.powerflow_run(powerflow_run_id) ON DELETE CASCADE,
+    stage TEXT NOT NULL,
+    cable INTEGER NOT NULL,
+    cable_loading_p50_time_percent DOUBLE PRECISION,
+    cable_loading_p90_time_percent DOUBLE PRECISION,
+    cable_loading_p95_time_percent DOUBLE PRECISION,
+    cable_loading_p99_time_percent DOUBLE PRECISION,
+    cable_loading_max_time_percent DOUBLE PRECISION,
+    cable_loading_hours_above_100 INTEGER,
+    cable_max_i_ka DOUBLE PRECISION,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_powerflow_cable_summary_run_stage_cable UNIQUE (powerflow_run_id, stage, cable)
+);
+
+CREATE INDEX IF NOT EXISTS idx_powerflow_cable_summary_run_stage
+    ON surrogrid.powerflow_cable_summary (powerflow_run_id, stage);
+
+CREATE TABLE IF NOT EXISTS surrogrid.powerflow_bus_voltage_summary (
+    powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.powerflow_run(powerflow_run_id) ON DELETE CASCADE,
+    stage TEXT NOT NULL,
+    bus INTEGER NOT NULL,
+    voltage_p50_time_pu DOUBLE PRECISION,
+    voltage_p10_time_pu DOUBLE PRECISION,
+    voltage_p05_time_pu DOUBLE PRECISION,
+    voltage_p01_time_pu DOUBLE PRECISION,
+    voltage_min_time_pu DOUBLE PRECISION,
+    voltage_hours_below_0_90 INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_powerflow_bus_voltage_summary_run_stage_bus UNIQUE (powerflow_run_id, stage, bus)
+);
+
+CREATE INDEX IF NOT EXISTS idx_powerflow_bus_voltage_summary_run_stage
+    ON surrogrid.powerflow_bus_voltage_summary (powerflow_run_id, stage);
+
+CREATE TABLE IF NOT EXISTS surrogrid.powerflow_tail_value (
+    powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.powerflow_run(powerflow_run_id) ON DELETE CASCADE,
+    stage TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    asset_type TEXT NOT NULL,
+    asset_id INTEGER NOT NULL,
+    tail TEXT NOT NULL,
+    threshold_value DOUBLE PRECISION,
+    t_index INTEGER NOT NULL,
+    value DOUBLE PRECISION NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_powerflow_tail_value UNIQUE (
+        powerflow_run_id, stage, metric, asset_type, asset_id, tail, t_index
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_powerflow_tail_value_run_stage_metric
+    ON surrogrid.powerflow_tail_value (powerflow_run_id, stage, metric);
+
+CREATE INDEX IF NOT EXISTS idx_powerflow_tail_value_asset
+    ON surrogrid.powerflow_tail_value (metric, asset_type, asset_id);
