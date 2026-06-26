@@ -575,6 +575,1082 @@ def _grid_label_from_row(row: pd.Series) -> str:
     return f"{ags}-{int(row['plz'])}_{int(row['kcid'])}_{int(row['bcid'])}"
 
 
+def powerflow_headline_summary_db(
+    input_id: str | None = None,
+    run_name: str = "baseline_static_pre_powerflow",
+    stage: str = "pre",
+    scenario_id: int | None = None,
+    ags: str | int | None = None,
+    plz: int | None = None,
+    kcid: int | None = None,
+    bcid: int | None = None,
+    candidate_index: int = 0,
+    min_buildings: int = 5,
+) -> pd.DataFrame:
+    """Read compact DB-backed headline power-flow metrics for comparison plots."""
+    db = SurroGridDatabase()
+    run_id = None
+    if input_id is not None:
+        grid_ref = _resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
+        run = _resolve_powerflow_run(db, grid_ref, run_name, scenario_id)
+        run_id = int(run["powerflow_run_id"])
+
+    query = text(
+        """
+        SELECT pr.powerflow_run_id,
+               pr.run_name,
+               pr.scenario_id,
+               sc.scenario_key,
+               gc.ags,
+               gc.plz,
+               gc.kcid,
+               gc.bcid,
+               gc.pylovo_grid_result_id,
+               pfs.stage,
+               pfs.n_timesteps,
+               pfs.n_voltage_buses,
+               pfs.n_cables,
+               pfs.transformer_s_rated_mva,
+               pfs.trafo_loading_p50_time_percent,
+               pfs.trafo_loading_p90_time_percent,
+               pfs.trafo_loading_p95_time_percent,
+               pfs.trafo_loading_p99_time_percent,
+               pfs.trafo_loading_max_time_percent,
+               pfs.trafo_loading_hours_above_100,
+               pfs.cable_loading_p95_asset_percent,
+               pfs.cable_hours_above_100_p95_asset,
+               pfs.voltage_p05_load_bus_hour_pu,
+               pfs.voltage_hours_below_0_90_p95_asset
+        FROM surrogrid.powerflow_summary pfs
+        JOIN surrogrid.powerflow_run pr USING (powerflow_run_id)
+        JOIN surrogrid.scenario sc USING (scenario_id)
+        JOIN surrogrid.grid_case gc USING (grid_case_id)
+        WHERE pr.run_name = :run_name
+          AND pfs.stage = :stage
+          AND (:run_id IS NULL OR pr.powerflow_run_id = :run_id)
+          AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
+          AND (:ags IS NULL OR gc.ags = :ags)
+          AND (:filter_plz IS NULL OR gc.plz = :filter_plz)
+          AND (:filter_kcid IS NULL OR gc.kcid = :filter_kcid)
+          AND (:filter_bcid IS NULL OR gc.bcid = :filter_bcid)
+        ORDER BY gc.ags, gc.plz, gc.kcid, gc.bcid, pr.powerflow_run_id, pfs.stage
+        """
+    )
+    with db.engine.connect() as conn:
+        summary = pd.read_sql_query(
+            query,
+            conn,
+            params={
+                "run_name": run_name,
+                "stage": stage,
+                "run_id": run_id,
+                "scenario_id": scenario_id,
+                "ags": _normalize_optional_ags(ags),
+                "filter_plz": plz if input_id is None else None,
+                "filter_kcid": kcid if input_id is None else None,
+                "filter_bcid": bcid if input_id is None else None,
+            },
+        )
+
+    if summary.empty:
+        raise ValueError(f"No compact DB power-flow summary found for run name {run_name!r}.")
+
+    summary["grid"] = summary.apply(_grid_label_from_row, axis=1)
+    return summary[
+        [
+            "grid",
+            "powerflow_run_id",
+            "run_name",
+            "scenario_id",
+            "scenario_key",
+            "stage",
+            "ags",
+            "plz",
+            "kcid",
+            "bcid",
+            "pylovo_grid_result_id",
+            "n_timesteps",
+            "n_voltage_buses",
+            "n_cables",
+            "transformer_s_rated_mva",
+            "trafo_loading_p50_time_percent",
+            "trafo_loading_p90_time_percent",
+            "trafo_loading_p95_time_percent",
+            "trafo_loading_p99_time_percent",
+            "trafo_loading_max_time_percent",
+            "trafo_loading_hours_above_100",
+            "cable_loading_p95_asset_percent",
+            "cable_hours_above_100_p95_asset",
+            "voltage_p05_load_bus_hour_pu",
+            "voltage_hours_below_0_90_p95_asset",
+        ]
+    ].reset_index(drop=True)
+
+
+def powerflow_tail_duration_data_db(
+    input_id: str | None = None,
+    run_name: str = "baseline_static_pre_powerflow",
+    stage: str = "pre",
+    scenario_id: int | None = None,
+    ags: str | int | None = None,
+    plz: int | None = None,
+    kcid: int | None = None,
+    bcid: int | None = None,
+    candidate_index: int = 0,
+    min_buildings: int = 5,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load grid summary, p99/p01 tail values, and percentile profiles together."""
+    kwargs = {
+        "input_id": input_id,
+        "run_name": run_name,
+        "stage": stage,
+        "scenario_id": scenario_id,
+        "ags": ags,
+        "plz": plz,
+        "kcid": kcid,
+        "bcid": bcid,
+        "candidate_index": candidate_index,
+        "min_buildings": min_buildings,
+    }
+    grid_summary = powerflow_headline_summary_db(**kwargs)
+    tail_values = powerflow_tail_values_db(**kwargs)
+    percentile_profile = powerflow_percentile_profile_db(**kwargs)
+    return grid_summary, tail_values, percentile_profile
+
+
+def powerflow_tail_values_db(
+    input_id: str | None = None,
+    run_name: str = "baseline_static_pre_powerflow",
+    stage: str = "pre",
+    scenario_id: int | None = None,
+    ags: str | int | None = None,
+    plz: int | None = None,
+    kcid: int | None = None,
+    bcid: int | None = None,
+    candidate_index: int = 0,
+    min_buildings: int = 5,
+) -> pd.DataFrame:
+    """Read DB-backed p99/p01 tail-hour values at transformer/cable/bus level."""
+    grid_summary = powerflow_headline_summary_db(
+        input_id=input_id,
+        run_name=run_name,
+        stage=stage,
+        scenario_id=scenario_id,
+        ags=ags,
+        plz=plz,
+        kcid=kcid,
+        bcid=bcid,
+        candidate_index=candidate_index,
+        min_buildings=min_buildings,
+    )
+    run_ids = grid_summary["powerflow_run_id"].astype(int).tolist()
+    if not run_ids:
+        return pd.DataFrame()
+
+    db = SurroGridDatabase()
+    query = text(
+        """
+        SELECT powerflow_run_id, stage, metric, asset_type, asset_id, tail,
+               threshold_value, t_index, value
+        FROM surrogrid.powerflow_tail_value
+        WHERE powerflow_run_id = ANY(:run_ids)
+          AND stage = :stage
+        """
+    )
+    with db.engine.connect() as conn:
+        tail_rows = pd.read_sql_query(query, conn, params={"run_ids": run_ids, "stage": stage})
+
+    meta_cols = [
+        "grid",
+        "powerflow_run_id",
+        "run_name",
+        "scenario_id",
+        "scenario_key",
+        "stage",
+        "ags",
+        "plz",
+        "kcid",
+        "bcid",
+        "pylovo_grid_result_id",
+    ]
+    if tail_rows.empty:
+        return pd.DataFrame(
+            columns=meta_cols
+            + [
+                "metric",
+                "asset_type",
+                "asset_id",
+                "asset_label",
+                "tail",
+                "threshold_value",
+                "t_index",
+                "value",
+            ]
+        )
+
+    tail_rows = tail_rows.merge(grid_summary[meta_cols], on=["powerflow_run_id", "stage"], how="left")
+    tail_rows["asset_label"] = tail_rows["asset_type"].astype(str) + " " + tail_rows["asset_id"].astype(str)
+    tail_rows.loc[tail_rows["asset_type"] == "transformer", "asset_label"] = (
+        tail_rows.loc[tail_rows["asset_type"] == "transformer", "grid"] + " transformer"
+    )
+    tail_rows["value"] = tail_rows["value"].astype(float)
+    tail_rows["threshold_value"] = tail_rows["threshold_value"].astype(float)
+    tail_rows["t_index"] = tail_rows["t_index"].astype(int)
+    return tail_rows[
+        meta_cols
+        + [
+            "metric",
+            "asset_type",
+            "asset_id",
+            "asset_label",
+            "tail",
+            "threshold_value",
+            "t_index",
+            "value",
+        ]
+    ].dropna(subset=["value"]).reset_index(drop=True)
+
+
+powerflow_headline_asset_summary_db = powerflow_tail_values_db
+
+
+def tail_threshold_counts(
+    tail_values: pd.DataFrame,
+    loading_threshold_percent: float = 100.0,
+    voltage_threshold_pu: float = 0.90,
+) -> pd.DataFrame:
+    """Count stored tail hours beyond thresholds, with completeness flags.
+
+    Counts are exact when the requested threshold is at least as extreme as the
+    stored asset-specific tail threshold: loading threshold >= p99 threshold, or
+    voltage threshold <= p01 threshold. Otherwise the count is a lower bound
+    because non-tail hours were not stored.
+    """
+    if tail_values.empty:
+        return pd.DataFrame()
+
+    df = tail_values.copy()
+    is_loading = df["metric"].isin(["Transformer", "Cables"])
+    is_voltage = df["metric"] == "Voltage"
+    df["beyond_threshold"] = False
+    df.loc[is_loading, "beyond_threshold"] = df.loc[is_loading, "value"] >= loading_threshold_percent
+    df.loc[is_voltage, "beyond_threshold"] = df.loc[is_voltage, "value"] <= voltage_threshold_pu
+
+    df["threshold_used"] = np.nan
+    df.loc[is_loading, "threshold_used"] = float(loading_threshold_percent)
+    df.loc[is_voltage, "threshold_used"] = float(voltage_threshold_pu)
+
+    df["is_complete_for_threshold"] = False
+    df.loc[is_loading, "is_complete_for_threshold"] = (
+        loading_threshold_percent >= df.loc[is_loading, "threshold_value"]
+    )
+    df.loc[is_voltage, "is_complete_for_threshold"] = (
+        voltage_threshold_pu <= df.loc[is_voltage, "threshold_value"]
+    )
+
+    group_cols = [
+        "grid",
+        "powerflow_run_id",
+        "run_name",
+        "scenario_id",
+        "scenario_key",
+        "stage",
+        "ags",
+        "plz",
+        "kcid",
+        "bcid",
+        "pylovo_grid_result_id",
+        "metric",
+        "asset_type",
+        "asset_id",
+        "asset_label",
+        "tail",
+    ]
+    return (
+        df.groupby(group_cols, as_index=False)
+        .agg(
+            n_tail_hours=("value", "size"),
+            n_tail_hours_beyond_threshold=("beyond_threshold", "sum"),
+            threshold_used=("threshold_used", "first"),
+            stored_tail_threshold=("threshold_value", "first"),
+            is_complete_for_threshold=("is_complete_for_threshold", "all"),
+        )
+        .reset_index(drop=True)
+    )
+
+
+def powerflow_percentile_profile_db(
+    input_id: str | None = None,
+    run_name: str = "baseline_static_pre_powerflow",
+    stage: str = "pre",
+    scenario_id: int | None = None,
+    ags: str | int | None = None,
+    plz: int | None = None,
+    kcid: int | None = None,
+    bcid: int | None = None,
+    candidate_index: int = 0,
+    min_buildings: int = 5,
+) -> pd.DataFrame:
+    """Read per-asset time-percentiles in long form for duration-profile plots."""
+    grid_summary = powerflow_headline_summary_db(
+        input_id=input_id,
+        run_name=run_name,
+        stage=stage,
+        scenario_id=scenario_id,
+        ags=ags,
+        plz=plz,
+        kcid=kcid,
+        bcid=bcid,
+        candidate_index=candidate_index,
+        min_buildings=min_buildings,
+    )
+    run_ids = grid_summary["powerflow_run_id"].astype(int).tolist()
+    if not run_ids:
+        return pd.DataFrame()
+
+    db = SurroGridDatabase()
+    cable_query = text(
+        """
+        SELECT powerflow_run_id, stage, cable AS asset_id,
+               cable_loading_p50_time_percent, cable_loading_p90_time_percent,
+               cable_loading_p95_time_percent, cable_loading_p99_time_percent,
+               cable_loading_max_time_percent
+        FROM surrogrid.powerflow_cable_summary
+        WHERE powerflow_run_id = ANY(:run_ids)
+          AND stage = :stage
+        """
+    )
+    voltage_query = text(
+        """
+        SELECT powerflow_run_id, stage, bus AS asset_id,
+               voltage_p50_time_pu, voltage_p10_time_pu, voltage_p05_time_pu,
+               voltage_p01_time_pu, voltage_min_time_pu
+        FROM surrogrid.powerflow_bus_voltage_summary
+        WHERE powerflow_run_id = ANY(:run_ids)
+          AND stage = :stage
+        """
+    )
+    with db.engine.connect() as conn:
+        cable_rows = pd.read_sql_query(cable_query, conn, params={"run_ids": run_ids, "stage": stage})
+        voltage_rows = pd.read_sql_query(voltage_query, conn, params={"run_ids": run_ids, "stage": stage})
+
+    meta_cols = [
+        "grid",
+        "powerflow_run_id",
+        "run_name",
+        "scenario_id",
+        "scenario_key",
+        "stage",
+        "ags",
+        "plz",
+        "kcid",
+        "bcid",
+        "pylovo_grid_result_id",
+    ]
+    meta = grid_summary[meta_cols].copy()
+    frames = []
+
+    trafo_map = {
+        "p50": "trafo_loading_p50_time_percent",
+        "p90": "trafo_loading_p90_time_percent",
+        "p95": "trafo_loading_p95_time_percent",
+        "p99": "trafo_loading_p99_time_percent",
+        "max": "trafo_loading_max_time_percent",
+    }
+    for order, (percentile, column) in enumerate(trafo_map.items()):
+        rows = grid_summary[meta_cols + [column]].rename(columns={column: "value"})
+        rows["metric"] = "Transformer"
+        rows["asset_type"] = "transformer"
+        rows["asset_id"] = 0
+        rows["asset_label"] = rows["grid"] + " transformer"
+        rows["percentile"] = percentile
+        rows["percentile_order"] = order
+        frames.append(rows)
+
+    cable_map = {
+        "p50": "cable_loading_p50_time_percent",
+        "p90": "cable_loading_p90_time_percent",
+        "p95": "cable_loading_p95_time_percent",
+        "p99": "cable_loading_p99_time_percent",
+        "max": "cable_loading_max_time_percent",
+    }
+    if not cable_rows.empty:
+        cable_rows = cable_rows.merge(meta, on=["powerflow_run_id", "stage"], how="left")
+        for order, (percentile, column) in enumerate(cable_map.items()):
+            rows = cable_rows[meta_cols + ["asset_id", column]].rename(columns={column: "value"})
+            rows["metric"] = "Cables"
+            rows["asset_type"] = "cable"
+            rows["asset_label"] = "cable " + rows["asset_id"].astype(str)
+            rows["percentile"] = percentile
+            rows["percentile_order"] = order
+            frames.append(rows)
+
+    voltage_map = {
+        "p50": "voltage_p50_time_pu",
+        "p10": "voltage_p10_time_pu",
+        "p05": "voltage_p05_time_pu",
+        "p01": "voltage_p01_time_pu",
+        "min": "voltage_min_time_pu",
+    }
+    if not voltage_rows.empty:
+        voltage_rows = voltage_rows.merge(meta, on=["powerflow_run_id", "stage"], how="left")
+        for order, (percentile, column) in enumerate(voltage_map.items()):
+            rows = voltage_rows[meta_cols + ["asset_id", column]].rename(columns={column: "value"})
+            rows["metric"] = "Voltage"
+            rows["asset_type"] = "bus"
+            rows["asset_label"] = "bus " + rows["asset_id"].astype(str)
+            rows["percentile"] = percentile
+            rows["percentile_order"] = order
+            frames.append(rows)
+
+    out = pd.concat(frames, ignore_index=True)
+    out["value"] = out["value"].astype(float)
+    return out[
+        meta_cols
+        + [
+            "metric",
+            "asset_type",
+            "asset_id",
+            "asset_label",
+            "percentile",
+            "percentile_order",
+            "value",
+        ]
+    ].dropna(subset=["value"]).reset_index(drop=True)
+
+
+
+def _real_grid_label_from_row(row: pd.Series) -> str:
+    return f"SWF LV_{int(row['lv_id']):03d}"
+
+
+def real_powerflow_headline_summary_db(
+    run_name: str = "baseline_static_pre_powerflow_real_swf_hh_only",
+    stage: str = "pre",
+    scenario_id: int | None = None,
+    plz: int | None = None,
+    lv_id: str | int | None = None,
+) -> pd.DataFrame:
+    """Read compact real SWF DB-backed headline power-flow metrics."""
+    db = SurroGridDatabase()
+    lv_id_int = None if lv_id is None else int(str(lv_id).removeprefix("LV_"))
+    query = text(
+        """
+        SELECT rpr.real_powerflow_run_id AS powerflow_run_id,
+               rpr.run_name,
+               rpr.scenario_id,
+               sc.scenario_key,
+               rgc.source,
+               rgc.plz,
+               rgc.lv_id,
+               rgc.variant,
+               rgc.category,
+               rgc.load_status,
+               rgc.source_file,
+               rps.stage,
+               rps.n_timesteps,
+               rps.n_voltage_buses,
+               rps.n_cables,
+               rps.transformer_s_rated_mva,
+               rps.trafo_loading_p50_time_percent,
+               rps.trafo_loading_p90_time_percent,
+               rps.trafo_loading_p95_time_percent,
+               rps.trafo_loading_p99_time_percent,
+               rps.trafo_loading_max_time_percent,
+               rps.trafo_loading_hours_above_100,
+               rps.cable_loading_p95_asset_percent,
+               rps.cable_hours_above_100_p95_asset,
+               rps.voltage_p05_load_bus_hour_pu,
+               rps.voltage_hours_below_0_90_p95_asset
+        FROM surrogrid.real_powerflow_summary rps
+        JOIN surrogrid.real_powerflow_run rpr USING (real_powerflow_run_id)
+        JOIN surrogrid.scenario sc USING (scenario_id)
+        JOIN surrogrid.real_grid_case rgc USING (real_grid_case_id)
+        WHERE rpr.run_name = :run_name
+          AND rps.stage = :stage
+          AND (:scenario_id IS NULL OR rpr.scenario_id = :scenario_id)
+          AND (:filter_plz IS NULL OR rgc.plz = :filter_plz)
+          AND (:lv_id IS NULL OR rgc.lv_id = CAST(:lv_id AS TEXT))
+        ORDER BY rgc.lv_id::INTEGER, rpr.real_powerflow_run_id, rps.stage
+        """
+    )
+    with db.engine.connect() as conn:
+        summary = pd.read_sql_query(
+            query,
+            conn,
+            params={
+                "run_name": run_name,
+                "stage": stage,
+                "scenario_id": scenario_id,
+                "filter_plz": plz,
+                "lv_id": None if lv_id_int is None else str(lv_id_int),
+            },
+        )
+
+    if summary.empty:
+        raise ValueError(f"No compact real-grid DB power-flow summary found for run name {run_name!r}.")
+
+    summary["grid"] = summary.apply(_real_grid_label_from_row, axis=1)
+    summary["powerflow_source"] = "real_swf"
+    summary["comparison_group"] = "Real SWF"
+    summary["ags"] = pd.NA
+    summary["kcid"] = pd.NA
+    summary["bcid"] = pd.NA
+    summary["pylovo_grid_result_id"] = pd.NA
+    return summary[
+        [
+            "grid",
+            "powerflow_source",
+            "comparison_group",
+            "powerflow_run_id",
+            "run_name",
+            "scenario_id",
+            "scenario_key",
+            "stage",
+            "ags",
+            "plz",
+            "kcid",
+            "bcid",
+            "pylovo_grid_result_id",
+            "lv_id",
+            "source_file",
+            "n_timesteps",
+            "n_voltage_buses",
+            "n_cables",
+            "transformer_s_rated_mva",
+            "trafo_loading_p50_time_percent",
+            "trafo_loading_p90_time_percent",
+            "trafo_loading_p95_time_percent",
+            "trafo_loading_p99_time_percent",
+            "trafo_loading_max_time_percent",
+            "trafo_loading_hours_above_100",
+            "cable_loading_p95_asset_percent",
+            "cable_hours_above_100_p95_asset",
+            "voltage_p05_load_bus_hour_pu",
+            "voltage_hours_below_0_90_p95_asset",
+        ]
+    ].reset_index(drop=True)
+
+
+def real_powerflow_tail_values_db(
+    run_name: str = "baseline_static_pre_powerflow_real_swf_hh_only",
+    stage: str = "pre",
+    scenario_id: int | None = None,
+    plz: int | None = None,
+    lv_id: str | int | None = None,
+) -> pd.DataFrame:
+    """Read DB-backed p99/p01 tail-hour values for real SWF grids."""
+    grid_summary = real_powerflow_headline_summary_db(
+        run_name=run_name,
+        stage=stage,
+        scenario_id=scenario_id,
+        plz=plz,
+        lv_id=lv_id,
+    )
+    run_ids = grid_summary["powerflow_run_id"].astype(int).tolist()
+    if not run_ids:
+        return pd.DataFrame()
+
+    db = SurroGridDatabase()
+    query = text(
+        """
+        SELECT real_powerflow_run_id AS powerflow_run_id, stage, metric, asset_type,
+               asset_id, tail, threshold_value, t_index, value
+        FROM surrogrid.real_powerflow_tail_value
+        WHERE real_powerflow_run_id = ANY(:run_ids)
+          AND stage = :stage
+        """
+    )
+    with db.engine.connect() as conn:
+        tail_rows = pd.read_sql_query(query, conn, params={"run_ids": run_ids, "stage": stage})
+
+    meta_cols = [
+        "grid",
+        "powerflow_source",
+        "comparison_group",
+        "powerflow_run_id",
+        "run_name",
+        "scenario_id",
+        "scenario_key",
+        "stage",
+        "ags",
+        "plz",
+        "kcid",
+        "bcid",
+        "pylovo_grid_result_id",
+        "lv_id",
+        "source_file",
+    ]
+    if tail_rows.empty:
+        return pd.DataFrame(
+            columns=meta_cols
+            + [
+                "metric",
+                "asset_type",
+                "asset_id",
+                "asset_label",
+                "tail",
+                "threshold_value",
+                "t_index",
+                "value",
+            ]
+        )
+
+    tail_rows = tail_rows.merge(grid_summary[meta_cols], on=["powerflow_run_id", "stage"], how="left")
+    tail_rows["asset_label"] = tail_rows["asset_type"].astype(str) + " " + tail_rows["asset_id"].astype(str)
+    tail_rows.loc[tail_rows["asset_type"] == "transformer", "asset_label"] = (
+        tail_rows.loc[tail_rows["asset_type"] == "transformer", "grid"] + " transformer"
+    )
+    tail_rows["value"] = tail_rows["value"].astype(float)
+    tail_rows["threshold_value"] = tail_rows["threshold_value"].astype(float)
+    tail_rows["t_index"] = tail_rows["t_index"].astype(int)
+    return tail_rows[
+        meta_cols
+        + [
+            "metric",
+            "asset_type",
+            "asset_id",
+            "asset_label",
+            "tail",
+            "threshold_value",
+            "t_index",
+            "value",
+        ]
+    ].dropna(subset=["value"]).reset_index(drop=True)
+
+
+def real_powerflow_percentile_profile_db(
+    run_name: str = "baseline_static_pre_powerflow_real_swf_hh_only",
+    stage: str = "pre",
+    scenario_id: int | None = None,
+    plz: int | None = None,
+    lv_id: str | int | None = None,
+) -> pd.DataFrame:
+    """Read real SWF per-asset time-percentiles in long form."""
+    grid_summary = real_powerflow_headline_summary_db(
+        run_name=run_name,
+        stage=stage,
+        scenario_id=scenario_id,
+        plz=plz,
+        lv_id=lv_id,
+    )
+    run_ids = grid_summary["powerflow_run_id"].astype(int).tolist()
+    if not run_ids:
+        return pd.DataFrame()
+
+    db = SurroGridDatabase()
+    cable_query = text(
+        """
+        SELECT real_powerflow_run_id AS powerflow_run_id, stage, cable AS asset_id,
+               cable_loading_p50_time_percent, cable_loading_p90_time_percent,
+               cable_loading_p95_time_percent, cable_loading_p99_time_percent,
+               cable_loading_max_time_percent
+        FROM surrogrid.real_powerflow_cable_summary
+        WHERE real_powerflow_run_id = ANY(:run_ids)
+          AND stage = :stage
+        """
+    )
+    voltage_query = text(
+        """
+        SELECT real_powerflow_run_id AS powerflow_run_id, stage, bus AS asset_id,
+               voltage_p50_time_pu, voltage_p10_time_pu, voltage_p05_time_pu,
+               voltage_p01_time_pu, voltage_min_time_pu
+        FROM surrogrid.real_powerflow_bus_voltage_summary
+        WHERE real_powerflow_run_id = ANY(:run_ids)
+          AND stage = :stage
+        """
+    )
+    with db.engine.connect() as conn:
+        cable_rows = pd.read_sql_query(cable_query, conn, params={"run_ids": run_ids, "stage": stage})
+        voltage_rows = pd.read_sql_query(voltage_query, conn, params={"run_ids": run_ids, "stage": stage})
+
+    meta_cols = [
+        "grid",
+        "powerflow_source",
+        "comparison_group",
+        "powerflow_run_id",
+        "run_name",
+        "scenario_id",
+        "scenario_key",
+        "stage",
+        "ags",
+        "plz",
+        "kcid",
+        "bcid",
+        "pylovo_grid_result_id",
+        "lv_id",
+        "source_file",
+    ]
+    meta = grid_summary[meta_cols].copy()
+    frames = []
+
+    trafo_map = {
+        "p50": "trafo_loading_p50_time_percent",
+        "p90": "trafo_loading_p90_time_percent",
+        "p95": "trafo_loading_p95_time_percent",
+        "p99": "trafo_loading_p99_time_percent",
+        "max": "trafo_loading_max_time_percent",
+    }
+    for order, (percentile, column) in enumerate(trafo_map.items()):
+        rows = grid_summary[meta_cols + [column]].rename(columns={column: "value"})
+        rows["metric"] = "Transformer"
+        rows["asset_type"] = "transformer"
+        rows["asset_id"] = 0
+        rows["asset_label"] = rows["grid"] + " transformer"
+        rows["percentile"] = percentile
+        rows["percentile_order"] = order
+        frames.append(rows)
+
+    cable_map = {
+        "p50": "cable_loading_p50_time_percent",
+        "p90": "cable_loading_p90_time_percent",
+        "p95": "cable_loading_p95_time_percent",
+        "p99": "cable_loading_p99_time_percent",
+        "max": "cable_loading_max_time_percent",
+    }
+    if not cable_rows.empty:
+        cable_rows = cable_rows.merge(meta, on=["powerflow_run_id", "stage"], how="left")
+        for order, (percentile, column) in enumerate(cable_map.items()):
+            rows = cable_rows[meta_cols + ["asset_id", column]].rename(columns={column: "value"})
+            rows["metric"] = "Cables"
+            rows["asset_type"] = "cable"
+            rows["asset_label"] = "cable " + rows["asset_id"].astype(str)
+            rows["percentile"] = percentile
+            rows["percentile_order"] = order
+            frames.append(rows)
+
+    voltage_map = {
+        "p50": "voltage_p50_time_pu",
+        "p10": "voltage_p10_time_pu",
+        "p05": "voltage_p05_time_pu",
+        "p01": "voltage_p01_time_pu",
+        "min": "voltage_min_time_pu",
+    }
+    if not voltage_rows.empty:
+        voltage_rows = voltage_rows.merge(meta, on=["powerflow_run_id", "stage"], how="left")
+        for order, (percentile, column) in enumerate(voltage_map.items()):
+            rows = voltage_rows[meta_cols + ["asset_id", column]].rename(columns={column: "value"})
+            rows["metric"] = "Voltage"
+            rows["asset_type"] = "bus"
+            rows["asset_label"] = "bus " + rows["asset_id"].astype(str)
+            rows["percentile"] = percentile
+            rows["percentile_order"] = order
+            frames.append(rows)
+
+    out = pd.concat(frames, ignore_index=True)
+    out["value"] = out["value"].astype(float)
+    return out[
+        meta_cols
+        + [
+            "metric",
+            "asset_type",
+            "asset_id",
+            "asset_label",
+            "percentile",
+            "percentile_order",
+            "value",
+        ]
+    ].dropna(subset=["value"]).reset_index(drop=True)
+
+
+def comparison_powerflow_data_db(
+    plz: int = 91301,
+    synthetic_run_name: str = "baseline_static_pre_powerflow",
+    real_run_name: str = "baseline_static_pre_powerflow_real_swf_hh_only",
+    stage: str = "pre",
+    scenario_id: int | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load synthetic and real SWF compact data with a shared comparison schema."""
+    synthetic_summary = powerflow_headline_summary_db(
+        run_name=synthetic_run_name,
+        stage=stage,
+        scenario_id=scenario_id,
+        plz=plz,
+    ).assign(powerflow_source="synthetic", comparison_group="Synthetic")
+    synthetic_tail = powerflow_tail_values_db(
+        run_name=synthetic_run_name,
+        stage=stage,
+        scenario_id=scenario_id,
+        plz=plz,
+    ).assign(powerflow_source="synthetic", comparison_group="Synthetic")
+    synthetic_percentiles = powerflow_percentile_profile_db(
+        run_name=synthetic_run_name,
+        stage=stage,
+        scenario_id=scenario_id,
+        plz=plz,
+    ).assign(powerflow_source="synthetic", comparison_group="Synthetic")
+
+    real_summary = real_powerflow_headline_summary_db(
+        run_name=real_run_name,
+        stage=stage,
+        scenario_id=scenario_id,
+        plz=plz,
+    )
+    real_tail = real_powerflow_tail_values_db(
+        run_name=real_run_name,
+        stage=stage,
+        scenario_id=scenario_id,
+        plz=plz,
+    )
+    real_percentiles = real_powerflow_percentile_profile_db(
+        run_name=real_run_name,
+        stage=stage,
+        scenario_id=scenario_id,
+        plz=plz,
+    )
+
+    return (
+        pd.concat([synthetic_summary, real_summary], ignore_index=True, sort=False),
+        pd.concat([synthetic_tail, real_tail], ignore_index=True, sort=False),
+        pd.concat([synthetic_percentiles, real_percentiles], ignore_index=True, sort=False),
+    )
+
+def plot_powerflow_headline_asset_violins(
+    asset_summary: pd.DataFrame,
+    group_col: str | None = None,
+    show: bool = True,
+):
+    """Plot continuous p99/p01 tail-hour values using transformer, cable, and bus rows."""
+    df = asset_summary.copy()
+    if group_col is None or group_col not in df.columns:
+        group_col = "comparison_group"
+        df[group_col] = "All tail hours"
+
+    metrics = [
+        ("Transformer", "P99 tail loading [%]"),
+        ("Cables", "P99 tail loading [%]"),
+        ("Voltage", "P01 tail voltage [p.u.]"),
+    ]
+    fig = make_subplots(rows=1, cols=3, subplot_titles=[title for title, _ in metrics])
+    for col_idx, (metric, y_title) in enumerate(metrics, start=1):
+        cols = [group_col, "value", "threshold_value", "asset_label", "grid", "t_index"]
+        plot_df = df.loc[df["metric"] == metric, cols].dropna()
+        fig.add_trace(
+            go.Violin(
+                x=plot_df[group_col].astype(str),
+                y=plot_df["value"].astype(float),
+                text=(
+                    plot_df["grid"].astype(str)
+                    + "<br>"
+                    + plot_df["asset_label"].astype(str)
+                    + "<br>t="
+                    + plot_df["t_index"].astype(str)
+                    + "<br>threshold="
+                    + plot_df["threshold_value"].round(4).astype(str)
+                ),
+                hovertemplate="%{text}<br>%{y:.4g}<extra></extra>",
+                box_visible=True,
+                meanline_visible=True,
+                points=False,
+                scalemode="width",
+                name=y_title,
+                showlegend=False,
+            ),
+            row=1,
+            col=col_idx,
+        )
+        fig.update_yaxes(title_text=y_title, row=1, col=col_idx)
+
+    fig.update_layout(
+        title="Critical Tail-Hour Values by Asset",
+        violingap=0.12,
+        height=430,
+        margin={"l": 55, "r": 25, "t": 75, "b": 65},
+    )
+    if show:
+        fig.show()
+    return fig
+
+
+def _hex_to_rgba(color: str, alpha: float) -> str:
+    color = color.lstrip("#")
+    if len(color) != 6:
+        return f"rgba(51, 92, 129, {alpha})"
+    r, g, b = (int(color[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
+def plot_powerflow_percentile_profiles(
+    profile: pd.DataFrame,
+    group_col: str | None = None,
+    show: bool = True,
+    color_map: dict[str, str] | None = None,
+    center_stat: str = "median",
+    band_quantiles: tuple[float, float] | None = None,
+    title: str = "Annual Percentile Profiles by Asset",
+    points: str | bool | None = None,
+):
+    """Plot percentile profiles with a center line and full asset range band.
+
+    For each metric and time-percentile, values are computed per asset. The line
+    is the median or mean across assets. By default the shaded band spans the
+    full min-to-max asset range, so critical extremes remain visible without
+    plotting every asset as a separate point. Pass ``band_quantiles=(0.10, 0.90)``
+    to use a quantile band instead.
+    """
+    df = profile.copy()
+    if group_col is None or group_col not in df.columns:
+        group_col = "comparison_group"
+        df[group_col] = "All assets"
+
+    center_stat = center_stat.lower().strip()
+    if center_stat not in {"mean", "median"}:
+        raise ValueError("center_stat must be either 'mean' or 'median'.")
+    if band_quantiles is not None:
+        lower_q, upper_q = band_quantiles
+        if not 0 <= lower_q < upper_q <= 1:
+            raise ValueError("band_quantiles must satisfy 0 <= lower < upper <= 1.")
+
+    metrics = [
+        ("Transformer", "Loading [%]"),
+        ("Cables", "Loading [%]"),
+        ("Voltage", "Voltage [p.u.]"),
+    ]
+    fig = make_subplots(rows=1, cols=3, subplot_titles=[title for title, _ in metrics])
+    default_colors = {
+        "Synthetic": "#335C81",
+        "Real SWF": "#D95D39",
+        "synthetic": "#335C81",
+        "real_swf": "#D95D39",
+    }
+    if color_map:
+        default_colors.update({str(key): value for key, value in color_map.items()})
+    fallback_palette = ["#335C81", "#D95D39", "#2A9D8F", "#6D597A", "#7A8450"]
+
+    for col_idx, (metric, y_title) in enumerate(metrics, start=1):
+        metric_df = df[df["metric"] == metric].copy()
+        if metric_df.empty:
+            continue
+        for color_idx, (group, group_df) in enumerate(metric_df.groupby(group_col, sort=False)):
+            grouped = group_df.groupby(["percentile_order", "percentile"], as_index=False)["value"]
+            if band_quantiles is None:
+                stats = grouped.agg(
+                    center=center_stat,
+                    band_lower="min",
+                    band_upper="max",
+                )
+                band_label = "min-max asset range"
+            else:
+                lower_q, upper_q = band_quantiles
+                stats = grouped.agg(
+                    center=center_stat,
+                    band_lower=lambda s: s.quantile(lower_q),
+                    band_upper=lambda s: s.quantile(upper_q),
+                )
+                band_label = f"p{int(lower_q * 100):02d}-p{int(upper_q * 100):02d} asset band"
+            stats = stats.sort_values("percentile_order")
+
+            group_label = str(group)
+            color = default_colors.get(group_label, fallback_palette[color_idx % len(fallback_palette)])
+            fig.add_trace(
+                go.Scatter(
+                    x=stats["percentile"],
+                    y=stats["band_upper"],
+                    mode="lines",
+                    line={"width": 0},
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+                row=1,
+                col=col_idx,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=stats["percentile"],
+                    y=stats["band_lower"],
+                    mode="lines",
+                    line={"width": 0},
+                    fill="tonexty",
+                    fillcolor=_hex_to_rgba(color, 0.16),
+                    name=f"{group_label} {band_label}",
+                    legendgroup=f"{group_label} band",
+                    showlegend=col_idx == 1,
+                    hovertemplate=f"%{{x}}<br>{band_label}<extra></extra>",
+                ),
+                row=1,
+                col=col_idx,
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=stats["percentile"],
+                    y=stats["center"],
+                    mode="lines+markers",
+                    line={"color": color, "width": 2.4},
+                    marker={"size": 6, "color": color},
+                    name=f"{group_label} {center_stat} across assets",
+                    legendgroup=f"{group_label} center",
+                    showlegend=col_idx == 1,
+                    customdata=stats[["band_lower", "band_upper"]].to_numpy(),
+                    hovertemplate=(
+                        "%{x}<br>"
+                        f"{center_stat}: %{{y:.4g}}<br>"
+                        "range: %{customdata[0]:.4g} - %{customdata[1]:.4g}"
+                        "<extra></extra>"
+                    ),
+                ),
+                row=1,
+                col=col_idx,
+            )
+        fig.update_yaxes(title_text=y_title, row=1, col=col_idx)
+        fig.update_xaxes(title_text="Time percentile", row=1, col=col_idx)
+
+    fig.update_layout(
+        title=title,
+        legend={"title": {"text": "Profile summary"}},
+        height=430,
+        margin={"l": 55, "r": 25, "t": 75, "b": 65},
+    )
+    if show:
+        fig.show()
+    return fig
+
+def plot_powerflow_headline_violins(
+    summary: pd.DataFrame,
+    group_col: str | None = None,
+    show: bool = True,
+):
+    """Plot the three compact headline metrics as comparable violin plots."""
+    df = summary.copy()
+    if group_col is None or group_col not in df.columns:
+        group_col = "comparison_group"
+        df[group_col] = "All grids"
+
+    metrics = [
+        ("trafo_loading_p95_time_percent", "Transformer", "P95 loading [%]"),
+        ("cable_loading_p95_asset_percent", "Cables", "P95 annual max loading [%]"),
+        ("voltage_p05_load_bus_hour_pu", "Voltage", "P05 load-bus voltage [p.u.]"),
+    ]
+    fig = make_subplots(rows=1, cols=3, subplot_titles=[title for _, title, _ in metrics])
+    for col_idx, (metric, _, y_title) in enumerate(metrics, start=1):
+        plot_df = df[[group_col, metric]].dropna()
+        fig.add_trace(
+            go.Violin(
+                x=plot_df[group_col].astype(str),
+                y=plot_df[metric].astype(float),
+                box_visible=True,
+                meanline_visible=True,
+                points="all",
+                jitter=0.18,
+                scalemode="width",
+                name=y_title,
+                showlegend=False,
+            ),
+            row=1,
+            col=col_idx,
+        )
+        fig.update_yaxes(title_text=y_title, row=1, col=col_idx)
+
+    fig.update_layout(
+        title="Headline Power-Flow Quality Metrics",
+        violingap=0.12,
+        height=430,
+        margin={"l": 55, "r": 25, "t": 75, "b": 65},
+    )
+    if show:
+        fig.show()
+    return fig
+
+
 def voltage_deviation_summary_db(
     input_id: str | None = None,
     run_name: str = "baseline_static_full_powerflow",
