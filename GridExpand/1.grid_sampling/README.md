@@ -45,9 +45,10 @@ DB_PORT=5432
 DB_NAME=...
 DB_USER=...
 DB_PASSWORD=...
+PYLOVO_VERSION_ID=1  # optional; leave empty to use the latest pylovo version
 ```
 
-`config.py` loads `GridExpand/.env` explicitly, so all GridExpand steps use the same database and data-path configuration.
+`config.py` loads `GridExpand/.env` explicitly, so all GridExpand steps use the same database and data-path configuration. `PYLOVO_VERSION_ID` is also read from this file and is used to pin all pylovo grid readout queries to one generated version when set.
 
 The notebooks expect the pylovo DB schema to provide at least the tables queried in `src/db_read.py`:
 

@@ -196,6 +196,7 @@ def get_candidates(repo_root: Path, ags: str, min_buildings: int) -> list[dict[s
               ON bc.grid_result_id = gr.grid_result_id
              AND bc.version_id = gr.version_id
             WHERE bc.n_buildings >= :min_buildings
+              AND (:pylovo_version_id IS NULL OR gr.version_id::text = :pylovo_version_id)
             ORDER BY gr.plz, gr.kcid, gr.bcid, gr.version_id DESC
         )
         SELECT
@@ -210,7 +211,11 @@ def get_candidates(repo_root: Path, ags: str, min_buildings: int) -> list[dict[s
             dict(row)
             for row in conn.execute(
                 query,
-                {"ags": normalize_ags(ags), "min_buildings": int(min_buildings)},
+                {
+                    "ags": normalize_ags(ags),
+                    "min_buildings": int(min_buildings),
+                    "pylovo_version_id": db.pylovo_version_id,
+                },
             ).mappings()
         ]
     return [

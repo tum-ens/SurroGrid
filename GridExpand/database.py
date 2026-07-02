@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,14 @@ DEFAULT_SCENARIO_ASSUMPTIONS = {
 }
 
 
+def get_pylovo_version_id() -> str | None:
+    value = os.getenv("PYLOVO_VERSION_ID")
+    if value is None:
+        return None
+    value = value.strip().strip('\"').strip("'")
+    return value or None
+
+
 def normalize_ags(value: str | int) -> int:
     """Store AGS as an integer, without a leading zero."""
     return int(str(value).strip().lstrip("0") or "0")
@@ -42,7 +51,7 @@ class SurroGridDatabase:
     def __init__(self) -> None:
         load_dotenv(ENV_PATH, override=True)
 
-        import os
+        self.pylovo_version_id = get_pylovo_version_id()
 
         self.engine = create_engine(
             "postgresql+psycopg2://"
@@ -603,6 +612,7 @@ class SurroGridDatabase:
                   ON bc.grid_result_id = gr.grid_result_id
                  AND bc.version_id = gr.version_id
                 WHERE bc.n_buildings >= :min_buildings
+                  AND (:pylovo_version_id IS NULL OR gr.version_id::text = :pylovo_version_id)
                 ORDER BY gr.plz, gr.kcid, gr.bcid, gr.version_id DESC
             ),
             numbered AS (
@@ -623,6 +633,7 @@ class SurroGridDatabase:
                     "ags": ags,
                     "candidate_index": int(candidate_index),
                     "min_buildings": int(min_buildings),
+                    "pylovo_version_id": self.pylovo_version_id,
                 },
             ).mappings().first()
 
@@ -670,6 +681,7 @@ class SurroGridDatabase:
             SELECT grid_result_id, version_id, plz, kcid, bcid
             FROM pylovo.grid_result
             WHERE plz = :plz AND kcid = :kcid AND bcid = :bcid
+              AND (:pylovo_version_id IS NULL OR version_id::text = :pylovo_version_id)
             ORDER BY version_id DESC
             LIMIT 1
             """
@@ -677,11 +689,17 @@ class SurroGridDatabase:
         with self.engine.connect() as conn:
             row = conn.execute(
                 query,
-                {"plz": int(plz), "kcid": int(kcid), "bcid": int(bcid)},
+                {
+                    "plz": int(plz),
+                    "kcid": int(kcid),
+                    "bcid": int(bcid),
+                    "pylovo_version_id": self.pylovo_version_id,
+                },
             ).mappings().first()
 
         if row is None:
-            raise ValueError(f"No pylovo grid found for PLZ={plz}, KCID={kcid}, BCID={bcid}.")
+            version_hint = f" and PYLOVO_VERSION_ID={self.pylovo_version_id}" if self.pylovo_version_id else ""
+            raise ValueError(f"No pylovo grid found for PLZ={plz}, KCID={kcid}, BCID={bcid}{version_hint}.")
 
         return self._format_grid_ref(
             ags=ags,

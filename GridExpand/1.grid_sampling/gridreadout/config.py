@@ -21,6 +21,7 @@ class Config:
     DB_NAME = os.getenv('DB_NAME')
     DB_USER = os.getenv('DB_USER')
     DB_PASSWORD = os.getenv('DB_PASSWORD')
+    PYLOVO_VERSION_ID = (os.getenv('PYLOVO_VERSION_ID') or '').strip() or None
 
     # PVGIS API
     PVGIS_URL = "https://re.jrc.ec.europa.eu/api/tmy"               # URL from which to fetch typical meterological year weather data

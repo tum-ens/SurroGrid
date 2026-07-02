@@ -186,6 +186,8 @@ Location: `1.grid_sampling/gridreadout/`
 
 DB credentials are read from environment variables loaded from the GridExpand-level `.env` file.
 
+For DB-backed synthetic-grid runs, `PYLOVO_VERSION_ID` in `GridExpand/.env` pins the pylovo `grid_result.version_id` used by candidate selection and power-flow input resolution. Leave it empty to keep the previous behavior of selecting the latest available version for each `(plz, kcid, bcid)`.
+
 ### Step 2: Demand allocation (write `/urbs_in/*`)
 
 Location: `2.demand_allocation/gridalloc/`

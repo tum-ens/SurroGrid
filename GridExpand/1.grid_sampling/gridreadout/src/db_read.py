@@ -109,12 +109,16 @@ class DataBase:
               ON bc.grid_result_id = gr.grid_result_id
              AND bc.version_id = gr.version_id
             WHERE bc.n_buildings >= :min_buildings
+              AND (:pylovo_version_id IS NULL OR gr.version_id::text = :pylovo_version_id)
             ORDER BY gr.plz, gr.kcid, gr.bcid, gr.version_id DESC;
         """)
         df_generated_grids = pd.read_sql_query(
             query,
             self.engine,
-            params={"min_buildings": int(min_buildings)},
+            params={
+                "min_buildings": int(min_buildings),
+                "pylovo_version_id": config.PYLOVO_VERSION_ID,
+            },
         )
         if "n_buildings" in df_generated_grids.columns:
             df_generated_grids = df_generated_grids.drop(columns=["n_buildings"])
@@ -141,13 +145,19 @@ class DataBase:
             SELECT grid
             FROM pylovo.grid_result
             WHERE (plz= :plz) AND (kcid= :kcid) AND (bcid= :bcid)
+              AND (:pylovo_version_id IS NULL OR version_id::text = :pylovo_version_id)
             ORDER BY version_id DESC
             LIMIT 1;
         """)
 
         # Execute the query with Pandas. This will only read data.
         with self.engine.connect() as conn:
-            df_grid = pd.read_sql(query, conn, params={"plz":int(grid_specs["plz"]), "kcid":int(grid_specs["kcid"]), "bcid":int(grid_specs["bcid"])})
+            df_grid = pd.read_sql(query, conn, params={
+                "plz": int(grid_specs["plz"]),
+                "kcid": int(grid_specs["kcid"]),
+                "bcid": int(grid_specs["bcid"]),
+                "pylovo_version_id": config.PYLOVO_VERSION_ID,
+            })
 
         if df_grid.empty:
             raise ValueError(
@@ -176,13 +186,19 @@ class DataBase:
               ON gr.grid_result_id = tp.grid_result_id
              AND gr.version_id = tp.version_id
             WHERE (gr.plz= :plz) AND (gr.kcid= :kcid) AND (gr.bcid= :bcid)
+              AND (:pylovo_version_id IS NULL OR gr.version_id::text = :pylovo_version_id)
             ORDER BY gr.version_id DESC
             LIMIT 1;
         """)
 
         # Execute the query with Pandas. This will only read data.
         with self.engine.connect() as conn:
-            df_trafo = pd.read_sql(query, conn, params={"plz":int(grid_specs["plz"]), "kcid":int(grid_specs["kcid"]), "bcid":int(grid_specs["bcid"])})
+            df_trafo = pd.read_sql(query, conn, params={
+                "plz": int(grid_specs["plz"]),
+                "kcid": int(grid_specs["kcid"]),
+                "bcid": int(grid_specs["bcid"]),
+                "pylovo_version_id": config.PYLOVO_VERSION_ID,
+            })
 
         if df_trafo.empty:
             raise ValueError(
@@ -277,6 +293,7 @@ class DataBase:
                 SELECT grid_result_id, version_id
                 FROM pylovo.grid_result
                 WHERE plz = :plz AND kcid = :kcid AND bcid = :bcid
+                  AND (:pylovo_version_id IS NULL OR version_id::text = :pylovo_version_id)
                 ORDER BY version_id DESC
                 LIMIT 1
             )
@@ -300,6 +317,7 @@ class DataBase:
                     "plz": int(grid_specs["plz"]),
                     "kcid": int(grid_specs["kcid"]),
                     "bcid": int(grid_specs["bcid"]),
+                    "pylovo_version_id": config.PYLOVO_VERSION_ID,
                 },
             )
 
