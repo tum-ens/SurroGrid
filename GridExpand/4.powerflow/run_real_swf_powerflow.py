@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
 STEP4_DIR = Path(__file__).resolve().parent
 DEMAND_DIR = GRIDEXPAND_DIR / "2.demand_allocation" / "gridalloc"
-ENV_PATH = GRIDEXPAND_DIR / "1.grid_sampling" / ".env"
+ENV_PATH = GRIDEXPAND_DIR / ".env"
 
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))

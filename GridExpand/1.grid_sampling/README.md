@@ -37,7 +37,7 @@ Legacy fallback: [environment.yml](environment.yml) is still available for conda
 
 DB access is configured via environment variables that are loaded in [gridreadout/config.py](gridreadout/config.py).
 
-Create a `.env` file in `GridExpand/1.grid_sampling/gridreadout/` (next to `config.py`) with:
+Create a `.env` file at the GridExpand repository root (`GridExpand/.env`) with:
 
 ```bash
 DB_HOST=...
@@ -47,7 +47,7 @@ DB_USER=...
 DB_PASSWORD=...
 ```
 
-`config.py` calls `load_dotenv()` without a fixed path. In practice, a repository-root `.env` can also be discovered when launching from this project, but placing the file next to `gridreadout/config.py` is the safest option.
+`config.py` loads `GridExpand/.env` explicitly, so all GridExpand steps use the same database and data-path configuration.
 
 The notebooks expect the pylovo DB schema to provide at least the tables queried in `src/db_read.py`:
 

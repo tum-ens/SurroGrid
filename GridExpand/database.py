@@ -15,7 +15,7 @@ from timeframe import build_full_year_metadata
 
 
 GRIDEXPAND_DIR = Path(__file__).resolve().parent
-ENV_PATH = GRIDEXPAND_DIR / "1.grid_sampling" / ".env"
+ENV_PATH = GRIDEXPAND_DIR / ".env"
 SCHEMA_SQL_PATH = GRIDEXPAND_DIR / "surrogrid_schema.sql"
 TIME_INDEX_START = "2009-01-01 00:00:00+00:00"
 DEFAULT_SCENARIO_KEY = "baseline_static"

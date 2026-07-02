@@ -184,7 +184,7 @@ Location: `1.grid_sampling/gridreadout/`
 
 - One `.h5` per sampled grid in `1.grid_sampling/gridreadout/results/`
 
-DB credentials are read from environment variables loaded in `1.grid_sampling/gridreadout/config.py` (commonly via a `.env` file next to it).
+DB credentials are read from environment variables loaded from the GridExpand-level `.env` file.
 
 ### Step 2: Demand allocation (write `/urbs_in/*`)
 

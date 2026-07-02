@@ -1,15 +1,15 @@
 """Configuration for Step 1 (grid sampling).
 
 Most settings are simple constants. Database credentials are expected as
-environment variables and are commonly provided via a local `.env` file in
-`gridreadout/`.
+environment variables and are commonly provided via the GridExpand-level `.env` file.
 """
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load .env file for environment-specific settings (DB credentials, etc.)
-load_dotenv(override=True)
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=True)
 
 class Config:
     #--------------------------------------------------------------#

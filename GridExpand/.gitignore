@@ -5,6 +5,7 @@
 **/.venv/
 
 # Sensitive data
+.env
 0.data_preparation
 gurobi.lic
 
