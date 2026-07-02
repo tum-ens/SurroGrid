@@ -1720,6 +1720,174 @@ def load_powerflow_comparison_data(
     }
 
 
+def powerflow_comparison_grid_count_summary(
+    *,
+    plz: int,
+    synthetic_run_name: str,
+    real_run_name: str,
+    stage: str,
+    scope_filter_overview: pd.DataFrame,
+    coverage: pd.DataFrame,
+) -> pd.DataFrame:
+    """Summarize launched, completed, and retained real/synthetic power-flow grids.
+
+    ``load_powerflow_comparison_data`` only sees runs with a written summary row.
+    This helper additionally audits launched run rows, so hard failures without a
+    summary remain visible in comparison notebooks.
+    """
+    db = SurroGridDatabase()
+    run_audit_query = text(
+        """
+        WITH synthetic_runs AS (
+            SELECT
+                'Synthetic' AS comparison_group,
+                COUNT(DISTINCT pr.powerflow_run_id) AS launched_powerflow_runs,
+                COUNT(DISTINCT pr.powerflow_run_id) FILTER (WHERE pfs.powerflow_run_id IS NOT NULL) AS powerflow_summary_grids
+            FROM surrogrid.powerflow_run pr
+            JOIN surrogrid.grid_case gc USING (grid_case_id)
+            LEFT JOIN surrogrid.powerflow_summary pfs
+              ON pfs.powerflow_run_id = pr.powerflow_run_id
+             AND pfs.stage = :stage
+            WHERE pr.run_name = :synthetic_run_name
+              AND gc.plz = :plz
+        ),
+        real_runs AS (
+            SELECT
+                'Real SWF' AS comparison_group,
+                COUNT(DISTINCT rpr.real_powerflow_run_id) AS launched_powerflow_runs,
+                COUNT(DISTINCT rpr.real_powerflow_run_id) FILTER (WHERE rps.real_powerflow_run_id IS NOT NULL) AS powerflow_summary_grids
+            FROM surrogrid.real_powerflow_run rpr
+            JOIN surrogrid.real_grid_case rgc USING (real_grid_case_id)
+            LEFT JOIN surrogrid.real_powerflow_summary rps
+              ON rps.real_powerflow_run_id = rpr.real_powerflow_run_id
+             AND rps.stage = :stage
+            WHERE rpr.run_name = :real_run_name
+              AND rgc.plz = :plz
+        )
+        SELECT * FROM synthetic_runs
+        UNION ALL
+        SELECT * FROM real_runs
+        """
+    )
+    with db.engine.connect() as conn:
+        run_audit = pd.read_sql_query(
+            run_audit_query,
+            conn,
+            params={
+                "plz": plz,
+                "stage": stage,
+                "synthetic_run_name": synthetic_run_name,
+                "real_run_name": real_run_name,
+            },
+        )
+
+    grid_count_summary = (
+        run_audit.merge(
+            scope_filter_overview.rename(
+                columns={
+                    "grids_before": "powerflow_summary_grids_before_filter",
+                    "grids_filtered": "grids_removed_by_filter",
+                    "grids_kept": "powerflow_grids_after_filter",
+                }
+            ),
+            on="comparison_group",
+            how="left",
+        )
+        .merge(
+            coverage.rename(
+                columns={
+                    "grids": "coverage_grids_after_filter",
+                    "assets_voltage": "voltage_assets_after_filter",
+                    "assets_cables": "cable_assets_after_filter",
+                }
+            ),
+            on="comparison_group",
+            how="left",
+        )
+    )
+    grid_count_summary["hard_failed_runs_without_summary"] = (
+        grid_count_summary["launched_powerflow_runs"]
+        - grid_count_summary["powerflow_summary_grids"]
+    )
+    grid_count_summary.insert(
+        1,
+        "run_name",
+        grid_count_summary["comparison_group"].map(
+            {"Synthetic": synthetic_run_name, "Real SWF": real_run_name}
+        ),
+    )
+    return grid_count_summary[
+        [
+            "comparison_group",
+            "run_name",
+            "launched_powerflow_runs",
+            "powerflow_summary_grids",
+            "hard_failed_runs_without_summary",
+            "criterion",
+            "grids_removed_by_filter",
+            "powerflow_grids_after_filter",
+            "voltage_assets_after_filter",
+            "cable_assets_after_filter",
+        ]
+    ]
+
+
+def powerflow_distribution_similarity_summary(
+    profile: pd.DataFrame,
+    group_col: str = "comparison_group",
+    synthetic_group: str = "Synthetic",
+    real_group: str = "Real SWF",
+) -> pd.DataFrame:
+    """Compare critical synthetic and real power-flow result distributions.
+
+    The table uses the same critical result semantics as the asset-cutoff plots:
+    transformer/cable annual maximum loading and annual minimum voltage. Signed
+    differences are calculated as synthetic minus real.
+    """
+    required = {group_col, "metric", "percentile", "value"}
+    missing_required = required.difference(profile.columns)
+    if missing_required:
+        missing = ", ".join(sorted(missing_required))
+        raise ValueError(f"Missing column(s) for distribution similarity summary: {missing}.")
+
+    critical_percentiles = {
+        "Transformer": "max",
+        "Cables": "max",
+        "Voltage": "min",
+    }
+    rows = []
+    for metric, percentile in critical_percentiles.items():
+        metric_rows = profile[
+            profile["metric"].eq(metric)
+            & profile["percentile"].eq(percentile)
+        ]
+        synthetic_values = metric_rows.loc[
+            metric_rows[group_col].eq(synthetic_group), "value"
+        ].astype(float).dropna()
+        real_values = metric_rows.loc[
+            metric_rows[group_col].eq(real_group), "value"
+        ].astype(float).dropna()
+        if synthetic_values.empty or real_values.empty:
+            rows.append(
+                {
+                    "metric": metric,
+                    "median_diff": np.nan,
+                    "std": np.nan,
+                    "wasserstein": np.nan,
+                }
+            )
+            continue
+        rows.append(
+            {
+                "metric": metric,
+                "median_diff": synthetic_values.median() - real_values.median(),
+                "std": synthetic_values.std(ddof=1) - real_values.std(ddof=1),
+                "wasserstein": wasserstein_distance(synthetic_values, real_values),
+            }
+        )
+    return pd.DataFrame(rows, columns=["metric", "median_diff", "std", "wasserstein"])
+
+
 def plot_powerflow_headline_asset_violins(
     asset_summary: pd.DataFrame,
     group_col: str | None = None,
