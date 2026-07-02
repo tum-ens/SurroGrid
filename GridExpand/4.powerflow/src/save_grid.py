@@ -19,7 +19,7 @@ from timeframe import read_hdf_metadata, scenario_key_for_timeframe
 
 
 class SaveFile:
-    def __init__(self, filename, storage="h5", pre_only=False, run_name=None):
+    def __init__(self, filename, storage="h5", pre_only=False, run_name=None, assumptions_extra=None):
         # Copy input file to destination directory
         self.filename = filename
         self.storage = storage
@@ -34,13 +34,16 @@ class SaveFile:
             shutil.copy2(self.input_path, self.output_path)
         else:
             self.grid_ref = self.db.resolve_grid_identifier(filename)
+            assumptions = dict(self.timeframe_metadata)
+            if assumptions_extra:
+                assumptions.update(assumptions_extra)
             self.powerflow_run_id = self.db.create_powerflow_run(
                 self.grid_ref,
                 urbs_input_file=filename,
                 pre_only=pre_only,
                 scenario_key=scenario_key_for_timeframe(self.timeframe_metadata.get("timeframe_mode", "full_year")),
                 run_name=run_name,
-                assumptions=self.timeframe_metadata,
+                assumptions=assumptions,
             )
 
         # Dirs from which to extract data within .h5 file

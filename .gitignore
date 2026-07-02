@@ -3,3 +3,4 @@ GridExpand/2.demand_allocation/gridalloc/data/statistics/general/mobility_profil
 GridExpand/2.demand_allocation/gridalloc/data/statistics/general/mobility_profile_pool/mobility_demand_pool.csv
 GridExpand/5.postprocessing/plotting/thesis_plots.ipynb
 GridExpand/run_logs/*
+swf_usage.md

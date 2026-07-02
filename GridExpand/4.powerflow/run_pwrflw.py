@@ -25,7 +25,70 @@ import src.demands as dmnds
 import src.powerflow as pwrflw
 import argparse
 import os
+from sqlalchemy import text
 from src.resource_report import resource_report
+
+
+
+def _synthetic_residential_buses(save_file: svgrd.SaveFile) -> set[int]:
+    """Return pandapower buses linked to synthetic residential buildings."""
+    if save_file.storage != "db" or save_file.db is None or save_file.powerflow_run_id is None:
+        raise ValueError("--hh-only requires --storage db so residential buses can be read from grid_building_bus.")
+
+    query = text(
+        """
+        SELECT DISTINCT gbb.bus
+        FROM surrogrid.powerflow_run pr
+        JOIN surrogrid.grid_building_bus gbb ON gbb.grid_case_id = pr.grid_case_id
+        WHERE pr.powerflow_run_id = :powerflow_run_id
+          AND gbb.bus IS NOT NULL
+          AND lower(COALESCE(gbb.building_use, '')) = 'residential'
+        ORDER BY gbb.bus
+        """
+    )
+    with save_file.db.engine.connect() as conn:
+        buses = [int(bus) for bus in conn.execute(query, {"powerflow_run_id": save_file.powerflow_run_id}).scalars()]
+    if not buses:
+        raise ValueError("--hh-only found no residential buses in surrogrid.grid_building_bus for this grid case.")
+    return set(buses)
+
+
+def _filter_demand_to_buses(df, buses: set[int], label: str):
+    if df is None:
+        return None
+    if getattr(df.columns, "nlevels", 1) < 2:
+        raise ValueError(f"Cannot apply --hh-only to {label}: expected MultiIndex columns (bus, component).")
+
+    keep_columns = []
+    for column in df.columns:
+        try:
+            keep_columns.append(int(column[0]) in buses)
+        except (TypeError, ValueError):
+            keep_columns.append(False)
+    filtered = df.loc[:, keep_columns].copy()
+    if filtered.empty:
+        raise ValueError(f"--hh-only removed all {label} demand columns; residential bus mapping and demand table do not match.")
+    print(f"HH-only {label}: kept {filtered.shape[1]} of {df.shape[1]} demand columns.", flush=True)
+    return filtered
+
+
+def _filter_grid_loads_to_buses(grid, buses: set[int]):
+    if "bus" not in grid.load.columns:
+        raise ValueError("Cannot apply --hh-only: pandapower grid.load has no bus column.")
+    before_rows = len(grid.load)
+    before_buses = grid.load["bus"].dropna().astype(int).nunique()
+    mask = [False if bus != bus else int(bus) in buses for bus in grid.load["bus"]]
+    grid.load = grid.load.loc[mask].copy().reset_index(drop=True)
+    after_rows = len(grid.load)
+    after_buses = grid.load["bus"].dropna().astype(int).nunique()
+    if grid.load.empty:
+        raise ValueError("--hh-only removed all pandapower load rows; residential bus mapping and grid.load do not match.")
+    print(
+        "HH-only grid.load: "
+        f"kept {after_rows}/{before_rows} load rows on {after_buses}/{before_buses} load buses.",
+        flush=True,
+    )
+    return grid
 
 if __name__ == "__main__":
     ##### Read args + Obtain relevant input_files #####:
@@ -56,9 +119,19 @@ if __name__ == "__main__":
         default=None,
         help="Optional DB powerflow run name. Useful for storing backbone-only summaries separately.",
     )
+    parser.add_argument(
+        "--hh-only",
+        action="store_true",
+        help=(
+            "Synthetic-grid DB mode: restrict demand and pandapower load rows to "
+            "residential building_use buses from surrogrid.grid_building_bus."
+        ),
+    )
     args = parser.parse_args()
     if args.summary_only and (args.storage != "db" or not args.pre_only):
         parser.error("--summary-only currently requires --storage db --pre-only.")
+    if args.hh_only and args.storage != "db":
+        parser.error("--hh-only requires --storage db.")
 
     # list all .h5 files in your directory
     all_entries = os.listdir("Input/")
@@ -84,13 +157,22 @@ if __name__ == "__main__":
         f"with {settings['n_cpu']} CPUs!"
     )
 
+    assumptions_extra = None
+    if args.hh_only:
+        assumptions_extra = {
+            "demand_scope": "synthetic_hh_only",
+            "hh_only_filter": "grid_building_bus.building_use == Residential",
+        }
+
     # Save file handler
     SF = svgrd.SaveFile(
         settings["file"],
         storage=args.storage,
         pre_only=args.pre_only,
         run_name=args.run_name,
+        assumptions_extra=assumptions_extra,
     )
+    residential_buses = _synthetic_residential_buses(SF) if args.hh_only else None
 
 
     ##### Obtaining Power Demands #####
@@ -100,6 +182,10 @@ if __name__ == "__main__":
         df_post_demand = None
     else:
         df_pre_demand, df_post_demand = dmnds.obtain_demand(SF)
+
+    if residential_buses is not None:
+        df_pre_demand = _filter_demand_to_buses(df_pre_demand, residential_buses, "pre")
+        df_post_demand = _filter_demand_to_buses(df_post_demand, residential_buses, "post")
 
     # Save to be retrieved later by ML model unless this run is intentionally summary-only.
     if not args.summary_only:
@@ -111,6 +197,8 @@ if __name__ == "__main__":
     ##### Powerflow #####
     # Readout grid from file
     grid = SF.get_input_grid()
+    if residential_buses is not None:
+        grid = _filter_grid_loads_to_buses(grid, residential_buses)
     transformer_s_rated_mva = float(grid.trafo["sn_mva"].sum()) if "sn_mva" in grid.trafo.columns else float("nan")
     cable_max_i_ka = grid.line.get("max_i_ka")
     if cable_max_i_ka is None:

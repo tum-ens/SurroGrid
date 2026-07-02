@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import math
+import random
 import os
+import re
 import sys
 import time
 from copy import deepcopy
@@ -22,6 +24,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pandapower as pp
+import pandapower.topology as pp_top
 from dotenv import load_dotenv
 
 GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
@@ -38,14 +41,19 @@ from database import DEFAULT_SCENARIO_KEY, SurroGridDatabase
 import src.powerflow as pwrflw
 
 PF_ELC = 0.959
-RUN_NAME = "baseline_static_pre_powerflow_real_swf_hh_only_backbone"
+RUN_NAME = "baseline_real"
+MIN_HH_ANNUAL_DEMAND_KWH = 500.0
 ASSUMPTION_TEXT = (
     "Real SWF load rows are filtered to active low-voltage household loads "
-    "with type=HH and names containing NS_Last. Existing DSO p_mw/q_mvar "
-    "values are ignored except for household load-bus placement. Cable metrics "
-    "exclude service lines connected to selected HH load buses, and voltage metrics "
-    "are evaluated at the nearest upstream retained backbone bus."
+    "with type=HH, names matching NS_Last or NS_ErLast, and parsed annual demand "
+    f"of at least {MIN_HH_ANNUAL_DEMAND_KWH:.0f} kWh/a where annual demand metadata "
+    "is available. HH rows on buses that pandapower marks as unsupplied are "
+    "excluded before profile generation. Existing DSO p_mw/q_mvar values are ignored except for household "
+    "load-bus placement. Cable metrics keep only lines on paths from the root "
+    "bus to selected HH load buses and exclude terminal service connections. "
+    "Voltage metrics are evaluated at the nearest upstream retained backbone bus."
 )
+ANNUAL_DEMAND_PATTERN = re.compile(r"2022:\s*([0-9]+(?:[.,][0-9]+)?)\s*kWh", re.IGNORECASE)
 
 
 def _load_electricity_module():
@@ -129,7 +137,18 @@ def _add_output_data_daylight_saving_shift(df_ts: pd.DataFrame) -> pd.DataFrame:
     return df_ts.drop(index=ts_hour1).reset_index(drop=True)
 
 
-def _household_load_rows(net: pp.pandapowerNet) -> pd.DataFrame:
+def _parse_annual_demand_kwh(load: pd.DataFrame) -> pd.Series:
+    """Parse yearly measured HH demand from SWF load descriptions."""
+    if "description" not in load.columns:
+        return pd.Series(np.nan, index=load.index, dtype=float)
+    values = []
+    for description in load["description"].astype(str):
+        match = ANNUAL_DEMAND_PATTERN.search(description)
+        values.append(float(match.group(1).replace(",", ".")) if match else np.nan)
+    return pd.Series(values, index=load.index, dtype=float)
+
+
+def _household_load_rows(net: pp.pandapowerNet, allowed_buses: set[int] | None = None) -> pd.DataFrame:
     """Return active low-voltage household load rows used for profile assignment."""
     load = net.load.copy()
     if "in_service" in load.columns:
@@ -139,16 +158,36 @@ def _household_load_rows(net: pp.pandapowerNet) -> pd.DataFrame:
         raise ValueError("The real grid load table must contain 'type' and 'name' columns for HH filtering.")
 
     type_mask = load["type"].astype(str).str.strip().eq("HH")
-    name_mask = load["name"].astype(str).str.contains("NS_Last", na=False)
+    name_mask = load["name"].astype(str).str.contains(r"NS_(?:Er)?Last", case=False, regex=True, na=False)
     load = load[type_mask & name_mask].copy()
+    annual_demand_kwh = _parse_annual_demand_kwh(load)
+    load = load[annual_demand_kwh.isna() | (annual_demand_kwh >= MIN_HH_ANNUAL_DEMAND_KWH)].copy()
+    if allowed_buses is not None:
+        allowed_buses = {int(bus) for bus in allowed_buses}
+        load = load[load["bus"].astype(int).isin(allowed_buses)].copy()
     if load.empty:
-        raise ValueError("The real grid contains no active low-voltage household loads with type=HH and name containing NS_Last.")
+        raise ValueError(
+            "The real grid contains no active low-voltage household loads "
+            "with type=HH, name matching NS_Last or NS_ErLast, and annual demand "
+            f"of at least {MIN_HH_ANNUAL_DEMAND_KWH:.0f} kWh/a."
+        )
     return load
 
 
-def _build_real_electric_demand(net: pp.pandapowerNet, seed: int) -> pd.DataFrame:
+def _supplied_buses(grid: pp.pandapowerNet) -> set[int]:
+    unsupplied = {int(bus) for bus in pp_top.unsupplied_buses(grid)}
+    return {int(bus) for bus in grid.bus.index}.difference(unsupplied)
+
+
+def _build_real_electric_demand(
+    net: pp.pandapowerNet,
+    seed: int,
+    load_rows: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     electricity_module = _load_electricity_module()
-    load = _household_load_rows(net)
+    load = _household_load_rows(net) if load_rows is None else load_rows.copy()
+    if load.empty:
+        raise ValueError("No supplied household load rows available for profile generation.")
 
     rng = np.random.default_rng(seed)
     profile_ids = np.arange(len(load), dtype=int)
@@ -165,7 +204,16 @@ def _build_real_electric_demand(net: pp.pandapowerNet, seed: int) -> pd.DataFram
         }
     )
 
-    pseudo_buildings = electricity_module.sample_statistics(pseudo_buildings)
+    np_random_state = np.random.get_state()
+    py_random_state = random.getstate()
+    try:
+        np.random.seed(seed)
+        random.seed(seed)
+        pseudo_buildings = electricity_module.sample_statistics(pseudo_buildings)
+    finally:
+        np.random.set_state(np_random_state)
+        random.setstate(py_random_state)
+
     _, df_elec = electricity_module.get_elec_demand(pseudo_buildings)
     df_elec = _add_output_data_daylight_saving_shift(df_elec)
 
@@ -185,7 +233,9 @@ def _build_real_electric_demand(net: pp.pandapowerNet, seed: int) -> pd.DataFram
     return pd.concat([df_elec, df_reactive], axis=1).sort_index(axis=1, level=[0, 1])
 
 
-def _prepare_real_grid(net: pp.pandapowerNet) -> tuple[pp.pandapowerNet, float, pd.Series, list[int], list[int]]:
+def _prepare_real_grid(
+    net: pp.pandapowerNet,
+) -> tuple[pp.pandapowerNet, float, pd.Series, list[int], list[int], pd.DataFrame, dict[str, int]]:
     grid = deepcopy(net)
     pp.replace_zero_branches_with_switches(
         grid,
@@ -211,8 +261,23 @@ def _prepare_real_grid(net: pp.pandapowerNet) -> tuple[pp.pandapowerNet, float, 
     if not grid.line.empty:
         grid.line["max_i_ka"] = 1000.0
 
-    selected_loads = _household_load_rows(grid)
-    load_buses = selected_loads["bus"].dropna().astype(int).drop_duplicates().tolist()
+    all_selected_loads = _household_load_rows(grid)
+    all_selected_buses = all_selected_loads["bus"].dropna().astype(int).drop_duplicates()
+    supplied_buses = _supplied_buses(grid)
+    selected_loads = _household_load_rows(grid, allowed_buses=supplied_buses)
+    if selected_loads.empty:
+        raise ValueError(
+            "The real grid contains no selected household loads on pandapower-supplied buses. "
+            "Check open switches, radialization, and the transformer/root component."
+        )
+    selected_buses = selected_loads["bus"].dropna().astype(int).drop_duplicates()
+    load_scope = {
+        "household_load_rows_before_supply_filter": int(len(all_selected_loads)),
+        "household_load_buses_before_supply_filter": int(len(all_selected_buses)),
+        "dropped_unsupplied_household_load_rows": int(len(all_selected_loads) - len(selected_loads)),
+        "dropped_unsupplied_household_load_buses": int(len(set(all_selected_buses).difference(set(selected_buses)))),
+    }
+    load_buses = selected_buses.tolist()
     grid.load = selected_loads.drop_duplicates(subset=["bus"]).copy().reset_index(drop=True)
     if not grid.load.empty:
         grid.load["name"] = "HH_Profile_" + grid.load["bus"].astype(int).astype(str)
@@ -243,7 +308,7 @@ def _prepare_real_grid(net: pp.pandapowerNet) -> tuple[pp.pandapowerNet, float, 
     backbone_cable_ids, voltage_buses = pwrflw.comparison_backbone_scope(grid, load_buses)
     if not voltage_buses:
         voltage_buses = load_buses
-    return grid, transformer_s_rated_mva, cable_max_i_ka, voltage_buses, backbone_cable_ids
+    return grid, transformer_s_rated_mva, cable_max_i_ka, voltage_buses, backbone_cable_ids, selected_loads, load_scope
 
 
 def _grid_ref(row: dict[str, Any]) -> dict[str, Any]:
@@ -273,9 +338,16 @@ def run_one(row: dict[str, Any], run_name: str, scenario_key: str, seed: int) ->
     start = time.perf_counter()
     source_file = Path(row["source_file"])
     net = pp.from_excel(source_file)
-    selected_household_loads = _household_load_rows(net)
-    df_demand = _build_real_electric_demand(net, seed=seed)
-    grid, transformer_s_rated_mva, cable_max_i_ka, voltage_buses, backbone_cable_ids = _prepare_real_grid(net)
+    (
+        grid,
+        transformer_s_rated_mva,
+        cable_max_i_ka,
+        voltage_buses,
+        backbone_cable_ids,
+        selected_household_loads,
+        load_scope,
+    ) = _prepare_real_grid(net)
+    df_demand = _build_real_electric_demand(net, seed=seed, load_rows=selected_household_loads)
     summary = pwrflw.pf_summary(
         grid,
         df_demand,
@@ -284,6 +356,8 @@ def run_one(row: dict[str, Any], run_name: str, scenario_key: str, seed: int) ->
         voltage_buses=voltage_buses,
         algorithm=["nr", "iwamoto_nr"],
         cable_ids=backbone_cable_ids,
+        on_nonconvergence="nan",
+        protect_grid_state=True,
     )
 
     db = SurroGridDatabase()
@@ -296,10 +370,12 @@ def run_one(row: dict[str, Any], run_name: str, scenario_key: str, seed: int) ->
             "timeframe_mode": "full_year",
             "demand_allocation": ASSUMPTION_TEXT,
             "profile_seed": int(seed),
+            **load_scope,
             "selected_household_load_rows": int(len(selected_household_loads)),
             "selected_household_load_buses": int(len(selected_household_loads["bus"].dropna().astype(int).drop_duplicates())),
             "backbone_voltage_buses": int(len(voltage_buses)),
             "backbone_cables": int(len(backbone_cable_ids)),
+            "nonconverged_timesteps": int(summary["grid_summary"].get("n_failed_timesteps", 0)),
         },
     )
     db.write_real_powerflow_summary(run_id, "pre", summary)
@@ -311,8 +387,11 @@ def run_one(row: dict[str, Any], run_name: str, scenario_key: str, seed: int) ->
         "source_file": str(source_file),
         "elapsed_s": elapsed,
         "n_timesteps": grid_summary["n_timesteps"],
+        "n_converged_timesteps": grid_summary.get("n_converged_timesteps"),
+        "n_failed_timesteps": grid_summary.get("n_failed_timesteps"),
         "n_voltage_buses": grid_summary["n_voltage_buses"],
         "n_cables": grid_summary["n_cables"],
+        **load_scope,
         "selected_household_load_rows": int(len(selected_household_loads)),
         "selected_household_load_buses": int(len(selected_household_loads["bus"].dropna().astype(int).drop_duplicates())),
         "backbone_voltage_buses": int(len(voltage_buses)),

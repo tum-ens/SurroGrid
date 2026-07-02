@@ -203,10 +203,21 @@ def _tail_values_frame(values, asset_ids, metric, asset_type, tail, threshold_pe
 def _active_line_index(grid):
     if grid.line.empty:
         return pd.Index([], dtype=int)
-    if "in_service" not in grid.line.columns:
-        return pd.Index(grid.line.index)
-    active = grid.line["in_service"].fillna(True).astype(bool)
-    return pd.Index(grid.line.index[active])
+    if "in_service" in grid.line.columns:
+        active = grid.line["in_service"].fillna(True).astype(bool)
+        line_index = pd.Index(grid.line.index[active])
+    else:
+        line_index = pd.Index(grid.line.index)
+
+    if hasattr(grid, "switch") and not grid.switch.empty and {"et", "element", "closed"}.issubset(grid.switch.columns):
+        open_line_switches = grid.switch[
+            grid.switch["et"].astype(str).eq("l")
+            & ~grid.switch["closed"].fillna(True).astype(bool)
+        ]
+        if not open_line_switches.empty:
+            open_lines = pd.Index(open_line_switches["element"].dropna().astype(int).unique())
+            line_index = line_index.difference(open_lines)
+    return line_index
 
 
 def _grid_adjacency(grid):
@@ -253,11 +264,13 @@ def _parent_tree_from_root(adjacency, root):
 
 
 def comparison_backbone_scope(grid, load_buses):
-    """Return backbone cable ids and upstream backbone voltage buses.
+    """Return demand-carrying backbone cable ids and upstream voltage buses.
 
-    The comparison scope excludes service/house-connection lines that touch the
-    selected load endpoints. Voltages are evaluated at the nearest upstream bus
-    that remains part of the retained line backbone.
+    The comparison scope keeps only active line rows that lie on at least one
+    path from the root bus to a selected household load bus. Terminal service
+    connections into selected load endpoints are excluded. If parallel line rows
+    connect the same two path buses, all active parallel rows are retained.
+    Voltages are evaluated at the nearest upstream bus on the retained backbone.
     """
     load_buses = {
         int(bus)
@@ -265,52 +278,96 @@ def comparison_backbone_scope(grid, load_buses):
         if pd.notna(bus) and int(bus) in grid.bus.index
     }
     active_line_ids = _active_line_index(grid)
-    if len(active_line_ids) == 0:
+    if len(active_line_ids) == 0 or not load_buses:
         return [], []
 
     lines = grid.line.loc[active_line_ids]
-    endpoint_mask = (
-        lines["from_bus"].astype(int).isin(load_buses)
-        | lines["to_bus"].astype(int).isin(load_buses)
-    )
-    backbone_cable_ids = pd.Index(active_line_ids[~endpoint_mask])
-    backbone_lines = grid.line.loc[backbone_cable_ids]
-    backbone_buses = set(backbone_lines["from_bus"].astype(int)).union(
-        set(backbone_lines["to_bus"].astype(int))
-    )
-    if not backbone_buses:
-        backbone_buses = set(lines["from_bus"].astype(int)).union(set(lines["to_bus"].astype(int))) - load_buses
+    line_ids_by_edge = {}
+    line_neighbors = {}
+    for line_id, line in lines.iterrows():
+        from_bus = int(line["from_bus"])
+        to_bus = int(line["to_bus"])
+        edge = frozenset((from_bus, to_bus))
+        line_ids_by_edge.setdefault(edge, []).append(int(line_id))
+        line_neighbors.setdefault(from_bus, set()).add(to_bus)
+        line_neighbors.setdefault(to_bus, set()).add(from_bus)
 
     adjacency = _grid_adjacency(grid)
     parents = _parent_tree_from_root(adjacency, _root_bus(grid))
+    retained_line_ids = set()
     voltage_buses = []
+
     for load_bus in sorted(load_buses):
+        if load_bus not in parents:
+            continue
+        path_edges = []
         bus = load_bus
         seen = set()
-        mapped_bus = None
         while bus in parents and bus not in seen:
             seen.add(bus)
-            bus = parents[bus]
-            if bus is None:
+            parent = parents[bus]
+            if parent is None:
                 break
-            if bus in backbone_buses:
-                mapped_bus = bus
-                break
-        if mapped_bus is None:
-            for neighbor in sorted(adjacency.get(load_bus, [])):
-                if neighbor in backbone_buses:
-                    mapped_bus = neighbor
-                    break
-        if mapped_bus is not None:
-            voltage_buses.append(int(mapped_bus))
+            path_edges.append((int(parent), int(bus)))
+            bus = parent
+
+        if not path_edges:
+            continue
+
+        terminal_load_bus = len(line_neighbors.get(load_bus, set())) <= 1
+        service_edge = frozenset(path_edges[0]) if terminal_load_bus else None
+        mapped_voltage_bus = None
+
+        for parent, child in path_edges:
+            edge = frozenset((parent, child))
+            if edge == service_edge:
+                mapped_voltage_bus = int(parent)
+                continue
+            line_ids = line_ids_by_edge.get(edge)
+            if not line_ids:
+                continue
+            retained_line_ids.update(line_ids)
+            if mapped_voltage_bus is None:
+                mapped_voltage_bus = int(child)
+
+        if mapped_voltage_bus is None:
+            mapped_voltage_bus = int(load_bus)
+        voltage_buses.append(mapped_voltage_bus)
+
+    backbone_cable_ids = pd.Index(sorted(retained_line_ids), dtype=int)
+    if len(backbone_cable_ids) > 0:
+        backbone_lines = grid.line.loc[backbone_cable_ids]
+        backbone_buses = set(backbone_lines["from_bus"].astype(int)).union(
+            set(backbone_lines["to_bus"].astype(int))
+        )
+        voltage_buses = [bus for bus in voltage_buses if bus in backbone_buses]
 
     voltage_buses = pd.Index(voltage_buses, dtype=int).drop_duplicates().tolist()
     return backbone_cable_ids.astype(int).tolist(), voltage_buses
 
 
-def pf_summary(grid, df, transformer_s_rated_mva, cable_max_i_ka, voltage_buses, algorithm="bfsw", cable_ids=None):
-    """Run power flow and return compact violation-hour and percentile metrics."""
+def pf_summary(
+    grid,
+    df,
+    transformer_s_rated_mva,
+    cable_max_i_ka,
+    voltage_buses,
+    algorithm="bfsw",
+    cable_ids=None,
+    on_nonconvergence="raise",
+    protect_grid_state=False,
+):
+    """Run power flow and return compact violation-hour and percentile metrics.
+
+    ``on_nonconvergence="nan"`` keeps the annual summary running and records
+    failed timesteps as missing values. The default stays strict and raises.
+    Set ``protect_grid_state=True`` when failed solves must not mutate the net
+    used by later timesteps.
+    """
+    if on_nonconvergence not in {"raise", "nan"}:
+        raise ValueError("on_nonconvergence must be either 'raise' or 'nan'.")
     transformer_loadings = []
+    failed_timesteps = []
     if cable_ids is None:
         cable_ids = pd.Index([int(line) for line in grid.line.index], name="cable")
     else:
@@ -322,7 +379,16 @@ def pf_summary(grid, df, transformer_s_rated_mva, cable_max_i_ka, voltage_buses,
     voltage_matrix = np.full((len(df), len(voltage_buses)), np.nan, dtype=float)
 
     for row_idx, (_, row) in enumerate(df.iterrows()):
-        grid_res = run_single_pf(grid, _demand_row_to_load(row), algorithm=algorithm)
+        attempt_grid = deepcopy(grid) if protect_grid_state else grid
+        try:
+            grid_res = run_single_pf(attempt_grid, _demand_row_to_load(row), algorithm=algorithm)
+        except pp.LoadflowNotConverged:
+            if on_nonconvergence == "raise":
+                raise
+            failed_timesteps.append(int(row_idx))
+            transformer_loadings.append(np.nan)
+            continue
+        grid = grid_res
 
         ext_grid = grid_res.res_ext_grid
         if {"p_mw", "q_mvar"}.issubset(ext_grid.columns) and transformer_s_rated_mva > 0:
@@ -367,8 +433,11 @@ def pf_summary(grid, df, transformer_s_rated_mva, cable_max_i_ka, voltage_buses,
         }
     ).dropna(subset=["voltage_p05_time_pu"])
 
+    n_failed_timesteps = int(len(failed_timesteps))
     grid_summary = {
         "n_timesteps": int(len(df)),
+        "n_converged_timesteps": int(len(df) - n_failed_timesteps),
+        "n_failed_timesteps": n_failed_timesteps,
         "n_voltage_buses": int(len(voltage_buses)),
         "n_cables": int(len(cable_values)),
         "transformer_s_rated_mva": float(transformer_s_rated_mva),
@@ -385,41 +454,46 @@ def pf_summary(grid, df, transformer_s_rated_mva, cable_max_i_ka, voltage_buses,
     }
 
     transformer_matrix = transformer_loadings.reshape(-1, 1) if transformer_loadings.size else np.empty((0, 1))
-    tail_summary = pd.concat(
-        [
-            _tail_values_frame(
-                transformer_matrix,
-                [0],
-                metric="Transformer",
-                asset_type="transformer",
-                tail="upper",
-                threshold_percentile=99,
-            ),
-            _tail_values_frame(
-                cable_loading_matrix,
-                cable_ids.to_numpy(dtype=int),
-                metric="Cables",
-                asset_type="cable",
-                tail="upper",
-                threshold_percentile=99,
-            ),
-            _tail_values_frame(
-                voltage_matrix,
-                voltage_buses.to_numpy(dtype=int),
-                metric="Voltage",
-                asset_type="bus",
-                tail="lower",
-                threshold_percentile=1,
-            ),
-        ],
-        ignore_index=True,
-    )
+    tail_frames = [
+        _tail_values_frame(
+            transformer_matrix,
+            [0],
+            metric="Transformer",
+            asset_type="transformer",
+            tail="upper",
+            threshold_percentile=99,
+        ),
+        _tail_values_frame(
+            cable_loading_matrix,
+            cable_ids.to_numpy(dtype=int),
+            metric="Cables",
+            asset_type="cable",
+            tail="upper",
+            threshold_percentile=99,
+        ),
+        _tail_values_frame(
+            voltage_matrix,
+            voltage_buses.to_numpy(dtype=int),
+            metric="Voltage",
+            asset_type="bus",
+            tail="lower",
+            threshold_percentile=1,
+        ),
+    ]
+    tail_frames = [frame for frame in tail_frames if not frame.empty]
+    if tail_frames:
+        tail_summary = pd.concat(tail_frames, ignore_index=True)
+    else:
+        tail_summary = pd.DataFrame(
+            columns=["metric", "asset_type", "asset_id", "tail", "threshold_value", "t_index", "value"]
+        )
 
     return {
         "grid_summary": grid_summary,
         "cable_summary": cable_summary,
         "bus_voltage_summary": bus_voltage_summary,
         "tail_summary": tail_summary,
+        "failed_timesteps": failed_timesteps,
     }
 
 def pf(grid, df, parallel, n_cpu):

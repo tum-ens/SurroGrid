@@ -30,7 +30,7 @@ GRIDEXPAND_DIR = REPO_ROOT / "GridExpand"
 DEFAULT_AGS = "9474126"
 DEFAULT_PLZ = 91301
 DEFAULT_MIN_BUILDINGS = 5
-DEFAULT_RUN_NAME = "baseline_static_pre_powerflow_backbone"
+DEFAULT_RUN_NAME = "baseline_synthetic"
 
 
 def utc_now() -> str:
@@ -51,6 +51,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step2-cpus", type=int, default=1)
     parser.add_argument("--step4-cpus", type=int, default=1)
     parser.add_argument("--run-name", default=DEFAULT_RUN_NAME)
+    parser.add_argument(
+        "--hh-only",
+        action="store_true",
+        help="Run Step 4 with synthetic residential/HH demand only.",
+    )
     parser.add_argument("--start-index", type=int)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--rerun-existing", action="store_true", help="Recompute grids that already have compact summaries.")
@@ -241,22 +246,25 @@ def run_candidate(candidate: dict[str, Any], args: argparse.Namespace, status: S
         shutil.copy2(source, target)
 
         current_stage = "step4_summary_powerflow"
+        step4_cmd = [
+            "uv",
+            "run",
+            "python",
+            "run_pwrflw.py",
+            bridge_filename,
+            "--storage",
+            "db",
+            "--pre-only",
+            "--summary-only",
+            "--run-name",
+            args.run_name,
+            "--n_cpu",
+            str(args.step4_cpus),
+        ]
+        if args.hh_only:
+            step4_cmd.append("--hh-only")
         run_command(
-            cmd=[
-                "uv",
-                "run",
-                "python",
-                "run_pwrflw.py",
-                bridge_filename,
-                "--storage",
-                "db",
-                "--pre-only",
-                "--summary-only",
-                "--run-name",
-                args.run_name,
-                "--n_cpu",
-                str(args.step4_cpus),
-            ],
+            cmd=step4_cmd,
             cwd=step4_dir,
             log_path=log_path,
             stage=current_stage,
@@ -332,6 +340,8 @@ def main() -> int:
         workers=args.workers,
         step2_cpus=args.step2_cpus,
         step4_cpus=args.step4_cpus,
+        hh_only=args.hh_only,
+        run_name=args.run_name,
         run_dir=str(run_dir),
     )
     if not selected:

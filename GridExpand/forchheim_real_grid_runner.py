@@ -10,7 +10,7 @@ import subprocess
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STEP4_DIR = REPO_ROOT / "GridExpand" / "4.powerflow"
-DEFAULT_RUN_NAME = "baseline_static_pre_powerflow_real_swf_hh_only_backbone"
+DEFAULT_RUN_NAME = "real_hybrid"
 
 
 def parse_args() -> argparse.Namespace:
@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--run-name", default=DEFAULT_RUN_NAME)
     parser.add_argument("--seed", type=int, default=91301)
-    parser.add_argument("--skip-existing", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--skip-existing", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--lv-id", default=None, help="Optional single LV id for a pilot run, e.g. 28 or LV_028.")
     parser.add_argument("--limit", type=int, default=None)
     return parser.parse_args()

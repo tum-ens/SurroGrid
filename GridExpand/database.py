@@ -53,9 +53,13 @@ class SurroGridDatabase:
     def ensure_schema(self) -> None:
         with self.engine.begin() as conn:
             if self._schema_ready(conn):
+                self._ensure_powerflow_summary_columns(conn)
+                self._ensure_real_powerflow_schema(conn)
                 return
             conn.execute(text("SELECT pg_advisory_xact_lock(916200005)"))
             if self._schema_ready(conn):
+                self._ensure_powerflow_summary_columns(conn)
+                self._ensure_real_powerflow_schema(conn)
                 return
             sql = SCHEMA_SQL_PATH.read_text(encoding="utf-8")
             statements = [statement.strip() for statement in sql.split(";") if statement.strip()]
@@ -71,6 +75,8 @@ class SurroGridDatabase:
     def _ensure_powerflow_summary_columns(self, conn) -> None:
         column_specs = {
             "powerflow_summary": {
+                "n_converged_timesteps": "INTEGER",
+                "n_failed_timesteps": "INTEGER",
                 "trafo_loading_p50_time_percent": "DOUBLE PRECISION",
                 "trafo_loading_p90_time_percent": "DOUBLE PRECISION",
                 "trafo_loading_p99_time_percent": "DOUBLE PRECISION",
@@ -193,6 +199,8 @@ class SurroGridDatabase:
                     n_timesteps INTEGER NOT NULL,
                     n_voltage_buses INTEGER NOT NULL,
                     n_cables INTEGER NOT NULL,
+                    n_converged_timesteps INTEGER,
+                    n_failed_timesteps INTEGER,
                     transformer_s_rated_mva DOUBLE PRECISION,
                     trafo_loading_p50_time_percent DOUBLE PRECISION,
                     trafo_loading_p90_time_percent DOUBLE PRECISION,
@@ -279,6 +287,14 @@ class SurroGridDatabase:
             "CREATE INDEX IF NOT EXISTS idx_real_powerflow_tail_value_run_stage_metric ON surrogrid.real_powerflow_tail_value (real_powerflow_run_id, stage, metric)",
         ):
             conn.execute(text(index_sql))
+
+        for column_name in ("n_converged_timesteps", "n_failed_timesteps"):
+            conn.execute(
+                text(
+                    f"ALTER TABLE IF EXISTS surrogrid.real_powerflow_summary "
+                    f"ADD COLUMN IF NOT EXISTS {column_name} INTEGER"
+                )
+            )
 
     def _schema_ready(self, conn=None) -> bool:
         query = text(
@@ -1404,6 +1420,8 @@ class SurroGridDatabase:
                     "real_powerflow_run_id": int(run_id),
                     "stage": stage,
                     "n_timesteps": int(grid_summary.get("n_timesteps", 0)),
+                    "n_converged_timesteps": grid_summary.get("n_converged_timesteps"),
+                    "n_failed_timesteps": grid_summary.get("n_failed_timesteps"),
                     "n_voltage_buses": int(grid_summary.get("n_voltage_buses", 0)),
                     "n_cables": int(grid_summary.get("n_cables", 0)),
                     "transformer_s_rated_mva": grid_summary.get("transformer_s_rated_mva"),
@@ -1537,6 +1555,8 @@ class SurroGridDatabase:
                     "powerflow_run_id": int(run_id),
                     "stage": stage,
                     "n_timesteps": int(grid_summary.get("n_timesteps", 0)),
+                    "n_converged_timesteps": grid_summary.get("n_converged_timesteps"),
+                    "n_failed_timesteps": grid_summary.get("n_failed_timesteps"),
                     "n_voltage_buses": int(grid_summary.get("n_voltage_buses", 0)),
                     "n_cables": int(grid_summary.get("n_cables", 0)),
                     "transformer_s_rated_mva": grid_summary.get("transformer_s_rated_mva"),
