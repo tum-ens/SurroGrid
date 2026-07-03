@@ -29,6 +29,7 @@ from pandapower.plotting import plotly as pp_plotly
 from pandapower.plotting import create_generic_coordinates
 from plotly.subplots import make_subplots
 from sqlalchemy import text
+from scipy.stats import wasserstein_distance
 
 
 GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
@@ -36,6 +37,84 @@ if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
 from database import SurroGridDatabase
+
+
+def save_plotly_figure(
+    fig: go.Figure,
+    output_path: str | Path,
+    formats: tuple[str, ...] = ("png", "svg"),
+    width: int | None = None,
+    height: int | None = None,
+    scale: float = 2.0,
+    active_slider_step: int | str | None = None,
+) -> list[Path]:
+    """Save a Plotly figure to one or more static image formats.
+
+    ``output_path`` can be either a path without suffix, such as
+    ``output/asset-percentiles``, or a concrete file path. Static Plotly export
+    requires the ``kaleido`` package, which is included in the Step 5
+    environment. For figures with sliders, ``active_slider_step`` selects the
+    static state to export by zero-based step index or by exact step label.
+    """
+    export_fig = go.Figure(fig)
+    if active_slider_step is not None:
+        _apply_plotly_slider_step(export_fig, active_slider_step)
+
+    output_path = Path(output_path)
+    if output_path.suffix:
+        base_path = output_path.with_suffix("")
+        if not formats:
+            formats = (output_path.suffix.lstrip("."),)
+    else:
+        base_path = output_path
+    base_path.parent.mkdir(parents=True, exist_ok=True)
+
+    saved_paths: list[Path] = []
+    for image_format in formats:
+        fmt = image_format.lower().lstrip(".")
+        target = base_path.with_suffix(f".{fmt}")
+        try:
+            export_fig.write_image(str(target), format=fmt, width=width, height=height, scale=scale)
+        except ValueError as exc:
+            raise RuntimeError(
+                "Static Plotly export failed. Make sure the Step 5 environment "
+                "contains kaleido by running `uv sync` in GridExpand/5.postprocessing."
+            ) from exc
+        saved_paths.append(target)
+    return saved_paths
+
+
+def _apply_plotly_slider_step(fig: go.Figure, active_slider_step: int | str) -> None:
+    sliders = fig.layout.sliders
+    if not sliders:
+        raise ValueError("active_slider_step was provided, but the Plotly figure has no sliders.")
+    slider = sliders[0]
+    steps = list(slider.steps)
+    if isinstance(active_slider_step, str):
+        labels = [str(step.label) for step in steps]
+        try:
+            step_index = labels.index(active_slider_step)
+        except ValueError as exc:
+            available = ", ".join(labels)
+            raise ValueError(
+                f"Unknown slider step label {active_slider_step!r}. Available labels: {available}."
+            ) from exc
+    else:
+        step_index = int(active_slider_step)
+    if step_index < 0 or step_index >= len(steps):
+        raise IndexError(f"Slider step index {step_index} is outside [0, {len(steps) - 1}].")
+
+    step = steps[step_index]
+    args = list(step.args) if step.args is not None else []
+    if args:
+        trace_update = args[0] or {}
+        visible = trace_update.get("visible") if isinstance(trace_update, dict) else None
+        if visible is not None:
+            for trace, is_visible in zip(fig.data, visible):
+                trace.visible = bool(is_visible)
+    if len(args) > 1 and isinstance(args[1], dict):
+        fig.update_layout(args[1])
+    fig.layout.sliders[0].active = step_index
 
 
 def _read_net(h5_path: Path) -> pp.pandapowerNet:
@@ -91,7 +170,11 @@ def _line_loading_from_current(
 ) -> pd.Series:
 
     max_i_ka = net.line["max_i_ka"].reindex(i_from_ka.index).astype(float).replace(0.0, np.nan)
-    loading_percent = (i_from_ka / max_i_ka) * 100.0
+    if "parallel" in net.line.columns:
+        parallel = net.line["parallel"].reindex(i_from_ka.index).fillna(1).astype(float)
+    else:
+        parallel = pd.Series(1.0, index=i_from_ka.index)
+    loading_percent = (i_from_ka / (max_i_ka * parallel)) * 100.0
     return loading_percent
 
 
@@ -2740,6 +2823,284 @@ def plot_powerflow_asset_cutoff_overview(
         fig.show()
     return fig
 
+
+def plot_powerflow_asset_cutoff_overview_static(
+    profile: pd.DataFrame,
+    group_col: str | None = None,
+    color_map: dict[str, str] | None = None,
+    asset_cutoff_percentile: float = 0.95,
+    asset_percentiles: tuple[float, ...] | None = None,
+    metrics: tuple[str, ...] = ("Transformer", "Cables", "Voltage"),
+    title: str = "Power-Flow Stress by Retained-Asset Cutoff",
+    y_axis_limits: tuple[float | None, float | None, float | None] | None = None,
+    center_stat: str = "mean",
+    show_band: bool = False,
+    worst_asset_per_grid: bool = True,
+    save_path: str | Path | None = None,
+    save_formats: tuple[str, ...] = ("svg", "pdf"),
+):
+    """Draw a publication-oriented static retained-asset cutoff overview.
+
+    The figure mirrors :func:`plot_powerflow_asset_cutoff_overview` without a
+    slider. ``asset_cutoff_percentile`` selects the retained-asset filter shown
+    in the bottom row and the maximum cutoff shown in the top-row curves.
+    Static Matplotlib output can be saved as SVG/PDF through ``save_path``.
+    """
+    required = {"metric", "percentile", "value"}
+    missing_required = required.difference(profile.columns)
+    if missing_required:
+        missing = ", ".join(sorted(missing_required))
+        raise ValueError(
+            "plot_powerflow_asset_cutoff_overview_static expects the asset-level "
+            f"percentile profile dataframe; missing column(s): {missing}."
+        )
+
+    center_stat = str(center_stat).strip().lower()
+    if center_stat not in {"median", "mean"}:
+        raise ValueError("center_stat must be either 'median' or 'mean'.")
+
+    cutoff = float(asset_cutoff_percentile)
+    if cutoff > 1:
+        cutoff = cutoff / 100
+    if cutoff <= 0 or cutoff > 1:
+        raise ValueError("asset_cutoff_percentile must satisfy 0 < value <= 1, or 0 < value <= 100.")
+
+    if asset_percentiles is None:
+        asset_percentiles = (0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99, 1.0)
+    asset_percentiles = tuple(float(q) / 100 if float(q) > 1 else float(q) for q in asset_percentiles)
+    if any(q <= 0 or q > 1 for q in asset_percentiles):
+        raise ValueError("asset_percentiles values must satisfy 0 < value <= 1, or 0 < value <= 100.")
+    x_values = tuple(q for q in sorted(set(asset_percentiles).union({cutoff})) if q <= cutoff or np.isclose(q, cutoff))
+    if not x_values:
+        x_values = (cutoff,)
+
+    df = profile.copy()
+    if group_col is None:
+        group_col = "comparison_group"
+    if group_col not in df.columns:
+        df[group_col] = "All retained assets"
+    df["percentile_norm"] = df["percentile"].map(_normalize_percentile_label)
+
+    metric_order = ["Transformer", "Cables", "Voltage"]
+    metric_lookup = {metric.lower(): metric for metric in metric_order}
+    selected_metrics = []
+    for metric in metrics:
+        metric_key = metric_lookup.get(str(metric).strip().lower())
+        if metric_key is None:
+            available = ", ".join(metric_order)
+            raise ValueError(f"Unsupported metric {metric!r}. Available: {available}.")
+        if metric_key not in selected_metrics:
+            selected_metrics.append(metric_key)
+
+    critical_percentile = {"Transformer": "max", "Cables": "max", "Voltage": "min"}
+    critical_direction = {"Transformer": "high", "Cables": "high", "Voltage": "low"}
+    y_titles = {
+        "Transformer": "Max loading [%]",
+        "Cables": "Max loading [%]",
+        "Voltage": "Min voltage [p.u.]",
+    }
+    default_colors = {
+        "Synthetic": "#335C81",
+        "Real SWF": "#D95D39",
+        "synthetic": "#335C81",
+        "real_swf": "#D95D39",
+    }
+    if color_map:
+        default_colors.update({str(key): value for key, value in color_map.items()})
+    fallback_palette = ["#335C81", "#D95D39", "#2A9D8F", "#6D597A", "#7A8450"]
+    y_axis_ranges = _powerflow_y_axis_ranges(y_axis_limits)
+
+    def _retained_mask(values: pd.Series, metric_name: str, retained_fraction: float) -> pd.Series:
+        values = values.astype(float)
+        if np.isclose(retained_fraction, 1.0):
+            return pd.Series(True, index=values.index)
+        if critical_direction[metric_name] == "high":
+            threshold = values.quantile(retained_fraction)
+            return values <= threshold
+        threshold = values.quantile(1 - retained_fraction)
+        return values >= threshold
+
+    def _retained_curve(values: pd.Series, metric_name: str) -> pd.DataFrame:
+        values = values.astype(float).dropna()
+        rows = []
+        for retained_fraction in x_values:
+            retained = values[_retained_mask(values, metric_name, retained_fraction)]
+            if retained.empty:
+                continue
+            rows.append(
+                {
+                    "retained_asset_cutoff": retained_fraction,
+                    "center": float(retained.median() if center_stat == "median" else retained.mean()),
+                    "band_lower": float(retained.min()),
+                    "band_upper": float(retained.max()),
+                }
+            )
+        return pd.DataFrame(rows)
+
+    def _retained_frame(group_df: pd.DataFrame, metric_name: str) -> pd.DataFrame:
+        values = group_df["value"].astype(float)
+        return group_df.loc[_retained_mask(values, metric_name, cutoff)].copy()
+
+    def _select_worst_asset_per_grid(plot_df: pd.DataFrame, metric_name: str) -> pd.DataFrame:
+        if not worst_asset_per_grid or plot_df.empty:
+            return plot_df
+        if "grid" not in plot_df.columns:
+            raise ValueError("worst_asset_per_grid=True requires a 'grid' column in the profile dataframe.")
+        group_keys = [group_col, "grid"] if group_col in plot_df.columns else ["grid"]
+        if critical_direction[metric_name] == "high":
+            value_index = plot_df.groupby(group_keys, sort=False)["value"].idxmax()
+        else:
+            value_index = plot_df.groupby(group_keys, sort=False)["value"].idxmin()
+        return plot_df.loc[value_index].reset_index(drop=True)
+
+    def _cutoff_label(value: float) -> str:
+        return f"P{int(round(value * 100)):02d}" if value < 1 else "P100"
+
+    title_fontsize = 20
+    panel_title_fontsize = 17
+    label_fontsize = 16
+    tick_fontsize = 14
+    legend_fontsize = 15
+
+    plt.style.use("seaborn-v0_8-whitegrid")
+    fig, axes = plt.subplots(
+        2,
+        len(selected_metrics),
+        figsize=(4.6 * len(selected_metrics), 7.2),
+        gridspec_kw={"height_ratios": [1.0, 1.15], "hspace": 0.34, "wspace": 0.28},
+        squeeze=False,
+    )
+    groups = list(df[group_col].astype(str).dropna().drop_duplicates())
+    group_colors = {
+        group: default_colors.get(group, fallback_palette[index % len(fallback_palette)])
+        for index, group in enumerate(groups)
+    }
+
+    for col_idx, metric in enumerate(selected_metrics):
+        metric_df = df[
+            (df["metric"] == metric)
+            & (df["percentile_norm"] == critical_percentile[metric])
+        ].dropna(subset=["value"]).copy()
+        if metric_df.empty:
+            continue
+
+        ax_curve = axes[0, col_idx]
+        ax_dist = axes[1, col_idx]
+        for group in groups:
+            group_df = metric_df[metric_df[group_col].astype(str) == group]
+            values = group_df["value"].astype(float).dropna()
+            if values.empty:
+                continue
+            curve = _retained_curve(values, metric)
+            color = group_colors[group]
+            ax_curve.plot(
+                curve["retained_asset_cutoff"],
+                curve["center"],
+                marker="o",
+                linewidth=2.8,
+                markersize=6.5,
+                color=color,
+                label=group,
+            )
+            if show_band:
+                ax_curve.fill_between(
+                    curve["retained_asset_cutoff"].to_numpy(dtype=float),
+                    curve["band_lower"].to_numpy(dtype=float),
+                    curve["band_upper"].to_numpy(dtype=float),
+                    color=color,
+                    alpha=0.13,
+                    linewidth=0,
+                )
+
+        violin_values = []
+        violin_labels = []
+        violin_colors = []
+        for group in groups:
+            group_df = metric_df[metric_df[group_col].astype(str) == group]
+            retained = _select_worst_asset_per_grid(_retained_frame(group_df, metric), metric)
+            values = retained["value"].astype(float).dropna().to_numpy()
+            if values.size == 0:
+                continue
+            violin_values.append(values)
+            violin_labels.append(group)
+            violin_colors.append(group_colors[group])
+
+        if violin_values:
+            positions = np.arange(1, len(violin_values) + 1)
+            violins = ax_dist.violinplot(
+                violin_values,
+                positions=positions,
+                widths=0.72,
+                showmeans=False,
+                showmedians=True,
+                showextrema=False,
+            )
+            for body, color in zip(violins["bodies"], violin_colors):
+                body.set_facecolor(color)
+                body.set_edgecolor(color)
+                body.set_alpha(0.28)
+                body.set_linewidth(1.2)
+            if "cmedians" in violins:
+                violins["cmedians"].set_color("#222222")
+                violins["cmedians"].set_linewidth(2.0)
+            rng = np.random.default_rng(7)
+            for position, values, color in zip(positions, violin_values, violin_colors):
+                jitter = rng.normal(0, 0.035, size=values.size)
+                ax_dist.scatter(
+                    np.full(values.size, position) + jitter,
+                    values,
+                    s=18,
+                    color=color,
+                    alpha=0.42,
+                    linewidths=0,
+                )
+            ax_dist.set_xticks(positions)
+            ax_dist.set_xticklabels(violin_labels, rotation=0, fontsize=tick_fontsize)
+
+        ax_curve.set_title(metric, fontsize=panel_title_fontsize, fontweight="bold")
+        ax_curve.set_xlabel("")
+        ax_curve.set_ylabel(f"{center_stat.capitalize()} {y_titles[metric].lower()}", fontsize=label_fontsize)
+        ax_curve.set_xticks(list(x_values))
+        ax_curve.set_xticklabels([_cutoff_label(q) for q in x_values], rotation=55, ha="right", rotation_mode="anchor", fontsize=tick_fontsize)
+        ax_dist.set_xlabel("")
+        ax_dist.set_ylabel(y_titles[metric], fontsize=label_fontsize)
+        if metric in y_axis_ranges:
+            ax_curve.set_ylim(y_axis_ranges[metric])
+            ax_dist.set_ylim(y_axis_ranges[metric])
+        for ax in (ax_curve, ax_dist):
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.tick_params(axis="both", labelsize=tick_fontsize)
+            ax.grid(True, axis="y", color="#d8d8d8", linewidth=0.8)
+            ax.grid(False, axis="x")
+
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    if handles:
+        fig.legend(
+            handles,
+            labels,
+            loc="upper center",
+            ncol=len(labels),
+            frameon=False,
+            bbox_to_anchor=(0.5, 0.91),
+            fontsize=legend_fontsize,
+        )
+    fig.suptitle(
+        f"{title} ({_cutoff_label(cutoff)} retained-asset cutoff)",
+        y=0.99,
+        fontsize=title_fontsize,
+        fontweight="bold",
+    )
+    fig.subplots_adjust(top=0.78, bottom=0.08, left=0.08, right=0.985, hspace=0.38, wspace=0.35)
+
+    if save_path is not None:
+        save_path = Path(save_path)
+        base_path = save_path.with_suffix("") if save_path.suffix else save_path
+        base_path.parent.mkdir(parents=True, exist_ok=True)
+        for image_format in save_formats:
+            fig.savefig(base_path.with_suffix(f".{image_format.lstrip('.')}"), bbox_inches="tight")
+    return fig
+
 def plot_powerflow_percentile_profiles(
     profile: pd.DataFrame,
     group_col: str | None = None,
@@ -4411,6 +4772,10 @@ def line_loading_distribution_db(
             }
         )
         ratings = net.line[["max_i_ka"]].copy()
+        if "parallel" in net.line.columns:
+            ratings["parallel"] = net.line["parallel"].fillna(1).astype(float)
+        else:
+            ratings["parallel"] = 1.0
         ratings["line"] = ratings.index.astype(int)
         ratings["powerflow_run_id"] = int(run_id_value)
         if "name" in net.line.columns:
@@ -4423,7 +4788,10 @@ def line_loading_distribution_db(
     ratings = pd.concat(rating_frames, ignore_index=True)
     df = df.merge(ratings, on=["powerflow_run_id", "line"], how="left")
     df["max_i_ka"] = df["max_i_ka"].astype(float).replace(0.0, np.nan)
-    df["loading_percent"] = (df["max_i_from_ka"].astype(float) / df["max_i_ka"]) * 100.0
+    df["parallel"] = df["parallel"].fillna(1).astype(float)
+    df["loading_percent"] = (
+        df["max_i_from_ka"].astype(float) / (df["max_i_ka"] * df["parallel"])
+    ) * 100.0
     df["comparison"] = df["stage"].map(
         {"pre": "status_quo_pre", "post": "full_pipeline_post"}
     ).fillna(df["stage"])
@@ -4592,8 +4960,13 @@ def max_line_loading_summary_db(
         raise ValueError(f"No DB line results found for run {run['powerflow_run_id']}.")
 
     max_i_ka = net.line["max_i_ka"].astype(float).replace(0.0, np.nan)
+    if "parallel" in net.line.columns:
+        parallel = net.line["parallel"].fillna(1).astype(float)
+    else:
+        parallel = pd.Series(1.0, index=net.line.index)
     df["max_i_ka"] = df["line"].map(max_i_ka.to_dict())
-    df["loading_percent"] = (df["i_from_ka"] / df["max_i_ka"]) * 100.0
+    df["parallel"] = df["line"].map(parallel.to_dict()).fillna(1).astype(float)
+    df["loading_percent"] = (df["i_from_ka"] / (df["max_i_ka"] * df["parallel"])) * 100.0
 
     idx = df.groupby("stage", sort=False)["loading_percent"].idxmax()
     summary = df.loc[idx].copy()

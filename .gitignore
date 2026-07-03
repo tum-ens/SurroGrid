@@ -4,3 +4,10 @@ GridExpand/2.demand_allocation/gridalloc/data/statistics/general/mobility_profil
 GridExpand/5.postprocessing/plotting/thesis_plots.ipynb
 GridExpand/run_logs/*
 swf_usage.md
+pylovo_paper.tex
+paper_draft_pylovo-validation/*
+*.png
+*.pdf
+*.svg
+GridExpand/5.postprocessing/plotting/output/*
+GridExpand/5.postprocessing/paper.md
