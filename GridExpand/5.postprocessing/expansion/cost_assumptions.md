@@ -39,10 +39,10 @@ For transformers, the previous `additional_kVA * EUR/kVA + fixed handling` rule 
 Cable capacity is evaluated on raw electrical line components, ideally `pylovo.pandapower_line` joined to `surrogrid.powerflow_line_result`. The line current from the power-flow result is compared with the installed capacity of the same electrical component.
 
 ```text
-installed_capacity_ka = max_i_ka * existing_parallel
+installed_capacity_ka = max_i_ka * component_parallel
 loading_percent = peak_current_ka / installed_capacity_ka * 100
 required_parallel = ceil(peak_current_ka / max_i_ka)
-additional_parallel = max(required_parallel - existing_parallel, 0)
+additional_parallel = max(required_parallel - component_parallel, 0)
 requires_expansion = additional_parallel > 0
 ```
 
@@ -53,10 +53,12 @@ component_cost_eur = additional_parallel * component_length_km * selected_parall
 estimated_cost_eur = sum(component_cost_eur) for the displayed QGIS feature
 ```
 
-The selected line cost is stored per row in:
+The selected line cost for the most critical mapped raw component is stored per row in:
 
-- `line_cost_eur_per_km`
-- `line_cost_basis`
+- `critical_component_cost_eur_per_km`
+- `critical_component_cost_basis`
+
+If several raw electrical components are mapped to one visible QGIS segment, `estimated_cost_eur` and `additional_parallel` are aggregated over all mapped components. The `critical_component_*` fields describe the component with the highest loading, and `component_cost_basis_count` / `component_std_type_count` indicate whether the visible segment combines heterogeneous component assumptions.
 
 `pylovo.lines_result_view` should only be used after the raw electrical calculation, to attach final component or aggregated component results to QGIS-friendly geometries. In particular, do not derive `existing_parallel`, `required_parallel`, or installed capacity from a merged helper row in `lines_result_view`. A visual helper can combine multiple feeder pieces using display-oriented rules such as `max(parallel)` and `sum(length_km)`, which can overstate or misassign electrical capacity when independent lines share a lane or when predefined pandapower parallel cables are not visualized as separate geometries.
 
@@ -124,6 +126,12 @@ Additional source names used in the synthesis and retained for traceability:
 - dena 2012: older DSO-validated lower-bound plausibility check. Not used as the primary default because the cost base is historical.
 - FfE MONA and related FfE distribution-grid modelling: retained for methodological traceability around LV-grid simulations and technology options.
 
+## Voltage Consideration
+
+The current line expansion estimate is a thermal-capacity heuristic: it adds parallel cable capacity only when the simulated line current exceeds the installed nominal capacity. Voltage violations are intentionally not converted directly into segment-level cable costs yet, because the cheapest technically plausible remedy may be a different transformer tap, transformer relocation, feeder reconfiguration, local cable reinforcement, or a new feeder route. Treating every low-voltage case as an additional parallel cable on the most loaded segment would therefore be too confident.
+
+The recommended next layer is to keep the thermal result as the base cost and add a separate voltage-stress classification per grid or supply envelope. For grids with voltage minima below the accepted threshold but no thermal overload, the first robust estimate should flag the affected supply area and report voltage-mitigation need as a sensitivity class. A later segment-level voltage heuristic should only be added once the downstream path to the critical bus is reconstructed reliably, so candidate reinforcement sections can be ranked by path impedance contribution rather than by loading alone.
+
 ## Interpretation Guidance
 
 Use the default result as an order-of-magnitude spatial screening layer:
@@ -133,4 +141,4 @@ Use the default result as an order-of-magnitude spatial screening layer:
 - Not suitable for final construction budgeting without checking route feasibility, trench reopening, switchgear, protection, voltage constraints, station constraints, and DSO-specific planning rules.
 - Not suitable for inferring electrical parallel cables from QGIS helper geometries. Raw electrical line components must remain the source for installed capacity and additional cable counts.
 
-The output deliberately keeps `line_cost_basis`, `line_cost_eur_per_km`, and `transformer_cost_basis` in the result tables so QGIS users can see why a feature received its cost.
+The output deliberately keeps `critical_component_cost_basis`, `critical_component_cost_eur_per_km`, and `transformer_cost_basis` in the result tables so QGIS users can see why a feature received its cost.

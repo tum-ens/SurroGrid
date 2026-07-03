@@ -44,6 +44,14 @@ EXPECTED_POWERFLOW_TABLES = {
     "powerflow_line_result": ("pre", "post"),
 }
 
+PROFILE_CHOICES = (
+    "status_quo",
+    "electricity_heat",
+    "electricity_mobility",
+    "electricity_heat_mobility",
+    "all",
+)
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -61,6 +69,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step3-target-columns", type=int, default=35)
     parser.add_argument("--step3-cluster-concurrency", type=int, default=1)
     parser.add_argument("--step4-cpus", type=int, default=4)
+    parser.add_argument(
+        "--profiles",
+        choices=PROFILE_CHOICES,
+        default="all",
+        help="Demand profile scope passed to Step 2; use electricity_heat for heat without mobility.",
+    )
     parser.add_argument("--step2-timeseries-storage", choices=["db", "temp", "both"], default="temp")
     parser.add_argument(
         "--timeframe-mode",
@@ -476,7 +490,7 @@ def run_candidate(
                 "--min-buildings",
                 str(args.min_buildings),
                 "--profiles",
-                "all",
+                args.profiles,
                 "--mobility-source",
                 "pool",
                 "--timeseries-storage",
@@ -630,6 +644,7 @@ def main() -> int:
         workers=args.workers,
         step2_cpus=args.step2_cpus,
         step2_timeseries_storage=args.step2_timeseries_storage,
+        profiles=args.profiles,
         timeframe_mode=args.timeframe_mode,
         step3_cpus=args.step3_cpus,
         step3_max_cpus=args.step3_max_cpus,

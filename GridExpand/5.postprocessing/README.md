@@ -71,8 +71,9 @@ Load the two QGIS materialized views from PostgreSQL and filter on `analysis_key
 - `overloaded_at_100_percent`: true when the simulated peak exceeds the existing nominal capacity.
 - `loading_percent`: peak loading of the critical mapped line or transformer.
 - `estimated_cost_eur`: heuristic reinforcement cost.
-- `additional_parallel`: additional cable parallels required for the visible cable segment.
-- `line_cost_basis` and `line_cost_eur_per_km`: selected literature-backed cable cost tier.
+- `additional_parallel`: sum of additional cable parallels over raw electrical components mapped to the visible cable segment.
+- `critical_component_cost_basis` and `critical_component_cost_eur_per_km`: selected literature-backed cable cost tier for the most loaded mapped raw component.
+- `component_cost_basis_count` and `component_std_type_count`: flag whether a visible segment aggregates heterogeneous raw components.
 - `additional_transformer_kva`: additional transformer capacity required.
 - `transformer_cost_basis`: selected all-in transformer replacement tier.
 

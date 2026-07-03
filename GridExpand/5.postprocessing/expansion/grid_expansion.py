@@ -110,6 +110,172 @@ def _create_analysis_run(
         ) from exc
 
 
+def _audit_unmapped_line_components(db: SurroGridDatabase, *, args: argparse.Namespace) -> None:
+    """Report active electrical line components that cannot be attached to QGIS geometries.
+
+    Root-adjacent connector lines can be legitimate non-asset artefacts, but
+    overloaded unmapped components would hide expansion needs. Treat those as a
+    hard failure before materializing costs.
+    """
+    query = text(
+        """
+        WITH selected_runs AS (
+            SELECT
+                pr.powerflow_run_id,
+                pr.grid_case_id,
+                gc.ags,
+                gc.plz,
+                gc.kcid,
+                gc.bcid,
+                gc.pylovo_grid_result_id,
+                gc.pylovo_version_id
+            FROM surrogrid.powerflow_run pr
+            JOIN surrogrid.grid_case gc USING (grid_case_id)
+            WHERE pr.run_name = :run_name
+              AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
+              AND (:ags IS NULL OR gc.ags = :ags)
+              AND (:plz IS NULL OR gc.plz = :plz)
+        ),
+        pp_source AS (
+            SELECT
+                sr.*,
+                pl.pp_index AS line,
+                pl.name AS component_line_name,
+                pl.length_km AS component_length_km,
+                pl.max_i_ka,
+                pl.parallel AS component_parallel,
+                pl.from_bus,
+                pl.to_bus,
+                regexp_replace(pl.name, '^Line to ', 'L') AS pylovo_line_name
+            FROM selected_runs sr
+            JOIN pylovo.pandapower_line pl
+              ON pl.grid_result_id = sr.pylovo_grid_result_id
+        ),
+        source_lines AS (
+            SELECT
+                pp.*,
+                lr.geom AS source_geom,
+                lr.line_name AS source_line_name
+            FROM pp_source pp
+            LEFT JOIN pylovo.lines_result lr
+              ON lr.grid_result_id = pp.pylovo_grid_result_id
+             AND lr.line_name = pp.pylovo_line_name
+        ),
+        visible_map AS (
+            SELECT
+                src.*,
+                COALESCE(direct.id, spatial.id) AS visible_line_id
+            FROM source_lines src
+            LEFT JOIN LATERAL (
+                SELECT v.id
+                FROM pylovo.lines_result_view v
+                WHERE v.grid_result_id = src.pylovo_grid_result_id
+                  AND v.version_id = src.pylovo_version_id
+                  AND v.plz = src.plz
+                  AND v.kcid = src.kcid
+                  AND v.bcid = src.bcid
+                  AND v.line_name = src.source_line_name
+                LIMIT 1
+            ) direct ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT v.id
+                FROM pylovo.lines_result_view v
+                WHERE direct.id IS NULL
+                  AND src.source_geom IS NOT NULL
+                  AND v.grid_result_id = src.pylovo_grid_result_id
+                  AND v.version_id = src.pylovo_version_id
+                  AND v.plz = src.plz
+                  AND v.kcid = src.kcid
+                  AND v.bcid = src.bcid
+                  AND v.line_name <> src.source_line_name
+                  AND ST_DWithin(v.geom, src.source_geom, 0.05)
+                ORDER BY
+                    ST_Length(ST_Intersection(v.geom, src.source_geom)) DESC,
+                    ST_Distance(v.geom, src.source_geom) ASC
+                LIMIT 1
+            ) spatial ON direct.id IS NULL
+        ),
+        peak_line AS (
+            SELECT DISTINCT ON (plr.powerflow_run_id, plr.line)
+                plr.powerflow_run_id,
+                plr.line,
+                ABS(plr.i_from_ka) AS max_i_from_ka
+            FROM surrogrid.powerflow_line_result plr
+            JOIN selected_runs sr USING (powerflow_run_id)
+            WHERE plr.stage = :stage
+            ORDER BY plr.powerflow_run_id, plr.line, ABS(plr.i_from_ka) DESC
+        ),
+        active_components AS (
+            SELECT
+                vm.*,
+                peak.max_i_from_ka,
+                CASE
+                    WHEN vm.max_i_ka IS NULL OR vm.max_i_ka = 0.0 THEN NULL
+                    ELSE peak.max_i_from_ka
+                        / (vm.max_i_ka * COALESCE(vm.component_parallel, 1))
+                        * 100.0
+                END AS loading_percent
+            FROM visible_map vm
+            JOIN peak_line peak
+              ON peak.powerflow_run_id = vm.powerflow_run_id
+             AND peak.line = vm.line
+        ),
+        unmapped AS (
+            SELECT *
+            FROM active_components
+            WHERE visible_line_id IS NULL
+        )
+        SELECT
+            (SELECT COUNT(*) FROM selected_runs) AS selected_runs,
+            (SELECT COUNT(*) FROM active_components) AS active_components,
+            (SELECT COUNT(*) FROM unmapped) AS unmapped_components,
+            COUNT(*) FILTER (WHERE COALESCE(loading_percent, 0.0) > 100.0) AS overloaded_unmapped_components,
+            COALESCE(MAX(loading_percent), 0.0) AS max_unmapped_loading_percent,
+            COUNT(*) FILTER (
+                WHERE source_line_name IS NULL
+                  AND source_geom IS NULL
+                  AND component_length_km <= 0.005
+            ) AS root_connector_like_components
+        FROM unmapped
+        """
+    )
+    params = {
+        "run_name": args.run_name,
+        "stage": args.stage,
+        "scenario_id": args.scenario_id,
+        "ags": _optional_ags(args.ags),
+        "plz": args.plz,
+    }
+    with db.engine.connect() as conn:
+        row = conn.execute(query, params).mappings().one()
+
+    selected_runs = int(row["selected_runs"] or 0)
+    active_components = int(row["active_components"] or 0)
+    unmapped = int(row["unmapped_components"] or 0)
+    overloaded = int(row["overloaded_unmapped_components"] or 0)
+    root_like = int(row["root_connector_like_components"] or 0)
+    max_loading = float(row["max_unmapped_loading_percent"] or 0.0)
+
+    if selected_runs == 0:
+        raise RuntimeError("No power-flow runs match the requested expansion scope.")
+    if active_components == 0:
+        raise RuntimeError(
+            "No raw power-flow line-result rows match the requested expansion scope. "
+            "Run Step 4 with raw DB storage before materializing expansion costs."
+        )
+    if overloaded > 0:
+        raise RuntimeError(
+            f"Found {overloaded} overloaded line component(s) without a visible pylovo geometry "
+            f"(max unmapped loading {max_loading:.2f}%). Refusing to hide expansion needs."
+        )
+    if unmapped > 0:
+        print(
+            "Warning: ignored "
+            f"{unmapped} active unmapped line component(s) "
+            f"({root_like} root-connector-like; max loading {max_loading:.2f}%)."
+        )
+
+
 def _materialize_line_results(
     db: SurroGridDatabase,
     *,
@@ -297,7 +463,9 @@ def _materialize_line_results(
                 SUM(additional_parallel)::INTEGER AS additional_parallel,
                 BOOL_OR(additional_parallel > 0) AS requires_expansion,
                 BOOL_OR(COALESCE(loading_percent, 0.0) > 100.0) AS overloaded_at_100_percent,
-                COALESCE(SUM(estimated_component_cost_eur), 0.0) AS estimated_cost_eur
+                COALESCE(SUM(estimated_component_cost_eur), 0.0) AS estimated_cost_eur,
+                COUNT(DISTINCT line_cost_basis) AS component_cost_basis_count,
+                COUNT(DISTINCT component_std_type) AS component_std_type_count
             FROM component_cost
             GROUP BY powerflow_run_id, visible_line_id
         ),
@@ -326,7 +494,7 @@ def _materialize_line_results(
             from_bus,
             to_bus,
             length_km,
-            existing_parallel,
+            critical_component_parallel,
             max_component_line,
             max_component_line_name,
             max_i_from_ka,
@@ -337,11 +505,13 @@ def _materialize_line_results(
             requires_expansion,
             overloaded_at_100_percent,
             estimated_cost_eur,
-            line_cost_eur_per_km,
-            line_cost_basis,
+            critical_component_cost_eur_per_km,
+            critical_component_cost_basis,
             critical_t_index,
             critical_ts,
-            mapped_component_lines
+            mapped_component_lines,
+            component_cost_basis_count,
+            component_std_type_count
         )
         SELECT
             :expansion_analysis_run_id,
@@ -377,7 +547,9 @@ def _materialize_line_results(
             cc.line_cost_basis,
             cc.critical_t_index,
             cc.critical_ts,
-            vc.mapped_component_lines
+            vc.mapped_component_lines,
+            va.component_cost_basis_count,
+            va.component_std_type_count
         FROM critical_component cc
         JOIN visible_aggregate va
           ON va.powerflow_run_id = cc.powerflow_run_id
@@ -659,6 +831,7 @@ def main() -> None:
         return
 
     analysis_key = _analysis_key(args)
+    _audit_unmapped_line_components(db, args=args)
     run_id = _create_analysis_run(db, analysis_key=analysis_key, args=args)
     line_rows = _materialize_line_results(db, expansion_analysis_run_id=run_id, args=args)
     transformer_rows = _materialize_transformer_results(

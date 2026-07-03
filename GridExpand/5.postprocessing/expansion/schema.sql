@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_line_result (
     from_bus INTEGER,
     to_bus INTEGER,
     length_km DOUBLE PRECISION,
-    existing_parallel INTEGER,
+    critical_component_parallel INTEGER,
     max_component_line INTEGER,
     max_component_line_name TEXT,
     max_i_from_ka DOUBLE PRECISION,
@@ -141,17 +141,25 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_line_result (
     requires_expansion BOOLEAN NOT NULL,
     overloaded_at_100_percent BOOLEAN NOT NULL,
     estimated_cost_eur DOUBLE PRECISION NOT NULL,
-    line_cost_eur_per_km DOUBLE PRECISION,
-    line_cost_basis TEXT,
+    critical_component_cost_eur_per_km DOUBLE PRECISION,
+    critical_component_cost_basis TEXT,
     critical_t_index INTEGER,
     critical_ts TIMESTAMPTZ,
     mapped_component_lines INTEGER NOT NULL,
+    component_cost_basis_count INTEGER NOT NULL DEFAULT 1,
+    component_std_type_count INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (expansion_analysis_run_id, powerflow_run_id, visible_line_id)
 );
 
 ALTER TABLE IF EXISTS surrogrid.expansion_line_result DROP COLUMN IF EXISTS target_loading_percent;
-ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS line_cost_eur_per_km DOUBLE PRECISION;
-ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS line_cost_basis TEXT;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result DROP COLUMN IF EXISTS existing_parallel;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result DROP COLUMN IF EXISTS line_cost_eur_per_km;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result DROP COLUMN IF EXISTS line_cost_basis;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS critical_component_parallel INTEGER;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS critical_component_cost_eur_per_km DOUBLE PRECISION;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS critical_component_cost_basis TEXT;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS component_cost_basis_count INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS component_std_type_count INTEGER NOT NULL DEFAULT 1;
 
 CREATE INDEX IF NOT EXISTS idx_expansion_line_result_grid
     ON surrogrid.expansion_line_result (grid_case_id, powerflow_run_id);
