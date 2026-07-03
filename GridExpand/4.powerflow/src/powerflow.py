@@ -373,7 +373,11 @@ def pf_summary(
     else:
         cable_ids = pd.Index([int(line) for line in cable_ids if int(line) in grid.line.index], name="cable")
     cable_max_i_ka = cable_max_i_ka.reindex(cable_ids).astype(float).replace(0.0, np.nan)
-    cable_capacity = cable_max_i_ka.to_numpy(dtype=float)
+    if "parallel" in grid.line.columns:
+        cable_parallel = grid.line["parallel"].reindex(cable_ids).fillna(1).astype(float)
+    else:
+        cable_parallel = pd.Series(1.0, index=cable_ids)
+    cable_capacity = (cable_max_i_ka * cable_parallel).to_numpy(dtype=float)
     cable_loading_matrix = np.full((len(df), len(cable_ids)), np.nan, dtype=float)
     voltage_buses = pd.Index([int(bus) for bus in voltage_buses if int(bus) in grid.bus.index], name="bus")
     voltage_matrix = np.full((len(df), len(voltage_buses)), np.nan, dtype=float)
@@ -412,7 +416,9 @@ def pf_summary(
     cable_summary = pd.DataFrame(
         {
             "cable": cable_ids,
-            "cable_max_i_ka": cable_capacity,
+            "cable_max_i_ka": cable_max_i_ka.to_numpy(dtype=float),
+            "cable_parallel": cable_parallel.to_numpy(dtype=float),
+            "cable_installed_capacity_ka": cable_capacity,
             "cable_loading_p50_time_percent": _safe_nanpercentile(cable_loading_matrix, 50, axis=0),
             "cable_loading_p90_time_percent": _safe_nanpercentile(cable_loading_matrix, 90, axis=0),
             "cable_loading_p95_time_percent": _safe_nanpercentile(cable_loading_matrix, 95, axis=0),

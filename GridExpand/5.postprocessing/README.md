@@ -41,7 +41,7 @@ Step 5 should not write simulation results back into the pipeline. Use it for no
 
 The QGIS-facing materialized views are:
 
-- `surrogrid.expansion_line_qgis_mv`: cable expansion estimates joined to `pylovo.lines_result_with_grid`.
+- `surrogrid.expansion_line_qgis_mv`: cable expansion estimates joined to `pylovo.lines_result_view`.
 - `surrogrid.expansion_transformer_qgis_mv`: transformer expansion estimates joined to `pylovo.transformer_positions_with_grid`.
 
 The materialized views are refreshed by `expansion/grid_expansion.py` after each materialization run and include a stable `qgis_id` column for QGIS.
@@ -78,7 +78,7 @@ Load the two QGIS materialized views from PostgreSQL and filter on `analysis_key
 
 ### Method
 
-Cable results start from `surrogrid.powerflow_line_result` and are aggregated to peak current per pandapower line. They are mapped to original pylovo line rows by line name, then rolled up to the visible geometry in `pylovo.lines_result_with_grid`. This keeps merged feeder sections QGIS-friendly while avoiding Python-side loading of large time series.
+Cable results start from `surrogrid.powerflow_line_result` and are aggregated to peak current per pandapower line. They are mapped to original pylovo line rows by line name, then rolled up to the visible geometry in `pylovo.lines_result_view`. This keeps merged feeder sections QGIS-friendly while avoiding Python-side loading of large time series.
 
 Transformer results use `surrogrid.powerflow_import` as the transformer loading proxy because Step 4 replaces the transformer with a switch before running pandapower. Apparent import `sqrt(P^2 + Q^2)` is compared with `pylovo.grid_result.transformer_rated_power`, falling back to `transformer_positions_with_grid.s_max_kva` where available.
 

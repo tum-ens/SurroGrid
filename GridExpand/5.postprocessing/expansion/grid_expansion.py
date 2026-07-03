@@ -146,6 +146,8 @@ def _materialize_line_results(
                 sr.*,
                 pl.pp_index AS line,
                 pl.name AS component_line_name,
+                pl.std_type AS component_std_type,
+                pl.length_km AS component_length_km,
                 pl.max_i_ka,
                 pl.parallel AS component_parallel,
                 regexp_replace(pl.name, '^Line to ', 'L') AS pylovo_line_name
@@ -171,7 +173,7 @@ def _materialize_line_results(
             FROM source_lines src
             LEFT JOIN LATERAL (
                 SELECT v.id
-                FROM pylovo.lines_result_with_grid v
+                FROM pylovo.lines_result_view v
                 WHERE v.grid_result_id = src.pylovo_grid_result_id
                   AND v.version_id = src.pylovo_version_id
                   AND v.plz = src.plz
@@ -182,7 +184,7 @@ def _materialize_line_results(
             ) direct ON TRUE
             LEFT JOIN LATERAL (
                 SELECT v.id
-                FROM pylovo.lines_result_with_grid v
+                FROM pylovo.lines_result_view v
                 WHERE direct.id IS NULL
                   AND src.source_geom IS NOT NULL
                   AND v.grid_result_id = src.pylovo_grid_result_id
@@ -224,13 +226,18 @@ def _materialize_line_results(
                 vm.visible_line_id,
                 vm.line AS component_line,
                 vm.component_line_name,
+                vm.component_std_type,
+                vm.component_length_km,
+                COALESCE(vm.component_parallel, 1) AS component_parallel,
                 peak.max_i_from_ka,
                 NULLIF(vm.max_i_ka, 0.0) AS max_i_ka,
                 peak.critical_t_index,
                 peak.critical_ts,
                 CASE
                     WHEN vm.max_i_ka IS NULL OR vm.max_i_ka = 0.0 THEN NULL
-                    ELSE peak.max_i_from_ka / vm.max_i_ka * 100.0
+                    ELSE peak.max_i_from_ka
+                        / (vm.max_i_ka * COALESCE(vm.component_parallel, 1))
+                        * 100.0
                 END AS loading_percent,
                 CASE
                     WHEN vm.max_i_ka IS NULL OR vm.max_i_ka = 0.0 THEN COALESCE(vm.component_parallel, 1)
@@ -248,23 +255,56 @@ def _materialize_line_results(
              AND peak.line = vm.line
             WHERE vm.visible_line_id IS NOT NULL
         ),
+        component_cost AS (
+            SELECT
+                cl.*,
+                GREATEST(cl.required_parallel - cl.component_parallel, 0) AS additional_parallel,
+                line_cost.line_cost_eur_per_km,
+                line_cost.line_cost_basis,
+                GREATEST(cl.required_parallel - cl.component_parallel, 0)
+                    * COALESCE(cl.component_length_km, 0.0)
+                    * line_cost.line_cost_eur_per_km AS estimated_component_cost_eur
+            FROM component_loading cl
+            CROSS JOIN assumption
+            CROSS JOIN LATERAL (
+                SELECT
+                    CASE
+                        WHEN cl.component_std_type ~ '240' THEN assumption.line_parallel_240_eur_per_km
+                        WHEN cl.component_std_type ~ '185' THEN assumption.line_parallel_185_eur_per_km
+                        WHEN cl.component_std_type ~ '150' THEN assumption.line_parallel_150_eur_per_km
+                        WHEN cl.component_std_type ~ '120|95|70|50|35' THEN assumption.line_parallel_150_eur_per_km
+                        ELSE assumption.line_parallel_default_eur_per_km
+                    END AS line_cost_eur_per_km,
+                    CASE
+                        WHEN cl.component_std_type ~ '240' THEN 'parallel_existing_route_240mm2'
+                        WHEN cl.component_std_type ~ '185' THEN 'parallel_existing_route_185mm2'
+                        WHEN cl.component_std_type ~ '150' THEN 'parallel_existing_route_150mm2'
+                        WHEN cl.component_std_type ~ '120|95|70|50|35' THEN 'parallel_existing_route_le_150mm2'
+                        ELSE 'parallel_existing_route_default_240mm2'
+                    END AS line_cost_basis
+            ) line_cost
+        ),
         visible_counts AS (
             SELECT powerflow_run_id, visible_line_id, COUNT(*) AS mapped_component_lines
-            FROM component_loading
+            FROM component_cost
             GROUP BY powerflow_run_id, visible_line_id
         ),
-        visible_required AS (
+        visible_aggregate AS (
             SELECT
                 powerflow_run_id,
                 visible_line_id,
-                MAX(required_parallel) AS required_parallel
-            FROM component_loading
+                MAX(required_parallel) AS required_parallel,
+                SUM(additional_parallel)::INTEGER AS additional_parallel,
+                BOOL_OR(additional_parallel > 0) AS requires_expansion,
+                BOOL_OR(COALESCE(loading_percent, 0.0) > 100.0) AS overloaded_at_100_percent,
+                COALESCE(SUM(estimated_component_cost_eur), 0.0) AS estimated_cost_eur
+            FROM component_cost
             GROUP BY powerflow_run_id, visible_line_id
         ),
         critical_component AS (
             SELECT DISTINCT ON (powerflow_run_id, visible_line_id)
                 *
-            FROM component_loading
+            FROM component_cost
             ORDER BY powerflow_run_id, visible_line_id, loading_percent DESC NULLS LAST
         )
         INSERT INTO surrogrid.expansion_line_result (
@@ -314,64 +354,44 @@ def _materialize_line_results(
             cc.bcid,
             cc.pylovo_grid_result_id,
             cc.pylovo_version_id,
-            lwg.id,
-            lwg.line_name,
-            lwg.std_type,
-            lwg.is_helper,
-            lwg.helper_type,
-            lwg.from_bus,
-            lwg.to_bus,
-            lwg.length_km,
-            COALESCE(lwg.parallel, 1),
+            lv.id,
+            lv.line_name,
+            lv.std_type,
+            lv.is_helper,
+            lv.helper_type,
+            lv.from_bus,
+            lv.to_bus,
+            lv.length_km,
+            cc.component_parallel,
             cc.component_line,
             cc.component_line_name,
             cc.max_i_from_ka,
             cc.max_i_ka,
             cc.loading_percent,
-            vr.required_parallel,
-            GREATEST(vr.required_parallel - COALESCE(lwg.parallel, 1), 0),
-            GREATEST(vr.required_parallel - COALESCE(lwg.parallel, 1), 0) > 0,
-            COALESCE(cc.loading_percent, 0.0) > 100.0,
-            GREATEST(vr.required_parallel - COALESCE(lwg.parallel, 1), 0)
-                * COALESCE(lwg.length_km, 0.0)
-                * line_cost.line_cost_eur_per_km,
-            line_cost.line_cost_eur_per_km,
-            line_cost.line_cost_basis,
+            va.required_parallel,
+            va.additional_parallel,
+            va.requires_expansion,
+            va.overloaded_at_100_percent,
+            va.estimated_cost_eur,
+            cc.line_cost_eur_per_km,
+            cc.line_cost_basis,
             cc.critical_t_index,
             cc.critical_ts,
             vc.mapped_component_lines
         FROM critical_component cc
-        JOIN visible_required vr
-          ON vr.powerflow_run_id = cc.powerflow_run_id
-         AND vr.visible_line_id = cc.visible_line_id
+        JOIN visible_aggregate va
+          ON va.powerflow_run_id = cc.powerflow_run_id
+         AND va.visible_line_id = cc.visible_line_id
         JOIN visible_counts vc
           ON vc.powerflow_run_id = cc.powerflow_run_id
          AND vc.visible_line_id = cc.visible_line_id
-        JOIN pylovo.lines_result_with_grid lwg
-          ON lwg.grid_result_id = cc.pylovo_grid_result_id
-         AND lwg.version_id = cc.pylovo_version_id
-         AND lwg.plz = cc.plz
-         AND lwg.kcid = cc.kcid
-         AND lwg.bcid = cc.bcid
-         AND lwg.id = cc.visible_line_id
-        CROSS JOIN assumption
-        CROSS JOIN LATERAL (
-            SELECT
-                CASE
-                    WHEN lwg.std_type ~ '240' THEN assumption.line_parallel_240_eur_per_km
-                    WHEN lwg.std_type ~ '185' THEN assumption.line_parallel_185_eur_per_km
-                    WHEN lwg.std_type ~ '150' THEN assumption.line_parallel_150_eur_per_km
-                    WHEN lwg.std_type ~ '120|95|70|50|35' THEN assumption.line_parallel_150_eur_per_km
-                    ELSE assumption.line_parallel_default_eur_per_km
-                END AS line_cost_eur_per_km,
-                CASE
-                    WHEN lwg.std_type ~ '240' THEN 'parallel_existing_route_240mm2'
-                    WHEN lwg.std_type ~ '185' THEN 'parallel_existing_route_185mm2'
-                    WHEN lwg.std_type ~ '150' THEN 'parallel_existing_route_150mm2'
-                    WHEN lwg.std_type ~ '120|95|70|50|35' THEN 'parallel_existing_route_le_150mm2'
-                    ELSE 'parallel_existing_route_default_240mm2'
-                END AS line_cost_basis
-        ) line_cost
+        JOIN pylovo.lines_result_view lv
+          ON lv.grid_result_id = cc.pylovo_grid_result_id
+         AND lv.version_id = cc.pylovo_version_id
+         AND lv.plz = cc.plz
+         AND lv.kcid = cc.kcid
+         AND lv.bcid = cc.bcid
+         AND lv.id = cc.visible_line_id
         """
     )
     with db.engine.begin() as conn:

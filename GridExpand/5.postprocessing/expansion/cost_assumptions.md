@@ -6,7 +6,7 @@ Default assumption key: `de_lv_heuristic_2026`
 
 These values are transparent screening assumptions for spatial postprocessing. They are not construction offers, DSO work-order costs, or a substitute for site-specific grid planning. The capacity heuristic remains deliberately simple: reinforce only where the simulated peak exceeds nominal existing capacity.
 
-Important topology note: cable capacity must be derived from the raw electrical pandapower/pylovo line components, not from `pylovo.lines_result_with_grid`. The `lines_result_with_grid` object is a QGIS-friendly display layer. It can contain artificial helper geometries, offset geometries, merged feeder chains, and visual lines that share geometry without being electrically parallel. It is suitable for displaying and joining final results in QGIS, but it must not be used as the source of installed electrical capacity.
+Important topology note: cable capacity must be derived from the raw electrical pandapower/pylovo line components, not from `pylovo.lines_result_view`. The `lines_result_view` object is a QGIS-friendly display layer. It can contain artificial helper geometries, offset geometries, merged feeder chains, and visual lines that share geometry without being electrically parallel. It is suitable for displaying and joining final results in QGIS, but it must not be used as the source of installed electrical capacity.
 
 ## Current Defaults Used in the Calculation
 
@@ -58,7 +58,7 @@ The selected line cost is stored per row in:
 - `line_cost_eur_per_km`
 - `line_cost_basis`
 
-`pylovo.lines_result_with_grid` should only be used after the raw electrical calculation, to attach final component or aggregated component results to QGIS-friendly geometries. In particular, do not derive `existing_parallel`, `required_parallel`, or installed capacity from a merged helper row in `lines_result_with_grid`. A visual helper can combine multiple feeder pieces using display-oriented rules such as `max(parallel)` and `sum(length_km)`, which can overstate or misassign electrical capacity when independent lines share a lane or when predefined pandapower parallel cables are not visualized as separate geometries.
+`pylovo.lines_result_view` should only be used after the raw electrical calculation, to attach final component or aggregated component results to QGIS-friendly geometries. In particular, do not derive `existing_parallel`, `required_parallel`, or installed capacity from a merged helper row in `lines_result_view`. A visual helper can combine multiple feeder pieces using display-oriented rules such as `max(parallel)` and `sum(length_km)`, which can overstate or misassign electrical capacity when independent lines share a lane or when predefined pandapower parallel cables are not visualized as separate geometries.
 
 Transformer capacity:
 

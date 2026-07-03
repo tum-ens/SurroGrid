@@ -100,6 +100,12 @@ class SurroGridDatabase:
                 "cable_loading_p95_time_percent": "DOUBLE PRECISION",
                 "cable_loading_p99_time_percent": "DOUBLE PRECISION",
                 "cable_loading_hours_above_100": "INTEGER",
+                "cable_parallel": "DOUBLE PRECISION",
+                "cable_installed_capacity_ka": "DOUBLE PRECISION",
+            },
+            "real_powerflow_cable_summary": {
+                "cable_parallel": "DOUBLE PRECISION",
+                "cable_installed_capacity_ka": "DOUBLE PRECISION",
             },
             "powerflow_bus_voltage_summary": {
                 "voltage_p50_time_pu": "DOUBLE PRECISION",
@@ -241,6 +247,8 @@ class SurroGridDatabase:
                     cable_loading_max_time_percent DOUBLE PRECISION,
                     cable_loading_hours_above_100 INTEGER,
                     cable_max_i_ka DOUBLE PRECISION,
+                    cable_parallel DOUBLE PRECISION,
+                    cable_installed_capacity_ka DOUBLE PRECISION,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     CONSTRAINT uq_real_powerflow_cable_summary_run_stage_cable UNIQUE (real_powerflow_run_id, stage, cable)
                 )
@@ -324,6 +332,8 @@ class SurroGridDatabase:
                     ('powerflow_cable_summary', 'cable_loading_p95_time_percent'),
                     ('powerflow_cable_summary', 'cable_loading_p99_time_percent'),
                     ('powerflow_cable_summary', 'cable_loading_hours_above_100'),
+                    ('powerflow_cable_summary', 'cable_parallel'),
+                    ('powerflow_cable_summary', 'cable_installed_capacity_ka'),
                     ('powerflow_bus_voltage_summary', 'voltage_p50_time_pu'),
                     ('powerflow_bus_voltage_summary', 'voltage_p10_time_pu'),
                     ('powerflow_bus_voltage_summary', 'voltage_p01_time_pu'),

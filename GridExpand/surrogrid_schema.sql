@@ -385,6 +385,8 @@ CREATE TABLE IF NOT EXISTS surrogrid.powerflow_cable_summary (
     cable_loading_max_time_percent DOUBLE PRECISION,
     cable_loading_hours_above_100 INTEGER,
     cable_max_i_ka DOUBLE PRECISION,
+    cable_parallel DOUBLE PRECISION,
+    cable_installed_capacity_ka DOUBLE PRECISION,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_powerflow_cable_summary_run_stage_cable UNIQUE (powerflow_run_id, stage, cable)
 );

@@ -223,16 +223,16 @@ SELECT
     ar.analysis_key,
     ar.assumption_key,
     elr.*,
-    lwg.geom::geometry(LineString, 25832) AS geom
+    lv.geom::geometry(LineString, 25832) AS geom
 FROM surrogrid.expansion_line_result elr
 JOIN surrogrid.expansion_analysis_run ar USING (expansion_analysis_run_id)
-JOIN pylovo.lines_result_with_grid lwg
-  ON lwg.grid_result_id = elr.pylovo_grid_result_id
- AND lwg.version_id = elr.pylovo_version_id
- AND lwg.plz = elr.plz
- AND lwg.kcid = elr.kcid
- AND lwg.bcid = elr.bcid
- AND lwg.id = elr.visible_line_id
+JOIN pylovo.lines_result_view lv
+  ON lv.grid_result_id = elr.pylovo_grid_result_id
+ AND lv.version_id = elr.pylovo_version_id
+ AND lv.plz = elr.plz
+ AND lv.kcid = elr.kcid
+ AND lv.bcid = elr.bcid
+ AND lv.id = elr.visible_line_id
 WITH DATA;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_expansion_line_qgis_mv_qgis_id
