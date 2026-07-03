@@ -1,10 +1,16 @@
 from config import config
 
+import calendar
+import fcntl
+import hashlib
+import json
+import time
+from datetime import timedelta, timezone
+from pathlib import Path
+
 import requests
 import numpy as np
 import pandas as pd
-from datetime import timedelta, timezone
-import calendar
 
 
 def get_pvgis_tmy_sarah3_dataframe(latitude, longitude):
@@ -126,6 +132,70 @@ def get_pvgis_tmy_sarah3_dataframe(latitude, longitude):
         traceback.print_exc()
         return None
     
+def _openmeteo_cache_dir():
+    return Path(config.STORAGE_DIR) / "cache" / "openmeteo_soil_temperature"
+
+
+def _openmeteo_cache_params(params):
+    cache_params = dict(params)
+    # Soil temperature at 1.00-2.55 m varies slowly in space. Rounding avoids
+    # dozens of near-identical API calls for neighbouring LV grids.
+    cache_params["latitude"] = round(float(cache_params["latitude"]), 2)
+    cache_params["longitude"] = round(float(cache_params["longitude"]), 2)
+    return cache_params
+
+
+def _openmeteo_cache_path(cache_params):
+    payload = json.dumps(cache_params, sort_keys=True).encode("utf-8")
+    cache_key = hashlib.sha256(payload).hexdigest()
+    return _openmeteo_cache_dir() / f"{cache_key}.json"
+
+
+def _request_openmeteo_hourly(params, *, max_attempts=5, timeout=30):
+    cache_params = _openmeteo_cache_params(params)
+    cache_dir = _openmeteo_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = _openmeteo_cache_path(cache_params)
+    lock_path = cache_dir / "openmeteo.lock"
+
+    with lock_path.open("w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        if cache_path.exists():
+            with cache_path.open("r", encoding="utf-8") as handle:
+                return json.load(handle)
+
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.get(config.OPENMETEO_URL, params=cache_params, timeout=timeout)
+                response.raise_for_status()
+                data = response.json()
+                if "hourly" in data:
+                    temp_path = cache_path.with_suffix(".tmp")
+                    with temp_path.open("w", encoding="utf-8") as handle:
+                        json.dump(data, handle)
+                    temp_path.replace(cache_path)
+                    return data
+                last_error = data
+            except Exception as exc:
+                last_error = str(exc)
+
+            if attempt < max_attempts:
+                sleep_seconds = min(60, 2 ** attempt)
+                print(
+                    "Open-Meteo soil-temperature request failed "
+                    f"(attempt {attempt}/{max_attempts}); retrying in {sleep_seconds}s. "
+                    f"Details: {last_error}",
+                    flush=True,
+                )
+                time.sleep(sleep_seconds)
+
+    raise RuntimeError(
+        "Open-Meteo soil-temperature response did not contain an 'hourly' field "
+        f"after {max_attempts} attempts. Params: {cache_params}. Last response/error: {last_error}"
+    )
+
+
 def get_open_meteo_soil_temperature(lat, lon, selected_months):
     data_dict = {}
     for id in range(len(selected_months)):
@@ -147,9 +217,7 @@ def get_open_meteo_soil_temperature(lat, lon, selected_months):
             "hourly": "soil_temperature_100_to_255cm",
             "timezone": config.OPENMETEO_TIME_ZONE
         }
-        response = requests.get(config.OPENMETEO_URL, params=params)
-        
-        data = response.json()
+        data = _request_openmeteo_hourly(params)
         data_dict[month] = pd.DataFrame(data["hourly"])
 
     # Post-processing
