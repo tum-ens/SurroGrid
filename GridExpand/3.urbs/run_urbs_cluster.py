@@ -24,6 +24,15 @@ if __name__ == '__main__':
         parser = argparse.ArgumentParser(description="Low voltage grid DER allocation.")
         parser.add_argument("inputfile_id", help="Input file name (no path)")
         parser.add_argument("--n_cpu", default=1, help="Number of CPUs available for parallel generation")
+        parser.add_argument("--tsam", action="store_true", help="Enable TSAM type-week aggregation.")
+        parser.add_argument("--tsam-periods", type=int, default=6, help="Number of TSAM type weeks.")
+        parser.add_argument("--tsam-hours-per-period", type=int, default=168, help="Hours per TSAM period.")
+        parser.add_argument(
+            "--tsam-extreme-method",
+            choices=["append", "new_cluster_center", "replace_cluster_center"],
+            default="replace_cluster_center",
+            help="How TSAM should include cold and solar extreme weeks.",
+        )
         args = parser.parse_args()
 
         ### Obtain relevant input_files
@@ -46,9 +55,10 @@ if __name__ == '__main__':
             "input_file": input_file,
             # "input_file": 'N2775500E4431500_86154_1_-6.h5',    # input file name in dir "Input" 
             # "input_file": 'N2827500E4503500_93426_5_41.h5',    # input file name in dir "Input"
-            "tsam": False,                           # apply time series aggregation ("True", "False")
-            "noTypicalPeriods": 6,                  # tsam: number of aggregated typical periods (int, max 52) 
-            "hoursPerPeriod": 168,                  # tsam: length of typical period (int)
+            "tsam": args.tsam,                     # apply time series aggregation ("True", "False")
+            "noTypicalPeriods": args.tsam_periods, # tsam: number of aggregated typical periods (int, max 52)
+            "hoursPerPeriod": args.tsam_hours_per_period,  # tsam: length of typical period (int)
+            "tsamExtremePeriodMethod": args.tsam_extreme_method,
 
             # Electrification
             "PV_electr": 100,       # 100           # % of building nodes adopting PV (0-100)

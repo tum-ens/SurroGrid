@@ -3,11 +3,72 @@ import pandas as pd
 import tsam.timeseriesaggregation as tsam
 from datetime import datetime, timedelta
 import numpy as np
+from sklearn.metrics import mean_squared_error
 from urbs.identify import *
 import re
 
+
+def _normalized_duration_rmse(original, reconstructed):
+    original = pd.Series(original, dtype="float64").reset_index(drop=True)
+    reconstructed = pd.Series(reconstructed, dtype="float64").reset_index(drop=True)
+    scale = original.max() - original.min()
+    if pd.isna(scale) or scale == 0:
+        return 0.0
+    original_norm = (original - original.min()) / scale
+    reconstructed_norm = (reconstructed - original.min()) / scale
+    return float(np.sqrt(mean_squared_error(
+        original_norm.sort_values(ascending=False).reset_index(drop=True),
+        reconstructed_norm.sort_values(ascending=False).reset_index(drop=True),
+    )))
+
+
+def _period_profile(values, period_idx, hours_per_period):
+    start = period_idx * hours_per_period
+    end = start + hours_per_period
+    if end <= len(values):
+        return values.iloc[start:end].reset_index(drop=True)
+    tail = values.iloc[start:].reset_index(drop=True)
+    head = values.iloc[:end - len(values)].reset_index(drop=True)
+    return pd.concat([tail, head], ignore_index=True)
+
+
+def _calculate_demand_duration_rmse(data, cluster_order, cluster_center_indices, hours_per_period):
+    demand = data["demand"].copy()
+    demand = demand[demand.index.get_level_values("t") > 0]
+    if not isinstance(demand.columns, pd.MultiIndex) or demand.columns.nlevels < 2:
+        return pd.DataFrame()
+
+    demand_by_commodity = demand.T.groupby(level=1).sum().T
+    if demand_by_commodity.empty:
+        return pd.DataFrame()
+
+    mobility_columns = [col for col in demand_by_commodity.columns if str(col).startswith("mobility")]
+    if mobility_columns:
+        demand_by_commodity["mobility"] = demand_by_commodity[mobility_columns].sum(axis=1)
+        demand_by_commodity = demand_by_commodity.drop(columns=mobility_columns)
+    demand_by_commodity["total_demand"] = demand_by_commodity.sum(axis=1)
+    rows = []
+    cluster_center_indices = list(cluster_center_indices)
+    for commodity in demand_by_commodity.columns:
+        original = demand_by_commodity[commodity].reset_index(drop=True)
+        reconstructed_parts = []
+        for period_idx, cluster_label in enumerate(cluster_order):
+            start = period_idx * hours_per_period
+            if start >= len(original):
+                break
+            period_len = min(hours_per_period, len(original) - start)
+            center_idx = int(cluster_center_indices[int(cluster_label)])
+            reconstructed_parts.append(_period_profile(original, center_idx, hours_per_period).iloc[:period_len])
+        reconstructed = pd.concat(reconstructed_parts, ignore_index=True)
+        rows.append({
+            "demand_type": commodity,
+            "RMSE_duration": _normalized_duration_rmse(original, reconstructed),
+        })
+    return pd.DataFrame(rows).set_index("demand_type")
+
+
 ### Apply timeseries aggregation
-def run_tsam(data, noTypicalPeriods, hoursPerPeriod):
+def run_tsam(data, noTypicalPeriods, hoursPerPeriod, extremePeriodMethod="replace_cluster_center"):
     """ Included time series for period selection:
     - Demand: water_heat, space_heat, mobilities, electricity, electricity-reactive
     - SupIm: solar
@@ -51,7 +112,6 @@ def run_tsam(data, noTypicalPeriods, hoursPerPeriod):
 
 
     ### Clustering settings
-    extremePeriodMethod = "replace_cluster_center"    # Alternative: 'new_cluster_center'
     clusterMethod = 'hierarchical'                    # good, because deterministic
     representationMethod = "medoidRepresentation"     # final cluster representatives are chosen from actual typeperiod members (alternative: cluster mean representation)
     segmentation = False                              # No segmentation of final typeperiods into representative segments
@@ -75,6 +135,14 @@ def run_tsam(data, noTypicalPeriods, hoursPerPeriod):
                                              segmentation = segmentation,                     # No segmentation of final typeperiods into representative segments
                                              rescaleClusterPeriods = rescaleClusterPeriods)   # Do not rescale data to original as we extract that from input data
     aggregation.createTypicalPeriods()       # Conduct tsam
+    accuracy_indicators = aggregation.accuracyIndicators()
+    total_accuracy_indicators = aggregation.totalAccuracyIndicators()
+    demand_duration_rmse = _calculate_demand_duration_rmse(
+        data,
+        aggregation.clusterOrder,
+        aggregation.clusterCenterIndices,
+        hoursPerPeriod,
+    )
 
 
     ##################### Extract and return relevant data ###############################
@@ -89,6 +157,9 @@ def run_tsam(data, noTypicalPeriods, hoursPerPeriod):
     tsam_data['clusterMethod'] = pd.Series(aggregation.clusterMethod)                   # e.g. hierarchical
     tsam_data['noTypicalPeriods'] = pd.DataFrame({aggregation.noTypicalPeriods})        # e.g. 6
     tsam_data['hoursPerPeriod'] = pd.DataFrame({aggregation.hoursPerPeriod})            # e.g. 168
+    tsam_data['accuracyIndicators'] = accuracy_indicators
+    tsam_data['totalAccuracyIndicators'] = pd.DataFrame(total_accuracy_indicators).T
+    tsam_data['demandDurationRmse'] = demand_duration_rmse
     tsam_data["extremePeriodIndices"] = pd.Series([value["stepNo"] for value in aggregation.extremePeriods.values()], dtype='int64') # additionally added extremePeriod week indices (if not already a cluster center) e.g. [50] taken from extremePeriods with key column_name = (columnindex1, renamed columnindex2) = ("ambient", "Tamb"+"daily min."); value = {"stepNo": week with minimum, "profile": all time series data of this week (also other columns), "column":column_multiindex before rename}
    
 

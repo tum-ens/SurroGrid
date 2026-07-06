@@ -367,6 +367,9 @@ def pf_summary(
     if on_nonconvergence not in {"raise", "nan"}:
         raise ValueError("on_nonconvergence must be either 'raise' or 'nan'.")
     transformer_loadings = []
+    transformer_p_mw = []
+    transformer_q_mvar = []
+    transformer_s_mva = []
     failed_timesteps = []
     if cable_ids is None:
         cable_ids = pd.Index([int(line) for line in grid.line.index], name="cable")
@@ -391,13 +394,28 @@ def pf_summary(
                 raise
             failed_timesteps.append(int(row_idx))
             transformer_loadings.append(np.nan)
+            transformer_p_mw.append(np.nan)
+            transformer_q_mvar.append(np.nan)
+            transformer_s_mva.append(np.nan)
             continue
         grid = grid_res
 
         ext_grid = grid_res.res_ext_grid
-        if {"p_mw", "q_mvar"}.issubset(ext_grid.columns) and transformer_s_rated_mva > 0:
-            s_mva = np.hypot(ext_grid["p_mw"].sum(), ext_grid["q_mvar"].sum())
+        if {"p_mw", "q_mvar"}.issubset(ext_grid.columns):
+            p_mw = float(ext_grid["p_mw"].sum())
+            q_mvar = float(ext_grid["q_mvar"].sum())
+            s_mva = float(np.hypot(p_mw, q_mvar))
+        else:
+            p_mw = np.nan
+            q_mvar = np.nan
+            s_mva = np.nan
+        transformer_p_mw.append(p_mw)
+        transformer_q_mvar.append(q_mvar)
+        transformer_s_mva.append(s_mva)
+        if transformer_s_rated_mva > 0:
             transformer_loadings.append((s_mva / transformer_s_rated_mva) * 100.0)
+        else:
+            transformer_loadings.append(np.nan)
 
         voltage_matrix[row_idx, :] = grid_res.res_bus["vm_pu"].reindex(voltage_buses).to_numpy(dtype=float)
 
@@ -406,12 +424,36 @@ def pf_summary(
 
     voltage_all = voltage_matrix[~np.isnan(voltage_matrix)]
     transformer_loadings = np.asarray(transformer_loadings, dtype=float)
+    transformer_p_mw = np.asarray(transformer_p_mw, dtype=float)
+    transformer_q_mvar = np.asarray(transformer_q_mvar, dtype=float)
+    transformer_s_mva = np.asarray(transformer_s_mva, dtype=float)
     cable_max_loading = _safe_nanmax(cable_loading_matrix, axis=0) if len(cable_ids) else np.array([], dtype=float)
     cable_values = cable_max_loading[~np.isnan(cable_max_loading)]
 
     trafo_hours_above_100 = int(np.nansum(transformer_loadings > 100.0)) if transformer_loadings.size else 0
     cable_hours_above_100 = np.nansum(cable_loading_matrix > 100.0, axis=0).astype(int) if len(cable_ids) else np.array([], dtype=int)
     voltage_hours_below_0_90 = np.nansum(voltage_matrix < 0.90, axis=0).astype(int) if len(voltage_buses) else np.array([], dtype=int)
+    voltage_hours_above_1_03 = np.nansum(voltage_matrix > 1.03, axis=0).astype(int) if len(voltage_buses) else np.array([], dtype=int)
+    voltage_hours_above_1_10 = np.nansum(voltage_matrix > 1.10, axis=0).astype(int) if len(voltage_buses) else np.array([], dtype=int)
+    cable_max_t_index = (
+        np.nanargmax(cable_loading_matrix, axis=0).astype(int)
+        if len(cable_ids) and not np.all(np.isnan(cable_loading_matrix), axis=0).any()
+        else np.array([
+            int(np.nanargmax(cable_loading_matrix[:, idx])) if not np.all(np.isnan(cable_loading_matrix[:, idx])) else -1
+            for idx in range(len(cable_ids))
+        ], dtype=int)
+    )
+    if transformer_s_mva.size and not np.all(np.isnan(transformer_s_mva)):
+        trafo_critical_t_index = int(np.nanargmax(transformer_s_mva))
+        trafo_max_s_mva = float(transformer_s_mva[trafo_critical_t_index])
+        trafo_max_p_mw = float(transformer_p_mw[trafo_critical_t_index])
+        trafo_max_q_mvar = float(transformer_q_mvar[trafo_critical_t_index])
+    else:
+        trafo_critical_t_index = None
+        trafo_max_s_mva = np.nan
+        trafo_max_p_mw = np.nan
+        trafo_max_q_mvar = np.nan
+    trafo_mean_s_mva = float(np.nanmean(transformer_s_mva)) if transformer_s_mva.size and not np.all(np.isnan(transformer_s_mva)) else np.nan
 
     cable_summary = pd.DataFrame(
         {
@@ -424,6 +466,7 @@ def pf_summary(
             "cable_loading_p95_time_percent": _safe_nanpercentile(cable_loading_matrix, 95, axis=0),
             "cable_loading_p99_time_percent": _safe_nanpercentile(cable_loading_matrix, 99, axis=0),
             "cable_loading_max_time_percent": cable_max_loading,
+            "cable_loading_max_t_index": cable_max_t_index,
             "cable_loading_hours_above_100": cable_hours_above_100,
         }
     ).dropna(subset=["cable_loading_max_time_percent"])
@@ -435,7 +478,10 @@ def pf_summary(
             "voltage_p05_time_pu": _safe_nanpercentile(voltage_matrix, 5, axis=0),
             "voltage_p01_time_pu": _safe_nanpercentile(voltage_matrix, 1, axis=0),
             "voltage_min_time_pu": _safe_nanmax(-voltage_matrix, axis=0) * -1.0,
+            "voltage_max_time_pu": _safe_nanmax(voltage_matrix, axis=0),
             "voltage_hours_below_0_90": voltage_hours_below_0_90,
+            "voltage_hours_above_1_03": voltage_hours_above_1_03,
+            "voltage_hours_above_1_10": voltage_hours_above_1_10,
         }
     ).dropna(subset=["voltage_p05_time_pu"])
 
@@ -447,6 +493,11 @@ def pf_summary(
         "n_voltage_buses": int(len(voltage_buses)),
         "n_cables": int(len(cable_values)),
         "transformer_s_rated_mva": float(transformer_s_rated_mva),
+        "trafo_mean_s_mva": trafo_mean_s_mva,
+        "trafo_max_s_mva": trafo_max_s_mva,
+        "trafo_max_p_mw": trafo_max_p_mw,
+        "trafo_max_q_mvar": trafo_max_q_mvar,
+        "trafo_critical_t_index": trafo_critical_t_index,
         "trafo_loading_p50_time_percent": float(_safe_nanpercentile(transformer_loadings, 50)),
         "trafo_loading_p90_time_percent": float(_safe_nanpercentile(transformer_loadings, 90)),
         "trafo_loading_p95_time_percent": float(_safe_nanpercentile(transformer_loadings, 95)),
@@ -457,7 +508,15 @@ def pf_summary(
         "cable_hours_above_100_p95_asset": float(_safe_nanpercentile(cable_hours_above_100, 95)) if cable_hours_above_100.size else np.nan,
         "voltage_p05_load_bus_hour_pu": float(_safe_nanpercentile(voltage_all, 5)),
         "voltage_hours_below_0_90_p95_asset": float(_safe_nanpercentile(voltage_hours_below_0_90, 95)) if voltage_hours_below_0_90.size else np.nan,
+        "voltage_hours_above_1_03_p95_asset": float(_safe_nanpercentile(voltage_hours_above_1_03, 95)) if voltage_hours_above_1_03.size else np.nan,
+        "voltage_hours_above_1_10_p95_asset": float(_safe_nanpercentile(voltage_hours_above_1_10, 95)) if voltage_hours_above_1_10.size else np.nan,
     }
+
+    transformer_diagnostic = _transformer_import_diagnostic_frame(
+        transformer_p_mw,
+        transformer_q_mvar,
+        transformer_s_mva,
+    )
 
     transformer_matrix = transformer_loadings.reshape(-1, 1) if transformer_loadings.size else np.empty((0, 1))
     tail_frames = [
@@ -499,8 +558,94 @@ def pf_summary(
         "cable_summary": cable_summary,
         "bus_voltage_summary": bus_voltage_summary,
         "tail_summary": tail_summary,
+        "transformer_diagnostic": transformer_diagnostic,
         "failed_timesteps": failed_timesteps,
     }
+
+
+def _interp_ldc(values: np.ndarray, duration_percent: np.ndarray) -> np.ndarray:
+    values = pd.Series(values).dropna().sort_values(ascending=False).to_numpy(dtype=float)
+    if len(values) == 0:
+        return np.full(len(duration_percent), np.nan, dtype=float)
+    source_percent = np.linspace(0.0, 100.0, len(values))
+    return np.interp(duration_percent, source_percent, values)
+
+
+def _transformer_import_diagnostic_frame(
+    p_mw: np.ndarray,
+    q_mvar: np.ndarray,
+    s_mva: np.ndarray,
+    ldc_points: int = 101,
+) -> pd.DataFrame:
+    hourly = pd.DataFrame(
+        {
+            "t_index": np.arange(len(s_mva), dtype=int),
+            "p_mw": p_mw,
+            "q_mvar": q_mvar,
+            "q_abs_mvar": np.abs(q_mvar),
+            "s_mva": s_mva,
+        }
+    )
+    if hourly.empty:
+        return pd.DataFrame(
+            columns=[
+                "diagnostic",
+                "point_index",
+                "x_value",
+                "t_index",
+                "p_mw",
+                "q_mvar",
+                "q_abs_mvar",
+                "s_mva",
+                "mean_s_mva",
+                "max_s_mva",
+            ]
+        )
+
+    mean_s_mva = float(np.nanmean(s_mva)) if not np.all(np.isnan(s_mva)) else np.nan
+    max_s_mva = float(np.nanmax(s_mva)) if not np.all(np.isnan(s_mva)) else np.nan
+
+    hourly["day_index"] = hourly["t_index"] // 24
+    daily = (
+        hourly.groupby("day_index", as_index=False)[["p_mw", "q_mvar", "q_abs_mvar", "s_mva"]]
+        .mean()
+        .rename(columns={"day_index": "point_index"})
+    )
+    daily["diagnostic"] = "daily_mean"
+    daily["x_value"] = daily["point_index"].astype(float)
+    daily["t_index"] = daily["point_index"].astype(int) * 24
+
+    duration_percent = np.linspace(0.0, 100.0, ldc_points)
+    ldc = pd.DataFrame(
+        {
+            "diagnostic": "ldc",
+            "point_index": np.arange(ldc_points, dtype=int),
+            "x_value": duration_percent,
+            "t_index": pd.NA,
+            "p_mw": _interp_ldc(hourly["p_mw"].to_numpy(dtype=float), duration_percent),
+            "q_mvar": _interp_ldc(hourly["q_mvar"].to_numpy(dtype=float), duration_percent),
+            "q_abs_mvar": _interp_ldc(hourly["q_abs_mvar"].to_numpy(dtype=float), duration_percent),
+            "s_mva": _interp_ldc(hourly["s_mva"].to_numpy(dtype=float), duration_percent),
+        }
+    )
+
+    out = pd.concat([daily, ldc], ignore_index=True, sort=False)
+    out["mean_s_mva"] = mean_s_mva
+    out["max_s_mva"] = max_s_mva
+    return out[
+        [
+            "diagnostic",
+            "point_index",
+            "x_value",
+            "t_index",
+            "p_mw",
+            "q_mvar",
+            "q_abs_mvar",
+            "s_mva",
+            "mean_s_mva",
+            "max_s_mva",
+        ]
+    ]
 
 def pf(grid, df, parallel, n_cpu):
     if parallel:

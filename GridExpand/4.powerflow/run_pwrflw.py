@@ -182,7 +182,7 @@ if __name__ == "__main__":
         df_pre_demand = dmnds.obtain_pre_demand(SF)
         df_post_demand = None
     else:
-        df_pre_demand, df_post_demand = dmnds.obtain_demand(SF)
+        df_pre_demand, df_post_demand = dmnds.obtain_demand(SF, save_reactive=not args.summary_only)
 
     if residential_buses is not None:
         df_pre_demand = _filter_demand_to_buses(df_pre_demand, residential_buses, "pre")

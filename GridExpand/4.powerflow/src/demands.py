@@ -16,7 +16,7 @@ Outputs:
 
 - Returns `(df_pre_demand, df_post_demand)` with MultiIndex columns identifying
     site/bus and power component (`electricity` and `electricity-reactive`).
-- Writes `pwrflw/urbs_out/MILP/reactive` to the output `.h5` for traceability.
+- Optionally writes `pwrflw/urbs_out/MILP/reactive` to the output `.h5` for traceability.
 
 Important conventions:
 
@@ -27,6 +27,38 @@ Important conventions:
 from config import config
 import pandas as pd
 import numpy as np
+
+
+def _use_t_as_index(df):
+    if not isinstance(df.index, pd.MultiIndex):
+        return df.copy()
+    if "t" not in df.index.names:
+        return df.copy()
+    result = df.copy()
+    result.index = result.index.get_level_values("t")
+    result.index.name = "t"
+    return result
+
+
+def _drop_tsam_initial_timestep(df_pre_demand):
+    df_pre_demand = _use_t_as_index(df_pre_demand)
+    if len(df_pre_demand) > 1 and df_pre_demand.index.min() == 0:
+        return df_pre_demand.iloc[1:].copy()
+    return df_pre_demand
+
+
+def _align_pre_demand_to_urbs(df_pre_demand, df_urbs_demand):
+    df_pre_demand = _use_t_as_index(df_pre_demand)
+    urbs_timesteps = df_urbs_demand.index.get_level_values("t").nunique()
+    if len(df_pre_demand) == urbs_timesteps + 1 and df_pre_demand.index.min() == 0:
+        df_pre_demand = df_pre_demand.iloc[1:].copy()
+    if len(df_pre_demand) != urbs_timesteps:
+        raise ValueError(
+            "Pre-demand and urbs output have incompatible timesteps: "
+            f"pre={len(df_pre_demand)}, urbs={urbs_timesteps}."
+        )
+    df_pre_demand.index = range(len(df_pre_demand))
+    return df_pre_demand
 
 
 def _process_pre_demands(df_pre_demand):
@@ -130,19 +162,25 @@ def _process_post_demands(df_urbs_demand, df_pre_demand_react):
     return df_post_demand_elec, df_post_demand_react, df_react_save
 
 def obtain_pre_demand(SF):
-    df_raw_demand = pd.read_hdf(SF.input_path, key=SF.raw_demand_dir)
+    df_raw_demand = SF.get_pre_demand()
+    if SF.uses_reduced_demand():
+        df_raw_demand = _drop_tsam_initial_timestep(df_raw_demand)
+        df_raw_demand.index = range(len(df_raw_demand))
     df_pre_demand_elec, df_pre_demand_react = _process_pre_demands(df_raw_demand)
     return pd.concat([df_pre_demand_elec, df_pre_demand_react], axis=1)
 
-def obtain_demand(SF):
+def obtain_demand(SF, save_reactive=True):
     # Read-out demands:
     df_raw_demand, df_urbs_demand = SF.get_input_demands()
+
+    df_raw_demand = _align_pre_demand_to_urbs(df_raw_demand, df_urbs_demand)
 
     # Obtain pre-urbs raw household demands as imports
     df_pre_demand_elec, df_pre_demand_react = _process_pre_demands(df_raw_demand)
     # Extract post-urbs imports
     df_post_demand_elec, df_post_demand_react, df_react_save = _process_post_demands(df_urbs_demand, df_pre_demand_react)
-    SF.save_df(df_react_save, "pwrflw/urbs_out/MILP/reactive")
+    if save_reactive:
+        SF.save_df(df_react_save, "pwrflw/urbs_out/MILP/reactive")
 
     # Concat demands
     df_pre_demand = pd.concat([df_pre_demand_elec, df_pre_demand_react], axis=1)

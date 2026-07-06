@@ -174,9 +174,12 @@ def run_lvds_opt(input_path,        # path to input file
         print("Running time series aggregation (TSAM)...")
         start_time=time.time()  # Timer for measuring tsam duration
         # run timeseries aggregation method before creating model (to reduce computational load by reducing considered weeks)
-        data, global_settings["timesteps"], tsam_data = run_tsam(data,
-                                                                global_settings["noTypicalPeriods"],
-                                                                global_settings["hoursPerPeriod"])  
+        data, global_settings["timesteps"], tsam_data = run_tsam(
+            data,
+            global_settings["noTypicalPeriods"],
+            global_settings["hoursPerPeriod"],
+            global_settings.get("tsamExtremePeriodMethod", "replace_cluster_center"),
+        )
         end_time = time.time()  # Timer for measuring tsam duration
         if mode["tsam"]: print(f"TSAM took {(end_time-start_time)/60:.2f} minutes to run!\n") 
     else: # tsam disabled, just filter the time series according to the defined time steps

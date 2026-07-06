@@ -49,6 +49,7 @@ class SaveFile:
         # Dirs from which to extract data within .h5 file
         self.grid_dir = "raw_data/net"
         self.raw_demand_dir = "urbs_in/demand"
+        self.reduced_demand_dir = "urbs_out/reduced_data/demand"
         self.net_demand_dir = "urbs_out/MILP/tau_pro"
 
     def _get_readpath(self):
@@ -70,8 +71,20 @@ class SaveFile:
         db = SurroGridDatabase()
         return db.read_pandapower_grid(db.resolve_grid_identifier(self.filename))
 
+    def _hdf_key_exists(self, key):
+        clean_key = key.strip("/")
+        with h5py.File(self.input_path, "r") as hdf_file:
+            return clean_key in hdf_file
+
+    def uses_reduced_demand(self):
+        return self._hdf_key_exists(self.reduced_demand_dir)
+
+    def get_pre_demand(self):
+        demand_key = self.reduced_demand_dir if self.uses_reduced_demand() else self.raw_demand_dir
+        return pd.read_hdf(self.input_path, key=demand_key)
+
     def get_input_demands(self):
-        df_raw_demand = pd.read_hdf(self.input_path, key=self.raw_demand_dir)
+        df_raw_demand = self.get_pre_demand()
         df_net_demand = pd.read_hdf(self.input_path, key=self.net_demand_dir)
         return df_raw_demand, df_net_demand
 

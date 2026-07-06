@@ -72,6 +72,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step3-target-columns", type=int, default=35)
     parser.add_argument("--step3-cluster-concurrency", type=int, default=1)
     parser.add_argument("--step4-cpus", type=int, default=4)
+    parser.add_argument("--tsam", action="store_true", help="Enable TSAM type-week aggregation in Step 3.")
+    parser.add_argument("--tsam-periods", type=int, default=6, help="Number of TSAM type weeks for Step 3.")
+    parser.add_argument("--tsam-hours-per-period", type=int, default=168, help="Hours per TSAM period.")
+    parser.add_argument(
+        "--tsam-extreme-method",
+        choices=["append", "new_cluster_center", "replace_cluster_center"],
+        default="replace_cluster_center",
+        help="How TSAM should include cold and solar extreme weeks.",
+    )
     parser.add_argument(
         "--powerflow-output",
         choices=POWERFLOW_OUTPUT_CHOICES,
@@ -626,16 +635,27 @@ def run_candidate(
         )
 
         current_stage = "step3_urbs"
+        step3_cmd = [
+            "uv",
+            "run",
+            "python",
+            "run_urbs_cluster.py",
+            step2_filename,
+            "--n_cpu",
+            str(step3_cpus),
+        ]
+        if args.tsam:
+            step3_cmd.extend([
+                "--tsam",
+                "--tsam-periods",
+                str(args.tsam_periods),
+                "--tsam-hours-per-period",
+                str(args.tsam_hours_per_period),
+                "--tsam-extreme-method",
+                args.tsam_extreme_method,
+            ])
         run_command(
-            cmd=[
-                "uv",
-                "run",
-                "python",
-                "run_urbs_cluster.py",
-                step2_filename,
-                "--n_cpu",
-                str(step3_cpus),
-            ],
+            cmd=step3_cmd,
             cwd=step3_dir,
             log_path=log_file,
             status=status,
