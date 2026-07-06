@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.collections import LineCollection, PolyCollection
+from matplotlib.colors import LinearSegmentedColormap, LogNorm, Normalize
 from scipy.spatial import ConvexHull
 from sqlalchemy import text
 
@@ -21,6 +22,60 @@ if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
 from database import SurroGridDatabase
+
+
+COST_CMAP = LinearSegmentedColormap.from_list(
+    "cost_green_red",
+    ["#1a9850", "#fee08b", "#d73027"],
+)
+
+
+def _cost_colormap(cmap: str | LinearSegmentedColormap):
+    if isinstance(cmap, str) and cmap == "cost_green_red":
+        return COST_CMAP
+    return plt.get_cmap(cmap) if isinstance(cmap, str) else cmap
+
+
+def _display_value_scale(value_column: str) -> tuple[float, str]:
+    if value_column.endswith("_eur"):
+        return 1000.0, "k€"
+    return 1.0, ""
+
+
+def _display_label(value_column: str, unit: str) -> str:
+    label = value_column.replace("_eur", "").replace("_", " ")
+    if unit:
+        return f"{label} [{unit}]"
+    return label
+
+
+def _add_osm_basemap(
+    ax: plt.Axes,
+    *,
+    target_epsg: int,
+    source: object | None = None,
+    zoom: str | int = "auto",
+    alpha: float = 0.72,
+) -> None:
+    try:
+        import contextily as ctx
+    except ImportError as exc:
+        raise ImportError(
+            "OSM basemap support requires contextily. Install/sync the "
+            "GridExpand/5.postprocessing uv environment first."
+        ) from exc
+
+    if source is None:
+        source = ctx.providers.OpenStreetMap.Mapnik
+    ctx.add_basemap(
+        ax,
+        crs=f"EPSG:{int(target_epsg)}",
+        source=source,
+        zoom=zoom,
+        alpha=alpha,
+        attribution_size=6,
+        reset_extent=True,
+    )
 
 
 @dataclass(frozen=True)
@@ -402,5 +457,299 @@ def plot_grid_area_envelope_comparison(
                 "has_polygon": [item.envelope is not None for item in real_envelopes],
             }
         ),
+    }
+
+
+def _latest_expansion_analysis_key(db: SurroGridDatabase) -> str:
+    query = text(
+        """
+        SELECT analysis_key
+        FROM surrogrid.expansion_analysis_run
+        ORDER BY created_at DESC, expansion_analysis_run_id DESC
+        LIMIT 1
+        """
+    )
+    with db.engine.connect() as conn:
+        key = conn.execute(query).scalar_one_or_none()
+    if key is None:
+        raise ValueError("No expansion analysis run found.")
+    return str(key)
+
+
+def load_synthetic_expansion_envelope_points(
+    *,
+    analysis_key: str | None = None,
+    building_use: str | Sequence[str] | None = None,
+    target_epsg: int = 25832,
+) -> pd.DataFrame:
+    """Load synthetic building points with grid-level expansion costs."""
+
+    db = SurroGridDatabase()
+    analysis_key = analysis_key or _latest_expansion_analysis_key(db)
+    params: dict[str, object] = {"analysis_key": analysis_key, "target_epsg": int(target_epsg)}
+    filters = ["gbb.centroid IS NOT NULL"]
+    if building_use is not None:
+        if isinstance(building_use, str):
+            selected_uses = [building_use]
+        else:
+            selected_uses = list(building_use)
+        filters.append("gbb.building_use = ANY(:building_use)")
+        params["building_use"] = selected_uses
+
+    query = text(
+        f"""
+        WITH ar AS (
+            SELECT expansion_analysis_run_id, analysis_key
+            FROM surrogrid.expansion_analysis_run
+            WHERE analysis_key = :analysis_key
+        ), line_cost AS (
+            SELECT
+                grid_case_id,
+                COUNT(*) AS cable_segments,
+                COUNT(*) FILTER (WHERE requires_expansion) AS cable_segments_requiring_expansion,
+                COALESCE(SUM(estimated_cost_eur), 0.0) AS cable_cost_eur,
+                MAX(loading_percent) AS max_cable_loading_percent
+            FROM surrogrid.expansion_line_result
+            WHERE expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar)
+            GROUP BY grid_case_id
+        ), transformer_cost AS (
+            SELECT
+                grid_case_id,
+                BOOL_OR(requires_expansion) AS transformer_requires_expansion,
+                COALESCE(SUM(estimated_cost_eur), 0.0) AS transformer_cost_eur,
+                MAX(loading_percent) AS transformer_loading_percent,
+                MAX(additional_transformer_kva) AS additional_transformer_kva
+            FROM surrogrid.expansion_transformer_result
+            WHERE expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar)
+            GROUP BY grid_case_id
+        ), grid_cost AS (
+            SELECT
+                COALESCE(line_cost.grid_case_id, transformer_cost.grid_case_id) AS grid_case_id,
+                COALESCE(cable_segments, 0) AS cable_segments,
+                COALESCE(cable_segments_requiring_expansion, 0) AS cable_segments_requiring_expansion,
+                COALESCE(cable_cost_eur, 0.0) AS cable_cost_eur,
+                max_cable_loading_percent,
+                COALESCE(transformer_requires_expansion, FALSE) AS transformer_requires_expansion,
+                COALESCE(transformer_cost_eur, 0.0) AS transformer_cost_eur,
+                transformer_loading_percent,
+                COALESCE(additional_transformer_kva, 0.0) AS additional_transformer_kva,
+                COALESCE(cable_cost_eur, 0.0) + COALESCE(transformer_cost_eur, 0.0) AS total_cost_eur
+            FROM line_cost
+            FULL OUTER JOIN transformer_cost USING (grid_case_id)
+        )
+        SELECT
+            gbb.grid_case_id,
+            gbb.kcid,
+            gbb.bcid,
+            gbb.building_use,
+            ST_X(ST_Transform(gbb.centroid, :target_epsg)) AS x,
+            ST_Y(ST_Transform(gbb.centroid, :target_epsg)) AS y,
+            gc.cable_segments,
+            gc.cable_segments_requiring_expansion,
+            gc.cable_cost_eur,
+            gc.max_cable_loading_percent,
+            gc.transformer_requires_expansion,
+            gc.transformer_cost_eur,
+            gc.transformer_loading_percent,
+            gc.additional_transformer_kva,
+            gc.total_cost_eur
+        FROM grid_cost gc
+        JOIN surrogrid.grid_building_bus gbb USING (grid_case_id)
+        WHERE {' AND '.join(filters)}
+        """
+    )
+    with db.engine.connect() as conn:
+        points = pd.read_sql_query(query, conn, params=params)
+    points.attrs["analysis_key"] = analysis_key
+    return points
+
+
+def _grid_metrics_from_points(points: pd.DataFrame) -> pd.DataFrame:
+    metric_cols = [
+        "kcid",
+        "bcid",
+        "cable_segments",
+        "cable_segments_requiring_expansion",
+        "cable_cost_eur",
+        "max_cable_loading_percent",
+        "transformer_requires_expansion",
+        "transformer_cost_eur",
+        "transformer_loading_percent",
+        "additional_transformer_kva",
+        "total_cost_eur",
+    ]
+    available_cols = [col for col in metric_cols if col in points.columns]
+    return points.groupby("grid_case_id", as_index=False)[available_cols].first()
+
+
+def plot_synthetic_expansion_envelopes(
+    *,
+    analysis_key: str | None = None,
+    value_column: str = "total_cost_eur",
+    building_use: str | Sequence[str] | None = None,
+    target_epsg: int = 25832,
+    clip_quantile: float | None = 0.95,
+    log_scale: bool = False,
+    cmap: str | LinearSegmentedColormap = "cost_green_red",
+    show_points: bool = False,
+    show_buildings: bool = True,
+    building_point_size: float = 3.0,
+    building_alpha: float = 0.24,
+    envelope_alpha: float = 0.58,
+    add_osm_layer: bool = True,
+    osm_source: object | None = None,
+    osm_zoom: str | int = "auto",
+    osm_alpha: float = 0.72,
+    output_path: str | Path | None = None,
+    figsize: tuple[float, float] = (9.5, 8.0),
+) -> tuple[plt.Figure, plt.Axes, dict[str, pd.DataFrame]]:
+    """Plot synthetic supplied-area envelopes colored by expansion severity.
+
+    By default all available building points are used. ``value_column`` can be one
+    of the grid-level metrics returned by
+    :func:`load_synthetic_expansion_envelope_points`, for example
+    ``total_cost_eur``, ``cable_cost_eur``, or ``transformer_cost_eur``. Cost
+    columns ending in ``_eur`` are displayed in thousand euros on the colorbar.
+    Set ``add_osm_layer=False`` to disable the OSM background. The building
+    context layer is controlled through ``show_buildings``.
+    """
+
+    points = load_synthetic_expansion_envelope_points(
+        analysis_key=analysis_key,
+        building_use=building_use,
+        target_epsg=target_epsg,
+    )
+    if points.empty:
+        raise ValueError("No synthetic expansion envelope points found for the selected filters.")
+    if value_column not in points.columns:
+        available = ", ".join(sorted(points.columns))
+        raise ValueError(f"Unknown value_column {value_column!r}. Available columns: {available}.")
+
+    analysis_key = str(points.attrs.get("analysis_key", analysis_key or "latest"))
+    envelopes = _make_envelopes(points, "Synthetic", "grid_case_id")
+    metrics = _grid_metrics_from_points(points)
+    values_by_grid = metrics.set_index("grid_case_id")[value_column].astype(float).to_dict()
+
+    polygons = []
+    polygon_values = []
+    line_segments = []
+    line_values = []
+    point_clouds = []
+    point_values = []
+    for envelope in envelopes:
+        value = float(values_by_grid.get(int(envelope.grid_id), np.nan))
+        if envelope.envelope is not None:
+            polygons.append(envelope.envelope)
+            polygon_values.append(value)
+        elif envelope.n_points == 2:
+            line_segments.append(envelope.points)
+            line_values.append(value)
+        else:
+            point_clouds.append(envelope.points)
+            point_values.append(value)
+
+    value_scale, value_unit = _display_value_scale(value_column)
+    polygon_display_values = [value / value_scale for value in polygon_values]
+    line_display_values = [value / value_scale for value in line_values]
+    point_display_values = [value / value_scale for value in point_values]
+    all_values = pd.Series(
+        polygon_display_values + line_display_values + point_display_values,
+        dtype=float,
+    ).replace([np.inf, -np.inf], np.nan).dropna()
+    if all_values.empty:
+        raise ValueError(f"No finite values available for {value_column!r}.")
+
+    vmax = float(all_values.max())
+    if clip_quantile is not None:
+        q = float(clip_quantile)
+        if q > 1:
+            q = q / 100
+        if q <= 0 or q > 1:
+            raise ValueError("clip_quantile must satisfy 0 < value <= 1, or 0 < value <= 100.")
+        vmax = float(all_values.quantile(q))
+    vmax = max(vmax, 1e-9)
+    if log_scale:
+        positive = all_values[all_values > 0]
+        if positive.empty:
+            norm = Normalize(vmin=0.0, vmax=max(float(all_values.max()), 1e-9))
+        else:
+            norm = LogNorm(vmin=max(float(positive.min()), 1e-6), vmax=max(vmax, float(positive.min()) * 1.01))
+    else:
+        norm = Normalize(vmin=0.0, vmax=vmax)
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize, constrained_layout=True)
+    cmap_obj = _cost_colormap(cmap)
+
+    if polygons:
+        collection = PolyCollection(
+            polygons,
+            array=np.asarray(polygon_display_values, dtype=float),
+            cmap=cmap_obj,
+            norm=norm,
+            edgecolors="#263238",
+            linewidths=0.65,
+            alpha=envelope_alpha,
+            zorder=2,
+        )
+        ax.add_collection(collection)
+        color_source = collection
+    else:
+        color_source = plt.cm.ScalarMappable(norm=norm, cmap=cmap_obj)
+
+    if line_segments:
+        colors = cmap_obj(norm(np.asarray(line_display_values, dtype=float)))
+        ax.add_collection(LineCollection(line_segments, colors=colors, linewidths=1.6, alpha=min(0.9, envelope_alpha + 0.18), zorder=3))
+    for cloud, value in zip(point_clouds, point_display_values):
+        ax.scatter(
+            cloud[:, 0],
+            cloud[:, 1],
+            s=20,
+            color=cmap_obj(norm(value)),
+            edgecolor="#263238",
+            linewidth=0.4,
+            alpha=min(0.95, envelope_alpha + 0.25),
+            zorder=4,
+        )
+
+    if show_buildings:
+        ax.scatter(
+            points["x"],
+            points["y"],
+            s=building_point_size,
+            color="#202020",
+            alpha=building_alpha,
+            linewidths=0,
+            zorder=5,
+        )
+
+    if show_points:
+        ax.scatter(points["x"], points["y"], s=2, color="#111111", alpha=0.12, linewidths=0, zorder=6)
+
+    ax.autoscale_view()
+    ax.set_aspect("equal", adjustable="box")
+    if add_osm_layer:
+        _add_osm_basemap(
+            ax,
+            target_epsg=target_epsg,
+            source=osm_source,
+            zoom=osm_zoom,
+            alpha=osm_alpha,
+        )
+    ax.grid(True, linewidth=0.3, alpha=0.25)
+    ax.set_xlabel(f"x [EPSG:{target_epsg}]")
+    ax.set_ylabel(f"y [EPSG:{target_epsg}]")
+    title_label = _display_label(value_column, value_unit)
+    ax.set_title(f"{value_column} estimation aggregated per grid envelope")
+    cbar = fig.colorbar(color_source, ax=ax, shrink=0.82)
+    cbar.set_label(title_label)
+
+    if output_path is not None:
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output, dpi=240)
+
+    return fig, ax, {
+        "points": points,
+        "grid_metrics": metrics.sort_values(value_column, ascending=False).reset_index(drop=True),
     }
 

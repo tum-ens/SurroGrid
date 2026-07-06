@@ -1268,6 +1268,83 @@ def powerflow_percentile_profile_db(
     ].dropna(subset=["value"]).reset_index(drop=True)
 
 
+def latest_synthetic_powerflow_summary_run_name(
+    stage: str = "pre",
+    scenario_id: int | None = None,
+    ags: str | int | None = None,
+    plz: int | None = None,
+    db: SurroGridDatabase | None = None,
+) -> str:
+    """Return the newest synthetic run name with compact power-flow summaries."""
+    db = db or SurroGridDatabase()
+    query = text(
+        """
+        SELECT
+            pr.run_name,
+            COUNT(DISTINCT pr.powerflow_run_id) AS summary_grids,
+            MAX(pfs.created_at) AS latest_summary_at
+        FROM surrogrid.powerflow_summary pfs
+        JOIN surrogrid.powerflow_run pr USING (powerflow_run_id)
+        JOIN surrogrid.grid_case gc USING (grid_case_id)
+        WHERE pfs.stage = :stage
+          AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
+          AND (:ags IS NULL OR gc.ags = :ags)
+          AND (:filter_plz IS NULL OR gc.plz = :filter_plz)
+        GROUP BY pr.run_name
+        ORDER BY latest_summary_at DESC, summary_grids DESC, pr.run_name DESC
+        LIMIT 1
+        """
+    )
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            query,
+            {
+                "stage": stage,
+                "scenario_id": scenario_id,
+                "ags": _normalize_optional_ags(ags),
+                "filter_plz": plz,
+            },
+        ).mappings().first()
+    if row is None:
+        raise ValueError(
+            "No compact synthetic power-flow summary run found for the selected filters. "
+            "Run the pipeline with --powerflow-output summary or --powerflow-output both first."
+        )
+    return str(row["run_name"])
+
+
+def load_synthetic_powerflow_cutoff_profile(
+    run_name: str | None = None,
+    stage: str = "pre",
+    scenario_id: int | None = None,
+    ags: str | int | None = None,
+    plz: int | None = None,
+    kcid: int | None = None,
+    bcid: int | None = None,
+    min_buildings: int = 5,
+) -> pd.DataFrame:
+    """Load synthetic asset-percentile profiles for retained-asset cutoff plots."""
+    if run_name is None:
+        run_name = latest_synthetic_powerflow_summary_run_name(
+            stage=stage,
+            scenario_id=scenario_id,
+            ags=ags,
+            plz=plz,
+        )
+    profile = powerflow_percentile_profile_db(
+        run_name=run_name,
+        stage=stage,
+        scenario_id=scenario_id,
+        ags=ags,
+        plz=plz,
+        kcid=kcid,
+        bcid=bcid,
+        min_buildings=min_buildings,
+    )
+    profile = profile.copy()
+    profile["comparison_group"] = "Synthetic"
+    return profile
+
 
 def _real_grid_label_from_row(row: pd.Series) -> str:
     return f"SWF LV_{int(row['lv_id']):03d}"
@@ -2828,7 +2905,7 @@ def plot_powerflow_asset_cutoff_overview_static(
     profile: pd.DataFrame,
     group_col: str | None = None,
     color_map: dict[str, str] | None = None,
-    asset_cutoff_percentile: float = 0.95,
+    asset_cutoff_percentile: float = 1.0,
     asset_percentiles: tuple[float, ...] | None = None,
     metrics: tuple[str, ...] = ("Transformer", "Cables", "Voltage"),
     title: str = "Power-Flow Stress by Retained-Asset Cutoff",
@@ -3075,7 +3152,7 @@ def plot_powerflow_asset_cutoff_overview_static(
             ax.grid(False, axis="x")
 
     handles, labels = axes[0, 0].get_legend_handles_labels()
-    if handles:
+    if handles and len(labels) > 1:
         fig.legend(
             handles,
             labels,
@@ -3738,6 +3815,62 @@ def voltage_deviation_summary_db(
         )
 
     if summary.empty:
+        compact_query = text(
+            """
+            SELECT pr.powerflow_run_id,
+                   pr.run_name,
+                   pr.scenario_id,
+                   sc.scenario_key,
+                   gc.ags,
+                   gc.plz,
+                   gc.kcid,
+                   gc.bcid,
+                   gc.pylovo_grid_result_id,
+                   pbvs.stage,
+                   MIN(pbvs.voltage_min_time_pu) AS min_vm_pu,
+                   MAX(pbvs.voltage_max_time_pu) AS max_vm_pu,
+                   MAX(pfs.n_timesteps) AS n_timesteps,
+                   COUNT(DISTINCT pbvs.bus) AS n_buses
+            FROM surrogrid.powerflow_bus_voltage_summary pbvs
+            JOIN surrogrid.powerflow_summary pfs
+              ON pfs.powerflow_run_id = pbvs.powerflow_run_id
+             AND pfs.stage = pbvs.stage
+            JOIN surrogrid.powerflow_run pr
+              ON pr.powerflow_run_id = pbvs.powerflow_run_id
+            JOIN surrogrid.scenario sc
+              ON sc.scenario_id = pr.scenario_id
+            JOIN surrogrid.grid_case gc
+              ON gc.grid_case_id = pr.grid_case_id
+            WHERE pr.run_name = :run_name
+              AND pbvs.stage = ANY(:stages)
+              AND (:run_id IS NULL OR pbvs.powerflow_run_id = :run_id)
+              AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
+              AND (:ags IS NULL OR gc.ags = :ags)
+              AND (:filter_plz IS NULL OR gc.plz = :filter_plz)
+              AND (:filter_kcid IS NULL OR gc.kcid = :filter_kcid)
+              AND (:filter_bcid IS NULL OR gc.bcid = :filter_bcid)
+            GROUP BY pr.powerflow_run_id, pr.run_name, pr.scenario_id, sc.scenario_key, gc.ags, gc.plz, gc.kcid, gc.bcid,
+                     gc.pylovo_grid_result_id, pbvs.stage
+            ORDER BY pr.powerflow_run_id, pbvs.stage
+            """
+        )
+        with db.engine.connect() as conn:
+            summary = pd.read_sql_query(
+                compact_query,
+                conn,
+                params={
+                    "run_name": run_name,
+                    "stages": list(stages),
+                    "run_id": run_id,
+                    "scenario_id": scenario_id,
+                    "ags": _normalize_optional_ags(ags),
+                    "filter_plz": plz if input_id is None else None,
+                    "filter_kcid": kcid if input_id is None else None,
+                    "filter_bcid": bcid if input_id is None else None,
+                },
+            )
+
+    if summary.empty:
         raise ValueError(f"No DB voltage results found for run name {run_name!r}.")
 
     summary["grid"] = summary.apply(_grid_label_from_row, axis=1)
@@ -3781,7 +3914,7 @@ def plot_voltage_deviation_histogram(
     fig.add_trace(
         go.Histogram(
             x=upper_values,
-            name="Max. Upper Voltage Deviation",
+            name="Highest voltage per grid",
             marker={"color": "#2f92c5", "line": {"color": "white", "width": 0.5}},
             xbins={"start": x_min, "end": x_max, "size": bin_size},
             opacity=0.95,
@@ -3790,7 +3923,7 @@ def plot_voltage_deviation_histogram(
     fig.add_trace(
         go.Histogram(
             x=lower_values,
-            name="Max. Lower Voltage Deviation",
+            name="Lowest voltage per grid",
             marker={"color": "#66c2a4", "line": {"color": "white", "width": 0.5}},
             xbins={"start": x_min, "end": x_max, "size": bin_size},
             opacity=0.95,
@@ -3823,9 +3956,16 @@ def plot_voltage_deviation_histogram(
     fig.update_layout(
         barmode="overlay",
         title="Voltage Magnitude Extremes Across LV Grids",
-        xaxis_title="Voltage Magnitude (p.u.)",
-        yaxis_title="LV Grid Count",
-        yaxis={"type": "log", "rangemode": "tozero"},
+        xaxis_title="Grid-Level Voltage Extremum [p.u.]",
+        yaxis_title="LV Grid Count (log scale)",
+        yaxis={
+            "type": "log",
+            "rangemode": "tozero",
+            "tickmode": "array",
+            "tickvals": [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000],
+            "ticktext": ["1", "2", "5", "10", "20", "50", "100", "200", "500", "1,000"],
+            "minor": {"ticks": "outside"},
+        },
         legend={"orientation": "h", "x": 0.02, "y": 1.12},
         margin={"l": 70, "r": 30, "t": 80, "b": 65},
         width=820,
@@ -3912,7 +4052,77 @@ def transformer_import_distribution_db(
         )
 
     if df.empty:
-        raise ValueError(f"No DB transformer import results found for run name {run_name!r}.")
+        compact_query = text(
+            """
+            SELECT pr.powerflow_run_id,
+                   pr.run_name,
+                   pr.scenario_id,
+                   sc.scenario_key,
+                   gc.ags,
+                   gc.plz,
+                   gc.kcid,
+                   gc.bcid,
+                   gc.pylovo_grid_result_id,
+                   ptd.stage,
+                   ptd.diagnostic,
+                   ptd.point_index,
+                   ptd.x_value,
+                   ptd.t_index,
+                   ptd.ts,
+                   ptd.p_mw,
+                   ptd.q_mvar,
+                   ptd.q_abs_mvar,
+                   ptd.s_mva,
+                   ptd.mean_s_mva,
+                   ptd.max_s_mva
+            FROM surrogrid.powerflow_transformer_diagnostic ptd
+            JOIN surrogrid.powerflow_run pr USING (powerflow_run_id)
+            JOIN surrogrid.scenario sc USING (scenario_id)
+            JOIN surrogrid.grid_case gc USING (grid_case_id)
+            WHERE pr.run_name = :run_name
+              AND ptd.stage = :stage
+              AND (:run_id IS NULL OR ptd.powerflow_run_id = :run_id)
+              AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
+              AND (:ags IS NULL OR gc.ags = :ags)
+              AND (:filter_plz IS NULL OR gc.plz = :filter_plz)
+              AND (:filter_kcid IS NULL OR gc.kcid = :filter_kcid)
+              AND (:filter_bcid IS NULL OR gc.bcid = :filter_bcid)
+            ORDER BY pr.powerflow_run_id, ptd.diagnostic, ptd.point_index
+            """
+        )
+        with db.engine.connect() as conn:
+            df = pd.read_sql_query(
+                compact_query,
+                conn,
+                params={
+                    "run_name": run_name,
+                    "stage": stage,
+                    "run_id": run_id,
+                    "scenario_id": scenario_id,
+                    "ags": _normalize_optional_ags(ags),
+                    "filter_plz": plz if input_id is None else None,
+                    "filter_kcid": kcid if input_id is None else None,
+                    "filter_bcid": bcid if input_id is None else None,
+                },
+            )
+        if df.empty:
+            raise ValueError(f"No DB transformer import results found for run name {run_name!r}.")
+        df["grid"] = df.apply(_grid_label_from_row, axis=1)
+        df["q_import_mvar"] = df["q_abs_mvar"] if reactive_magnitude else df["q_mvar"]
+        df["s_import_mva"] = df["s_mva"]
+        mean_s = df["mean_s_mva"].replace(0.0, np.nan)
+        max_s_by_grid = df.groupby("powerflow_run_id")["max_s_mva"].first().replace(0.0, np.nan)
+        ldc_scale = float(max_s_by_grid.mean())
+        if not np.isfinite(ldc_scale) or ldc_scale == 0.0:
+            ldc_scale = np.nan
+        df["p_ts_norm"] = df["p_mw"] / mean_s
+        df["q_ts_norm"] = df["q_import_mvar"] / mean_s
+        df["s_ts_norm"] = df["s_import_mva"] / mean_s
+        df["p_ldc_norm"] = df["p_mw"] / ldc_scale
+        df["q_ldc_norm"] = df["q_import_mvar"] / ldc_scale
+        df["s_ldc_norm"] = df["s_import_mva"] / ldc_scale
+        df.attrs["ldc_scale_mva"] = ldc_scale
+        return df.reset_index(drop=True)
 
     df["grid"] = df.apply(_grid_label_from_row, axis=1)
     df["q_import_mvar"] = df["q_mvar"].abs() if reactive_magnitude else df["q_mvar"]
@@ -4208,6 +4418,24 @@ def _daily_matplotlib_transformer_bands(
     *,
     relative_axis: bool,
 ) -> pd.DataFrame:
+    if "diagnostic" in df.columns:
+        daily_df = df[df["diagnostic"] == "daily_mean"].copy()
+        if daily_df.empty:
+            raise ValueError(f"No compact daily transformer diagnostic values available for {value_col}.")
+        index_col = "t_index" if relative_axis else "ts"
+        wide = daily_df.pivot_table(
+            index=index_col,
+            columns="powerflow_run_id",
+            values=value_col,
+            aggfunc="mean",
+        ).sort_index()
+        if relative_axis:
+            wide.index = (wide.index.astype(int) // 24).astype(int)
+            wide.index.name = "day_index"
+        else:
+            wide.index = pd.to_datetime(wide.index)
+        return _matplotlib_quantile_summary(wide)
+
     wide = _wide_transformer_frame(df, value_col, relative_axis=relative_axis)
     if relative_axis:
         daily = wide.groupby(wide.index // 24).mean()
@@ -4224,6 +4452,18 @@ def _ldc_matplotlib_transformer_bands(
     *,
     relative_axis: bool,
 ) -> pd.DataFrame:
+    if "diagnostic" in df.columns:
+        ldc_df = df[df["diagnostic"] == "ldc"].copy()
+        if ldc_df.empty:
+            raise ValueError(f"No compact LDC transformer diagnostic values available for {value_col}.")
+        ldc = ldc_df.pivot_table(
+            index="x_value",
+            columns="powerflow_run_id",
+            values=value_col,
+            aggfunc="mean",
+        ).sort_index()
+        return _matplotlib_quantile_summary(ldc)
+
     wide = _wide_transformer_frame(df, value_col, relative_axis=relative_axis)
     duration_percent = np.linspace(0.0, 100.0, n_points)
     curves = []
@@ -4353,9 +4593,11 @@ def _plot_matplotlib_band(
 def plot_transformer_import_distributions_matplotlib(
     df: pd.DataFrame,
     show: bool = True,
+    metrics: tuple[str, ...] = ("p", "q", "s"),
 ):
     specs = [
         {
+            "key": "p",
             "ts_col": "p_ts_norm",
             "ldc_col": "p_ldc_norm",
             "title": "Net Transformer Active Power P Import",
@@ -4366,6 +4608,7 @@ def plot_transformer_import_distributions_matplotlib(
             "band96": "#fee0d2",
         },
         {
+            "key": "q",
             "ts_col": "q_ts_norm",
             "ldc_col": "q_ldc_norm",
             "title": "Net Transformer Reactive Power |Q| Import",
@@ -4376,6 +4619,7 @@ def plot_transformer_import_distributions_matplotlib(
             "band96": "#efedf5",
         },
         {
+            "key": "s",
             "ts_col": "s_ts_norm",
             "ldc_col": "s_ldc_norm",
             "title": "Net Transformer Apparent Power |S| Load",
@@ -4386,6 +4630,28 @@ def plot_transformer_import_distributions_matplotlib(
             "band96": "#9ecae1",
         },
     ]
+    metric_aliases = {
+        "p": "p",
+        "active": "p",
+        "active_power": "p",
+        "q": "q",
+        "reactive": "q",
+        "reactive_power": "q",
+        "s": "s",
+        "apparent": "s",
+        "apparent_power": "s",
+    }
+    selected_keys = []
+    for metric in metrics:
+        key = metric_aliases.get(str(metric).strip().lower())
+        if key is None:
+            available = ", ".join(sorted(metric_aliases))
+            raise ValueError(f"Unsupported transformer metric {metric!r}. Available aliases: {available}.")
+        if key not in selected_keys:
+            selected_keys.append(key)
+    specs = [spec for spec in specs if spec["key"] in selected_keys]
+    if not specs:
+        raise ValueError("At least one transformer metric must be selected.")
 
     with plt.rc_context(
         {
@@ -4399,7 +4665,8 @@ def plot_transformer_import_distributions_matplotlib(
             "ytick.labelsize": 8,
         }
     ):
-        fig, axes = plt.subplots(3, 2, figsize=(10, 9.2), dpi=150)
+        fig_height = 3.25 * len(specs)
+        fig, axes = plt.subplots(len(specs), 2, figsize=(10, fig_height), dpi=150, squeeze=False)
         relative_axis = _uses_relative_timeslice_axis(df)
         for row, spec in enumerate(specs):
             ts_band = _daily_matplotlib_transformer_bands(
