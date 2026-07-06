@@ -85,6 +85,12 @@ class SurroGridDatabase:
         column_specs = {
             "powerflow_summary": {
                 "n_converged_timesteps": "INTEGER",
+                "trafo_mean_s_mva": "DOUBLE PRECISION",
+                "trafo_max_s_mva": "DOUBLE PRECISION",
+                "trafo_max_p_mw": "DOUBLE PRECISION",
+                "trafo_max_q_mvar": "DOUBLE PRECISION",
+                "trafo_critical_t_index": "INTEGER",
+                "trafo_critical_ts": "TIMESTAMPTZ",
                 "n_failed_timesteps": "INTEGER",
                 "trafo_loading_p50_time_percent": "DOUBLE PRECISION",
                 "trafo_loading_p90_time_percent": "DOUBLE PRECISION",
@@ -93,12 +99,15 @@ class SurroGridDatabase:
                 "trafo_loading_hours_above_100": "INTEGER",
                 "cable_hours_above_100_p95_asset": "DOUBLE PRECISION",
                 "voltage_hours_below_0_90_p95_asset": "DOUBLE PRECISION",
+                "voltage_hours_above_1_03_p95_asset": "DOUBLE PRECISION",
+                "voltage_hours_above_1_10_p95_asset": "DOUBLE PRECISION",
             },
             "powerflow_cable_summary": {
                 "cable_loading_p50_time_percent": "DOUBLE PRECISION",
                 "cable_loading_p90_time_percent": "DOUBLE PRECISION",
                 "cable_loading_p95_time_percent": "DOUBLE PRECISION",
                 "cable_loading_p99_time_percent": "DOUBLE PRECISION",
+                "cable_loading_max_t_index": "INTEGER",
                 "cable_loading_hours_above_100": "INTEGER",
                 "cable_parallel": "DOUBLE PRECISION",
                 "cable_installed_capacity_ka": "DOUBLE PRECISION",
@@ -112,7 +121,10 @@ class SurroGridDatabase:
                 "voltage_p10_time_pu": "DOUBLE PRECISION",
                 "voltage_p01_time_pu": "DOUBLE PRECISION",
                 "voltage_min_time_pu": "DOUBLE PRECISION",
+                "voltage_max_time_pu": "DOUBLE PRECISION",
                 "voltage_hours_below_0_90": "INTEGER",
+                "voltage_hours_above_1_03": "INTEGER",
+                "voltage_hours_above_1_10": "INTEGER",
             },
         }
         for table_name, columns in column_specs.items():
@@ -158,6 +170,39 @@ class SurroGridDatabase:
                 """
                 CREATE INDEX IF NOT EXISTS idx_powerflow_tail_value_asset
                     ON surrogrid.powerflow_tail_value (metric, asset_type, asset_id)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS surrogrid.powerflow_transformer_diagnostic (
+                    powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.powerflow_run(powerflow_run_id) ON DELETE CASCADE,
+                    stage TEXT NOT NULL,
+                    diagnostic TEXT NOT NULL,
+                    point_index INTEGER NOT NULL,
+                    x_value DOUBLE PRECISION NOT NULL,
+                    t_index INTEGER,
+                    ts TIMESTAMPTZ,
+                    p_mw DOUBLE PRECISION,
+                    q_mvar DOUBLE PRECISION,
+                    q_abs_mvar DOUBLE PRECISION,
+                    s_mva DOUBLE PRECISION,
+                    mean_s_mva DOUBLE PRECISION,
+                    max_s_mva DOUBLE PRECISION,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_powerflow_transformer_diagnostic UNIQUE (
+                        powerflow_run_id, stage, diagnostic, point_index
+                    )
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_powerflow_transformer_diagnostic_run_stage
+                    ON surrogrid.powerflow_transformer_diagnostic (powerflow_run_id, stage, diagnostic)
                 """
             )
         )
@@ -320,6 +365,12 @@ class SurroGridDatabase:
                 VALUES
                     ('demand_allocation_run', 'assumptions'),
                     ('powerflow_run', 'assumptions'),
+                    ('powerflow_summary', 'trafo_mean_s_mva'),
+                    ('powerflow_summary', 'trafo_max_s_mva'),
+                    ('powerflow_summary', 'trafo_max_p_mw'),
+                    ('powerflow_summary', 'trafo_max_q_mvar'),
+                    ('powerflow_summary', 'trafo_critical_t_index'),
+                    ('powerflow_summary', 'trafo_critical_ts'),
                     ('powerflow_summary', 'trafo_loading_p50_time_percent'),
                     ('powerflow_summary', 'trafo_loading_p90_time_percent'),
                     ('powerflow_summary', 'trafo_loading_p99_time_percent'),
@@ -327,10 +378,13 @@ class SurroGridDatabase:
                     ('powerflow_summary', 'trafo_loading_hours_above_100'),
                     ('powerflow_summary', 'cable_hours_above_100_p95_asset'),
                     ('powerflow_summary', 'voltage_hours_below_0_90_p95_asset'),
+                    ('powerflow_summary', 'voltage_hours_above_1_03_p95_asset'),
+                    ('powerflow_summary', 'voltage_hours_above_1_10_p95_asset'),
                     ('powerflow_cable_summary', 'cable_loading_p50_time_percent'),
                     ('powerflow_cable_summary', 'cable_loading_p90_time_percent'),
                     ('powerflow_cable_summary', 'cable_loading_p95_time_percent'),
                     ('powerflow_cable_summary', 'cable_loading_p99_time_percent'),
+                    ('powerflow_cable_summary', 'cable_loading_max_t_index'),
                     ('powerflow_cable_summary', 'cable_loading_hours_above_100'),
                     ('powerflow_cable_summary', 'cable_parallel'),
                     ('powerflow_cable_summary', 'cable_installed_capacity_ka'),
@@ -338,7 +392,10 @@ class SurroGridDatabase:
                     ('powerflow_bus_voltage_summary', 'voltage_p10_time_pu'),
                     ('powerflow_bus_voltage_summary', 'voltage_p01_time_pu'),
                     ('powerflow_bus_voltage_summary', 'voltage_min_time_pu'),
-                    ('powerflow_bus_voltage_summary', 'voltage_hours_below_0_90')
+                    ('powerflow_bus_voltage_summary', 'voltage_max_time_pu'),
+                    ('powerflow_bus_voltage_summary', 'voltage_hours_below_0_90'),
+                    ('powerflow_bus_voltage_summary', 'voltage_hours_above_1_03'),
+                    ('powerflow_bus_voltage_summary', 'voltage_hours_above_1_10')
             )
             SELECT
                 to_regclass('surrogrid.grid_case') IS NOT NULL
@@ -351,6 +408,7 @@ class SurroGridDatabase:
                 AND to_regclass('surrogrid.powerflow_cable_summary') IS NOT NULL
                 AND to_regclass('surrogrid.powerflow_bus_voltage_summary') IS NOT NULL
                 AND to_regclass('surrogrid.powerflow_tail_value') IS NOT NULL
+                AND to_regclass('surrogrid.powerflow_transformer_diagnostic') IS NOT NULL
                 AND to_regclass('surrogrid.real_grid_case') IS NOT NULL
                 AND to_regclass('surrogrid.real_powerflow_run') IS NOT NULL
                 AND to_regclass('surrogrid.real_powerflow_summary') IS NOT NULL
@@ -1471,6 +1529,19 @@ class SurroGridDatabase:
         cable_summary = summary.get("cable_summary")
         if isinstance(cable_summary, pd.DataFrame) and not cable_summary.empty:
             cable_out = cable_summary.copy()
+            real_cable_columns = [
+                "cable",
+                "cable_loading_p50_time_percent",
+                "cable_loading_p90_time_percent",
+                "cable_loading_p95_time_percent",
+                "cable_loading_p99_time_percent",
+                "cable_loading_max_time_percent",
+                "cable_loading_hours_above_100",
+                "cable_max_i_ka",
+                "cable_parallel",
+                "cable_installed_capacity_ka",
+            ]
+            cable_out = cable_out[[col for col in real_cable_columns if col in cable_out.columns]]
             cable_out.insert(0, "stage", stage)
             cable_out.insert(0, "real_powerflow_run_id", int(run_id))
             cable_out["cable"] = cable_out["cable"].astype(int)
@@ -1479,6 +1550,16 @@ class SurroGridDatabase:
         bus_voltage_summary = summary.get("bus_voltage_summary")
         if isinstance(bus_voltage_summary, pd.DataFrame) and not bus_voltage_summary.empty:
             bus_out = bus_voltage_summary.copy()
+            real_voltage_columns = [
+                "bus",
+                "voltage_p50_time_pu",
+                "voltage_p10_time_pu",
+                "voltage_p05_time_pu",
+                "voltage_p01_time_pu",
+                "voltage_min_time_pu",
+                "voltage_hours_below_0_90",
+            ]
+            bus_out = bus_out[[col for col in real_voltage_columns if col in bus_out.columns]]
             bus_out.insert(0, "stage", stage)
             bus_out.insert(0, "real_powerflow_run_id", int(run_id))
             bus_out["bus"] = bus_out["bus"].astype(int)
@@ -1560,6 +1641,7 @@ class SurroGridDatabase:
 
     def _clear_powerflow_run(self, conn, run_id: int) -> None:
         for table_name in (
+            "powerflow_transformer_diagnostic",
             "powerflow_tail_value",
             "powerflow_cable_summary",
             "powerflow_bus_voltage_summary",
@@ -1588,6 +1670,12 @@ class SurroGridDatabase:
                     "n_voltage_buses": int(grid_summary.get("n_voltage_buses", 0)),
                     "n_cables": int(grid_summary.get("n_cables", 0)),
                     "transformer_s_rated_mva": grid_summary.get("transformer_s_rated_mva"),
+                    "trafo_mean_s_mva": grid_summary.get("trafo_mean_s_mva"),
+                    "trafo_max_s_mva": grid_summary.get("trafo_max_s_mva"),
+                    "trafo_max_p_mw": grid_summary.get("trafo_max_p_mw"),
+                    "trafo_max_q_mvar": grid_summary.get("trafo_max_q_mvar"),
+                    "trafo_critical_t_index": grid_summary.get("trafo_critical_t_index"),
+                    "trafo_critical_ts": self._timestamp_for_powerflow_index(run_id, grid_summary.get("trafo_critical_t_index")),
                     "trafo_loading_p50_time_percent": grid_summary.get("trafo_loading_p50_time_percent"),
                     "trafo_loading_p90_time_percent": grid_summary.get("trafo_loading_p90_time_percent"),
                     "trafo_loading_p95_time_percent": grid_summary.get("trafo_loading_p95_time_percent"),
@@ -1598,6 +1686,8 @@ class SurroGridDatabase:
                     "cable_hours_above_100_p95_asset": grid_summary.get("cable_hours_above_100_p95_asset"),
                     "voltage_p05_load_bus_hour_pu": grid_summary.get("voltage_p05_load_bus_hour_pu"),
                     "voltage_hours_below_0_90_p95_asset": grid_summary.get("voltage_hours_below_0_90_p95_asset"),
+                    "voltage_hours_above_1_03_p95_asset": grid_summary.get("voltage_hours_above_1_03_p95_asset"),
+                    "voltage_hours_above_1_10_p95_asset": grid_summary.get("voltage_hours_above_1_10_p95_asset"),
                 }
             ]
         )
@@ -1627,6 +1717,21 @@ class SurroGridDatabase:
             tail_out["asset_id"] = tail_out["asset_id"].astype(int)
             tail_out["t_index"] = tail_out["t_index"].astype(int)
             self._append(tail_out, "powerflow_tail_value")
+
+        transformer_diagnostic = summary.get("transformer_diagnostic")
+        if isinstance(transformer_diagnostic, pd.DataFrame) and not transformer_diagnostic.empty:
+            diag_out = transformer_diagnostic.copy()
+            diag_out.insert(0, "stage", stage)
+            diag_out.insert(0, "powerflow_run_id", int(run_id))
+            diag_out["point_index"] = diag_out["point_index"].astype(int)
+            diag_out["x_value"] = diag_out["x_value"].astype(float)
+            diag_out["t_index"] = pd.to_numeric(diag_out["t_index"], errors="coerce").astype("Int64")
+            diag_out["ts"] = [
+                self._timestamp_for_powerflow_index(run_id, value)
+                if pd.notna(value) else pd.NaT
+                for value in diag_out["t_index"]
+            ]
+            self._append(diag_out, "powerflow_transformer_diagnostic")
 
     def write_powerflow_demand(self, run_id: int, stage: str, df: pd.DataFrame) -> None:
         ts = self._timestamps_for_powerflow_run(run_id, len(df))
@@ -1738,6 +1843,11 @@ class SurroGridDatabase:
             run_id,
             n_rows,
         )
+
+    def _timestamp_for_powerflow_index(self, run_id: int, t_index) -> pd.Timestamp | None:
+        if t_index is None or pd.isna(t_index):
+            return None
+        return self._timestamps_for_powerflow_run(run_id, int(t_index) + 1)[int(t_index)]
 
     def _timestamps_for_powerflow_run(self, run_id: int, n_rows: int) -> pd.DatetimeIndex:
         return self._timestamps_for_run(

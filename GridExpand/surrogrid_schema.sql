@@ -357,6 +357,12 @@ CREATE TABLE IF NOT EXISTS surrogrid.powerflow_summary (
     n_voltage_buses INTEGER NOT NULL,
     n_cables INTEGER NOT NULL,
     transformer_s_rated_mva DOUBLE PRECISION,
+    trafo_mean_s_mva DOUBLE PRECISION,
+    trafo_max_s_mva DOUBLE PRECISION,
+    trafo_max_p_mw DOUBLE PRECISION,
+    trafo_max_q_mvar DOUBLE PRECISION,
+    trafo_critical_t_index INTEGER,
+    trafo_critical_ts TIMESTAMPTZ,
     trafo_loading_p50_time_percent DOUBLE PRECISION,
     trafo_loading_p90_time_percent DOUBLE PRECISION,
     trafo_loading_p95_time_percent DOUBLE PRECISION,
@@ -367,6 +373,8 @@ CREATE TABLE IF NOT EXISTS surrogrid.powerflow_summary (
     cable_hours_above_100_p95_asset DOUBLE PRECISION,
     voltage_p05_load_bus_hour_pu DOUBLE PRECISION,
     voltage_hours_below_0_90_p95_asset DOUBLE PRECISION,
+    voltage_hours_above_1_03_p95_asset DOUBLE PRECISION,
+    voltage_hours_above_1_10_p95_asset DOUBLE PRECISION,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_powerflow_summary_run_stage UNIQUE (powerflow_run_id, stage)
 );
@@ -383,6 +391,7 @@ CREATE TABLE IF NOT EXISTS surrogrid.powerflow_cable_summary (
     cable_loading_p95_time_percent DOUBLE PRECISION,
     cable_loading_p99_time_percent DOUBLE PRECISION,
     cable_loading_max_time_percent DOUBLE PRECISION,
+    cable_loading_max_t_index INTEGER,
     cable_loading_hours_above_100 INTEGER,
     cable_max_i_ka DOUBLE PRECISION,
     cable_parallel DOUBLE PRECISION,
@@ -403,13 +412,37 @@ CREATE TABLE IF NOT EXISTS surrogrid.powerflow_bus_voltage_summary (
     voltage_p05_time_pu DOUBLE PRECISION,
     voltage_p01_time_pu DOUBLE PRECISION,
     voltage_min_time_pu DOUBLE PRECISION,
+    voltage_max_time_pu DOUBLE PRECISION,
     voltage_hours_below_0_90 INTEGER,
+    voltage_hours_above_1_03 INTEGER,
+    voltage_hours_above_1_10 INTEGER,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_powerflow_bus_voltage_summary_run_stage_bus UNIQUE (powerflow_run_id, stage, bus)
 );
 
 CREATE INDEX IF NOT EXISTS idx_powerflow_bus_voltage_summary_run_stage
     ON surrogrid.powerflow_bus_voltage_summary (powerflow_run_id, stage);
+
+CREATE TABLE IF NOT EXISTS surrogrid.powerflow_transformer_diagnostic (
+    powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.powerflow_run(powerflow_run_id) ON DELETE CASCADE,
+    stage TEXT NOT NULL,
+    diagnostic TEXT NOT NULL,
+    point_index INTEGER NOT NULL,
+    x_value DOUBLE PRECISION NOT NULL,
+    t_index INTEGER,
+    ts TIMESTAMPTZ,
+    p_mw DOUBLE PRECISION,
+    q_mvar DOUBLE PRECISION,
+    q_abs_mvar DOUBLE PRECISION,
+    s_mva DOUBLE PRECISION,
+    mean_s_mva DOUBLE PRECISION,
+    max_s_mva DOUBLE PRECISION,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_powerflow_transformer_diagnostic UNIQUE (powerflow_run_id, stage, diagnostic, point_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_powerflow_transformer_diagnostic_run_stage
+    ON surrogrid.powerflow_transformer_diagnostic (powerflow_run_id, stage, diagnostic);
 
 CREATE TABLE IF NOT EXISTS surrogrid.powerflow_tail_value (
     powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.powerflow_run(powerflow_run_id) ON DELETE CASCADE,

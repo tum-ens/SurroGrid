@@ -197,14 +197,15 @@ def _audit_unmapped_line_components(db: SurroGridDatabase, *, args: argparse.Nam
             ) spatial ON direct.id IS NULL
         ),
         peak_line AS (
-            SELECT DISTINCT ON (plr.powerflow_run_id, plr.line)
-                plr.powerflow_run_id,
-                plr.line,
-                ABS(plr.i_from_ka) AS max_i_from_ka
-            FROM surrogrid.powerflow_line_result plr
+            SELECT
+                pcs.powerflow_run_id,
+                pcs.cable AS line,
+                pcs.cable_loading_max_time_percent
+                    / 100.0
+                    * pcs.cable_installed_capacity_ka AS max_i_from_ka
+            FROM surrogrid.powerflow_cable_summary pcs
             JOIN selected_runs sr USING (powerflow_run_id)
-            WHERE plr.stage = :stage
-            ORDER BY plr.powerflow_run_id, plr.line, ABS(plr.i_from_ka) DESC
+            WHERE pcs.stage = :stage
         ),
         active_components AS (
             SELECT
@@ -383,16 +384,17 @@ def _materialize_line_results(
             ) spatial ON direct.id IS NULL
         ),
         peak_line AS (
-            SELECT DISTINCT ON (plr.powerflow_run_id, plr.line)
-                plr.powerflow_run_id,
-                plr.line,
-                ABS(plr.i_from_ka) AS max_i_from_ka,
-                plr.t_index AS critical_t_index,
-                plr.ts AS critical_ts
-            FROM surrogrid.powerflow_line_result plr
+            SELECT
+                pcs.powerflow_run_id,
+                pcs.cable AS line,
+                pcs.cable_loading_max_time_percent
+                    / 100.0
+                    * pcs.cable_installed_capacity_ka AS max_i_from_ka,
+                pcs.cable_loading_max_t_index AS critical_t_index,
+                NULL::TIMESTAMPTZ AS critical_ts
+            FROM surrogrid.powerflow_cable_summary pcs
             JOIN selected_runs sr USING (powerflow_run_id)
-            WHERE plr.stage = :stage
-            ORDER BY plr.powerflow_run_id, plr.line, ABS(plr.i_from_ka) DESC
+            WHERE pcs.stage = :stage
         ),
         component_loading AS (
             SELECT
@@ -630,17 +632,17 @@ def _materialize_transformer_results(
               AND (:plz IS NULL OR gc.plz = :plz)
         ),
         peak_import AS (
-            SELECT DISTINCT ON (pi.powerflow_run_id)
-                pi.powerflow_run_id,
-                pi.ts AS critical_ts,
-                pi.t_index AS critical_t_index,
-                pi.p_mw,
-                pi.q_mvar,
-                SQRT(POWER(pi.p_mw, 2) + POWER(pi.q_mvar, 2)) AS s_mva
-            FROM surrogrid.powerflow_import pi
+            SELECT
+                pfs.powerflow_run_id,
+                pfs.trafo_critical_ts AS critical_ts,
+                pfs.trafo_critical_t_index AS critical_t_index,
+                pfs.trafo_max_p_mw AS p_mw,
+                pfs.trafo_max_q_mvar AS q_mvar,
+                pfs.trafo_max_s_mva AS s_mva
+            FROM surrogrid.powerflow_summary pfs
             JOIN selected_runs sr USING (powerflow_run_id)
-            WHERE pi.stage = :stage
-            ORDER BY pi.powerflow_run_id, SQRT(POWER(pi.p_mw, 2) + POWER(pi.q_mvar, 2)) DESC
+            WHERE pfs.stage = :stage
+              AND pfs.trafo_max_s_mva IS NOT NULL
         ),
         transformer_base AS (
             SELECT

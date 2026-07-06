@@ -123,6 +123,7 @@ def _existing_summary_rows(db: SurroGridDatabase, run_id: int, stage: str) -> in
           + (SELECT COUNT(*) FROM surrogrid.powerflow_cable_summary WHERE powerflow_run_id = :run_id AND stage = :stage)
           + (SELECT COUNT(*) FROM surrogrid.powerflow_bus_voltage_summary WHERE powerflow_run_id = :run_id AND stage = :stage)
           + (SELECT COUNT(*) FROM surrogrid.powerflow_tail_value WHERE powerflow_run_id = :run_id AND stage = :stage)
+          + (SELECT COUNT(*) FROM surrogrid.powerflow_transformer_diagnostic WHERE powerflow_run_id = :run_id AND stage = :stage)
         """
     )
     with db.engine.connect() as conn:
@@ -132,6 +133,7 @@ def _existing_summary_rows(db: SurroGridDatabase, run_id: int, stage: str) -> in
 def _delete_summary_rows(db: SurroGridDatabase, run_id: int, stage: str) -> None:
     with db.engine.begin() as conn:
         for table_name in (
+            "powerflow_transformer_diagnostic",
             "powerflow_tail_value",
             "powerflow_cable_summary",
             "powerflow_bus_voltage_summary",
@@ -281,8 +283,9 @@ def _build_summary_from_raw(
 
     p_mw = imports.set_index("t_index")["p_mw"].reindex(range(n_timesteps)).astype(float)
     q_mvar = imports.set_index("t_index")["q_mvar"].reindex(range(n_timesteps)).astype(float)
+    transformer_s_mva = np.hypot(p_mw.to_numpy(dtype=float), q_mvar.to_numpy(dtype=float))
     if transformer_s_rated_mva > 0:
-        transformer_loadings = (np.hypot(p_mw.to_numpy(), q_mvar.to_numpy()) / transformer_s_rated_mva) * 100.0
+        transformer_loadings = (transformer_s_mva / transformer_s_rated_mva) * 100.0
     else:
         transformer_loadings = np.full(n_timesteps, np.nan, dtype=float)
 
@@ -309,8 +312,25 @@ def _build_summary_from_raw(
     cable_max_loading = pwrflw._safe_nanmax(cable_loading_matrix, axis=0) if len(cable_ids) else np.array([], dtype=float)
     cable_values = cable_max_loading[~np.isnan(cable_max_loading)]
     cable_hours_above_100 = np.nansum(cable_loading_matrix > 100.0, axis=0).astype(int) if len(cable_ids) else np.array([], dtype=int)
+    cable_max_t_index = np.array([
+        int(np.nanargmax(cable_loading_matrix[:, idx])) if not np.all(np.isnan(cable_loading_matrix[:, idx])) else -1
+        for idx in range(len(cable_ids))
+    ], dtype=int)
     voltage_hours_below_0_90 = np.nansum(voltage_matrix < 0.90, axis=0).astype(int) if len(voltage_buses) else np.array([], dtype=int)
+    voltage_hours_above_1_03 = np.nansum(voltage_matrix > 1.03, axis=0).astype(int) if len(voltage_buses) else np.array([], dtype=int)
+    voltage_hours_above_1_10 = np.nansum(voltage_matrix > 1.10, axis=0).astype(int) if len(voltage_buses) else np.array([], dtype=int)
     voltage_all = voltage_matrix[~np.isnan(voltage_matrix)]
+    if transformer_s_mva.size and not np.all(np.isnan(transformer_s_mva)):
+        trafo_critical_t_index = int(np.nanargmax(transformer_s_mva))
+        trafo_max_s_mva = float(transformer_s_mva[trafo_critical_t_index])
+        trafo_max_p_mw = float(p_mw.iloc[trafo_critical_t_index])
+        trafo_max_q_mvar = float(q_mvar.iloc[trafo_critical_t_index])
+    else:
+        trafo_critical_t_index = None
+        trafo_max_s_mva = np.nan
+        trafo_max_p_mw = np.nan
+        trafo_max_q_mvar = np.nan
+    trafo_mean_s_mva = float(np.nanmean(transformer_s_mva)) if transformer_s_mva.size and not np.all(np.isnan(transformer_s_mva)) else np.nan
 
     n_converged_timesteps = int(imports["t_index"].nunique())
     n_failed_timesteps = max(0, int(n_timesteps) - n_converged_timesteps)
@@ -325,6 +345,7 @@ def _build_summary_from_raw(
             "cable_loading_p95_time_percent": pwrflw._safe_nanpercentile(cable_loading_matrix, 95, axis=0),
             "cable_loading_p99_time_percent": pwrflw._safe_nanpercentile(cable_loading_matrix, 99, axis=0),
             "cable_loading_max_time_percent": cable_max_loading,
+            "cable_loading_max_t_index": cable_max_t_index,
             "cable_loading_hours_above_100": cable_hours_above_100,
         }
     ).dropna(subset=["cable_loading_max_time_percent"])
@@ -336,7 +357,10 @@ def _build_summary_from_raw(
             "voltage_p05_time_pu": pwrflw._safe_nanpercentile(voltage_matrix, 5, axis=0),
             "voltage_p01_time_pu": pwrflw._safe_nanpercentile(voltage_matrix, 1, axis=0),
             "voltage_min_time_pu": pwrflw._safe_nanmax(-voltage_matrix, axis=0) * -1.0,
+            "voltage_max_time_pu": pwrflw._safe_nanmax(voltage_matrix, axis=0),
             "voltage_hours_below_0_90": voltage_hours_below_0_90,
+            "voltage_hours_above_1_03": voltage_hours_above_1_03,
+            "voltage_hours_above_1_10": voltage_hours_above_1_10,
         }
     ).dropna(subset=["voltage_p05_time_pu"])
 
@@ -347,6 +371,11 @@ def _build_summary_from_raw(
         "n_voltage_buses": int(len(voltage_buses)),
         "n_cables": int(len(cable_values)),
         "transformer_s_rated_mva": float(transformer_s_rated_mva),
+        "trafo_mean_s_mva": trafo_mean_s_mva,
+        "trafo_max_s_mva": trafo_max_s_mva,
+        "trafo_max_p_mw": trafo_max_p_mw,
+        "trafo_max_q_mvar": trafo_max_q_mvar,
+        "trafo_critical_t_index": trafo_critical_t_index,
         "trafo_loading_p50_time_percent": float(pwrflw._safe_nanpercentile(transformer_loadings, 50)),
         "trafo_loading_p90_time_percent": float(pwrflw._safe_nanpercentile(transformer_loadings, 90)),
         "trafo_loading_p95_time_percent": float(pwrflw._safe_nanpercentile(transformer_loadings, 95)),
@@ -357,7 +386,15 @@ def _build_summary_from_raw(
         "cable_hours_above_100_p95_asset": float(pwrflw._safe_nanpercentile(cable_hours_above_100, 95)) if cable_hours_above_100.size else np.nan,
         "voltage_p05_load_bus_hour_pu": float(pwrflw._safe_nanpercentile(voltage_all, 5)),
         "voltage_hours_below_0_90_p95_asset": float(pwrflw._safe_nanpercentile(voltage_hours_below_0_90, 95)) if voltage_hours_below_0_90.size else np.nan,
+        "voltage_hours_above_1_03_p95_asset": float(pwrflw._safe_nanpercentile(voltage_hours_above_1_03, 95)) if voltage_hours_above_1_03.size else np.nan,
+        "voltage_hours_above_1_10_p95_asset": float(pwrflw._safe_nanpercentile(voltage_hours_above_1_10, 95)) if voltage_hours_above_1_10.size else np.nan,
     }
+
+    transformer_diagnostic = pwrflw._transformer_import_diagnostic_frame(
+        p_mw.to_numpy(dtype=float),
+        q_mvar.to_numpy(dtype=float),
+        transformer_s_mva,
+    )
 
     tail_frames = [
         pwrflw._tail_values_frame(
@@ -395,6 +432,7 @@ def _build_summary_from_raw(
         "cable_summary": cable_summary,
         "bus_voltage_summary": bus_voltage_summary,
         "tail_summary": tail_summary,
+        "transformer_diagnostic": transformer_diagnostic,
     }
 
 
