@@ -9,6 +9,7 @@ from .validation import *
 from .saveload import *
 from .features import *
 from .scenarios import *
+from .scenarios import _infer_electrification_labels
 import os
 import multiprocessing as mp
 import time
@@ -155,8 +156,10 @@ def run_lvds_opt(input_path,        # path to input file
 
     ### Insert settings into data and read out modes/name: ###
     print("\nReading running modes...")
-    scenario_name = urbs.read_scenario_name(global_settings) # from global settings create a filename
-    data = urbs.insert_scenario(data, global_settings)       # insert global settings as df into input data
+    inferred_labels = _infer_electrification_labels(data, global_settings)
+    global_settings.update(inferred_labels)
+    scenario_name = urbs.read_scenario_name(global_settings, data) # from actual input data create a filename
+    data = urbs.insert_scenario(data, global_settings)             # insert global settings as df into input data
 
     mode = identify_mode(data)   # check whether intertemporal, transmission, storage, dsm, bsp, tve, availability, acpf/dcpf, type period weight, tsam, tsam season, onoff, minfraction, power_price, uncoordinated, transdist, 14a, uhp
     print(f"Identified running modes: {mode}")               # for us should be present: sto, bsp, tve, ava, tsam, exp(pro, sto-c, sto-p), uncoordinated

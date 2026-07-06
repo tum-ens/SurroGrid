@@ -110,8 +110,9 @@ if __name__ == "__main__":
         "--summary-only",
         action="store_true",
         help=(
-            "DB/pre-only mode: run all timesteps but save only compact headline "
-            "metrics to surrogrid.powerflow_summary instead of full time-series tables."
+            "DB mode: run all timesteps but save only compact headline metrics "
+            "to surrogrid.powerflow_summary instead of full time-series tables. "
+            "With --pre-only only the pre stage is summarized; otherwise pre and post are summarized."
         ),
     )
     parser.add_argument(
@@ -128,8 +129,8 @@ if __name__ == "__main__":
         ),
     )
     args = parser.parse_args()
-    if args.summary_only and (args.storage != "db" or not args.pre_only):
-        parser.error("--summary-only currently requires --storage db --pre-only.")
+    if args.summary_only and args.storage != "db":
+        parser.error("--summary-only requires --storage db.")
     if args.hh_only and args.storage != "db":
         parser.error("--hh-only requires --storage db.")
 
@@ -233,10 +234,21 @@ if __name__ == "__main__":
     if not args.pre_only:
         # Run powerflow post DER expansion
         with resource_report(name="Post-Expansion Powerflow Run", include_children=True):
-            ext_import_post, vm_post, line_loads_post = pwrflw.pf(grid, df_post_demand, settings["parallel"], settings["n_cpu"])
-            ##### Save results #####
-            SF.save_df(ext_import_post, "/pwrflw/output/post/demand_import")
-            SF.save_df(vm_post, "/pwrflw/output/post/vm")
-            SF.save_df(line_loads_post, "/pwrflw/output/post/line_loads")
+            if args.summary_only:
+                summary_post = pwrflw.pf_summary(
+                    grid,
+                    df_post_demand,
+                    transformer_s_rated_mva=transformer_s_rated_mva,
+                    cable_max_i_ka=cable_max_i_ka,
+                    voltage_buses=voltage_buses,
+                    cable_ids=backbone_cable_ids,
+                )
+                SF.save_summary(summary_post, "post")
+            else:
+                ext_import_post, vm_post, line_loads_post = pwrflw.pf(grid, df_post_demand, settings["parallel"], settings["n_cpu"])
+                ##### Save results #####
+                SF.save_df(ext_import_post, "/pwrflw/output/post/demand_import")
+                SF.save_df(vm_post, "/pwrflw/output/post/vm")
+                SF.save_df(line_loads_post, "/pwrflw/output/post/line_loads")
 
     print("Done!")

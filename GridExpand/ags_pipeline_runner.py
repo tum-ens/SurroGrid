@@ -34,6 +34,7 @@ from timeframe import (
     horizon_hours_from_hdf,
     output_filename_for_timeframe,
     read_hdf_metadata,
+    scenario_key_for_timeframe,
 )
 
 
@@ -52,6 +53,8 @@ PROFILE_CHOICES = (
     "all",
 )
 
+POWERFLOW_OUTPUT_CHOICES = ("raw", "summary", "both")
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -69,6 +72,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step3-target-columns", type=int, default=35)
     parser.add_argument("--step3-cluster-concurrency", type=int, default=1)
     parser.add_argument("--step4-cpus", type=int, default=4)
+    parser.add_argument(
+        "--powerflow-output",
+        choices=POWERFLOW_OUTPUT_CHOICES,
+        default="raw",
+        help=(
+            "Power-flow output mode. 'raw' stores full pre/post time series, "
+            "'summary' stores compact notebook metrics, and 'both' stores both. "
+            "For electrification profiles the compact summary includes post results."
+        ),
+    )
     parser.add_argument(
         "--profiles",
         choices=PROFILE_CHOICES,
@@ -308,6 +321,56 @@ def hdf_column_count(path: Path, key: str) -> int:
         return total
 
 
+def _labels_from_columns(df: pd.DataFrame) -> list[str]:
+    if df.empty:
+        return []
+    if isinstance(df.columns, pd.MultiIndex):
+        return [str(value).lower() for value in df.columns.get_level_values(-1)]
+    return [str(value).lower() for value in df.columns]
+
+
+def _labels_from_column(df: pd.DataFrame, column: str) -> list[str]:
+    if df.empty or column not in df.columns:
+        return []
+    return [str(value).lower() for value in df[column].dropna().unique()]
+
+
+def _contains_any(labels: list[str], tokens: tuple[str, ...]) -> bool:
+    return any(any(token in label for token in tokens) for label in labels)
+
+
+def scenario_suffix_from_hdf(path: Path) -> str:
+    with pd.HDFStore(path, mode="r") as store:
+        demand = store["/urbs_in/demand"] if "/urbs_in/demand" in store else pd.DataFrame()
+        supim = store["/urbs_in/supim"] if "/urbs_in/supim" in store else pd.DataFrame()
+        process = store["/urbs_in/process"] if "/urbs_in/process" in store else pd.DataFrame()
+        commodity = store["/urbs_in/commodity"] if "/urbs_in/commodity" in store else pd.DataFrame()
+
+    demand_labels = _labels_from_columns(demand)
+    supim_labels = _labels_from_columns(supim)
+    process_labels = _labels_from_column(process, "Process")
+    commodity_labels = _labels_from_column(commodity, "Commodity")
+
+    has_pv = bool(supim_labels) or _contains_any(process_labels, ("pv", "rooftop"))
+    has_heat = (
+        _contains_any(demand_labels, ("space_heat", "water_heat", "heat"))
+        or _contains_any(process_labels, ("heatpump", "heat_dummy", "heat"))
+        or _contains_any(commodity_labels, ("space_heat", "water_heat", "common_heat"))
+    )
+    has_ev = (
+        _contains_any(demand_labels, ("mobility", "bev", "ev"))
+        or _contains_any(process_labels, ("charging_station", "bev", "mobility"))
+        or _contains_any(commodity_labels, ("mobility", "bev"))
+    )
+
+    return (
+        f"PV{100 if has_pv else 0}_"
+        f"HP{100 if has_heat else 0}_"
+        f"EV{100 if has_ev else 0}_"
+        "VarTar0_CapPr0"
+    )
+
+
 def choose_step3_settings(step2_output: Path, args: argparse.Namespace) -> tuple[int, int, dict[str, int]]:
     if args.no_dynamic_step3:
         return int(args.step3_cpus), int(args.step3_cluster_concurrency), {}
@@ -329,7 +392,15 @@ def choose_step3_settings(step2_output: Path, args: argparse.Namespace) -> tuple
     return selected, int(args.step3_cluster_concurrency), stats
 
 
-def validate_powerflow_db(repo_root: Path, scenario_filename: str) -> dict[str, Any]:
+def validate_powerflow_db(
+    repo_root: Path,
+    scenario_filename: str,
+    *,
+    summary_only: bool = False,
+    pre_only: bool = False,
+    run_name: str | None = None,
+    expected_summary_stages: tuple[str, ...] = ("pre",),
+) -> dict[str, Any]:
     configure_imports(repo_root)
     scenario_path = repo_root / "GridExpand" / "4.powerflow" / "Input" / scenario_filename
     expected_horizon = horizon_hours_from_hdf(scenario_path)
@@ -344,23 +415,51 @@ def validate_powerflow_db(repo_root: Path, scenario_filename: str) -> dict[str, 
                 SELECT powerflow_run_id, run_name, pre_only, updated_at
                 FROM surrogrid.powerflow_run
                 WHERE urbs_input_file = :scenario_filename
+                  AND pre_only = :pre_only
+                  AND (:run_name IS NULL OR run_name = :run_name)
                 ORDER BY updated_at DESC, powerflow_run_id DESC
                 LIMIT 1
                 """
             ),
-            {"scenario_filename": scenario_filename},
+            {"scenario_filename": scenario_filename, "pre_only": pre_only, "run_name": run_name},
         ).mappings().first()
         if run is None:
-            raise RuntimeError(f"No powerflow_run found for {scenario_filename}")
+            mode = "summary" if summary_only else "raw"
+            raise RuntimeError(f"No {mode} powerflow_run found for {scenario_filename}")
 
         run_id = int(run["powerflow_run_id"])
         validation: dict[str, Any] = {
             "powerflow_run_id": run_id,
             "run_name": run["run_name"],
+            "mode": "summary" if summary_only else "raw",
             "tables": {},
             "expected_horizon_hours": expected_horizon,
         }
         missing: list[str] = []
+        if summary_only:
+            for table_name in ("powerflow_summary", "powerflow_cable_summary", "powerflow_bus_voltage_summary"):
+                rows = conn.execute(
+                    text(
+                        f"""
+                        SELECT stage, count(*) AS rows
+                        FROM surrogrid.{table_name}
+                        WHERE powerflow_run_id = :run_id
+                        GROUP BY stage
+                        ORDER BY stage
+                        """
+                    ),
+                    {"run_id": run_id},
+                ).mappings().all()
+                by_stage = {str(row["stage"]): dict(row) for row in rows}
+                validation["tables"][table_name] = by_stage
+                for stage in expected_summary_stages:
+                    row = by_stage.get(stage)
+                    if not row or int(row["rows"]) <= 0:
+                        missing.append(f"{table_name}:{stage}:missing")
+            if missing:
+                raise RuntimeError("Incomplete Step 4 DB summary results: " + ", ".join(missing))
+            return validation
+
         for table_name, expected_stages in EXPECTED_POWERFLOW_TABLES.items():
             rows = conn.execute(
                 text(
@@ -441,10 +540,7 @@ def run_candidate(
     bridge_filename = str(candidate["bridge_filename"])
     step2_filename = output_filename_for_timeframe(bridge_filename, args.timeframe_mode)
     prefix = step2_filename.split("_", 1)[0]
-    scenario_filename = step2_filename.replace(
-        ".h5",
-        "_PV100_HP100_EV100_VarTar0_CapPr0.h5",
-    )
+    scenario_filename = ""
     log_file = args.run_dir / "logs" / f"candidate_{candidate_index:03d}_{step2_filename}.log"
     started = time.monotonic()
     current_stage = "queued"
@@ -510,11 +606,14 @@ def run_candidate(
         if not step2_output.exists():
             raise FileNotFoundError(f"Missing Step 2 output {step2_output}")
         timeframe_metadata = read_hdf_metadata(step2_output)
+        scenario_suffix = scenario_suffix_from_hdf(step2_output)
+        scenario_filename = step2_filename.replace(".h5", f"_{scenario_suffix}.h5")
         status.update(
             candidate_index,
             horizon_hours=timeframe_metadata.get("horizon_hours", ""),
             timeframe_start=timeframe_metadata.get("timeframe_start", ""),
             timeframe_end=timeframe_metadata.get("timeframe_end", ""),
+            message=json.dumps({"scenario_suffix": scenario_suffix}, sort_keys=True),
         )
         shutil.copy2(step2_output, step3_dir / "Input" / step2_filename)
 
@@ -549,9 +648,37 @@ def run_candidate(
             raise FileNotFoundError(f"Missing Step 3 output {step3_output}")
         shutil.copy2(step3_output, step4_dir / "Input" / scenario_filename)
 
-        current_stage = "step4_powerflow"
-        run_command(
-            cmd=[
+        validations = []
+        if args.powerflow_output in {"raw", "both"}:
+            current_stage = "step4_powerflow_raw"
+            run_command(
+                cmd=[
+                    "uv",
+                    "run",
+                    "python",
+                    "run_pwrflw.py",
+                    scenario_filename,
+                    "--storage",
+                    "db",
+                    "--n_cpu",
+                    str(args.step4_cpus),
+                ],
+                cwd=step4_dir,
+                log_path=log_file,
+                status=status,
+                candidate_index=candidate_index,
+                stage=current_stage,
+            )
+
+            current_stage = "step4_validate_raw"
+            validations.append(validate_powerflow_db(repo_root, scenario_filename, summary_only=False, pre_only=False))
+
+        if args.powerflow_output in {"summary", "both"}:
+            current_stage = "step4_powerflow_summary"
+            summary_pre_only = args.profiles == "status_quo"
+            expected_summary_stages = ("pre",) if summary_pre_only else ("pre", "post")
+            summary_run_name = f"{scenario_key_for_timeframe(args.timeframe_mode)}_{args.profiles}_summary_powerflow"
+            summary_cmd = [
                 "uv",
                 "run",
                 "python",
@@ -559,21 +686,38 @@ def run_candidate(
                 scenario_filename,
                 "--storage",
                 "db",
+                "--summary-only",
+                "--run-name",
+                summary_run_name,
                 "--n_cpu",
                 str(args.step4_cpus),
-            ],
-            cwd=step4_dir,
-            log_path=log_file,
-            status=status,
-            candidate_index=candidate_index,
-            stage=current_stage,
-        )
+            ]
+            if summary_pre_only:
+                summary_cmd.insert(summary_cmd.index("--summary-only"), "--pre-only")
+            run_command(
+                cmd=summary_cmd,
+                cwd=step4_dir,
+                log_path=log_file,
+                status=status,
+                candidate_index=candidate_index,
+                stage=current_stage,
+            )
 
-        current_stage = "step4_validate"
-        validation = validate_powerflow_db(repo_root, scenario_filename)
+            current_stage = "step4_validate_summary"
+            validations.append(
+                validate_powerflow_db(
+                    repo_root,
+                    scenario_filename,
+                    summary_only=True,
+                    pre_only=summary_pre_only,
+                    run_name=summary_run_name,
+                    expected_summary_stages=expected_summary_stages,
+                )
+            )
+
         with log_file.open("a", encoding="utf-8") as log_handle:
             log_handle.write(f"\n[{utc_now()}] STEP4 VALIDATION OK\n")
-            log_handle.write(json.dumps(validation, indent=2, sort_keys=True, default=str) + "\n")
+            log_handle.write(json.dumps(validations, indent=2, sort_keys=True, default=str) + "\n")
 
         seconds = round(time.monotonic() - started, 1)
         status.update(
@@ -650,6 +794,7 @@ def main() -> int:
         step3_max_cpus=args.step3_max_cpus,
         step3_cluster_concurrency=args.step3_cluster_concurrency,
         step4_cpus=args.step4_cpus,
+        powerflow_output=args.powerflow_output,
         run_dir=str(run_dir),
         resume=args.resume,
         rerun_failed=args.rerun_failed,
