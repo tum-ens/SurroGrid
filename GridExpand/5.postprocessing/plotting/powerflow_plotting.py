@@ -2188,10 +2188,7 @@ def plot_powerflow_pooled_asset_percentile_curves(
             f"percentile profile dataframe; missing column(s): {missing}."
         )
 
-    center_stat = str(center_stat).strip().lower()
-    if center_stat not in {"median", "mean"}:
-        raise ValueError("center_stat must be either 'median' or 'mean'.")
-    center_label = center_stat.capitalize()
+    center_stat = "median"
 
     df = profile.copy()
     if group_col is None:
@@ -2523,15 +2520,17 @@ def plot_powerflow_asset_cutoff_overview(
     center_stat: str = "median",
     show_band: bool = True,
     worst_asset_per_grid: bool = False,
+    filter_scope: str = "asset",
 ):
-    """Plot retained-asset cutoff curves and matching asset distributions.
+    """Plot retained cutoff curves and matching asset distributions.
 
-    Row 1 shows, for every retained-asset cutoff, the selected center statistic
-    and min-max range of the retained assets. Row 2 shows the distribution of exactly the retained
-    assets at the selected cutoff. ``center_stat`` selects whether the top-row
-    center line uses the retained-asset median or mean. Set
-    ``worst_asset_per_grid=True`` to draw only each grid's most critical retained
-    transformer/cable/bus value in the violin row.
+    Row 1 shows, for every retained cutoff, the selected center statistic and
+    min-max range of the retained assets. Row 2 shows the distribution of the
+    retained assets at the selected cutoff. ``filter_scope="asset"`` filters
+    individual assets directly. ``filter_scope="grid"`` ranks whole grids by
+    their most critical asset and then keeps all assets belonging to the
+    retained grids. Set ``worst_asset_per_grid=True`` to draw only each grid's
+    most critical retained transformer/cable/bus value in the violin row.
     """
     required = {"metric", "percentile", "value"}
     missing_required = required.difference(profile.columns)
@@ -2546,6 +2545,16 @@ def plot_powerflow_asset_cutoff_overview(
     if center_stat not in {"median", "mean"}:
         raise ValueError("center_stat must be either 'median' or 'mean'.")
     center_label = center_stat.capitalize()
+
+    filter_scope = str(filter_scope).strip().lower()
+    if filter_scope in {"asset", "assets"}:
+        filter_scope = "asset"
+    elif filter_scope in {"grid", "grids"}:
+        filter_scope = "grid"
+    else:
+        raise ValueError("filter_scope must be either 'asset' or 'grid'.")
+    cutoff_unit = "asset" if filter_scope == "asset" else "grid"
+    cutoff_units = "assets" if filter_scope == "asset" else "grids"
 
     df = profile.copy()
     if group_col is None:
@@ -2598,8 +2607,8 @@ def plot_powerflow_asset_cutoff_overview(
 
     def _cutoff_label(cutoff: float) -> str:
         if np.isclose(cutoff, 1.0):
-            return "Show cutoffs through P100"
-        return f"Show cutoffs through P{int(round(cutoff * 100)):02d}"
+            return f"Show {cutoff_unit} cutoffs through P100"
+        return f"Show {cutoff_unit} cutoffs through P{int(round(cutoff * 100)):02d}"
 
     def _asset_percentile_label(q: float) -> str:
         return f"P{int(round(q * 100)):02d}" if q < 1 else "P100"
@@ -2608,7 +2617,21 @@ def plot_powerflow_asset_cutoff_overview(
         visible = tuple(q for q in asset_percentiles if q <= cutoff or np.isclose(q, cutoff))
         return visible or (cutoff,)
 
+    def _grid_keys(frame: pd.DataFrame) -> pd.Series:
+        if "powerflow_run_id" in frame.columns:
+            key_cols = [
+                col
+                for col in ("powerflow_source", "comparison_group", "run_name", "stage", "powerflow_run_id")
+                if col in frame.columns
+            ]
+        elif "grid" in frame.columns:
+            key_cols = [col for col in ("comparison_group", "run_name", "stage", "grid") if col in frame.columns]
+        else:
+            raise ValueError("filter_scope='grid' requires a 'powerflow_run_id' or 'grid' column.")
+        return frame[key_cols].astype("string").fillna("<NA>").agg("|".join, axis=1)
+
     def _retained_mask(values: pd.Series, metric_name: str, retained_fraction: float) -> pd.Series:
+        values = values.astype(float)
         if np.isclose(retained_fraction, 1.0):
             return pd.Series(True, index=values.index)
         if critical_direction[metric_name] == "high":
@@ -2617,28 +2640,40 @@ def plot_powerflow_asset_cutoff_overview(
         threshold = values.quantile(1 - retained_fraction)
         return values >= threshold
 
-    def _retained_curve(values: pd.Series, metric_name: str, x_values: tuple[float, ...]) -> pd.DataFrame:
+    def _retained_frame(group_df: pd.DataFrame, metric_name: str, cutoff: float) -> pd.DataFrame:
+        values = group_df["value"].astype(float)
+        if filter_scope == "asset":
+            return group_df.loc[_retained_mask(values, metric_name, cutoff)].copy()
+
+        row_keys = _grid_keys(group_df)
+        reducer = "max" if critical_direction[metric_name] == "high" else "min"
+        grid_values = values.groupby(row_keys, sort=False).agg(reducer)
+        retained_grid_keys = set(grid_values.loc[_retained_mask(grid_values, metric_name, cutoff)].index)
+        return group_df.loc[row_keys.isin(retained_grid_keys)].copy()
+
+    def _retained_curve(group_df: pd.DataFrame, metric_name: str, x_values: tuple[float, ...]) -> pd.DataFrame:
         rows = []
-        values = values.astype(float).dropna()
+        group_df = group_df.dropna(subset=["value"]).copy()
+        if group_df.empty:
+            return pd.DataFrame(rows)
+        total_count = int(group_df["value"].size) if filter_scope == "asset" else int(_grid_keys(group_df).nunique())
         for retained_fraction in x_values:
-            retained = values[_retained_mask(values, metric_name, retained_fraction)]
+            retained_df = _retained_frame(group_df, metric_name, retained_fraction)
+            retained = retained_df["value"].astype(float).dropna()
             if retained.empty:
                 continue
+            retained_count = int(retained.size) if filter_scope == "asset" else int(_grid_keys(retained_df).nunique())
             rows.append(
                 {
                     "retained_asset_cutoff": retained_fraction,
                     "center": float(retained.median() if center_stat == "median" else retained.mean()),
                     "band_lower": float(retained.min()),
                     "band_upper": float(retained.max()),
-                    "retained_assets": int(retained.size),
-                    "total_assets": int(values.size),
+                    "retained_assets": retained_count,
+                    "total_assets": total_count,
                 }
             )
         return pd.DataFrame(rows)
-
-    def _retained_frame(group_df: pd.DataFrame, metric_name: str, cutoff: float) -> pd.DataFrame:
-        values = group_df["value"].astype(float)
-        return group_df.loc[_retained_mask(values, metric_name, cutoff)].copy()
 
     def _select_worst_asset_per_grid(plot_df: pd.DataFrame, metric_name: str) -> pd.DataFrame:
         if not worst_asset_per_grid or plot_df.empty:
@@ -2715,7 +2750,7 @@ def plot_powerflow_asset_cutoff_overview(
                 values = group_df["value"].astype(float).dropna()
                 if values.empty:
                     continue
-                curve = _retained_curve(values, metric, x_values)
+                curve = _retained_curve(group_df, metric, x_values)
                 if curve.empty:
                     continue
                 group_label = str(group)
@@ -2752,9 +2787,9 @@ def plot_powerflow_asset_cutoff_overview(
                             showlegend=col_idx == 1,
                             customdata=customdata,
                             hovertemplate=(
-                                "asset cutoff %{x:.0%}<br>"
+                                f"{cutoff_unit} cutoff %{{x:.0%}}<br>"
                                 "range: %{customdata[0]:.4g} - %{customdata[1]:.4g}<br>"
-                                "retained: %{customdata[2]} / %{customdata[3]}<br>"
+                                f"retained {cutoff_units}: %{{customdata[2]}} / %{{customdata[3]}}<br>"
                                 f"{cutoff_label}<extra></extra>"
                             ),
                             visible=is_visible,
@@ -2775,10 +2810,10 @@ def plot_powerflow_asset_cutoff_overview(
                         showlegend=col_idx == 1,
                         customdata=customdata,
                         hovertemplate=(
-                            "asset cutoff %{x:.0%}<br>"
+                            f"{cutoff_unit} cutoff %{{x:.0%}}<br>"
                             f"{center_stat}: %{{y:.4g}}<br>"
                             "range: %{customdata[0]:.4g} - %{customdata[1]:.4g}<br>"
-                            "retained: %{customdata[2]} / %{customdata[3]}<br>"
+                            f"retained {cutoff_units}: %{{customdata[2]}} / %{{customdata[3]}}<br>"
                             f"{cutoff_label}<extra></extra>"
                         ),
                         visible=is_visible,
@@ -2850,7 +2885,7 @@ def plot_powerflow_asset_cutoff_overview(
             if metric in y_axis_ranges:
                 fig.update_yaxes(range=y_axis_ranges[metric], row=1, col=col_idx)
                 fig.update_yaxes(range=y_axis_ranges[metric], row=2, col=col_idx)
-            fig.update_xaxes(title_text="Asset cutoff", tickangle=-45, row=1, col=col_idx)
+            fig.update_xaxes(title_text=f"{cutoff_unit.capitalize()} cutoff", tickangle=-45, row=1, col=col_idx)
             fig.update_xaxes(title_text="", row=2, col=col_idx)
         traces_by_cutoff.append(cutoff_trace_indices)
 
@@ -2875,7 +2910,7 @@ def plot_powerflow_asset_cutoff_overview(
         title={
             "text": (
                 f"{title}<br>"
-                f"<sup>Top: retained-asset {center_stat} and min-max range. Bottom: distribution of retained assets at selected cutoff.</sup>"
+                f"<sup>Top: retained-{cutoff_unit} {center_stat} and min-max range. Bottom: distribution of assets retained by {cutoff_unit} cutoff.</sup>"
             )
         },
         autosize=False,
@@ -2887,7 +2922,7 @@ def plot_powerflow_asset_cutoff_overview(
         sliders=[
             {
                 "active": 0,
-                "currentvalue": {"prefix": "Visible cutoff range: "},
+                "currentvalue": {"prefix": f"Visible {cutoff_unit} cutoff range: "},
                 "x": 0.08,
                 "len": 0.84,
                 "y": -0.08,
@@ -2913,14 +2948,16 @@ def plot_powerflow_asset_cutoff_overview_static(
     center_stat: str = "mean",
     show_band: bool = False,
     worst_asset_per_grid: bool = True,
+    filter_scope: str = "asset",
     save_path: str | Path | None = None,
     save_formats: tuple[str, ...] = ("svg", "pdf"),
 ):
-    """Draw a publication-oriented static retained-asset cutoff overview.
+    """Draw a publication-oriented static retained cutoff overview.
 
     The figure mirrors :func:`plot_powerflow_asset_cutoff_overview` without a
-    slider. ``asset_cutoff_percentile`` selects the retained-asset filter shown
-    in the bottom row and the maximum cutoff shown in the top-row curves.
+    slider. ``asset_cutoff_percentile`` selects the retained cutoff shown in the
+    bottom row and the maximum cutoff shown in the top-row curves.
+    ``filter_scope`` switches between asset-level and grid-level filtering.
     Static Matplotlib output can be saved as SVG/PDF through ``save_path``.
     """
     required = {"metric", "percentile", "value"}
@@ -2935,6 +2972,15 @@ def plot_powerflow_asset_cutoff_overview_static(
     center_stat = str(center_stat).strip().lower()
     if center_stat not in {"median", "mean"}:
         raise ValueError("center_stat must be either 'median' or 'mean'.")
+
+    filter_scope = str(filter_scope).strip().lower()
+    if filter_scope in {"asset", "assets"}:
+        filter_scope = "asset"
+    elif filter_scope in {"grid", "grids"}:
+        filter_scope = "grid"
+    else:
+        raise ValueError("filter_scope must be either 'asset' or 'grid'.")
+    cutoff_unit = "asset" if filter_scope == "asset" else "grid"
 
     cutoff = float(asset_cutoff_percentile)
     if cutoff > 1:
@@ -2987,6 +3033,19 @@ def plot_powerflow_asset_cutoff_overview_static(
     fallback_palette = ["#335C81", "#D95D39", "#2A9D8F", "#6D597A", "#7A8450"]
     y_axis_ranges = _powerflow_y_axis_ranges(y_axis_limits)
 
+    def _grid_keys(frame: pd.DataFrame) -> pd.Series:
+        if "powerflow_run_id" in frame.columns:
+            key_cols = [
+                col
+                for col in ("powerflow_source", "comparison_group", "run_name", "stage", "powerflow_run_id")
+                if col in frame.columns
+            ]
+        elif "grid" in frame.columns:
+            key_cols = [col for col in ("comparison_group", "run_name", "stage", "grid") if col in frame.columns]
+        else:
+            raise ValueError("filter_scope='grid' requires a 'powerflow_run_id' or 'grid' column.")
+        return frame[key_cols].astype("string").fillna("<NA>").agg("|".join, axis=1)
+
     def _retained_mask(values: pd.Series, metric_name: str, retained_fraction: float) -> pd.Series:
         values = values.astype(float)
         if np.isclose(retained_fraction, 1.0):
@@ -2997,11 +3056,23 @@ def plot_powerflow_asset_cutoff_overview_static(
         threshold = values.quantile(1 - retained_fraction)
         return values >= threshold
 
-    def _retained_curve(values: pd.Series, metric_name: str) -> pd.DataFrame:
-        values = values.astype(float).dropna()
+    def _retained_frame_at_cutoff(group_df: pd.DataFrame, metric_name: str, retained_fraction: float) -> pd.DataFrame:
+        values = group_df["value"].astype(float)
+        if filter_scope == "asset":
+            return group_df.loc[_retained_mask(values, metric_name, retained_fraction)].copy()
+
+        row_keys = _grid_keys(group_df)
+        reducer = "max" if critical_direction[metric_name] == "high" else "min"
+        grid_values = values.groupby(row_keys, sort=False).agg(reducer)
+        retained_grid_keys = set(grid_values.loc[_retained_mask(grid_values, metric_name, retained_fraction)].index)
+        return group_df.loc[row_keys.isin(retained_grid_keys)].copy()
+
+    def _retained_curve(group_df: pd.DataFrame, metric_name: str) -> pd.DataFrame:
+        group_df = group_df.dropna(subset=["value"]).copy()
         rows = []
         for retained_fraction in x_values:
-            retained = values[_retained_mask(values, metric_name, retained_fraction)]
+            retained_df = _retained_frame_at_cutoff(group_df, metric_name, retained_fraction)
+            retained = retained_df["value"].astype(float).dropna()
             if retained.empty:
                 continue
             rows.append(
@@ -3015,8 +3086,7 @@ def plot_powerflow_asset_cutoff_overview_static(
         return pd.DataFrame(rows)
 
     def _retained_frame(group_df: pd.DataFrame, metric_name: str) -> pd.DataFrame:
-        values = group_df["value"].astype(float)
-        return group_df.loc[_retained_mask(values, metric_name, cutoff)].copy()
+        return _retained_frame_at_cutoff(group_df, metric_name, cutoff)
 
     def _select_worst_asset_per_grid(plot_df: pd.DataFrame, metric_name: str) -> pd.DataFrame:
         if not worst_asset_per_grid or plot_df.empty:
@@ -3068,7 +3138,7 @@ def plot_powerflow_asset_cutoff_overview_static(
             values = group_df["value"].astype(float).dropna()
             if values.empty:
                 continue
-            curve = _retained_curve(values, metric)
+            curve = _retained_curve(group_df, metric)
             color = group_colors[group]
             ax_curve.plot(
                 curve["retained_asset_cutoff"],
@@ -3163,7 +3233,7 @@ def plot_powerflow_asset_cutoff_overview_static(
             fontsize=legend_fontsize,
         )
     fig.suptitle(
-        f"{title} ({_cutoff_label(cutoff)} retained-asset cutoff)",
+        f"{title} ({_cutoff_label(cutoff)} retained-{cutoff_unit} cutoff)",
         y=0.99,
         fontsize=title_fontsize,
         fontweight="bold",
