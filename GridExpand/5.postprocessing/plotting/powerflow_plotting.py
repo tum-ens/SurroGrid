@@ -3895,6 +3895,10 @@ def voltage_deviation_summary_db(
     ].reset_index(drop=True)
 
 
+
+def _format_pu_limit(value: float) -> str:
+    return f"{float(value):.3f}".rstrip("0").rstrip(".")
+
 def plot_voltage_deviation_histogram(
     summary: pd.DataFrame,
     lower_limit: float = 0.9,
@@ -3936,7 +3940,7 @@ def plot_voltage_deviation_histogram(
         y=0.72,
         xref="x",
         yref="paper",
-        text=f"< {lower_limit:.1f} p.u.: {lower_share:.1f}%",
+        text=f"< {_format_pu_limit(lower_limit)} p.u.: {lower_share:.1f}%",
         showarrow=False,
         bgcolor="rgba(255,255,255,0.85)",
         bordercolor="#d0d0d0",
@@ -3947,7 +3951,7 @@ def plot_voltage_deviation_histogram(
         y=0.72,
         xref="x",
         yref="paper",
-        text=f"> {upper_limit:.1f} p.u.: {upper_share:.1f}%",
+        text=f"> {_format_pu_limit(upper_limit)} p.u.: {upper_share:.1f}%",
         showarrow=False,
         bgcolor="rgba(255,255,255,0.85)",
         bordercolor="#d0d0d0",
@@ -3977,6 +3981,129 @@ def plot_voltage_deviation_histogram(
         fig.show()
     return fig
 
+
+
+def plot_voltage_deviation_histogram_comparison(
+    summaries: dict[str, pd.DataFrame],
+    lower_limit: float = 0.9,
+    upper_limit: float = 1.1,
+    bin_size: float = 0.01,
+    title: str = "Voltage Magnitude Extremes Across LV Grids",
+    show: bool = True,
+):
+    """Plot voltage-extreme histograms for multiple stages in horizontal subplots."""
+    if not summaries:
+        raise ValueError("At least one summary dataframe is required.")
+
+    cleaned: dict[str, tuple[pd.Series, pd.Series]] = {}
+    x_min_values = [lower_limit]
+    x_max_values = [upper_limit]
+    for label, summary in summaries.items():
+        if summary.empty:
+            continue
+        lower_values = summary["min_vm_pu"].astype(float).dropna()
+        upper_values = summary["max_vm_pu"].astype(float).dropna()
+        if lower_values.empty or upper_values.empty:
+            continue
+        cleaned[str(label)] = (lower_values, upper_values)
+        x_min_values.append(float(lower_values.min()))
+        x_max_values.append(float(upper_values.max()))
+    if not cleaned:
+        raise ValueError("No finite voltage summary values found.")
+
+    x_min = min(x_min_values) - 0.03
+    x_max = max(x_max_values) + 0.03
+    fig = make_subplots(
+        rows=1,
+        cols=len(cleaned),
+        subplot_titles=list(cleaned.keys()),
+        shared_yaxes=True,
+        horizontal_spacing=0.08,
+    )
+    colors = {
+        "highest": "#2f92c5",
+        "lowest": "#66c2a4",
+    }
+    for col_idx, (label, (lower_values, upper_values)) in enumerate(cleaned.items(), start=1):
+        lower_share = (lower_values < lower_limit).mean() * 100.0
+        upper_share = (upper_values > upper_limit).mean() * 100.0
+        fig.add_trace(
+            go.Histogram(
+                x=upper_values,
+                name="Highest voltage per grid",
+                marker={"color": colors["highest"], "line": {"color": "white", "width": 0.5}},
+                xbins={"start": x_min, "end": x_max, "size": bin_size},
+                opacity=0.88,
+                legendgroup="highest",
+                showlegend=col_idx == 1,
+            ),
+            row=1,
+            col=col_idx,
+        )
+        fig.add_trace(
+            go.Histogram(
+                x=lower_values,
+                name="Lowest voltage per grid",
+                marker={"color": colors["lowest"], "line": {"color": "white", "width": 0.5}},
+                xbins={"start": x_min, "end": x_max, "size": bin_size},
+                opacity=0.88,
+                legendgroup="lowest",
+                showlegend=col_idx == 1,
+            ),
+            row=1,
+            col=col_idx,
+        )
+        fig.add_vline(x=lower_limit, line_color="#3a3a3a", line_dash="dash", line_width=2, row=1, col=col_idx)
+        fig.add_vline(x=upper_limit, line_color="#3a3a3a", line_dash="dash", line_width=2, row=1, col=col_idx)
+        fig.add_annotation(
+            x=lower_limit - 0.012,
+            y=0.82,
+            xref="x" if col_idx == 1 else f"x{col_idx}",
+            yref="paper",
+            text=f"< {_format_pu_limit(lower_limit)} p.u.: {lower_share:.1f}%",
+            showarrow=False,
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor="#d0d0d0",
+            borderwidth=1,
+        )
+        fig.add_annotation(
+            x=upper_limit + 0.012,
+            y=0.70,
+            xref="x" if col_idx == 1 else f"x{col_idx}",
+            yref="paper",
+            text=f"> {_format_pu_limit(upper_limit)} p.u.: {upper_share:.1f}%",
+            showarrow=False,
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor="#d0d0d0",
+            borderwidth=1,
+        )
+
+    fig.update_layout(
+        barmode="overlay",
+        title=title,
+        yaxis_title="LV Grid Count (log scale)",
+        legend={"orientation": "h", "x": 0.02, "y": 1.16},
+        margin={"l": 70, "r": 30, "t": 90, "b": 65},
+        width=max(820, 455 * len(cleaned)),
+        height=440,
+    )
+    for col_idx in range(1, len(cleaned) + 1):
+        fig.update_xaxes(title_text="Grid-Level Voltage Extremum [p.u.]", range=[x_min, x_max], showgrid=True, gridcolor="#d8d8d8", row=1, col=col_idx)
+        fig.update_yaxes(
+            type="log",
+            rangemode="tozero",
+            tickmode="array",
+            tickvals=[1, 2, 5, 10, 20, 50, 100, 200, 500, 1000],
+            ticktext=["1", "2", "5", "10", "20", "50", "100", "200", "500", "1,000"],
+            minor={"ticks": "outside"},
+            showgrid=True,
+            gridcolor="#d8d8d8",
+            row=1,
+            col=col_idx,
+        )
+    if show:
+        fig.show()
+    return fig
 
 def transformer_import_distribution_db(
     input_id: str | None = None,
@@ -4549,6 +4676,8 @@ def _plot_matplotlib_band(
     band96_color: str,
     expected_label: str,
     show_legend: bool,
+    band68_label: str = "68% Percentile Band",
+    band96_label: str = "96% Percentile Band",
 ) -> None:
     ax.fill_between(
         x,
@@ -4556,8 +4685,8 @@ def _plot_matplotlib_band(
         band["q98"].to_numpy(),
         facecolor=band96_color,
         edgecolor="none",
-        alpha=0.55,
-        label="96% Percentile Band",
+        alpha=0.42,
+        label=band96_label,
     )
     ax.fill_between(
         x,
@@ -4565,15 +4694,15 @@ def _plot_matplotlib_band(
         band["q84"].to_numpy(),
         facecolor=band68_color,
         edgecolor="none",
-        alpha=0.45,
-        label="68% Percentile Band",
+        alpha=0.38,
+        label=band68_label,
     )
     ax.plot(
         x,
         band["expected"].to_numpy(),
         color=color,
-        linewidth=1.4,
-        alpha=0.95,
+        linewidth=1.6,
+        alpha=0.98,
         label=expected_label,
     )
     _style_transformer_axis(ax)
@@ -4590,10 +4719,171 @@ def _plot_matplotlib_band(
         legend.get_frame().set_edgecolor("#cccccc")
 
 
+
+def _select_tsam_week_indices(ts_band: pd.DataFrame, requested: tuple[int, int] | None) -> tuple[int, int]:
+    n_weeks = int(len(ts_band) // 7)
+    if n_weeks < 2:
+        return (0, 0)
+    if requested is not None:
+        first, second = requested
+        first = max(0, min(int(first), n_weeks - 1))
+        second = max(0, min(int(second), n_weeks - 1))
+        return first, second
+    week_ids = pd.Series(np.arange(len(ts_band)) // 7, index=ts_band.index)
+    weekly_mean = ts_band["expected"].groupby(week_ids).mean().dropna()
+    if weekly_mean.empty:
+        return (0, min(1, n_weeks - 1))
+    high_week = int(weekly_mean.idxmax())
+    low_week = int(weekly_mean.idxmin())
+    if high_week == low_week:
+        low_week = min(high_week + 1, n_weeks - 1) if high_week == 0 else 0
+    return high_week, low_week
+
+
+def _week_slice(band: pd.DataFrame, week_index: int) -> pd.DataFrame:
+    start = int(week_index) * 7
+    end = start + 7
+    return band.iloc[start:end].copy()
+
+
+def _x_values_for_tsam_week(band: pd.DataFrame):
+    if isinstance(band.index, pd.DatetimeIndex):
+        return mdates.date2num(band.index.to_pydatetime()), True
+    return np.arange(len(band), dtype=float), False
+
+
+def _format_tsam_week_axis(ax, band: pd.DataFrame) -> None:
+    if isinstance(band.index, pd.DatetimeIndex):
+        ax.xaxis_date()
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+        for label in ax.get_xticklabels():
+            label.set_rotation(35)
+            label.set_ha("right")
+        ax.set_xlim(band.index[0], band.index[-1])
+    else:
+        ax.set_xticks(np.arange(len(band), dtype=float))
+        ax.set_xticklabels([f"Day {idx + 1}" for idx in range(len(band))])
+        ax.set_xlim(0, max(len(band) - 1, 1))
+
+
+def _plot_transformer_import_tsam_week_panels_matplotlib(
+    df: pd.DataFrame,
+    spec: dict[str, str],
+    grouped_frames: list[tuple[str, pd.DataFrame]],
+    default_group_styles: dict[str, dict[str, str]],
+    fallback_styles: list[dict[str, str]],
+    *,
+    tsam_week_indices: tuple[int, int] | None,
+    tsam_week_labels: tuple[str, str],
+    show: bool,
+):
+    use_calendar_axis = "ts" in df.columns and df["ts"].notna().any()
+    relative_axis = not use_calendar_axis
+
+    reference_band = _daily_matplotlib_transformer_bands(
+        grouped_frames[-1][1] if grouped_frames else df,
+        spec["ts_col"],
+        relative_axis=relative_axis,
+    )
+    week_indices = _select_tsam_week_indices(reference_band, tsam_week_indices)
+
+    with plt.rc_context(
+        {
+            "font.family": "sans-serif",
+            "font.sans-serif": ["Arial", "DejaVu Sans"],
+            "mathtext.fontset": "dejavusans",
+            "text.usetex": False,
+            "axes.titlesize": 9,
+            "axes.labelsize": 8,
+            "xtick.labelsize": 8,
+            "ytick.labelsize": 8,
+        }
+    ):
+        fig = plt.figure(figsize=(11.2, 6.2), dpi=150)
+        gs = fig.add_gridspec(2, 2, width_ratios=[1.35, 1.0], hspace=0.42, wspace=0.30)
+        week_axes = [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[1, 0])]
+        ax_ldc = fig.add_subplot(gs[:, 1])
+
+        for row, (ax_ts, week_index, week_label) in enumerate(zip(week_axes, week_indices, tsam_week_labels)):
+            for group_index, (group_label, group_df) in enumerate(grouped_frames):
+                if group_df.empty:
+                    continue
+                style = default_group_styles.get(group_label, fallback_styles[group_index % len(fallback_styles)])
+                color = style.get("color", spec["color"])
+                band68 = style.get("band68", spec["band68"])
+                band96 = style.get("band96", spec["band96"])
+                ts_band = _daily_matplotlib_transformer_bands(
+                    group_df,
+                    spec["ts_col"],
+                    relative_axis=relative_axis,
+                )
+                week_band = _week_slice(ts_band, week_index)
+                if week_band.empty:
+                    continue
+                x_ts, _ = _x_values_for_tsam_week(week_band)
+                prefix = f"{group_label} " if group_label else ""
+                _plot_matplotlib_band(
+                    ax_ts,
+                    week_band,
+                    x_ts,
+                    color,
+                    band68,
+                    band96,
+                    f"{prefix}expected",
+                    show_legend=row == 0,
+                    band68_label=f"{prefix}68% band",
+                    band96_label=f"{prefix}96% band",
+                )
+            _format_tsam_week_axis(ax_ts, _week_slice(reference_band, week_index))
+            ax_ts.set_title(f"{week_label} (representative week {week_index + 1})")
+            ax_ts.set_ylabel(spec["ts_y"])
+
+        for group_index, (group_label, group_df) in enumerate(grouped_frames):
+            if group_df.empty:
+                continue
+            style = default_group_styles.get(group_label, fallback_styles[group_index % len(fallback_styles)])
+            color = style.get("color", spec["color"])
+            band68 = style.get("band68", spec["band68"])
+            band96 = style.get("band96", spec["band96"])
+            ldc_band = _ldc_matplotlib_transformer_bands(
+                group_df,
+                spec["ldc_col"],
+                relative_axis=relative_axis,
+            )
+            x_ldc = ldc_band.index.to_numpy(dtype=float)
+            prefix = f"{group_label} " if group_label else ""
+            _plot_matplotlib_band(
+                ax_ldc,
+                ldc_band,
+                x_ldc,
+                color,
+                band68,
+                band96,
+                f"{prefix}expected",
+                show_legend=True,
+                band68_label=f"{prefix}68% band",
+                band96_label=f"{prefix}96% band",
+            )
+        ax_ldc.set_xlim(0, 100)
+        ax_ldc.set_xticks(np.arange(0, 101, 20))
+        ax_ldc.set_xticklabels([f"{value}%" for value in range(0, 101, 20)])
+        ax_ldc.set_title(f"{spec['title']} duration curve")
+        ax_ldc.set_ylabel(spec["ldc_y"])
+        fig.suptitle(spec["title"], y=0.99, fontsize=10, fontweight="bold")
+        fig.subplots_adjust(top=0.90, bottom=0.10, left=0.08, right=0.98, hspace=0.42, wspace=0.30)
+        if show:
+            plt.show()
+        return fig
+
 def plot_transformer_import_distributions_matplotlib(
     df: pd.DataFrame,
     show: bool = True,
     metrics: tuple[str, ...] = ("p", "q", "s"),
+    group_col: str | None = None,
+    group_styles: dict[str, dict[str, str]] | None = None,
+    tsam_week_panels: bool = False,
+    tsam_week_indices: tuple[int, int] | None = None,
+    tsam_week_labels: tuple[str, str] = ("Min-temperature week", "Max-solar week"),
 ):
     specs = [
         {
@@ -4653,6 +4943,40 @@ def plot_transformer_import_distributions_matplotlib(
     if not specs:
         raise ValueError("At least one transformer metric must be selected.")
 
+    default_group_styles = {
+        "Pre": {"color": "#335C81", "band68": "#9ecae1", "band96": "#deebf7"},
+        "Post-all": {"color": "#D95D39", "band68": "#f4a582", "band96": "#fde0c5"},
+        "Post": {"color": "#D95D39", "band68": "#f4a582", "band96": "#fde0c5"},
+    }
+    if group_styles:
+        default_group_styles.update({str(key): value for key, value in group_styles.items()})
+    fallback_styles = [
+        {"color": "#08306b", "band68": "#3182bd", "band96": "#9ecae1"},
+        {"color": "#d73027", "band68": "#fc8d59", "band96": "#fee0d2"},
+        {"color": "#1a9850", "band68": "#91cf60", "band96": "#d9ef8b"},
+        {"color": "#6a3d9a", "band68": "#b2abd2", "band96": "#e0d6f0"},
+    ]
+
+    if group_col is not None and group_col in df.columns:
+        group_labels = [str(label) for label in df[group_col].dropna().drop_duplicates()]
+        grouped_frames = [(label, df[df[group_col].astype(str) == label].copy()) for label in group_labels]
+    else:
+        grouped_frames = [("", df.copy())]
+
+    if tsam_week_panels:
+        if len(specs) != 1:
+            raise ValueError("tsam_week_panels=True currently supports exactly one transformer metric.")
+        return _plot_transformer_import_tsam_week_panels_matplotlib(
+            df,
+            specs[0],
+            grouped_frames,
+            default_group_styles,
+            fallback_styles,
+            tsam_week_indices=tsam_week_indices,
+            tsam_week_labels=tsam_week_labels,
+            show=show,
+        )
+
     with plt.rc_context(
         {
             "font.family": "sans-serif",
@@ -4669,51 +4993,64 @@ def plot_transformer_import_distributions_matplotlib(
         fig, axes = plt.subplots(len(specs), 2, figsize=(10, fig_height), dpi=150, squeeze=False)
         relative_axis = _uses_relative_timeslice_axis(df)
         for row, spec in enumerate(specs):
-            ts_band = _daily_matplotlib_transformer_bands(
-                df,
-                spec["ts_col"],
-                relative_axis=relative_axis,
-            )
-            ldc_band = _ldc_matplotlib_transformer_bands(
-                df,
-                spec["ldc_col"],
-                relative_axis=relative_axis,
-            )
-
             ax_ts = axes[row, 0]
             ax_ldc = axes[row, 1]
-            if relative_axis:
-                x_ts = ts_band.index.to_numpy(dtype=float)
-            else:
-                x_ts = mdates.date2num(ts_band.index.to_pydatetime())
-            x_ldc = ldc_band.index.to_numpy(dtype=float)
+            for group_index, (group_label, group_df) in enumerate(grouped_frames):
+                if group_df.empty:
+                    continue
+                style = default_group_styles.get(group_label, fallback_styles[group_index % len(fallback_styles)])
+                color = style.get("color", spec["color"])
+                band68 = style.get("band68", spec["band68"])
+                band96 = style.get("band96", spec["band96"])
+                ts_band = _daily_matplotlib_transformer_bands(
+                    group_df,
+                    spec["ts_col"],
+                    relative_axis=relative_axis,
+                )
+                ldc_band = _ldc_matplotlib_transformer_bands(
+                    group_df,
+                    spec["ldc_col"],
+                    relative_axis=relative_axis,
+                )
+                if relative_axis:
+                    x_ts = ts_band.index.to_numpy(dtype=float)
+                else:
+                    x_ts = mdates.date2num(ts_band.index.to_pydatetime())
+                x_ldc = ldc_band.index.to_numpy(dtype=float)
 
-            _plot_matplotlib_band(
-                ax_ts,
-                ts_band,
-                x_ts,
-                spec["color"],
-                spec["band68"],
-                spec["band96"],
-                "Expected Timeseries (24 h Agg.)",
-                show_legend=True,
-            )
-            _plot_matplotlib_band(
-                ax_ldc,
-                ldc_band,
-                x_ldc,
-                spec["color"],
-                spec["band68"],
-                spec["band96"],
-                "Expected LDC (Hourly)",
-                show_legend=True,
-            )
+                prefix = f"{group_label} " if group_label else ""
+                _plot_matplotlib_band(
+                    ax_ts,
+                    ts_band,
+                    x_ts,
+                    color,
+                    band68,
+                    band96,
+                    f"{prefix}expected",
+                    show_legend=True,
+                    band68_label=f"{prefix}68% band",
+                    band96_label=f"{prefix}96% band",
+                )
+                _plot_matplotlib_band(
+                    ax_ldc,
+                    ldc_band,
+                    x_ldc,
+                    color,
+                    band68,
+                    band96,
+                    f"{prefix}expected",
+                    show_legend=True,
+                    band68_label=f"{prefix}68% band",
+                    band96_label=f"{prefix}96% band",
+                )
 
             if relative_axis:
-                _format_relative_day_axis(ax_ts, ts_band.index)
+                sample_band = _daily_matplotlib_transformer_bands(grouped_frames[0][1], spec["ts_col"], relative_axis=relative_axis)
+                _format_relative_day_axis(ax_ts, sample_band.index)
             else:
                 ax_ts.xaxis_date()
-                _format_month_axis(ax_ts, ts_band.index)
+                sample_band = _daily_matplotlib_transformer_bands(grouped_frames[0][1], spec["ts_col"], relative_axis=relative_axis)
+                _format_month_axis(ax_ts, sample_band.index)
             ax_ldc.set_xlim(0, 100)
             ax_ldc.set_xticks(np.arange(0, 101, 20))
             ax_ldc.set_xticklabels([f"{value}%" for value in range(0, 101, 20)])
@@ -4726,7 +5063,6 @@ def plot_transformer_import_distributions_matplotlib(
         if show:
             plt.show()
         return fig
-
 
 def plot_transformer_apparent_power_stage_comparison_matplotlib(
     pre_df: pd.DataFrame,

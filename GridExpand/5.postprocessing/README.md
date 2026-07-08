@@ -54,6 +54,30 @@ uv run --project GridExpand/4.powerflow python GridExpand/ags_pipeline_runner.py
   --run-dir GridExpand/run_logs/<run_name>
 ```
 
+Run a full-year all-assets scenario with TSAM typical weeks and compact post/pre power-flow summaries:
+
+```bash
+uv run --project GridExpand/4.powerflow python GridExpand/ags_pipeline_runner.py \
+  --repo-root . \
+  --ags <AGS> \
+  --profiles all \
+  --timeframe-mode full_year \
+  --powerflow-output summary \
+  --tsam \
+  --tsam-periods 6 \
+  --tsam-hours-per-period 168 \
+  --tsam-extreme-method replace_cluster_center \
+  --run-dir GridExpand/run_logs/<run_name> \
+  --workers 1 \
+  --step2-cpus 4 \
+  --step3-cpus 32 \
+  --step3-max-cpus 32 \
+  --step3-cluster-concurrency 16 \
+  --step4-cpus 4
+```
+
+With TSAM enabled, Step 4 uses the reduced demand horizon written by Step 3, so the power-flow summaries cover `6 * 168 = 1008` representative hours instead of a reconstructed 8760-hour series. Summary and both-mode pipeline runs automatically materialize expansion analyses at the end; use `--no-materialize-expansion` to disable this.
+
 Use `--powerflow-output both` if both raw time series and compact summaries should be written during one run.
 
 If raw time series already exist, derive compact summaries without rerunning pandapower:
@@ -90,10 +114,10 @@ uv run python -m expansion.grid_expansion \
 
 Which Path Should I Use?
 
-- Use `--powerflow-output summary` when storage should stay small and the notebooks only need compact stress metrics.
+- Use `--powerflow-output summary` when storage should stay small and the notebooks only need compact stress metrics; combine it with `--tsam` for faster full-year screening. This now also creates `expansion_analysis_run` rows automatically.
 - Use `--powerflow-output raw` when later expansion-cost materialization, detailed diagnostics, or custom postprocessing are needed.
 - Use `materialize_powerflow_summary.py` only when raw time series already exist and compact notebook summaries are missing or stale.
-- Use `grid_expansion.py` only for expansion-cost estimates; it requires raw `post` power-flow rows.
+- Use `grid_expansion.py` manually only when you need to re-materialize or rename expansion-cost estimates; the normal summary pipeline does this automatically from compact summary rows.
 
 ## Expansion Outputs
 

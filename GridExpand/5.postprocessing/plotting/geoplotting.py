@@ -582,6 +582,268 @@ def _grid_metrics_from_points(points: pd.DataFrame) -> pd.DataFrame:
     return points.groupby("grid_case_id", as_index=False)[available_cols].first()
 
 
+
+def _synthetic_expansion_envelope_layers(
+    points: pd.DataFrame,
+    *,
+    value_column: str,
+    value_scale: float,
+) -> dict[str, object]:
+    envelopes = _make_envelopes(points, "Synthetic", "grid_case_id")
+    metrics = _grid_metrics_from_points(points)
+    values_by_grid = metrics.set_index("grid_case_id")[value_column].astype(float).to_dict()
+
+    polygons = []
+    polygon_values = []
+    line_segments = []
+    line_values = []
+    point_clouds = []
+    point_values = []
+    for envelope in envelopes:
+        value = float(values_by_grid.get(int(envelope.grid_id), np.nan))
+        display_value = value / value_scale
+        if envelope.envelope is not None:
+            polygons.append(envelope.envelope)
+            polygon_values.append(display_value)
+        elif envelope.n_points == 2:
+            line_segments.append(envelope.points)
+            line_values.append(display_value)
+        else:
+            point_clouds.append(envelope.points)
+            point_values.append(display_value)
+
+    display_values = pd.Series(
+        polygon_values + line_values + point_values,
+        dtype=float,
+    ).replace([np.inf, -np.inf], np.nan).dropna()
+    return {
+        "points": points,
+        "grid_metrics": metrics,
+        "polygons": polygons,
+        "polygon_values": polygon_values,
+        "line_segments": line_segments,
+        "line_values": line_values,
+        "point_clouds": point_clouds,
+        "point_values": point_values,
+        "display_values": display_values,
+    }
+
+
+def _draw_synthetic_expansion_envelope_layers(
+    ax: plt.Axes,
+    layers: dict[str, object],
+    *,
+    cmap_obj,
+    norm,
+    target_epsg: int,
+    show_points: bool,
+    show_buildings: bool,
+    building_point_size: float,
+    building_alpha: float,
+    envelope_alpha: float,
+    add_osm_layer: bool,
+    osm_source: object | None,
+    osm_zoom: str | int,
+    osm_alpha: float,
+) -> object:
+    points = layers["points"]
+    polygons = layers["polygons"]
+    polygon_values = layers["polygon_values"]
+    line_segments = layers["line_segments"]
+    line_values = layers["line_values"]
+    point_clouds = layers["point_clouds"]
+    point_values = layers["point_values"]
+
+    if polygons:
+        collection = PolyCollection(
+            polygons,
+            array=np.asarray(polygon_values, dtype=float),
+            cmap=cmap_obj,
+            norm=norm,
+            edgecolors="#263238",
+            linewidths=0.65,
+            alpha=envelope_alpha,
+            zorder=2,
+        )
+        ax.add_collection(collection)
+        color_source = collection
+    else:
+        color_source = plt.cm.ScalarMappable(norm=norm, cmap=cmap_obj)
+
+    if line_segments:
+        colors = cmap_obj(norm(np.asarray(line_values, dtype=float)))
+        ax.add_collection(
+            LineCollection(
+                line_segments,
+                colors=colors,
+                linewidths=1.6,
+                alpha=min(0.9, envelope_alpha + 0.18),
+                zorder=3,
+            )
+        )
+    for cloud, value in zip(point_clouds, point_values):
+        ax.scatter(
+            cloud[:, 0],
+            cloud[:, 1],
+            s=20,
+            color=cmap_obj(norm(value)),
+            edgecolor="#263238",
+            linewidth=0.4,
+            alpha=min(0.95, envelope_alpha + 0.25),
+            zorder=4,
+        )
+
+    if show_buildings:
+        ax.scatter(
+            points["x"],
+            points["y"],
+            s=building_point_size,
+            color="#202020",
+            alpha=building_alpha,
+            linewidths=0,
+            zorder=5,
+        )
+
+    if show_points:
+        ax.scatter(points["x"], points["y"], s=2, color="#111111", alpha=0.12, linewidths=0, zorder=6)
+
+    ax.set_aspect("equal", adjustable="box")
+    if add_osm_layer:
+        _add_osm_basemap(
+            ax,
+            target_epsg=target_epsg,
+            source=osm_source,
+            zoom=osm_zoom,
+            alpha=osm_alpha,
+        )
+    ax.grid(True, linewidth=0.3, alpha=0.25)
+    ax.set_xlabel(f"x [EPSG:{target_epsg}]")
+    ax.set_ylabel(f"y [EPSG:{target_epsg}]")
+    return color_source
+
+
+def plot_synthetic_expansion_envelope_comparison(
+    *,
+    pre_analysis_key: str,
+    post_analysis_key: str,
+    labels: tuple[str, str] = ("Pre", "Post-all"),
+    value_column: str = "total_cost_eur",
+    building_use: str | Sequence[str] | None = None,
+    target_epsg: int = 25832,
+    clip_quantile: float | None = 0.95,
+    log_scale: bool = False,
+    cmap: str | LinearSegmentedColormap = "cost_green_red",
+    show_points: bool = False,
+    show_buildings: bool = True,
+    building_point_size: float = 3.0,
+    building_alpha: float = 0.24,
+    envelope_alpha: float = 0.46,
+    add_osm_layer: bool = True,
+    osm_source: object | None = None,
+    osm_zoom: str | int = "auto",
+    osm_alpha: float = 0.72,
+    output_path: str | Path | None = None,
+    figsize: tuple[float, float] = (15.5, 7.3),
+) -> tuple[plt.Figure, np.ndarray, dict[str, dict[str, pd.DataFrame]]]:
+    """Plot pre/post expansion envelopes side by side with shared map extent and color scale."""
+
+    value_scale, value_unit = _display_value_scale(value_column)
+    datasets = []
+    for analysis_key, label in zip((pre_analysis_key, post_analysis_key), labels):
+        points = load_synthetic_expansion_envelope_points(
+            analysis_key=analysis_key,
+            building_use=building_use,
+            target_epsg=target_epsg,
+        )
+        if points.empty:
+            raise ValueError(f"No synthetic expansion envelope points found for analysis_key={analysis_key!r}.")
+        if value_column not in points.columns:
+            available = ", ".join(sorted(points.columns))
+            raise ValueError(f"Unknown value_column {value_column!r}. Available columns: {available}.")
+        layers = _synthetic_expansion_envelope_layers(points, value_column=value_column, value_scale=value_scale)
+        datasets.append({"analysis_key": analysis_key, "label": label, "layers": layers})
+
+    all_values = pd.concat([dataset["layers"]["display_values"] for dataset in datasets], ignore_index=True)
+    all_values = all_values.replace([np.inf, -np.inf], np.nan).dropna()
+    if all_values.empty:
+        raise ValueError(f"No finite values available for {value_column!r}.")
+    vmax = float(all_values.max())
+    if clip_quantile is not None:
+        q = float(clip_quantile)
+        if q > 1:
+            q = q / 100
+        if q <= 0 or q > 1:
+            raise ValueError("clip_quantile must satisfy 0 < value <= 1, or 0 < value <= 100.")
+        vmax = float(all_values.quantile(q))
+    vmax = max(vmax, 1e-9)
+    if log_scale:
+        positive = all_values[all_values > 0]
+        if positive.empty:
+            norm = Normalize(vmin=0.0, vmax=max(float(all_values.max()), 1e-9))
+        else:
+            norm = LogNorm(vmin=max(float(positive.min()), 1e-6), vmax=max(vmax, float(positive.min()) * 1.01))
+    else:
+        norm = Normalize(vmin=0.0, vmax=vmax)
+
+    all_points = pd.concat([dataset["layers"]["points"][["x", "y"]] for dataset in datasets], ignore_index=True)
+    x_min, x_max = float(all_points["x"].min()), float(all_points["x"].max())
+    y_min, y_max = float(all_points["y"].min()), float(all_points["y"].max())
+    pad_x = max((x_max - x_min) * 0.035, 25.0)
+    pad_y = max((y_max - y_min) * 0.035, 25.0)
+    xlim = (x_min - pad_x, x_max + pad_x)
+    ylim = (y_min - pad_y, y_max + pad_y)
+
+    cmap_obj = _cost_colormap(cmap)
+    fig, axes = plt.subplots(1, 2, figsize=figsize, constrained_layout=True, sharex=True, sharey=True)
+    color_source = plt.cm.ScalarMappable(norm=norm, cmap=cmap_obj)
+    for ax, dataset in zip(axes, datasets):
+        color_source = _draw_synthetic_expansion_envelope_layers(
+            ax,
+            dataset["layers"],
+            cmap_obj=cmap_obj,
+            norm=norm,
+            target_epsg=target_epsg,
+            show_points=show_points,
+            show_buildings=show_buildings,
+            building_point_size=building_point_size,
+            building_alpha=building_alpha,
+            envelope_alpha=envelope_alpha,
+            add_osm_layer=False,
+            osm_source=osm_source,
+            osm_zoom=osm_zoom,
+            osm_alpha=osm_alpha,
+        )
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        if add_osm_layer:
+            _add_osm_basemap(
+                ax,
+                target_epsg=target_epsg,
+                source=osm_source,
+                zoom=osm_zoom,
+                alpha=osm_alpha,
+            )
+        metric_count = len(dataset["layers"]["grid_metrics"])
+        ax.set_title(f"{dataset['label']} ({metric_count} grids)")
+
+    title_label = _display_label(value_column, value_unit)
+    cbar = fig.colorbar(color_source, ax=axes.ravel().tolist(), shrink=0.78)
+    cbar.set_label(title_label)
+    fig.suptitle(f"{value_column} estimation aggregated per grid envelope", y=1.02)
+
+    if output_path is not None:
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output, dpi=240, bbox_inches="tight")
+
+    return fig, axes, {
+        dataset["label"]: {
+            "points": dataset["layers"]["points"],
+            "grid_metrics": dataset["layers"]["grid_metrics"].sort_values(value_column, ascending=False).reset_index(drop=True),
+        }
+        for dataset in datasets
+    }
+
 def plot_synthetic_expansion_envelopes(
     *,
     analysis_key: str | None = None,
