@@ -58,7 +58,7 @@ Import from the owning module instead of using compatibility facades. For exampl
 Run the full AGS pipeline and store raw pre/post power-flow time series:
 
 ```bash
-uv run --project GridExpand/4.powerflow python GridExpand/executables/ags_pipeline_runner.py \
+uv run --project GridExpand/4.powerflow python GridExpand/runme/ags_pipeline_runner.py \
   --repo-root /path/to/SurroGrid \
   --ags <AGS> \
   --profiles electricity_heat \
@@ -70,7 +70,7 @@ uv run --project GridExpand/4.powerflow python GridExpand/executables/ags_pipeli
 Run the pipeline but store only compact summaries, not raw time series:
 
 ```bash
-uv run --project GridExpand/4.powerflow python GridExpand/executables/ags_pipeline_runner.py \
+uv run --project GridExpand/4.powerflow python GridExpand/runme/ags_pipeline_runner.py \
   --repo-root /path/to/SurroGrid \
   --ags <AGS> \
   --profiles electricity_heat \
@@ -82,7 +82,7 @@ uv run --project GridExpand/4.powerflow python GridExpand/executables/ags_pipeli
 Run a full-year all-assets scenario with TSAM typical weeks and compact post/pre power-flow summaries:
 
 ```bash
-uv run --project GridExpand/4.powerflow python GridExpand/executables/ags_pipeline_runner.py \
+uv run --project GridExpand/4.powerflow python GridExpand/runme/ags_pipeline_runner.py \
   --repo-root . \
   --ags <AGS> \
   --profiles all \
@@ -100,6 +100,8 @@ uv run --project GridExpand/4.powerflow python GridExpand/executables/ags_pipeli
   --step3-cluster-concurrency 16 \
   --step4-cpus 4
 ```
+
+Add `--demand-scope residential` to run the same Step 2 to Step 4 pipeline on household/residential buildings only. The runner then passes `--hh-only` to Step 4, uses the `baseline_static_hh_only` scenario key family, and appends `_hh_only` to automatic expansion analysis keys.
 
 With TSAM enabled, Step 4 uses the reduced demand horizon written by Step 3, so the power-flow summaries cover `6 * 168 = 1008` representative hours instead of a reconstructed 8760-hour series. Summary and both-mode pipeline runs automatically materialize expansion analyses at the end; use `--no-materialize-expansion` to disable this.
 

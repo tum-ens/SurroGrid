@@ -220,6 +220,8 @@ uv run --project .. python main.py <inputfile_id> --n_cpu <N>
 
 The script selects the first `.h5` in `data/grids/` whose prefix before the first underscore matches `inputfile_id`.
 
+Use `--demand-scope residential` for a household-only run. This filters the building table before electricity, PV, heat, mobility, and URBS input sheets are generated. DB-backed residential runs use the `baseline_static_hh_only` scenario key family so they do not overwrite all-demand results.
+
 #### Step 2: Outputs
 
 - A copied/augmented `.h5` in `2.demand_allocation/gridalloc/results/` containing:

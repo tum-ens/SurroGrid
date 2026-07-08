@@ -58,6 +58,7 @@ PROFILE_CHOICES = (
 )
 
 POWERFLOW_OUTPUT_CHOICES = ("raw", "summary", "both")
+DEMAND_SCOPE_CHOICES = ("all", "residential")
 
 
 def utc_now() -> str:
@@ -101,6 +102,15 @@ def parse_args() -> argparse.Namespace:
         default="all",
         help="Demand profile scope passed to Step 2; use electricity_heat for heat without mobility.",
     )
+    parser.add_argument(
+        "--demand-scope",
+        choices=DEMAND_SCOPE_CHOICES,
+        default="all",
+        help=(
+            "Building scope for Step 2 through Step 4. Use residential for a consistent "
+            "household-only URBS and power-flow pipeline."
+        ),
+    )
     parser.add_argument("--step2-timeseries-storage", choices=["db", "temp", "both"], default="temp")
     parser.add_argument(
         "--timeframe-mode",
@@ -125,7 +135,7 @@ def parse_args() -> argparse.Namespace:
         "--expansion-analysis-prefix",
         help=(
             "Optional prefix for automatic expansion analysis keys. "
-            "Defaults to '<timeframe_mode>_<profiles>[_tsam]'."
+            "Defaults to '<timeframe_mode>_<profiles>[_hh_only][_tsam]'."
         ),
     )
     return parser.parse_args()
@@ -186,6 +196,7 @@ class StatusLog:
             "bcid",
             "n_buildings",
             "bridge_filename",
+            "demand_scope",
             "timeframe_mode",
             "horizon_hours",
             "timeframe_start",
@@ -365,11 +376,24 @@ def run_batch_command(
         raise RuntimeError(f"{stage} failed with return code {completed.returncode}")
 
 
+def scenario_base_key(args: argparse.Namespace) -> str:
+    return "baseline_static_hh_only" if args.demand_scope == "residential" else "baseline_static"
+
+
+def pipeline_scenario_key(args: argparse.Namespace) -> str:
+    return scenario_key_for_timeframe(args.timeframe_mode, base_key=scenario_base_key(args))
+
+
+def powerflow_run_name(args: argparse.Namespace, mode: str) -> str:
+    return f"{pipeline_scenario_key(args)}_{args.profiles}_{mode}_powerflow"
+
+
 def expansion_analysis_prefix(args: argparse.Namespace) -> str:
     if args.expansion_analysis_prefix:
         return args.expansion_analysis_prefix
-    suffix = "_tsam" if args.tsam else ""
-    return f"{args.timeframe_mode}_{args.profiles}{suffix}"
+    scope_suffix = "_hh_only" if args.demand_scope == "residential" else ""
+    tsam_suffix = "_tsam" if args.tsam else ""
+    return f"{args.timeframe_mode}_{args.profiles}{scope_suffix}{tsam_suffix}"
 
 
 def materialize_expansion_analyses(
@@ -383,7 +407,7 @@ def materialize_expansion_analyses(
 
     summary_pre_only = args.profiles == "status_quo"
     stages = ("pre",) if summary_pre_only else ("pre", "post")
-    summary_run_name = f"{scenario_key_for_timeframe(args.timeframe_mode)}_{args.profiles}_summary_powerflow"
+    summary_run_name = powerflow_run_name(args, "summary")
     prefix = expansion_analysis_prefix(args)
     postprocessing_dir = repo_root / "GridExpand" / "5.postprocessing"
     log_path = args.run_dir / "expansion_materialization.log"
@@ -669,6 +693,7 @@ def run_candidate(
         bcid=candidate.get("bcid", ""),
         n_buildings=candidate.get("n_buildings", ""),
         bridge_filename=step2_filename,
+        demand_scope=args.demand_scope,
         timeframe_mode=args.timeframe_mode,
         horizon_hours=timeframe_metadata["horizon_hours"],
         timeframe_start=timeframe_metadata["timeframe_start"],
@@ -703,6 +728,8 @@ def run_candidate(
                 str(args.min_buildings),
                 "--profiles",
                 args.profiles,
+                "--demand-scope",
+                args.demand_scope,
                 "--mobility-source",
                 "pool",
                 "--timeseries-storage",
@@ -778,18 +805,24 @@ def run_candidate(
         validations = []
         if args.powerflow_output in {"raw", "both"}:
             current_stage = "step4_powerflow_raw"
+            raw_run_name = powerflow_run_name(args, "raw")
+            raw_cmd = [
+                "uv",
+                "run",
+                "python",
+                "run_pwrflw.py",
+                scenario_filename,
+                "--storage",
+                "db",
+                "--run-name",
+                raw_run_name,
+                "--n_cpu",
+                str(args.step4_cpus),
+            ]
+            if args.demand_scope == "residential":
+                raw_cmd.append("--hh-only")
             run_command(
-                cmd=[
-                    "uv",
-                    "run",
-                    "python",
-                    "run_pwrflw.py",
-                    scenario_filename,
-                    "--storage",
-                    "db",
-                    "--n_cpu",
-                    str(args.step4_cpus),
-                ],
+                cmd=raw_cmd,
                 cwd=step4_dir,
                 log_path=log_file,
                 status=status,
@@ -798,13 +831,21 @@ def run_candidate(
             )
 
             current_stage = "step4_validate_raw"
-            validations.append(validate_powerflow_db(repo_root, scenario_filename, summary_only=False, pre_only=False))
+            validations.append(
+                validate_powerflow_db(
+                    repo_root,
+                    scenario_filename,
+                    summary_only=False,
+                    pre_only=False,
+                    run_name=raw_run_name,
+                )
+            )
 
         if args.powerflow_output in {"summary", "both"}:
             current_stage = "step4_powerflow_summary"
             summary_pre_only = args.profiles == "status_quo"
             expected_summary_stages = ("pre",) if summary_pre_only else ("pre", "post")
-            summary_run_name = f"{scenario_key_for_timeframe(args.timeframe_mode)}_{args.profiles}_summary_powerflow"
+            summary_run_name = powerflow_run_name(args, "summary")
             summary_cmd = [
                 "uv",
                 "run",
@@ -821,6 +862,8 @@ def run_candidate(
             ]
             if summary_pre_only:
                 summary_cmd.insert(summary_cmd.index("--summary-only"), "--pre-only")
+            if args.demand_scope == "residential":
+                summary_cmd.append("--hh-only")
             run_command(
                 cmd=summary_cmd,
                 cwd=step4_dir,
@@ -916,6 +959,7 @@ def main() -> int:
         step2_cpus=args.step2_cpus,
         step2_timeseries_storage=args.step2_timeseries_storage,
         profiles=args.profiles,
+        demand_scope=args.demand_scope,
         timeframe_mode=args.timeframe_mode,
         step3_cpus=args.step3_cpus,
         step3_max_cpus=args.step3_max_cpus,

@@ -26,6 +26,7 @@ PROFILE_CHOICES = [
     "electricity_heat_mobility",
     "all",
 ]
+DEMAND_SCOPE_CHOICES = ["all", "residential"]
 
 
 def profile_flags(profile):
@@ -34,6 +35,23 @@ def profile_flags(profile):
         "include_heat": profile in {"electricity_heat", "electricity_heat_mobility", "all"},
         "include_mobility": profile in {"electricity_mobility", "electricity_heat_mobility", "all"},
     }
+
+
+def scenario_base_key_for_scope(demand_scope):
+    if demand_scope == "all":
+        return "baseline_static"
+    if demand_scope == "residential":
+        return "baseline_static_hh_only"
+    raise ValueError(f"Unknown demand scope: {demand_scope}")
+
+
+def scenario_assumptions(timeframe_metadata, scenario_key, demand_scope):
+    assumptions = dict(timeframe_metadata)
+    assumptions["scenario_key"] = scenario_key
+    assumptions["demand_scope"] = demand_scope
+    if demand_scope == "residential":
+        assumptions["demand_scope_filter"] = "building_use == Residential, with residential building-type fallback for HDF inputs"
+    return assumptions
 
 
 if __name__ == '__main__':
@@ -73,6 +91,15 @@ if __name__ == '__main__':
             ),
         )
         parser.add_argument(
+            "--demand-scope",
+            choices=DEMAND_SCOPE_CHOICES,
+            default="all",
+            help=(
+                "Building scope for demand allocation and URBS input generation. "
+                "Use residential for a household-only pipeline run."
+            ),
+        )
+        parser.add_argument(
             "--mobility-source",
             choices=["emobpy", "pool"],
             default="emobpy",
@@ -99,7 +126,11 @@ if __name__ == '__main__':
             parser.error("Timeslice modes require --mobility-source pool.")
 
         timeframe_metadata = build_initial_metadata(args.timeframe_mode)
-        scenario_key = scenario_key_for_timeframe(args.timeframe_mode)
+        scenario_key = scenario_key_for_timeframe(
+            args.timeframe_mode,
+            base_key=scenario_base_key_for_scope(args.demand_scope),
+        )
+        assumptions = scenario_assumptions(timeframe_metadata, scenario_key, args.demand_scope)
 
         #### Obtain relevant input file ####
         grid_ref = None
@@ -134,18 +165,20 @@ if __name__ == '__main__':
             "parallel": (int(args.n_cpu) > 1),  # Parallelized run?
             "n_cpu": int(args.n_cpu),           # cpus if parallel
             "profiles": args.profiles,
+            "demand_scope": args.demand_scope,
             "mobility_source": args.mobility_source,
             "timeseries_storage": args.timeseries_storage,
             "timeframe_mode": args.timeframe_mode,
             "timeframe_metadata": timeframe_metadata,
             "scenario_key": scenario_key,
-            "scenario_assumptions": timeframe_metadata,
+            "scenario_assumptions": assumptions,
             **profile_settings,
         }
 
         print(
             f"Running input file {inputfile} (ID {args.inputfile_id}, storage {args.storage}) "
-            f"with {settings['n_cpu']} CPUs and timeframe {args.timeframe_mode}!"
+            f"with {settings['n_cpu']} CPUs, timeframe {args.timeframe_mode}, "
+            f"and demand scope {args.demand_scope}!"
         )
         #----------------------------------------------------------------------------------------#
         #----------------------------------------------------------------------------------------#

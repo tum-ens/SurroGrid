@@ -32,6 +32,7 @@ class Grid:
 
         ### Basic grid data
         self.df_buildings, self.df_region, self.df_weather_raw = self.SF.get_input_data()
+        self._apply_demand_scope()
         if self.df_weather_raw is None:
             self.df_weather_raw = pd.DataFrame()
         if self.df_region is None or self.df_region.empty:
@@ -58,6 +59,8 @@ class Grid:
         self.timeframe_mode = self.settings.get("timeframe_mode", "full_year")
         self.timeframe_metadata = dict(self.settings.get("timeframe_metadata") or build_full_year_metadata())
         self._timeframe_slice_applied = False
+        self.settings["scenario_assumptions"] = self._scenario_assumptions()
+        self.SF.update_timeframe_metadata(self.settings["scenario_assumptions"])
 
         ### Urbs output sheets
         self.df_weather_urbs = pd.DataFrame()
@@ -69,6 +72,64 @@ class Grid:
         self.df_sto = pd.DataFrame()
         self.df_tve = pd.DataFrame()
         self.df_bsp = pd.DataFrame()
+
+
+    ############################################
+    ############## Demand Scope ################
+    ############################################
+    def _apply_demand_scope(self):
+        demand_scope = self.settings.get("demand_scope", "all")
+        if demand_scope == "all":
+            self.settings["demand_scope_stats"] = {
+                "input_buildings": int(len(self.df_buildings)),
+                "selected_buildings": int(len(self.df_buildings)),
+            }
+            return
+        if demand_scope != "residential":
+            raise ValueError(f"Unknown demand scope: {demand_scope}")
+
+        before_rows = len(self.df_buildings)
+        before_buses = self.df_buildings.get("bus", pd.Series(dtype=object)).dropna().nunique()
+        mask = self._residential_building_mask(self.df_buildings)
+        self.df_buildings = self.df_buildings.loc[mask].copy().reset_index(drop=True)
+        after_rows = len(self.df_buildings)
+        after_buses = self.df_buildings.get("bus", pd.Series(dtype=object)).dropna().nunique()
+        if self.df_buildings.empty:
+            raise ValueError("Demand scope residential removed all buildings for this grid.")
+
+        stats = {
+            "input_buildings": int(before_rows),
+            "selected_buildings": int(after_rows),
+            "input_buses": int(before_buses),
+            "selected_buses": int(after_buses),
+        }
+        self.settings["demand_scope_stats"] = stats
+        if isinstance(self.settings.get("scenario_assumptions"), dict):
+            self.settings["scenario_assumptions"].update(stats)
+        print(
+            "Residential demand scope: "
+            f"kept {after_rows}/{before_rows} buildings on {after_buses}/{before_buses} buses."
+        )
+
+    @staticmethod
+    def _residential_building_mask(df_buildings):
+        residential_types = {"AB", "MFH", "TH", "SFH"}
+        if "building_use" in df_buildings.columns:
+            return df_buildings["building_use"].astype(str).str.lower().eq("residential")
+        if "building_type" in df_buildings.columns:
+            return df_buildings["building_type"].astype(str).str.upper().isin(residential_types)
+        if "type" in df_buildings.columns:
+            return df_buildings["type"].astype(str).str.upper().isin(residential_types)
+        raise ValueError("Demand scope residential requires building_use, building_type, or type in building data.")
+
+    def _scenario_assumptions(self):
+        assumptions = dict(self.timeframe_metadata)
+        assumptions["scenario_key"] = self.settings.get("scenario_key")
+        assumptions["demand_scope"] = self.settings.get("demand_scope", "all")
+        if assumptions["demand_scope"] == "residential":
+            assumptions["demand_scope_filter"] = "building_use == Residential, with residential building-type fallback for HDF inputs"
+        assumptions.update(self.settings.get("demand_scope_stats") or {})
+        return assumptions
 
 
     ############################################
@@ -214,8 +275,8 @@ class Grid:
     def _set_timeframe_metadata(self, metadata):
         self.timeframe_metadata = dict(metadata)
         self.settings["timeframe_metadata"] = self.timeframe_metadata
-        self.settings["scenario_assumptions"] = self.timeframe_metadata
-        self.SF.update_timeframe_metadata(self.timeframe_metadata)
+        self.settings["scenario_assumptions"] = self._scenario_assumptions()
+        self.SF.update_timeframe_metadata(self.settings["scenario_assumptions"])
         print(
             "Selected timeframe "
             f"{self.timeframe_metadata['timeframe_mode']} "

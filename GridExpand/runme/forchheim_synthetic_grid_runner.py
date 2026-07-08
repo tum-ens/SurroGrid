@@ -233,6 +233,8 @@ def run_candidate(candidate: dict[str, Any], args: argparse.Namespace, status: S
                 str(args.min_buildings),
                 "--profiles",
                 "status_quo",
+                "--demand-scope",
+                "residential" if args.hh_only else "all",
                 "--timeseries-storage",
                 "temp",
                 "--n_cpu",

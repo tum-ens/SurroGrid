@@ -37,11 +37,14 @@ class SaveFile:
             assumptions = dict(self.timeframe_metadata)
             if assumptions_extra:
                 assumptions.update(assumptions_extra)
+            scenario_key = self.timeframe_metadata.get("scenario_key") or scenario_key_for_timeframe(
+                self.timeframe_metadata.get("timeframe_mode", "full_year")
+            )
             self.powerflow_run_id = self.db.create_powerflow_run(
                 self.grid_ref,
                 urbs_input_file=filename,
                 pre_only=pre_only,
-                scenario_key=scenario_key_for_timeframe(self.timeframe_metadata.get("timeframe_mode", "full_year")),
+                scenario_key=scenario_key,
                 run_name=run_name,
                 assumptions=assumptions,
             )
