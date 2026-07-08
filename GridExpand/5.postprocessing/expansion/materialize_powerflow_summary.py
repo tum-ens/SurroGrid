@@ -19,7 +19,6 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
-
 GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
 POWERFLOW_DIR = GRIDEXPAND_DIR / "4.powerflow"
 if str(GRIDEXPAND_DIR) not in sys.path:
@@ -27,7 +26,7 @@ if str(GRIDEXPAND_DIR) not in sys.path:
 if str(POWERFLOW_DIR) not in sys.path:
     sys.path.insert(0, str(POWERFLOW_DIR))
 
-from database import SurroGridDatabase, normalize_ags
+from common.database import SurroGridDatabase, normalize_ags
 from src import powerflow as pwrflw
 
 

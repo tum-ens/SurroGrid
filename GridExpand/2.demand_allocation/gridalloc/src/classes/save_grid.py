@@ -13,8 +13,8 @@ GRIDEXPAND_DIR = Path(__file__).resolve().parents[4]
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
-from database import SurroGridDatabase
-from timeframe import output_filename_for_timeframe, write_hdf_metadata
+from common.database import SurroGridDatabase
+from common.timeframe import output_filename_for_timeframe, write_hdf_metadata
 
 
 class SaveFile:

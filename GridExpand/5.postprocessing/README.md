@@ -11,21 +11,46 @@ uv sync
 
 Database connection details are read from the repository-level `.env` through `SurroGridDatabase`.
 
+## Module Layout
+
+Step 5 is split by workflow responsibility:
+
+- `powerflow.comparison_data`: load compact synthetic and real power-flow summaries, build comparison datasets, and compute similarity tables.
+- `plotting.*`: create figures from prepared data. Notebooks import the concrete plotting modules directly.
+- `audits.*`: diagnostic scripts for demand allocation and topology bottlenecks.
+- `expansion.*`: materialize expansion summaries/costs and load expansion overview tables.
+
+Import from the owning module instead of using compatibility facades. For example, use `powerflow.comparison_data` for DB loaders and `plotting.powerflow_asset_plots` for asset stress plots.
+
 ## Main Files
 
 ```text
 5.postprocessing/
   pyproject.toml
-  expansion/
+  powerflow/
+    comparison_data.py                    # DB loaders and synthetic/real comparison datasets
+  notebooks/
+    asset_powerflow_comparison.ipynb      # real/synthetic power-flow comparison notebook
     expansion_analysis.ipynb              # expansion analysis notebook
-    grid_expansion.py                     # materialize expansion costs from raw power-flow rows
+    grid_area_envelope_comparison.ipynb   # real/synthetic grid-area envelope notebook
+    timeseries_plotting.ipynb             # DB-backed time-series diagnostics notebook
+  plotting/
+    powerflow_heatmaps.py                 # HDF/DB timestep heatmaps and line-loading CLI helpers
+    powerflow_asset_plots.py              # asset cutoff, percentile, and violin plot functions
+    powerflow_voltage.py                  # voltage deviation summaries and plots
+    powerflow_transformer.py              # transformer import and stage-comparison plots
+    powerflow_io.py                       # shared Plotly export helper
+    geoplotting.py                        # envelope and geospatial plotting helpers
+  audits/
+    demand.py                             # real/synthetic annual demand diagnostics
+    topology_bottleneck.py                # critical voltage path/bottleneck audit
+    topology_whatif.py                    # read-only topology what-if checks
+  expansion/
+    grid_expansion.py                     # CLI/orchestration for expansion-cost materialization
+    overview.py                           # read-only expansion summary loaders for notebooks
     materialize_powerflow_summary.py      # derive compact summaries from stored raw rows
     schema.sql                            # expansion tables, assumptions, QGIS views
     cost_assumptions.md                   # cost-assumption notes
-  plotting/
-    powerflow_plotting.py                 # reusable power-flow plotting helpers
-    geoplotting.py                        # envelope and geospatial plotting helpers
-    asset_powerflow_comparison.ipynb      # real/synthetic power-flow comparison notebook
 ```
 
 ## Command Summary
@@ -33,7 +58,7 @@ Database connection details are read from the repository-level `.env` through `S
 Run the full AGS pipeline and store raw pre/post power-flow time series:
 
 ```bash
-uv run --project GridExpand/4.powerflow python GridExpand/ags_pipeline_runner.py \
+uv run --project GridExpand/4.powerflow python GridExpand/executables/ags_pipeline_runner.py \
   --repo-root /path/to/SurroGrid \
   --ags <AGS> \
   --profiles electricity_heat \
@@ -45,7 +70,7 @@ uv run --project GridExpand/4.powerflow python GridExpand/ags_pipeline_runner.py
 Run the pipeline but store only compact summaries, not raw time series:
 
 ```bash
-uv run --project GridExpand/4.powerflow python GridExpand/ags_pipeline_runner.py \
+uv run --project GridExpand/4.powerflow python GridExpand/executables/ags_pipeline_runner.py \
   --repo-root /path/to/SurroGrid \
   --ags <AGS> \
   --profiles electricity_heat \
@@ -57,7 +82,7 @@ uv run --project GridExpand/4.powerflow python GridExpand/ags_pipeline_runner.py
 Run a full-year all-assets scenario with TSAM typical weeks and compact post/pre power-flow summaries:
 
 ```bash
-uv run --project GridExpand/4.powerflow python GridExpand/ags_pipeline_runner.py \
+uv run --project GridExpand/4.powerflow python GridExpand/executables/ags_pipeline_runner.py \
   --repo-root . \
   --ags <AGS> \
   --profiles all \

@@ -37,7 +37,7 @@ if str(GRIDEXPAND_DIR) not in sys.path:
 if str(STEP4_DIR) not in sys.path:
     sys.path.insert(0, str(STEP4_DIR))
 
-from database import DEFAULT_SCENARIO_KEY, SurroGridDatabase
+from common.database import DEFAULT_SCENARIO_KEY, SurroGridDatabase
 import src.powerflow as pwrflw
 
 PF_ELC = 0.959

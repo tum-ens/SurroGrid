@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 
 from sqlalchemy import text
 
-from database import SurroGridDatabase
+REPO_ROOT = Path(__file__).resolve().parents[2]
+GRIDEXPAND_DIR = REPO_ROOT / "GridExpand"
+if str(GRIDEXPAND_DIR) not in sys.path:
+    sys.path.insert(0, str(GRIDEXPAND_DIR))
 
+from common.database import SurroGridDatabase
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 STEP3_DIR = REPO_ROOT / "GridExpand" / "3.urbs"
 STEP3_ARTIFACT_DIRS = (
     STEP3_DIR / "Input",

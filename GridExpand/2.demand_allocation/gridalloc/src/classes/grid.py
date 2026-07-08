@@ -11,7 +11,7 @@ import src.functions.solar as slr
 import src.functions.electricity as elc
 import src.functions.heat as heat
 import src.functions.mobility as mbl
-from timeframe import (
+from common.timeframe import (
     TIMESLICE_HOURS,
     build_full_year_metadata,
     select_timeframe_from_electricity,

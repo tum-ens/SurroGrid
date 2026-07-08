@@ -16,13 +16,11 @@ from matplotlib.colors import LinearSegmentedColormap, LogNorm, Normalize
 from scipy.spatial import ConvexHull
 from sqlalchemy import text
 
-
 GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
-from database import SurroGridDatabase
-
+from common.database import SurroGridDatabase
 
 COST_CMAP = LinearSegmentedColormap.from_list(
     "cost_green_red",

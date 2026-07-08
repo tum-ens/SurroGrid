@@ -12,6 +12,7 @@ gurobi.lic
 *.out
 *.err
 *.h5
+*.tex
 
 # Others
 Archive/

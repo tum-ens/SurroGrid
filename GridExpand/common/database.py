@@ -12,12 +12,12 @@ import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
-from timeframe import build_full_year_metadata
+from common.timeframe import build_full_year_metadata
 
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parent
+GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
 ENV_PATH = GRIDEXPAND_DIR / ".env"
-SCHEMA_SQL_PATH = GRIDEXPAND_DIR / "surrogrid_schema.sql"
+SCHEMA_SQL_PATH = Path(__file__).with_name("surrogrid_schema.sql")
 TIME_INDEX_START = "2009-01-01 00:00:00+00:00"
 DEFAULT_SCENARIO_KEY = "baseline_static"
 DEFAULT_SCENARIO_LABEL = "Baseline static assumptions"

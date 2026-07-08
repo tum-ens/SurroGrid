@@ -25,7 +25,7 @@ from typing import Any
 from sqlalchemy import text
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 GRIDEXPAND_DIR = REPO_ROOT / "GridExpand"
 DEFAULT_AGS = "9474126"
 DEFAULT_PLZ = 91301
@@ -125,7 +125,7 @@ def configure_imports() -> None:
 
 def existing_summary_filenames(plz: int, run_name: str) -> set[str]:
     configure_imports()
-    from database import SurroGridDatabase
+    from common.database import SurroGridDatabase
 
     db = SurroGridDatabase()
     db.ensure_schema()
@@ -311,8 +311,8 @@ def run_candidate(candidate: dict[str, Any], args: argparse.Namespace, status: S
 def main() -> int:
     args = parse_args()
     configure_imports()
-    from ags_pipeline_runner import get_candidates
-    from database import SurroGridDatabase
+    from runme.ags_pipeline_runner import get_candidates
+    from common.database import SurroGridDatabase
 
     run_dir = args.run_dir
     if run_dir is None:

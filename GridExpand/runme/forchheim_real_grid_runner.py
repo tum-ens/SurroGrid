@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 STEP4_DIR = REPO_ROOT / "GridExpand" / "4.powerflow"
 DEFAULT_RUN_NAME = "real_hybrid"
 

@@ -19,12 +19,12 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
 import pandapower as pp
+import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import text
 
-POSTPROCESSING_DIR = Path(__file__).resolve().parent
+POSTPROCESSING_DIR = Path(__file__).resolve().parents[1]
 GRIDEXPAND_DIR = POSTPROCESSING_DIR.parents[0]
 REPO_ROOT = GRIDEXPAND_DIR.parents[0]
 STEP4_DIR = GRIDEXPAND_DIR / "4.powerflow"
@@ -33,7 +33,7 @@ ENV_PATH = GRIDEXPAND_DIR / ".env"
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
-from database import SurroGridDatabase
+from common.database import SurroGridDatabase
 
 
 def _load_real_runner():

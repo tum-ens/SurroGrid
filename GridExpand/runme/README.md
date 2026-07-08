@@ -79,13 +79,27 @@ GridExpand/
     logs/                          # slurm logs
     src/                           # demand reconstruction + pf engine
 
+  common/                          # Shared DB/schema/timeframe helpers used across steps
+    database.py
+    timeframe.py
+    surrogrid_schema.sql
+
+  executables/                     # Runnable orchestration and maintenance CLIs
+    ags_pipeline_runner.py
+    forchheim_real_grid_runner.py
+    forchheim_synthetic_grid_runner.py
+    delete_scenario_data.py
+
   5.postprocessing/                # Step 5: result analysis + plotting
     pyproject.toml                 # uv environment for plotting notebooks
-    plotting/
-      plotting_notebook.ipynb
-      thesis_plots.ipynb
-      powerflow_plotting.py
+    notebooks/                     # analysis notebooks
+    powerflow/                     # comparison-data preparation
+    plotting/                      # figure helpers
+    audits/                        # demand/topology diagnostics
+    expansion/                     # expansion materialization and summaries
 ```
+
+Shared helpers live in `common/`; runnable orchestration and maintenance scripts live in `executables/`.
 
 Each step folder has its own `README.md` with more detail:
 

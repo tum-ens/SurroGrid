@@ -28,7 +28,11 @@ import h5py
 import pandas as pd
 from sqlalchemy import text
 
-from timeframe import (
+GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
+if str(GRIDEXPAND_DIR) not in sys.path:
+    sys.path.insert(0, str(GRIDEXPAND_DIR))
+
+from common.timeframe import (
     TIMEFRAME_MODES,
     build_initial_metadata,
     horizon_hours_from_hdf,
@@ -215,7 +219,7 @@ def normalize_ags(value: str) -> int:
 
 def get_candidates(repo_root: Path, ags: str, min_buildings: int) -> list[dict[str, object]]:
     configure_imports(repo_root)
-    from database import SurroGridDatabase
+    from common.database import SurroGridDatabase
 
     db = SurroGridDatabase()
     query = text(
@@ -517,7 +521,7 @@ def validate_powerflow_db(
     scenario_path = repo_root / "GridExpand" / "4.powerflow" / "Input" / scenario_filename
     expected_horizon = horizon_hours_from_hdf(scenario_path)
     expected_max_t = expected_horizon - 1
-    from database import SurroGridDatabase
+    from common.database import SurroGridDatabase
 
     db = SurroGridDatabase()
     with db.engine.connect() as conn:
