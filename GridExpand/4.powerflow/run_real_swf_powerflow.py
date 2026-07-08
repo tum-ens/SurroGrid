@@ -42,6 +42,14 @@ import src.powerflow as pwrflw
 
 PF_ELC = 0.959
 RUN_NAME = "baseline_real"
+ANNUAL_DEMAND_MODE_SYNTHETIC = "synthetic"
+ANNUAL_DEMAND_MODE_MEASURED = "measured"
+ANNUAL_DEMAND_MODE_CHOICES = (ANNUAL_DEMAND_MODE_SYNTHETIC, ANNUAL_DEMAND_MODE_MEASURED)
+MEASURED_PROFILE_SELECTION_CLOSEST = "closest"
+MEASURED_PROFILE_SELECTION_RANDOM_BAND = "random_band"
+MEASURED_PROFILE_SELECTION_CHOICES = (MEASURED_PROFILE_SELECTION_CLOSEST, MEASURED_PROFILE_SELECTION_RANDOM_BAND)
+DEFAULT_MEASURED_PROFILE_BAND_PCT = 10.0
+DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES = 10
 MIN_HH_ANNUAL_DEMAND_KWH = 500.0
 ASSUMPTION_TEXT = (
     "Real SWF load rows are filtered to active low-voltage household loads "
@@ -160,8 +168,8 @@ def _household_load_rows(net: pp.pandapowerNet, allowed_buses: set[int] | None =
     type_mask = load["type"].astype(str).str.strip().eq("HH")
     name_mask = load["name"].astype(str).str.contains(r"NS_(?:Er)?Last", case=False, regex=True, na=False)
     load = load[type_mask & name_mask].copy()
-    annual_demand_kwh = _parse_annual_demand_kwh(load)
-    load = load[annual_demand_kwh.isna() | (annual_demand_kwh >= MIN_HH_ANNUAL_DEMAND_KWH)].copy()
+    load["annual_demand_kwh"] = _parse_annual_demand_kwh(load)
+    load = load[load["annual_demand_kwh"].isna() | (load["annual_demand_kwh"] >= MIN_HH_ANNUAL_DEMAND_KWH)].copy()
     if allowed_buses is not None:
         allowed_buses = {int(bus) for bus in allowed_buses}
         load = load[load["bus"].astype(int).isin(allowed_buses)].copy()
@@ -179,15 +187,157 @@ def _supplied_buses(grid: pp.pandapowerNet) -> set[int]:
     return {int(bus) for bus in grid.bus.index}.difference(unsupplied)
 
 
+def _sum_demand_list(value: Any) -> float:
+    if isinstance(value, (list, tuple, np.ndarray, pd.Series)):
+        values = pd.to_numeric(pd.Series(list(value)), errors="coerce")
+        return float(values.sum())
+    if value is None or pd.isna(value):
+        return float("nan")
+    return float(value)
+
+
+def _apply_measured_annual_demands(pseudo_buildings: pd.DataFrame) -> pd.Series:
+    measured = pd.to_numeric(pseudo_buildings["swf_annual_demand_kwh"], errors="coerce")
+    has_measured = measured.notna()
+    pseudo_buildings.loc[has_measured, "demand_tot_list"] = measured.loc[has_measured].map(lambda value: [float(value)])
+    return has_measured
+
+
+def _select_residential_profile(
+    lps_total_demands: pd.DataFrame,
+    demand: float,
+    rng: np.random.Generator,
+    measured_profile_selection: str,
+    measured_profile_band_pct: float,
+    measured_profile_min_candidates: int,
+) -> dict[str, Any]:
+    profile_kwh = pd.to_numeric(lps_total_demands["kWh"], errors="coerce")
+    distances = (profile_kwh - float(demand)).abs().dropna()
+    if distances.empty:
+        raise ValueError("No residential electricity load profiles with valid annual kWh values are available.")
+
+    if measured_profile_selection == MEASURED_PROFILE_SELECTION_CLOSEST:
+        candidate_index = pd.Index([distances.idxmin()])
+        method = "closest"
+    elif measured_profile_selection == MEASURED_PROFILE_SELECTION_RANDOM_BAND:
+        band_abs = abs(float(demand)) * float(measured_profile_band_pct) / 100.0
+        candidate_index = distances[distances <= band_abs].index
+        if len(candidate_index) < int(measured_profile_min_candidates):
+            n_candidates = min(int(measured_profile_min_candidates), len(distances))
+            candidate_index = distances.nsmallest(n_candidates).index
+            method = "nearest_fallback"
+        else:
+            method = "band"
+    else:
+        raise ValueError(
+            f"measured_profile_selection must be one of {MEASURED_PROFILE_SELECTION_CHOICES}, "
+            f"got {measured_profile_selection!r}."
+        )
+
+    chosen_index = rng.choice(candidate_index.to_numpy())
+    return {
+        "chosen_index": chosen_index,
+        "chosen_profile_device": lps_total_demands.loc[chosen_index, "devicenumber"],
+        "chosen_profile_kwh": float(profile_kwh.loc[chosen_index]),
+        "candidate_count": int(len(candidate_index)),
+        "candidate_method": method,
+        "candidate_min_kwh": float(profile_kwh.loc[candidate_index].min()),
+        "candidate_max_kwh": float(profile_kwh.loc[candidate_index].max()),
+    }
+
+
+def _get_elec_demand_with_profile_selection(
+    pseudo_buildings: pd.DataFrame,
+    electricity_module,
+    seed: int,
+    measured_profile_selection: str,
+    measured_profile_band_pct: float,
+    measured_profile_min_candidates: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    df_normalized_lps_res = pd.read_hdf(electricity_module.config.ELEC_LPS_PATH, key="df_normalized_scaled")
+    lps_res_total_demand = pd.read_hdf(electricity_module.config.ELEC_LPS_PATH, key="df_sums")
+    rng = np.random.default_rng(int(seed) + 1_000_003)
+
+    data_dict_res = {}
+    selection_rows: list[dict[str, Any]] = []
+    for _, row in pseudo_buildings.iterrows():
+        if row["building_use"] != "Residential":
+            continue
+        profile_id = int(row["bus"])
+        ts_list = []
+        for sequence, demand in enumerate(row["demand_tot_list"]):
+            selected = _select_residential_profile(
+                lps_res_total_demand,
+                float(demand),
+                rng,
+                measured_profile_selection,
+                measured_profile_band_pct,
+                measured_profile_min_candidates,
+            )
+            chosen_device = selected["chosen_profile_device"]
+            ts_list.append(df_normalized_lps_res[chosen_device] * float(demand))
+            selection_rows.append(
+                {
+                    "profile_id": profile_id,
+                    "profile_sequence": int(sequence),
+                    "selected_profile_annual_demand_kwh": float(demand),
+                    **{key: value for key, value in selected.items() if key != "chosen_index"},
+                }
+            )
+        if ts_list:
+            data_dict_res[profile_id] = pd.concat(ts_list, axis=1).sum(axis=1)
+
+    df_elec = pd.DataFrame(data_dict_res).reset_index(drop=True)
+    df_elec.columns = pd.MultiIndex.from_product([df_elec.columns, ["electricity"]])
+    return df_elec, pd.DataFrame(selection_rows)
+
+
+def _profile_selection_summary(demand_audit: pd.DataFrame) -> dict[str, Any]:
+    if "chosen_profile_device" not in demand_audit.columns:
+        return {}
+    chosen = demand_audit["chosen_profile_device"].dropna().astype(str)
+    if chosen.empty:
+        return {}
+    counts = chosen.value_counts()
+    method_counts = demand_audit.get("candidate_method", pd.Series(dtype=object)).dropna().astype(str).value_counts()
+    return {
+        "measured_profile_unique_devices": int(counts.size),
+        "measured_profile_largest_reuse_count": int(counts.iloc[0]),
+        "measured_profile_largest_reuse_share": float(counts.iloc[0] / len(chosen)),
+        "measured_profile_top5_reuse_share": float(counts.head(5).sum() / len(chosen)),
+        "measured_profile_band_candidate_rows": int(method_counts.get("band", 0)),
+        "measured_profile_nearest_fallback_rows": int(method_counts.get("nearest_fallback", 0)),
+    }
+
+
 def _build_real_electric_demand(
     net: pp.pandapowerNet,
     seed: int,
     load_rows: pd.DataFrame | None = None,
-) -> pd.DataFrame:
+    annual_demand_mode: str = ANNUAL_DEMAND_MODE_SYNTHETIC,
+    measured_profile_selection: str = MEASURED_PROFILE_SELECTION_RANDOM_BAND,
+    measured_profile_band_pct: float = DEFAULT_MEASURED_PROFILE_BAND_PCT,
+    measured_profile_min_candidates: int = DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES,
+    return_audit: bool = False,
+) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
+    if annual_demand_mode not in ANNUAL_DEMAND_MODE_CHOICES:
+        raise ValueError(f"annual_demand_mode must be one of {ANNUAL_DEMAND_MODE_CHOICES}, got {annual_demand_mode!r}.")
+    if measured_profile_selection not in MEASURED_PROFILE_SELECTION_CHOICES:
+        raise ValueError(
+            f"measured_profile_selection must be one of {MEASURED_PROFILE_SELECTION_CHOICES}, "
+            f"got {measured_profile_selection!r}."
+        )
+    if measured_profile_band_pct <= 0:
+        raise ValueError("measured_profile_band_pct must be greater than zero.")
+    if measured_profile_min_candidates <= 0:
+        raise ValueError("measured_profile_min_candidates must be greater than zero.")
+
     electricity_module = _load_electricity_module()
     load = _household_load_rows(net) if load_rows is None else load_rows.copy()
     if load.empty:
         raise ValueError("No supplied household load rows available for profile generation.")
+    if "annual_demand_kwh" not in load.columns:
+        load["annual_demand_kwh"] = _parse_annual_demand_kwh(load)
 
     rng = np.random.default_rng(seed)
     profile_ids = np.arange(len(load), dtype=int)
@@ -196,11 +346,13 @@ def _build_real_electric_demand(
         {
             "bus": profile_ids,
             "real_bus": real_buses,
+            "source_load_index": load.index.to_numpy(),
             "households": 1,
             "occupants": _sample_household_occupants(electricity_module, len(load), rng),
             "building_use": "Residential",
             "building_type": "single_family_house",
             "floor_area": np.nan,
+            "swf_annual_demand_kwh": pd.to_numeric(load["annual_demand_kwh"], errors="coerce").to_numpy(),
         }
     )
 
@@ -214,8 +366,42 @@ def _build_real_electric_demand(
         np.random.set_state(np_random_state)
         random.setstate(py_random_state)
 
-    _, df_elec = electricity_module.get_elec_demand(pseudo_buildings)
+    synthetic_profile_annual_kwh = pseudo_buildings["demand_tot_list"].map(_sum_demand_list)
+    measured_mask = pd.Series(False, index=pseudo_buildings.index)
+    if annual_demand_mode == ANNUAL_DEMAND_MODE_MEASURED:
+        measured_mask = _apply_measured_annual_demands(pseudo_buildings)
+
+    selection_audit = pd.DataFrame()
+    if annual_demand_mode == ANNUAL_DEMAND_MODE_MEASURED:
+        df_elec, selection_audit = _get_elec_demand_with_profile_selection(
+            pseudo_buildings,
+            electricity_module,
+            seed,
+            measured_profile_selection,
+            measured_profile_band_pct,
+            measured_profile_min_candidates,
+        )
+    else:
+        _, df_elec = electricity_module.get_elec_demand(pseudo_buildings)
     df_elec = _add_output_data_daylight_saving_shift(df_elec)
+
+    generated_energy = df_elec.loc[:, df_elec.columns.get_level_values(1) == "electricity"].sum(axis=0)
+    generated_energy_by_profile = {int(profile_id): float(value) for (profile_id, _), value in generated_energy.items()}
+    audit = pd.DataFrame(
+        {
+            "profile_id": profile_ids,
+            "real_bus": real_buses,
+            "source_load_index": pseudo_buildings["source_load_index"].to_numpy(),
+            "occupants": pseudo_buildings["occupants"].to_numpy(),
+            "swf_annual_demand_kwh": pseudo_buildings["swf_annual_demand_kwh"].to_numpy(),
+            "synthetic_sampled_annual_kwh": synthetic_profile_annual_kwh.to_numpy(),
+            "profile_annual_demand_kwh": pseudo_buildings["demand_tot_list"].map(_sum_demand_list).to_numpy(),
+            "generated_profile_energy_kwh": [generated_energy_by_profile.get(int(profile_id), float("nan")) for profile_id in profile_ids],
+            "annual_demand_source": np.where(measured_mask.to_numpy(), "swf_annual_kwh", "synthetic_sample"),
+        }
+    )
+    if not selection_audit.empty:
+        audit = audit.merge(selection_audit, on="profile_id", how="left")
 
     profile_to_bus = dict(zip(profile_ids, real_buses, strict=True))
     df_elec.columns = pd.MultiIndex.from_tuples(
@@ -230,7 +416,10 @@ def _build_real_electric_demand(
         [(bus, "electricity-reactive") for bus, _ in df_reactive.columns],
         names=["bus", "component"],
     )
-    return pd.concat([df_elec, df_reactive], axis=1).sort_index(axis=1, level=[0, 1])
+    demand = pd.concat([df_elec, df_reactive], axis=1).sort_index(axis=1, level=[0, 1])
+    if return_audit:
+        return demand, audit
+    return demand
 
 
 def _prepare_real_grid(
@@ -334,7 +523,16 @@ def _optional_int(value):
     return int(value)
 
 
-def run_one(row: dict[str, Any], run_name: str, scenario_key: str, seed: int) -> dict[str, Any]:
+def run_one(
+    row: dict[str, Any],
+    run_name: str,
+    scenario_key: str,
+    seed: int,
+    annual_demand_mode: str = ANNUAL_DEMAND_MODE_SYNTHETIC,
+    measured_profile_selection: str = MEASURED_PROFILE_SELECTION_RANDOM_BAND,
+    measured_profile_band_pct: float = DEFAULT_MEASURED_PROFILE_BAND_PCT,
+    measured_profile_min_candidates: int = DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES,
+) -> dict[str, Any]:
     start = time.perf_counter()
     source_file = Path(row["source_file"])
     net = pp.from_excel(source_file)
@@ -347,7 +545,29 @@ def run_one(row: dict[str, Any], run_name: str, scenario_key: str, seed: int) ->
         selected_household_loads,
         load_scope,
     ) = _prepare_real_grid(net)
-    df_demand = _build_real_electric_demand(net, seed=seed, load_rows=selected_household_loads)
+    df_demand, demand_audit = _build_real_electric_demand(
+        net,
+        seed=seed,
+        load_rows=selected_household_loads,
+        annual_demand_mode=annual_demand_mode,
+        measured_profile_selection=measured_profile_selection,
+        measured_profile_band_pct=measured_profile_band_pct,
+        measured_profile_min_candidates=measured_profile_min_candidates,
+        return_audit=True,
+    )
+    profile_selection_summary = _profile_selection_summary(demand_audit)
+    demand_audit_totals = {
+        "annual_demand_mode": annual_demand_mode,
+        "swf_measured_annual_kwh": float(pd.to_numeric(demand_audit["swf_annual_demand_kwh"], errors="coerce").sum()),
+        "synthetic_sampled_annual_kwh": float(pd.to_numeric(demand_audit["synthetic_sampled_annual_kwh"], errors="coerce").sum()),
+        "profile_annual_demand_kwh": float(pd.to_numeric(demand_audit["profile_annual_demand_kwh"], errors="coerce").sum()),
+        "generated_profile_energy_kwh": float(pd.to_numeric(demand_audit["generated_profile_energy_kwh"], errors="coerce").sum()),
+        "swf_annual_demand_rows": int(pd.to_numeric(demand_audit["swf_annual_demand_kwh"], errors="coerce").notna().sum()),
+        "measured_profile_selection": measured_profile_selection,
+        "measured_profile_band_pct": float(measured_profile_band_pct),
+        "measured_profile_min_candidates": int(measured_profile_min_candidates),
+        **profile_selection_summary,
+    }
     summary = pwrflw.pf_summary(
         grid,
         df_demand,
@@ -370,6 +590,7 @@ def run_one(row: dict[str, Any], run_name: str, scenario_key: str, seed: int) ->
             "timeframe_mode": "full_year",
             "demand_allocation": ASSUMPTION_TEXT,
             "profile_seed": int(seed),
+            **demand_audit_totals,
             **load_scope,
             "selected_household_load_rows": int(len(selected_household_loads)),
             "selected_household_load_buses": int(len(selected_household_loads["bus"].dropna().astype(int).drop_duplicates())),
@@ -392,6 +613,7 @@ def run_one(row: dict[str, Any], run_name: str, scenario_key: str, seed: int) ->
         "n_voltage_buses": grid_summary["n_voltage_buses"],
         "n_cables": grid_summary["n_cables"],
         **load_scope,
+        **demand_audit_totals,
         "selected_household_load_rows": int(len(selected_household_loads)),
         "selected_household_load_buses": int(len(selected_household_loads["bus"].dropna().astype(int).drop_duplicates())),
         "backbone_voltage_buses": int(len(voltage_buses)),
@@ -410,6 +632,38 @@ def main() -> None:
     parser.add_argument("--run-name", default=RUN_NAME)
     parser.add_argument("--scenario-key", default=DEFAULT_SCENARIO_KEY)
     parser.add_argument("--seed", type=int, default=91301)
+    parser.add_argument(
+        "--annual-demand-mode",
+        choices=ANNUAL_DEMAND_MODE_CHOICES,
+        default=ANNUAL_DEMAND_MODE_SYNTHETIC,
+        help=(
+            "How to set annual HH profile energy. 'synthetic' samples annual demand from the synthetic "
+            "household-size distribution. 'measured' uses parsed SWF 2022 kWh values where available "
+            "and falls back to the synthetic sample for rows without annual metadata."
+        ),
+    )
+    parser.add_argument(
+        "--measured-profile-selection",
+        choices=MEASURED_PROFILE_SELECTION_CHOICES,
+        default=MEASURED_PROFILE_SELECTION_RANDOM_BAND,
+        help=(
+            "Profile-shape selection for --annual-demand-mode measured. 'random_band' randomly samples "
+            "profiles within the configured annual-kWh band and falls back to nearest candidates; "
+            "'closest' reproduces deterministic nearest-profile selection."
+        ),
+    )
+    parser.add_argument(
+        "--measured-profile-band-pct",
+        type=float,
+        default=DEFAULT_MEASURED_PROFILE_BAND_PCT,
+        help="Relative annual-kWh band for random measured profile selection, in percent.",
+    )
+    parser.add_argument(
+        "--measured-profile-min-candidates",
+        type=int,
+        default=DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES,
+        help="Minimum candidate profiles before falling back to nearest measured profiles.",
+    )
     parser.add_argument("--skip-existing", action="store_true", help="Skip grids that already have a compact real summary for this run/stage.")
     args = parser.parse_args()
 
@@ -449,7 +703,16 @@ def main() -> None:
         for i, row in enumerate(rows):
             print(f"[{i + 1}/{len(rows)}] {row['lv_id']} {row['source_file']}", flush=True)
             try:
-                result = run_one(row, args.run_name, args.scenario_key, args.seed + i)
+                result = run_one(
+                    row,
+                    args.run_name,
+                    args.scenario_key,
+                    args.seed + i,
+                    args.annual_demand_mode,
+                    args.measured_profile_selection,
+                    args.measured_profile_band_pct,
+                    args.measured_profile_min_candidates,
+                )
             except Exception as exc:
                 result = {
                     "lv_id": row["lv_id"],
@@ -472,7 +735,17 @@ def main() -> None:
     else:
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
             futures = {
-                pool.submit(run_one, row, args.run_name, args.scenario_key, args.seed + i): row
+                pool.submit(
+                    run_one,
+                    row,
+                    args.run_name,
+                    args.scenario_key,
+                    args.seed + i,
+                    args.annual_demand_mode,
+                    args.measured_profile_selection,
+                    args.measured_profile_band_pct,
+                    args.measured_profile_min_candidates,
+                ): row
                 for i, row in enumerate(rows)
             }
             for done, future in enumerate(as_completed(futures), start=1):

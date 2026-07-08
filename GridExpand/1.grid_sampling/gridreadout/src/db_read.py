@@ -341,10 +341,13 @@ class DataBase:
         df_buildings = df_buildings[cols]
         df_buildings = df_buildings.sort_values(by='bus').reset_index(drop=True)
 
-        if "occupants" in df_buildings.columns:
-            fallback_occ = df_buildings["households"].fillna(1)
+        if {"occupants", "households", "building_use"}.issubset(df_buildings.columns):
+            residential_mask = df_buildings["building_use"].eq("Residential")
+            fallback_occ = df_buildings.loc[residential_mask, "households"].fillna(1)
             fallback_occ = fallback_occ.clip(lower=1) * 2
-            df_buildings["occupants"] = df_buildings["occupants"].fillna(fallback_occ)
+            df_buildings.loc[residential_mask, "occupants"] = (
+                df_buildings.loc[residential_mask, "occupants"].fillna(fallback_occ)
+            )
 
 
         ### Read out location from string

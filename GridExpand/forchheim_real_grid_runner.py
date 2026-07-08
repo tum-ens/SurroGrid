@@ -21,6 +21,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--run-name", default=DEFAULT_RUN_NAME)
     parser.add_argument("--seed", type=int, default=91301)
+    parser.add_argument(
+        "--annual-demand-mode",
+        choices=["synthetic", "measured"],
+        default="synthetic",
+        help="Use synthetic sampled annual HH demand or parsed SWF annual kWh values where available.",
+    )
+    parser.add_argument(
+        "--measured-profile-selection",
+        choices=["closest", "random_band"],
+        default="random_band",
+        help="Profile-shape selection used only with --annual-demand-mode measured.",
+    )
+    parser.add_argument("--measured-profile-band-pct", type=float, default=10.0)
+    parser.add_argument("--measured-profile-min-candidates", type=int, default=10)
     parser.add_argument("--skip-existing", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--lv-id", default=None, help="Optional single LV id for a pilot run, e.g. 28 or LV_028.")
     parser.add_argument("--limit", type=int, default=None)
@@ -42,6 +56,14 @@ def main() -> int:
         args.run_name,
         "--seed",
         str(args.seed),
+        "--annual-demand-mode",
+        args.annual_demand_mode,
+        "--measured-profile-selection",
+        args.measured_profile_selection,
+        "--measured-profile-band-pct",
+        str(args.measured_profile_band_pct),
+        "--measured-profile-min-candidates",
+        str(args.measured_profile_min_candidates),
     ]
     if args.skip_existing:
         cmd.append("--skip-existing")

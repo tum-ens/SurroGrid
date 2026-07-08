@@ -112,6 +112,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-index", type=int)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--no-dynamic-step3", action="store_true")
+    parser.add_argument(
+        "--no-materialize-expansion",
+        action="store_true",
+        help="Do not materialize expansion_analysis_run rows after summary power-flow runs.",
+    )
+    parser.add_argument(
+        "--expansion-analysis-prefix",
+        help=(
+            "Optional prefix for automatic expansion analysis keys. "
+            "Defaults to '<timeframe_mode>_<profiles>[_tsam]'."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -315,6 +327,97 @@ def run_command(
     )
     if completed.returncode != 0:
         raise RuntimeError(f"{stage} failed with return code {completed.returncode}")
+
+
+def run_batch_command(
+    *,
+    cmd: list[str],
+    cwd: Path,
+    log_path: Path,
+    status: StatusLog,
+    stage: str,
+    env_extra: dict[str, str] | None = None,
+) -> None:
+    status.event(stage=stage, event="start", cmd=cmd, env_extra=env_extra or {})
+    started = time.monotonic()
+    with log_path.open("a", encoding="utf-8") as log_handle:
+        log_handle.write(f"\n[{utc_now()}] START {stage}: {' '.join(cmd)}\n")
+        if env_extra:
+            log_handle.write(f"[{utc_now()}] ENV {env_extra}\n")
+        log_handle.flush()
+        completed = subprocess.run(
+            cmd,
+            cwd=cwd,
+            env=command_env(env_extra),
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
+        seconds = round(time.monotonic() - started, 1)
+        log_handle.write(f"[{utc_now()}] END {stage}: rc={completed.returncode} seconds={seconds}\n")
+    status.event(stage=stage, event="finish", returncode=completed.returncode, seconds=seconds)
+    if completed.returncode != 0:
+        raise RuntimeError(f"{stage} failed with return code {completed.returncode}")
+
+
+def expansion_analysis_prefix(args: argparse.Namespace) -> str:
+    if args.expansion_analysis_prefix:
+        return args.expansion_analysis_prefix
+    suffix = "_tsam" if args.tsam else ""
+    return f"{args.timeframe_mode}_{args.profiles}{suffix}"
+
+
+def materialize_expansion_analyses(
+    *,
+    repo_root: Path,
+    args: argparse.Namespace,
+    status: StatusLog,
+) -> list[dict[str, str]]:
+    if args.no_materialize_expansion or args.powerflow_output not in {"summary", "both"}:
+        return []
+
+    summary_pre_only = args.profiles == "status_quo"
+    stages = ("pre",) if summary_pre_only else ("pre", "post")
+    summary_run_name = f"{scenario_key_for_timeframe(args.timeframe_mode)}_{args.profiles}_summary_powerflow"
+    prefix = expansion_analysis_prefix(args)
+    postprocessing_dir = repo_root / "GridExpand" / "5.postprocessing"
+    log_path = args.run_dir / "expansion_materialization.log"
+    materialized = []
+
+    for stage in stages:
+        analysis_key = f"{prefix}_{stage}"
+        cmd = [
+            "uv",
+            "run",
+            "python",
+            "-m",
+            "expansion.grid_expansion",
+            "--run-name",
+            summary_run_name,
+            "--stage",
+            stage,
+            "--ags",
+            str(args.ags),
+            "--analysis-key",
+            analysis_key,
+            "--note",
+            (
+                f"Automatically materialized by ags_pipeline_runner from {summary_run_name} "
+                f"summary stage={stage}."
+            ),
+            "--replace",
+        ]
+        run_batch_command(
+            cmd=cmd,
+            cwd=postprocessing_dir,
+            log_path=log_path,
+            status=status,
+            stage=f"expansion_materialize_{stage}",
+        )
+        materialized.append({"stage": stage, "analysis_key": analysis_key})
+
+    return materialized
 
 
 def hdf_column_count(path: Path, key: str) -> int:
@@ -815,6 +918,8 @@ def main() -> int:
         step3_cluster_concurrency=args.step3_cluster_concurrency,
         step4_cpus=args.step4_cpus,
         powerflow_output=args.powerflow_output,
+        materialize_expansion=not args.no_materialize_expansion and args.powerflow_output in {"summary", "both"},
+        expansion_analysis_prefix=expansion_analysis_prefix(args),
         run_dir=str(run_dir),
         resume=args.resume,
         rerun_failed=args.rerun_failed,
@@ -907,13 +1012,26 @@ def main() -> int:
                 failures.append(result)
                 status.event(event="candidate_failed_recorded", **result)
 
+    materialized_expansion = []
+    expansion_failure = None
+    try:
+        materialized_expansion = materialize_expansion_analyses(repo_root=repo_root, args=args, status=status)
+    except Exception as exc:
+        expansion_failure = str(exc)
+        status.event(event="expansion_materialization_failed", message=expansion_failure)
+
     total_seconds = round(time.monotonic() - started_wall, 1)
+    batch_status = "done" if not failures else "completed_with_failures"
+    if expansion_failure and batch_status == "done":
+        batch_status = "completed_with_expansion_failure"
     summary = {
-        "status": "done" if not failures else "completed_with_failures",
+        "status": batch_status,
         "candidate_count": len(candidates),
         "completed_count": len(completed),
         "failure_count": len(failures),
         "failures": failures,
+        "materialized_expansion": materialized_expansion,
+        "expansion_failure": expansion_failure,
         "total_seconds": total_seconds,
         "finished_at": utc_now(),
     }

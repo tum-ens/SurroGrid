@@ -52,6 +52,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step4-cpus", type=int, default=1)
     parser.add_argument("--run-name", default=DEFAULT_RUN_NAME)
     parser.add_argument(
+        "--hh-annual-demand-scale",
+        type=float,
+        default=1.0,
+        help="Optional aggregate multiplier passed to Step 4 HH-only demand scaling.",
+    )
+    parser.add_argument(
         "--hh-only",
         action="store_true",
         help="Run Step 4 with synthetic residential/HH demand only.",
@@ -263,6 +269,8 @@ def run_candidate(candidate: dict[str, Any], args: argparse.Namespace, status: S
         ]
         if args.hh_only:
             step4_cmd.append("--hh-only")
+        if float(args.hh_annual_demand_scale) != 1.0:
+            step4_cmd.extend(["--hh-annual-demand-scale", str(args.hh_annual_demand_scale)])
         run_command(
             cmd=step4_cmd,
             cwd=step4_dir,
@@ -341,6 +349,7 @@ def main() -> int:
         step2_cpus=args.step2_cpus,
         step4_cpus=args.step4_cpus,
         hh_only=args.hh_only,
+        hh_annual_demand_scale=args.hh_annual_demand_scale,
         run_name=args.run_name,
         run_dir=str(run_dir),
     )

@@ -90,6 +90,31 @@ def _filter_grid_loads_to_buses(grid, buses: set[int]):
     )
     return grid
 
+def _scale_hh_annual_demand(df, scale: float, label: str):
+    if df is None:
+        return None
+    scale = float(scale)
+    if scale <= 0:
+        raise ValueError("--hh-annual-demand-scale must be greater than zero.")
+    if scale == 1.0:
+        return df
+    if getattr(df.columns, "nlevels", 1) < 2:
+        raise ValueError(f"Cannot scale {label}: expected MultiIndex columns (bus, component).")
+    scaled = df.copy()
+    component_level = scaled.columns.get_level_values(1)
+    mask = component_level.isin(["electricity", "electricity-reactive"])
+    if not mask.any():
+        raise ValueError(f"Cannot scale {label}: no electricity or electricity-reactive columns found.")
+    before_kwh = float(scaled.loc[:, component_level == "electricity"].sum().sum())
+    scaled.loc[:, mask] = scaled.loc[:, mask] * scale
+    after_kwh = float(scaled.loc[:, component_level == "electricity"].sum().sum())
+    print(
+        f"HH annual demand scaling for {label}: factor={scale:.6g}, "
+        f"active energy {before_kwh:.1f} -> {after_kwh:.1f} kWh.",
+        flush=True,
+    )
+    return scaled
+
 if __name__ == "__main__":
     ##### Read args + Obtain relevant input_files #####:
     parser = argparse.ArgumentParser(description="Low voltage grid DER allocation.")
@@ -128,11 +153,24 @@ if __name__ == "__main__":
             "residential building_use buses from surrogrid.grid_building_bus."
         ),
     )
+    parser.add_argument(
+        "--hh-annual-demand-scale",
+        type=float,
+        default=1.0,
+        help=(
+            "Optional multiplier for HH-only pre-expansion electricity and reactive demand. "
+            "This is intended for aggregate SWF annual-demand sensitivity checks and requires --hh-only --pre-only."
+        ),
+    )
     args = parser.parse_args()
     if args.summary_only and args.storage != "db":
         parser.error("--summary-only requires --storage db.")
     if args.hh_only and args.storage != "db":
         parser.error("--hh-only requires --storage db.")
+    if args.hh_annual_demand_scale != 1.0 and not args.hh_only:
+        parser.error("--hh-annual-demand-scale requires --hh-only.")
+    if args.hh_annual_demand_scale != 1.0 and not args.pre_only:
+        parser.error("--hh-annual-demand-scale is only supported for --pre-only HH demand runs.")
 
     # list all .h5 files in your directory
     all_entries = os.listdir("Input/")
@@ -163,6 +201,7 @@ if __name__ == "__main__":
         assumptions_extra = {
             "demand_scope": "synthetic_hh_only",
             "hh_only_filter": "grid_building_bus.building_use == Residential",
+            "hh_annual_demand_scale": float(args.hh_annual_demand_scale),
         }
 
     # Save file handler
@@ -187,6 +226,9 @@ if __name__ == "__main__":
     if residential_buses is not None:
         df_pre_demand = _filter_demand_to_buses(df_pre_demand, residential_buses, "pre")
         df_post_demand = _filter_demand_to_buses(df_post_demand, residential_buses, "post")
+
+    if args.hh_annual_demand_scale != 1.0:
+        df_pre_demand = _scale_hh_annual_demand(df_pre_demand, args.hh_annual_demand_scale, "pre")
 
     # Save to be retrieved later by ML model unless this run is intentionally summary-only.
     if not args.summary_only:
