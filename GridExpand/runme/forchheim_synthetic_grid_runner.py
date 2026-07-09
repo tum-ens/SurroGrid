@@ -66,6 +66,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--rerun-existing", action="store_true", help="Recompute grids that already have compact summaries.")
     parser.add_argument("--run-dir", type=Path)
+    parser.add_argument("--max-step2-retries", type=int, default=3)
     parser.add_argument("--max-step4-retries", type=int, default=3)
     parser.add_argument("--retry-delay", type=float, default=10.0)
     return parser.parse_args()
@@ -245,6 +246,8 @@ def run_candidate(candidate: dict[str, Any], args: argparse.Namespace, status: S
             stage=current_stage,
             status=status,
             candidate_index=candidate_index,
+            max_retries=max(1, int(args.max_step2_retries)),
+            retry_delay=max(0.0, float(args.retry_delay)),
         )
 
         source = step2_dir / "results" / bridge_filename

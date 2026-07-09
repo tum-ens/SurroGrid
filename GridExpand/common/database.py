@@ -61,10 +61,6 @@ class SurroGridDatabase:
 
     def ensure_schema(self) -> None:
         with self.engine.begin() as conn:
-            if self._schema_ready(conn):
-                self._ensure_powerflow_summary_columns(conn)
-                self._ensure_real_powerflow_schema(conn)
-                return
             conn.execute(text("SELECT pg_advisory_xact_lock(916200005)"))
             if self._schema_ready(conn):
                 self._ensure_powerflow_summary_columns(conn)

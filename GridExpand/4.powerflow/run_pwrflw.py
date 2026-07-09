@@ -23,6 +23,7 @@ if str(GRIDEXPAND_DIR) not in sys.path:
 import src.save_grid as svgrd
 import src.demands as dmnds
 import src.powerflow as pwrflw
+from config import config as pf_config
 import argparse
 import os
 from sqlalchemy import text
@@ -162,6 +163,30 @@ if __name__ == "__main__":
             "This is intended for aggregate SWF annual-demand sensitivity checks and requires --hh-only --pre-only."
         ),
     )
+    parser.add_argument(
+        "--post-demand-mode",
+        choices=["flexible", "no-flex"],
+        default="flexible",
+        help=(
+            "Post-electrification demand reconstruction. 'flexible' uses optimized URBS net import; "
+            "'no-flex' derives fixed heat, PV, and capped EV charging from allocated Step 2 profiles."
+        ),
+    )
+    parser.add_argument(
+        "--no-flex-ev-charger-kw",
+        type=float,
+        default=None,
+        help="EV home charger cap for --post-demand-mode no-flex. Defaults to powerflow config EV_HOME_CHARGER_KW.",
+    )
+    parser.add_argument(
+        "--no-flex-source",
+        choices=["auto", "step2", "step3"],
+        default="auto",
+        help=(
+            "Input source for --post-demand-mode no-flex. 'step2' skips URBS and uses raw urbs_in tables; "
+            "'step3' uses URBS/reduced_data tables; 'auto' uses step3 when present, otherwise step2."
+        ),
+    )
     args = parser.parse_args()
     if args.summary_only and args.storage != "db":
         parser.error("--summary-only requires --storage db.")
@@ -171,6 +196,12 @@ if __name__ == "__main__":
         parser.error("--hh-annual-demand-scale requires --hh-only.")
     if args.hh_annual_demand_scale != 1.0 and not args.pre_only:
         parser.error("--hh-annual-demand-scale is only supported for --pre-only HH demand runs.")
+    if args.post_demand_mode == "no-flex" and args.pre_only:
+        parser.error("--post-demand-mode no-flex requires a post-electrification run, not --pre-only.")
+    if args.no_flex_ev_charger_kw is not None and args.post_demand_mode != "no-flex":
+        parser.error("--no-flex-ev-charger-kw requires --post-demand-mode no-flex.")
+    if args.no_flex_source != "auto" and args.post_demand_mode != "no-flex":
+        parser.error("--no-flex-source only applies to --post-demand-mode no-flex.")
 
     # list all .h5 files in your directory
     all_entries = os.listdir("Input/")
@@ -196,13 +227,26 @@ if __name__ == "__main__":
         f"with {settings['n_cpu']} CPUs!"
     )
 
-    assumptions_extra = None
+    no_flex_ev_charger_kw = (
+        args.no_flex_ev_charger_kw
+        if args.no_flex_ev_charger_kw is not None
+        else pf_config.EV_HOME_CHARGER_KW
+    )
+    assumptions_extra = {
+        "post_demand_mode": args.post_demand_mode,
+    }
+    if args.post_demand_mode == "no-flex":
+        assumptions_extra.update({
+            "no_flex_assumption": "fixed heat pump, rooftop PV, and EV charging profiles; no URBS optimized dispatch for post demand",
+            "no_flex_ev_charger_kw": float(no_flex_ev_charger_kw),
+            "no_flex_source": args.no_flex_source,
+        })
     if args.hh_only:
-        assumptions_extra = {
+        assumptions_extra.update({
             "demand_scope": "synthetic_hh_only",
             "hh_only_filter": "grid_building_bus.building_use == Residential",
             "hh_annual_demand_scale": float(args.hh_annual_demand_scale),
-        }
+        })
 
     # Save file handler
     SF = svgrd.SaveFile(
@@ -221,7 +265,13 @@ if __name__ == "__main__":
         df_pre_demand = dmnds.obtain_pre_demand(SF)
         df_post_demand = None
     else:
-        df_pre_demand, df_post_demand = dmnds.obtain_demand(SF, save_reactive=not args.summary_only)
+        df_pre_demand, df_post_demand = dmnds.obtain_demand(
+            SF,
+            save_reactive=not args.summary_only,
+            post_demand_mode=args.post_demand_mode,
+            ev_charger_kw=no_flex_ev_charger_kw,
+            no_flex_source=args.no_flex_source,
+        )
 
     if residential_buses is not None:
         df_pre_demand = _filter_demand_to_buses(df_pre_demand, residential_buses, "pre")

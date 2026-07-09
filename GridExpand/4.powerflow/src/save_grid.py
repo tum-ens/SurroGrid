@@ -54,6 +54,12 @@ class SaveFile:
         self.raw_demand_dir = "urbs_in/demand"
         self.reduced_demand_dir = "urbs_out/reduced_data/demand"
         self.net_demand_dir = "urbs_out/MILP/tau_pro"
+        self.raw_eff_factor_dir = "urbs_in/eff_factor"
+        self.reduced_eff_factor_dir = "urbs_out/reduced_data/eff_factor"
+        self.raw_supim_dir = "urbs_in/supim"
+        self.reduced_supim_dir = "urbs_out/reduced_data/supim"
+        self.raw_process_dir = "urbs_in/process"
+        self.reduced_process_dir = "urbs_out/reduced_data/process"
 
     def _get_readpath(self):
         directory = config.DATA_DIR
@@ -86,10 +92,51 @@ class SaveFile:
         demand_key = self.reduced_demand_dir if self.uses_reduced_demand() else self.raw_demand_dir
         return pd.read_hdf(self.input_path, key=demand_key)
 
+    def _read_preferred_hdf(self, reduced_key, raw_key):
+        key = reduced_key if self._hdf_key_exists(reduced_key) else raw_key
+        return pd.read_hdf(self.input_path, key=key)
+
+    def _read_required_hdf(self, key):
+        if not self._hdf_key_exists(key):
+            raise KeyError(f"Required HDF5 key '{key}' is missing in {self.filename}.")
+        return pd.read_hdf(self.input_path, key=key)
+
+    def has_urbs_results(self):
+        return self._hdf_key_exists(self.net_demand_dir)
+
     def get_input_demands(self):
         df_raw_demand = self.get_pre_demand()
         df_net_demand = pd.read_hdf(self.input_path, key=self.net_demand_dir)
         return df_raw_demand, df_net_demand
+
+    def get_no_flex_inputs(self, source="auto"):
+        if source not in {"auto", "step2", "step3"}:
+            raise ValueError("No-flex source must be 'auto', 'step2', or 'step3'.")
+
+        use_step3 = source == "step3" or (source == "auto" and self.has_urbs_results())
+        if use_step3:
+            if not self.has_urbs_results():
+                raise KeyError(
+                    f"No-flex source 'step3' requires '{self.net_demand_dir}', "
+                    f"but {self.filename} has no URBS result tables."
+                )
+            return {
+                "source": "step3",
+                "demand": self.get_pre_demand(),
+                "eff_factor": self._read_preferred_hdf(self.reduced_eff_factor_dir, self.raw_eff_factor_dir),
+                "supim": self._read_preferred_hdf(self.reduced_supim_dir, self.raw_supim_dir),
+                "process": self._read_preferred_hdf(self.reduced_process_dir, self.raw_process_dir),
+                "reference": pd.read_hdf(self.input_path, key=self.net_demand_dir),
+            }
+
+        return {
+            "source": "step2",
+            "demand": self._read_required_hdf(self.raw_demand_dir),
+            "eff_factor": self._read_required_hdf(self.raw_eff_factor_dir),
+            "supim": self._read_required_hdf(self.raw_supim_dir),
+            "process": self._read_required_hdf(self.raw_process_dir),
+            "reference": None,
+        }
 
     def save_df(self, df, dir):
         if self.storage == "db":

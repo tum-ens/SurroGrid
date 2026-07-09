@@ -132,13 +132,56 @@ def parse_args() -> argparse.Namespace:
         help="Do not materialize expansion_analysis_run rows after summary power-flow runs.",
     )
     parser.add_argument(
+        "--include-no-flex-powerflow",
+        action="store_true",
+        help=(
+            "For post-electrification profiles, run an additional Step 4 powerflow where "
+            "post demand is reconstructed from fixed heat, PV, and capped EV charging profiles."
+        ),
+    )
+    parser.add_argument(
+        "--no-flex-only",
+        action="store_true",
+        help=(
+            "Run only the no-flex post-electrification power flow directly from Step 2 outputs. "
+            "This skips Step 3 URBS and therefore cannot be combined with --tsam."
+        ),
+    )
+    parser.add_argument(
+        "--no-flex-source",
+        choices=["auto", "step2", "step3"],
+        default="auto",
+        help=(
+            "Input source for no-flex powerflow when Step 3 is available. "
+            "--no-flex-only always uses Step 2 raw urbs_in tables."
+        ),
+    )
+    parser.add_argument(
+        "--no-flex-ev-charger-kw",
+        type=float,
+        help="Optional EV charger cap passed to Step 4 --post-demand-mode no-flex.",
+    )
+    parser.add_argument(
         "--expansion-analysis-prefix",
         help=(
             "Optional prefix for automatic expansion analysis keys. "
             "Defaults to '<timeframe_mode>_<profiles>[_hh_only][_tsam]'."
         ),
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.include_no_flex_powerflow and args.profiles == "status_quo":
+        parser.error("--include-no-flex-powerflow requires post-electrification profiles, not status_quo.")
+    if args.no_flex_only and args.profiles == "status_quo":
+        parser.error("--no-flex-only requires post-electrification profiles, not status_quo.")
+    if args.no_flex_only and args.include_no_flex_powerflow:
+        parser.error("Use either --no-flex-only or --include-no-flex-powerflow, not both.")
+    if args.no_flex_only and args.tsam:
+        parser.error("--no-flex-only skips Step 3, so it cannot be combined with --tsam.")
+    if args.no_flex_ev_charger_kw is not None and not (args.include_no_flex_powerflow or args.no_flex_only):
+        parser.error("--no-flex-ev-charger-kw requires --include-no-flex-powerflow or --no-flex-only.")
+    if args.no_flex_source != "auto" and not args.include_no_flex_powerflow:
+        parser.error("--no-flex-source only applies with --include-no-flex-powerflow; --no-flex-only uses Step 2.")
+    return args
 
 
 class StatusLog:
@@ -406,15 +449,12 @@ def materialize_expansion_analyses(
         return []
 
     summary_pre_only = args.profiles == "status_quo"
-    stages = ("pre",) if summary_pre_only else ("pre", "post")
-    summary_run_name = powerflow_run_name(args, "summary")
     prefix = expansion_analysis_prefix(args)
     postprocessing_dir = repo_root / "GridExpand" / "5.postprocessing"
     log_path = args.run_dir / "expansion_materialization.log"
     materialized = []
 
-    for stage in stages:
-        analysis_key = f"{prefix}_{stage}"
+    def materialize_one(run_name: str, stage: str, analysis_key: str, note: str, log_stage: str) -> None:
         cmd = [
             "uv",
             "run",
@@ -422,7 +462,7 @@ def materialize_expansion_analyses(
             "-m",
             "expansion.grid_expansion",
             "--run-name",
-            summary_run_name,
+            run_name,
             "--stage",
             stage,
             "--ags",
@@ -430,10 +470,7 @@ def materialize_expansion_analyses(
             "--analysis-key",
             analysis_key,
             "--note",
-            (
-                f"Automatically materialized by ags_pipeline_runner from {summary_run_name} "
-                f"summary stage={stage}."
-            ),
+            note,
             "--replace",
         ]
         run_batch_command(
@@ -441,9 +478,65 @@ def materialize_expansion_analyses(
             cwd=postprocessing_dir,
             log_path=log_path,
             status=status,
-            stage=f"expansion_materialize_{stage}",
+            stage=log_stage,
+        )
+
+    if args.no_flex_only:
+        no_flex_run_name = powerflow_run_name(args, "summary_no_flex")
+        materialize_one(
+            no_flex_run_name,
+            "pre",
+            f"{prefix}_pre",
+            (
+                f"Automatically materialized by ags_pipeline_runner from {no_flex_run_name} "
+                "summary stage=pre."
+            ),
+            "expansion_materialize_pre",
+        )
+        materialized.append({"stage": "pre", "analysis_key": f"{prefix}_pre"})
+        materialize_one(
+            no_flex_run_name,
+            "post",
+            f"{prefix}_post_no_flex",
+            (
+                f"Automatically materialized by ags_pipeline_runner from {no_flex_run_name} "
+                "summary stage=post using fixed no-flex post-electrification demand."
+            ),
+            "expansion_materialize_post_no_flex",
+        )
+        materialized.append({"stage": "post_no_flex", "analysis_key": f"{prefix}_post_no_flex"})
+        return materialized
+
+    stages = ("pre",) if summary_pre_only else ("pre", "post")
+    summary_run_name = powerflow_run_name(args, "summary")
+    for stage in stages:
+        analysis_key = f"{prefix}_{stage}"
+        materialize_one(
+            summary_run_name,
+            stage,
+            analysis_key,
+            (
+                f"Automatically materialized by ags_pipeline_runner from {summary_run_name} "
+                f"summary stage={stage}."
+            ),
+            f"expansion_materialize_{stage}",
         )
         materialized.append({"stage": stage, "analysis_key": analysis_key})
+
+    if args.include_no_flex_powerflow and not summary_pre_only:
+        no_flex_run_name = powerflow_run_name(args, "summary_no_flex")
+        no_flex_analysis_key = f"{prefix}_post_no_flex"
+        materialize_one(
+            no_flex_run_name,
+            "post",
+            no_flex_analysis_key,
+            (
+                f"Automatically materialized by ags_pipeline_runner from {no_flex_run_name} "
+                "summary stage=post using fixed no-flex post-electrification demand."
+            ),
+            "expansion_materialize_post_no_flex",
+        )
+        materialized.append({"stage": "post_no_flex", "analysis_key": no_flex_analysis_key})
 
     return materialized
 
@@ -758,6 +851,120 @@ def run_candidate(
             timeframe_end=timeframe_metadata.get("timeframe_end", ""),
             message=json.dumps({"scenario_suffix": scenario_suffix}, sort_keys=True),
         )
+
+        if args.no_flex_only:
+            status.update(
+                candidate_index,
+                step3_cpus="skipped",
+                urbs_cluster_concurrency="skipped",
+                message=json.dumps({"scenario_suffix": scenario_suffix, "step3": "skipped_no_flex_only"}, sort_keys=True),
+            )
+            shutil.copy2(step2_output, step4_dir / "Input" / step2_filename)
+            validations = []
+
+            if args.powerflow_output in {"raw", "both"}:
+                current_stage = "step4_powerflow_raw_no_flex"
+                raw_no_flex_run_name = powerflow_run_name(args, "raw_no_flex")
+                raw_no_flex_cmd = [
+                    "uv",
+                    "run",
+                    "python",
+                    "run_pwrflw.py",
+                    step2_filename,
+                    "--storage",
+                    "db",
+                    "--run-name",
+                    raw_no_flex_run_name,
+                    "--post-demand-mode",
+                    "no-flex",
+                    "--no-flex-source",
+                    "step2",
+                    "--n_cpu",
+                    str(args.step4_cpus),
+                ]
+                if args.no_flex_ev_charger_kw is not None:
+                    raw_no_flex_cmd.extend(["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)])
+                if args.demand_scope == "residential":
+                    raw_no_flex_cmd.append("--hh-only")
+                run_command(
+                    cmd=raw_no_flex_cmd,
+                    cwd=step4_dir,
+                    log_path=log_file,
+                    status=status,
+                    candidate_index=candidate_index,
+                    stage=current_stage,
+                )
+                current_stage = "step4_validate_raw_no_flex"
+                validations.append(
+                    validate_powerflow_db(
+                        repo_root,
+                        step2_filename,
+                        summary_only=False,
+                        pre_only=False,
+                        run_name=raw_no_flex_run_name,
+                    )
+                )
+
+            if args.powerflow_output in {"summary", "both"}:
+                current_stage = "step4_powerflow_summary_no_flex"
+                summary_no_flex_run_name = powerflow_run_name(args, "summary_no_flex")
+                summary_no_flex_cmd = [
+                    "uv",
+                    "run",
+                    "python",
+                    "run_pwrflw.py",
+                    step2_filename,
+                    "--storage",
+                    "db",
+                    "--summary-only",
+                    "--run-name",
+                    summary_no_flex_run_name,
+                    "--post-demand-mode",
+                    "no-flex",
+                    "--no-flex-source",
+                    "step2",
+                    "--n_cpu",
+                    str(args.step4_cpus),
+                ]
+                if args.no_flex_ev_charger_kw is not None:
+                    summary_no_flex_cmd.extend(["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)])
+                if args.demand_scope == "residential":
+                    summary_no_flex_cmd.append("--hh-only")
+                run_command(
+                    cmd=summary_no_flex_cmd,
+                    cwd=step4_dir,
+                    log_path=log_file,
+                    status=status,
+                    candidate_index=candidate_index,
+                    stage=current_stage,
+                )
+                current_stage = "step4_validate_summary_no_flex"
+                validations.append(
+                    validate_powerflow_db(
+                        repo_root,
+                        step2_filename,
+                        summary_only=True,
+                        pre_only=False,
+                        run_name=summary_no_flex_run_name,
+                        expected_summary_stages=("pre", "post"),
+                    )
+                )
+
+            with log_file.open("a", encoding="utf-8") as log_handle:
+                log_handle.write(f"\n[{utc_now()}] STEP4 NO-FLEX VALIDATION OK\n")
+                log_handle.write(json.dumps(validations, indent=2, sort_keys=True, default=str) + "\n")
+
+            seconds = round(time.monotonic() - started, 1)
+            status.update(
+                candidate_index,
+                status="done",
+                stage="complete",
+                finished_at=utc_now(),
+                seconds=seconds,
+                message="ok",
+            )
+            return {"candidate_index": candidate_index, "status": "done", "seconds": seconds}
+
         shutil.copy2(step2_output, step3_dir / "Input" / step2_filename)
 
         step3_cpus, cluster_concurrency, step3_stats = choose_step3_settings(step2_output, args)
@@ -841,6 +1048,50 @@ def run_candidate(
                 )
             )
 
+        if args.include_no_flex_powerflow and args.powerflow_output in {"raw", "both"}:
+            current_stage = "step4_powerflow_raw_no_flex"
+            raw_no_flex_run_name = powerflow_run_name(args, "raw_no_flex")
+            raw_no_flex_cmd = [
+                "uv",
+                "run",
+                "python",
+                "run_pwrflw.py",
+                scenario_filename,
+                "--storage",
+                "db",
+                "--run-name",
+                raw_no_flex_run_name,
+                "--post-demand-mode",
+                "no-flex",
+                "--no-flex-source",
+                args.no_flex_source,
+                "--n_cpu",
+                str(args.step4_cpus),
+            ]
+            if args.no_flex_ev_charger_kw is not None:
+                raw_no_flex_cmd.extend(["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)])
+            if args.demand_scope == "residential":
+                raw_no_flex_cmd.append("--hh-only")
+            run_command(
+                cmd=raw_no_flex_cmd,
+                cwd=step4_dir,
+                log_path=log_file,
+                status=status,
+                candidate_index=candidate_index,
+                stage=current_stage,
+            )
+
+            current_stage = "step4_validate_raw_no_flex"
+            validations.append(
+                validate_powerflow_db(
+                    repo_root,
+                    scenario_filename,
+                    summary_only=False,
+                    pre_only=False,
+                    run_name=raw_no_flex_run_name,
+                )
+            )
+
         if args.powerflow_output in {"summary", "both"}:
             current_stage = "step4_powerflow_summary"
             summary_pre_only = args.profiles == "status_quo"
@@ -882,6 +1133,52 @@ def run_candidate(
                     pre_only=summary_pre_only,
                     run_name=summary_run_name,
                     expected_summary_stages=expected_summary_stages,
+                )
+            )
+
+        if args.include_no_flex_powerflow and args.powerflow_output in {"summary", "both"}:
+            current_stage = "step4_powerflow_summary_no_flex"
+            summary_no_flex_run_name = powerflow_run_name(args, "summary_no_flex")
+            summary_no_flex_cmd = [
+                "uv",
+                "run",
+                "python",
+                "run_pwrflw.py",
+                scenario_filename,
+                "--storage",
+                "db",
+                "--summary-only",
+                "--run-name",
+                summary_no_flex_run_name,
+                "--post-demand-mode",
+                "no-flex",
+                "--no-flex-source",
+                args.no_flex_source,
+                "--n_cpu",
+                str(args.step4_cpus),
+            ]
+            if args.no_flex_ev_charger_kw is not None:
+                summary_no_flex_cmd.extend(["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)])
+            if args.demand_scope == "residential":
+                summary_no_flex_cmd.append("--hh-only")
+            run_command(
+                cmd=summary_no_flex_cmd,
+                cwd=step4_dir,
+                log_path=log_file,
+                status=status,
+                candidate_index=candidate_index,
+                stage=current_stage,
+            )
+
+            current_stage = "step4_validate_summary_no_flex"
+            validations.append(
+                validate_powerflow_db(
+                    repo_root,
+                    scenario_filename,
+                    summary_only=True,
+                    pre_only=False,
+                    run_name=summary_no_flex_run_name,
+                    expected_summary_stages=("pre", "post"),
                 )
             )
 

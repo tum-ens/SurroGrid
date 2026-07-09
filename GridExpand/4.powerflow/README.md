@@ -49,7 +49,8 @@ The code expects each input file to contain (HDF5 keys / datasets):
 
 - `raw_data/net`: a pandapower network serialized as a JSON string (loaded via `pandapower.from_json_string`).
 - `urbs_in/demand`: raw household electricity demand time series (active power), used for the **pre-expansion** case.
-- `urbs_out/MILP/tau_pro`: urbs optimization results, used to reconstruct **post-expansion** net imports, PV generation, and HP demand.
+- `urbs_in/eff_factor`, `urbs_in/supim`, and `urbs_in/process`: required for `--post-demand-mode no-flex --no-flex-source step2`, where post demand is reconstructed without running URBS.
+- `urbs_out/MILP/tau_pro`: required for the default flexible post-expansion case. It is also used by no-flex source `step3` / `auto` when Step 3 results are present.
 
 The exact schema of these tables is defined by upstream steps; this step assumes they match what `src/save_grid.py` and `src/demands.py` read.
 
@@ -72,6 +73,27 @@ DB-backed power-flow result storage can be enabled with the command below. Use `
 
 ```bash
 uv run python run_pwrflw.py <inputfile_id> --storage db --pre-only
+```
+
+### Post-electrification demand modes
+
+Post-electrification runs support two demand modes:
+
+- `--post-demand-mode flexible` (default): use optimized URBS net-import time series from `urbs_out/MILP/tau_pro`. This is the existing HEMS/flexibility case.
+- `--post-demand-mode no-flex`: reconstruct post demand without optimized URBS dispatch. Heat demand is converted with the heat-pump COP time series, rooftop PV uses the exogenous `supim` profile and installed `process` capacity, and EV demand reuses the allocated mobility profiles plus charging-station availability. EV energy is redistributed inside home-availability stretches and capped by `Config.EV_HOME_CHARGER_KW` (default 11 kW) unless `--no-flex-ev-charger-kw` is passed.
+
+No-flex supports `--no-flex-source auto|step2|step3`:
+
+- `step2`: read raw `/urbs_in/*` tables and skip URBS entirely. This is the fast stress-reference case.
+- `step3`: read Step 3 / reduced-data tables and align to `urbs_out/MILP/tau_pro`. This is useful when the realized scenario depends on URBS or TSAM output.
+- `auto`: use `step3` when URBS results exist in the file; otherwise use `step2`.
+
+The no-flex mode intentionally reuses the existing Step 2 mobility pool and does not rerun emobpy. It is meant as a stress reference between pre-electrification and optimized post-electrification power-flow results.
+
+Example:
+
+```bash
+uv run python run_pwrflw.py <inputfile_id> --storage db --summary-only --post-demand-mode no-flex --no-flex-source step2
 ```
 
 In DB mode Step 4 still reads `urbs_in/*` and `urbs_out/*` from the input HDF5 file, but reads the pandapower grid from PostgreSQL and writes `pwrflw/*` results to the `surrogrid` schema instead of `Output/*.h5`. Results are grouped under the static `baseline_static` scenario key, integer `scenario_id`, and an interpretable `run_name`; rerunning the same grid/scenario/run overwrites the previous time-series rows. Building-level joins are available through the `surrogrid.grid_building_bus` view.
@@ -97,7 +119,7 @@ For each processed input file, an output file is created in `Output/` with the *
 `run_pwrflw.py` writes:
 
 - `/pwrflw/input/demand_pre`: per-bus pre-expansion demand time series (active + reactive).
-- `/pwrflw/input/demand_post`: per-bus post-expansion demand time series (active + reactive).
+- `/pwrflw/input/demand_post`: per-bus post-expansion demand time series (active + reactive; either optimized-flexible or reconstructed no-flex depending on `--post-demand-mode`).
 
 - `/pwrflw/output/pre/demand_import`: external grid import (p/q) per timestep.
 - `/pwrflw/output/pre/vm`: bus voltage magnitudes `vm_pu` per timestep.
@@ -123,10 +145,11 @@ On the HPC submission scripts, stdout/stderr are written to:
 ### Demand reconstruction (`src/demands.py`)
 
 - **Pre-expansion**: household active power is taken from `urbs_in/demand`, and reactive power is synthesized using a fixed power factor (`config.PF_ELC`).
-- **Post-expansion**: the urbs results `urbs_out/MILP/tau_pro` are filtered to keep:
+- **Flexible post-expansion**: the urbs results `urbs_out/MILP/tau_pro` are filtered to keep:
 	- `import` and `feed_in` (to compute net imports),
 	- `heatpump_air` (heat pump load),
 	- all rooftop PV technologies (`pro` starting with `Rooftop...`).
+- **No-flex post-expansion**: fixed post demand is reconstructed from `urbs_in` / `urbs_out/reduced_data` inputs instead of optimized URBS imports. Heat, EV, and PV are added to the pre-expansion electricity demand at bus level.
 
 Reactive power post-expansion is computed using:
 

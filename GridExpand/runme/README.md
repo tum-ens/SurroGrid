@@ -271,6 +271,35 @@ uv run python run_pwrflw.py <inputfile_id> --n_cpu <N>
 
 - A copied/augmented output file in `4.powerflow/Output/` containing `pwrflw/` inputs + results.
 
+#### Optional no-flex post-electrification power flow
+
+The AGS runner supports two no-flex post-electrification workflows.
+
+Fast no-flex stress run, skipping Step 3 entirely:
+
+```bash
+uv run python GridExpand/runme/ags_pipeline_runner.py \
+  --repo-root /home/breveron/git/github/SurroGrid \
+  --ags <AGS> \
+  --profiles all \
+  --powerflow-output summary \
+  --no-flex-only
+```
+
+Hybrid comparison run, keeping the normal optimized-flexible Step 3/Step 4 path and adding a second no-flex Step 4 result:
+
+```bash
+uv run python GridExpand/runme/ags_pipeline_runner.py \
+  --repo-root /home/breveron/git/github/SurroGrid \
+  --ags <AGS> \
+  --profiles all \
+  --powerflow-output summary \
+  --include-no-flex-powerflow \
+  --no-flex-source auto
+```
+
+`--no-flex-only` reads raw Step 2 `/urbs_in/*` tables and cannot be combined with `--tsam`, because TSAM is part of Step 3. `--include-no-flex-powerflow` can use `--no-flex-source auto|step2|step3`; use `step3` or `auto` when the realized penetration scenario depends on URBS/reduced-data outputs. In all cases, the no-flex run reuses Step 2 mobility profiles and charging availability; it does not rerun emobpy. Use `--no-flex-ev-charger-kw <kW>` to override the default 11 kW home charger cap.
+
 ### Step 5: Postprocessing and plotting
 
 Location: `5.postprocessing/`
