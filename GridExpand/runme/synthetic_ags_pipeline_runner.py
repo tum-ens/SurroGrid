@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Run the DB-backed GridExpand pipeline for AGS grid candidates.
+"""Run the DB-backed synthetic GridExpand pipeline for AGS grid candidates.
 
-This helper coordinates Step 2, Step 3, and Step 4 for long tmux runs. It keeps
+This helper coordinates synthetic Step 2, optional Step 3, and Step 4 runs for long tmux batches. It keeps
 per-candidate logs, can resume completed work, validates DB-backed power-flow
 outputs, and records failed grids without aborting the full batch.
 """
@@ -61,12 +61,16 @@ POWERFLOW_OUTPUT_CHOICES = ("raw", "summary", "both")
 DEMAND_SCOPE_CHOICES = ("all", "residential")
 
 
+def run_name_profile_token(profile: str) -> str:
+    return "post_electrification" if profile == "all" else profile
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run DB-backed GridExpand pipeline batch for one AGS.")
+    parser = argparse.ArgumentParser(description="Run DB-backed synthetic GridExpand pipeline batch for one AGS.")
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--ags", required=True, help="AGS identifier for the region to process, e.g. 09162000.")
     parser.add_argument("--min-buildings", type=int, default=5)
@@ -143,8 +147,8 @@ def parse_args() -> argparse.Namespace:
         "--no-flex-only",
         action="store_true",
         help=(
-            "Run only the no-flex post-electrification power flow directly from Step 2 outputs. "
-            "This skips Step 3 URBS and therefore cannot be combined with --tsam."
+            "Run only the no-flex post-electrification power flow. Without --tsam it runs directly "
+            "from Step 2 outputs; with --tsam it runs Step 3 in reduce-only mode and skips optimization."
         ),
     )
     parser.add_argument(
@@ -152,8 +156,8 @@ def parse_args() -> argparse.Namespace:
         choices=["auto", "step2", "step3"],
         default="auto",
         help=(
-            "Input source for no-flex powerflow when Step 3 is available. "
-            "--no-flex-only always uses Step 2 raw urbs_in tables."
+            "Input source for additional no-flex powerflow when Step 3 is available. "
+            "--no-flex-only selects Step 2 for full-year runs and Step 3 reduced_data for TSAM runs automatically."
         ),
     )
     parser.add_argument(
@@ -169,14 +173,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     args = parser.parse_args()
+    if args.profiles == "status_quo" and args.tsam:
+        parser.error("--profiles status_quo runs pre-only power flow directly after Step 2 and cannot use --tsam.")
     if args.include_no_flex_powerflow and args.profiles == "status_quo":
         parser.error("--include-no-flex-powerflow requires post-electrification profiles, not status_quo.")
     if args.no_flex_only and args.profiles == "status_quo":
         parser.error("--no-flex-only requires post-electrification profiles, not status_quo.")
     if args.no_flex_only and args.include_no_flex_powerflow:
         parser.error("Use either --no-flex-only or --include-no-flex-powerflow, not both.")
-    if args.no_flex_only and args.tsam:
-        parser.error("--no-flex-only skips Step 3, so it cannot be combined with --tsam.")
     if args.no_flex_ev_charger_kw is not None and not (args.include_no_flex_powerflow or args.no_flex_only):
         parser.error("--no-flex-ev-charger-kw requires --include-no-flex-powerflow or --no-flex-only.")
     if args.no_flex_source != "auto" and not args.include_no_flex_powerflow:
@@ -271,11 +275,12 @@ def normalize_ags(value: str) -> int:
     return int(str(value).strip().lstrip("0") or "0")
 
 
-def get_candidates(repo_root: Path, ags: str, min_buildings: int) -> list[dict[str, object]]:
+def get_candidates(repo_root: Path, ags: str, min_buildings: int, demand_scope: str = "all") -> list[dict[str, object]]:
     configure_imports(repo_root)
     from common.database import SurroGridDatabase
 
     db = SurroGridDatabase()
+    count_column = "n_residential_buildings" if demand_scope == "residential" else "n_buildings"
     query = text(
         """
         WITH ags_plz AS (
@@ -284,7 +289,22 @@ def get_candidates(repo_root: Path, ags: str, min_buildings: int) -> list[dict[s
             WHERE ags = :ags
         ),
         building_counts AS (
-            SELECT grid_result_id, version_id, COUNT(*) AS n_buildings
+            SELECT
+                grid_result_id,
+                version_id,
+                COUNT(*) AS n_buildings,
+                COUNT(*) FILTER (
+                    WHERE
+                        CASE
+                            WHEN UPPER(COALESCE(TRIM(building_type), TRIM(type), '')) IN ('AB', 'MFH', 'TH', 'SFH')
+                            THEN 'Residential'
+                            WHEN LOWER(COALESCE(TRIM(building_use), TRIM(type), '')) LIKE '%%public%%'
+                            THEN 'Public'
+                            WHEN LOWER(COALESCE(TRIM(building_use), TRIM(type), '')) LIKE '%%commercial%%'
+                            THEN 'Commercial'
+                            ELSE 'Commercial'
+                        END = 'Residential'
+                ) AS n_residential_buildings
             FROM pylovo.buildings_result
             GROUP BY grid_result_id, version_id
         ),
@@ -295,13 +315,18 @@ def get_candidates(repo_root: Path, ags: str, min_buildings: int) -> list[dict[s
                 gr.plz,
                 gr.kcid,
                 gr.bcid,
-                bc.n_buildings
+                bc.n_buildings,
+                bc.n_residential_buildings
             FROM pylovo.grid_result gr
             JOIN ags_plz ap ON ap.plz = gr.plz
             JOIN building_counts bc
               ON bc.grid_result_id = gr.grid_result_id
              AND bc.version_id = gr.version_id
-            WHERE bc.n_buildings >= :min_buildings
+            WHERE
+              CASE
+                WHEN :demand_scope = 'residential' THEN bc.n_residential_buildings
+                ELSE bc.n_buildings
+              END >= :min_buildings
               AND (:pylovo_version_id IS NULL OR gr.version_id::text = :pylovo_version_id)
             ORDER BY gr.plz, gr.kcid, gr.bcid, gr.version_id DESC
         )
@@ -320,6 +345,7 @@ def get_candidates(repo_root: Path, ags: str, min_buildings: int) -> list[dict[s
                 {
                     "ags": normalize_ags(ags),
                     "min_buildings": int(min_buildings),
+                    "demand_scope": demand_scope,
                     "pylovo_version_id": db.pylovo_version_id,
                 },
             ).mappings()
@@ -330,7 +356,11 @@ def get_candidates(repo_root: Path, ags: str, min_buildings: int) -> list[dict[s
             row=row,
             candidate_index=int(row["candidate_index"]),
         )
-        | {"n_buildings": int(row["n_buildings"])}
+        | {
+            "n_buildings": int(row["n_buildings"]),
+            "n_selected_buildings": int(row[count_column]),
+            "n_residential_buildings": int(row["n_residential_buildings"]),
+        }
         for row in rows
     ]
 
@@ -428,7 +458,7 @@ def pipeline_scenario_key(args: argparse.Namespace) -> str:
 
 
 def powerflow_run_name(args: argparse.Namespace, mode: str) -> str:
-    return f"{pipeline_scenario_key(args)}_{args.profiles}_{mode}_powerflow"
+    return f"{pipeline_scenario_key(args)}_{run_name_profile_token(args.profiles)}_{mode}_powerflow"
 
 
 def expansion_analysis_prefix(args: argparse.Namespace) -> str:
@@ -436,7 +466,7 @@ def expansion_analysis_prefix(args: argparse.Namespace) -> str:
         return args.expansion_analysis_prefix
     scope_suffix = "_hh_only" if args.demand_scope == "residential" else ""
     tsam_suffix = "_tsam" if args.tsam else ""
-    return f"{args.timeframe_mode}_{args.profiles}{scope_suffix}{tsam_suffix}"
+    return f"{args.timeframe_mode}_{run_name_profile_token(args.profiles)}{scope_suffix}{tsam_suffix}"
 
 
 def materialize_expansion_analyses(
@@ -488,7 +518,7 @@ def materialize_expansion_analyses(
             "pre",
             f"{prefix}_pre",
             (
-                f"Automatically materialized by ags_pipeline_runner from {no_flex_run_name} "
+                f"Automatically materialized by synthetic_ags_pipeline_runner from {no_flex_run_name} "
                 "summary stage=pre."
             ),
             "expansion_materialize_pre",
@@ -499,7 +529,7 @@ def materialize_expansion_analyses(
             "post",
             f"{prefix}_post_no_flex",
             (
-                f"Automatically materialized by ags_pipeline_runner from {no_flex_run_name} "
+                f"Automatically materialized by synthetic_ags_pipeline_runner from {no_flex_run_name} "
                 "summary stage=post using fixed no-flex post-electrification demand."
             ),
             "expansion_materialize_post_no_flex",
@@ -516,7 +546,7 @@ def materialize_expansion_analyses(
             stage,
             analysis_key,
             (
-                f"Automatically materialized by ags_pipeline_runner from {summary_run_name} "
+                f"Automatically materialized by synthetic_ags_pipeline_runner from {summary_run_name} "
                 f"summary stage={stage}."
             ),
             f"expansion_materialize_{stage}",
@@ -531,7 +561,7 @@ def materialize_expansion_analyses(
             "post",
             no_flex_analysis_key,
             (
-                f"Automatically materialized by ags_pipeline_runner from {no_flex_run_name} "
+                f"Automatically materialized by synthetic_ags_pipeline_runner from {no_flex_run_name} "
                 "summary stage=post using fixed no-flex post-electrification demand."
             ),
             "expansion_materialize_post_no_flex",
@@ -693,7 +723,10 @@ def validate_powerflow_db(
                 raise RuntimeError("Incomplete Step 4 DB summary results: " + ", ".join(missing))
             return validation
 
+        expected_stage_filter = ("pre",) if pre_only else None
         for table_name, expected_stages in EXPECTED_POWERFLOW_TABLES.items():
+            if expected_stage_filter is not None:
+                expected_stages = expected_stage_filter
             rows = conn.execute(
                 text(
                     f"""
@@ -716,19 +749,20 @@ def validate_powerflow_db(
                 if int(row["rows"]) <= 0 or int(row["min_t"]) != 0 or int(row["max_t"]) != expected_max_t:
                     missing.append(f"{table_name}:{stage}:incomplete")
 
-        reactive_rows = conn.execute(
-            text(
-                """
-                SELECT count(*) AS rows, min(t_index) AS min_t, max(t_index) AS max_t
-                FROM surrogrid.powerflow_reactive_component
-                WHERE powerflow_run_id = :run_id
-                """
-            ),
-            {"run_id": run_id},
-        ).mappings().one()
-        validation["tables"]["powerflow_reactive_component"] = {"all": dict(reactive_rows)}
-        if int(reactive_rows["rows"]) <= 0 or int(reactive_rows["min_t"]) != 0 or int(reactive_rows["max_t"]) != expected_max_t:
-            missing.append("powerflow_reactive_component:all:incomplete")
+        if not pre_only:
+            reactive_rows = conn.execute(
+                text(
+                    """
+                    SELECT count(*) AS rows, min(t_index) AS min_t, max(t_index) AS max_t
+                    FROM surrogrid.powerflow_reactive_component
+                    WHERE powerflow_run_id = :run_id
+                    """
+                ),
+                {"run_id": run_id},
+            ).mappings().one()
+            validation["tables"]["powerflow_reactive_component"] = {"all": dict(reactive_rows)}
+            if int(reactive_rows["rows"]) <= 0 or int(reactive_rows["min_t"]) != 0 or int(reactive_rows["max_t"]) != expected_max_t:
+                missing.append("powerflow_reactive_component:all:incomplete")
 
         if missing:
             raise RuntimeError("Incomplete Step 4 DB results: " + ", ".join(missing))
@@ -852,15 +886,162 @@ def run_candidate(
             message=json.dumps({"scenario_suffix": scenario_suffix}, sort_keys=True),
         )
 
-        if args.no_flex_only:
+        if args.profiles == "status_quo":
             status.update(
                 candidate_index,
                 step3_cpus="skipped",
                 urbs_cluster_concurrency="skipped",
-                message=json.dumps({"scenario_suffix": scenario_suffix, "step3": "skipped_no_flex_only"}, sort_keys=True),
+                message=json.dumps({"scenario_suffix": scenario_suffix, "step3": "skipped_status_quo"}, sort_keys=True),
             )
             shutil.copy2(step2_output, step4_dir / "Input" / step2_filename)
             validations = []
+
+            if args.powerflow_output in {"raw", "both"}:
+                current_stage = "step4_powerflow_raw_pre_only"
+                raw_run_name = powerflow_run_name(args, "raw")
+                raw_cmd = [
+                    "uv",
+                    "run",
+                    "python",
+                    "run_pwrflw.py",
+                    step2_filename,
+                    "--storage",
+                    "db",
+                    "--pre-only",
+                    "--run-name",
+                    raw_run_name,
+                    "--n_cpu",
+                    str(args.step4_cpus),
+                ]
+                if args.demand_scope == "residential":
+                    raw_cmd.append("--hh-only")
+                run_command(
+                    cmd=raw_cmd,
+                    cwd=step4_dir,
+                    log_path=log_file,
+                    status=status,
+                    candidate_index=candidate_index,
+                    stage=current_stage,
+                )
+                current_stage = "step4_validate_raw_pre_only"
+                validations.append(
+                    validate_powerflow_db(
+                        repo_root,
+                        step2_filename,
+                        summary_only=False,
+                        pre_only=True,
+                        run_name=raw_run_name,
+                    )
+                )
+
+            if args.powerflow_output in {"summary", "both"}:
+                current_stage = "step4_powerflow_summary_pre_only"
+                summary_run_name = powerflow_run_name(args, "summary")
+                summary_cmd = [
+                    "uv",
+                    "run",
+                    "python",
+                    "run_pwrflw.py",
+                    step2_filename,
+                    "--storage",
+                    "db",
+                    "--pre-only",
+                    "--summary-only",
+                    "--run-name",
+                    summary_run_name,
+                    "--n_cpu",
+                    str(args.step4_cpus),
+                ]
+                if args.demand_scope == "residential":
+                    summary_cmd.append("--hh-only")
+                run_command(
+                    cmd=summary_cmd,
+                    cwd=step4_dir,
+                    log_path=log_file,
+                    status=status,
+                    candidate_index=candidate_index,
+                    stage=current_stage,
+                )
+                current_stage = "step4_validate_summary_pre_only"
+                validations.append(
+                    validate_powerflow_db(
+                        repo_root,
+                        step2_filename,
+                        summary_only=True,
+                        pre_only=True,
+                        run_name=summary_run_name,
+                        expected_summary_stages=("pre",),
+                    )
+                )
+
+            with log_file.open("a", encoding="utf-8") as log_handle:
+                log_handle.write(f"\n[{utc_now()}] STEP4 STATUS-QUO VALIDATION OK\n")
+                log_handle.write(json.dumps(validations, indent=2, sort_keys=True, default=str) + "\n")
+
+            seconds = round(time.monotonic() - started, 1)
+            status.update(
+                candidate_index,
+                status="done",
+                stage="complete",
+                finished_at=utc_now(),
+                seconds=seconds,
+                message="ok",
+            )
+            return {"candidate_index": candidate_index, "status": "done", "seconds": seconds}
+
+        if args.no_flex_only:
+            validations = []
+            if args.tsam:
+                status.update(
+                    candidate_index,
+                    step3_cpus=1,
+                    urbs_cluster_concurrency="reduce_only",
+                    message=json.dumps({"scenario_suffix": scenario_suffix, "step3": "tsam_reduce_only"}, sort_keys=True),
+                )
+                shutil.copy2(step2_output, step3_dir / "Input" / step2_filename)
+                current_stage = "step3_tsam_reduce_only"
+                reduce_cmd = [
+                    "uv",
+                    "run",
+                    "python",
+                    "run_urbs_cluster.py",
+                    step2_filename,
+                    "--n_cpu",
+                    "1",
+                    "--tsam",
+                    "--tsam-periods",
+                    str(args.tsam_periods),
+                    "--tsam-hours-per-period",
+                    str(args.tsam_hours_per_period),
+                    "--tsam-extreme-method",
+                    args.tsam_extreme_method,
+                    "--reduce-only",
+                ]
+                run_command(
+                    cmd=reduce_cmd,
+                    cwd=step3_dir,
+                    log_path=log_file,
+                    status=status,
+                    candidate_index=candidate_index,
+                    stage=current_stage,
+                    env_extra={"URBS_CLUSTER_CONCURRENCY": "1"},
+                )
+                step3_reduce_output = step3_dir / "result" / scenario_filename
+                if not step3_reduce_output.exists():
+                    raise FileNotFoundError(f"Missing Step 3 reduce-only output {step3_reduce_output}")
+                powerflow_filename = scenario_filename
+                no_flex_source = "step3"
+                shutil.copy2(step3_reduce_output, step4_dir / "Input" / powerflow_filename)
+            else:
+                status.update(
+                    candidate_index,
+                    step3_cpus="skipped",
+                    urbs_cluster_concurrency="skipped",
+                    message=json.dumps({"scenario_suffix": scenario_suffix, "step3": "skipped_no_flex_only"}, sort_keys=True),
+                )
+                powerflow_filename = step2_filename
+                no_flex_source = "step2"
+                shutil.copy2(step2_output, step4_dir / "Input" / powerflow_filename)
 
             if args.powerflow_output in {"raw", "both"}:
                 current_stage = "step4_powerflow_raw_no_flex"
@@ -870,7 +1051,7 @@ def run_candidate(
                     "run",
                     "python",
                     "run_pwrflw.py",
-                    step2_filename,
+                    powerflow_filename,
                     "--storage",
                     "db",
                     "--run-name",
@@ -878,7 +1059,7 @@ def run_candidate(
                     "--post-demand-mode",
                     "no-flex",
                     "--no-flex-source",
-                    "step2",
+                    no_flex_source,
                     "--n_cpu",
                     str(args.step4_cpus),
                 ]
@@ -898,7 +1079,7 @@ def run_candidate(
                 validations.append(
                     validate_powerflow_db(
                         repo_root,
-                        step2_filename,
+                        powerflow_filename,
                         summary_only=False,
                         pre_only=False,
                         run_name=raw_no_flex_run_name,
@@ -913,7 +1094,7 @@ def run_candidate(
                     "run",
                     "python",
                     "run_pwrflw.py",
-                    step2_filename,
+                    powerflow_filename,
                     "--storage",
                     "db",
                     "--summary-only",
@@ -922,7 +1103,7 @@ def run_candidate(
                     "--post-demand-mode",
                     "no-flex",
                     "--no-flex-source",
-                    "step2",
+                    no_flex_source,
                     "--n_cpu",
                     str(args.step4_cpus),
                 ]
@@ -942,7 +1123,7 @@ def run_candidate(
                 validations.append(
                     validate_powerflow_db(
                         repo_root,
-                        step2_filename,
+                        powerflow_filename,
                         summary_only=True,
                         pre_only=False,
                         run_name=summary_no_flex_run_name,
@@ -1270,7 +1451,7 @@ def main() -> int:
         rerun_failed=args.rerun_failed,
     )
 
-    candidates = get_candidates(repo_root, args.ags, args.min_buildings)
+    candidates = get_candidates(repo_root, args.ags, args.min_buildings, args.demand_scope)
     (run_dir / "candidates.json").write_text(
         json.dumps(candidates, indent=2, sort_keys=True, default=str),
         encoding="utf-8",

@@ -84,10 +84,9 @@ GridExpand/
     timeframe.py
     surrogrid_schema.sql
 
-  executables/                     # Runnable orchestration and maintenance CLIs
-    ags_pipeline_runner.py
-    forchheim_real_grid_runner.py
-    forchheim_synthetic_grid_runner.py
+  runme/                           # Runnable orchestration and maintenance CLIs
+    synthetic_ags_pipeline_runner.py # synthetic AGS Step 2-4 pipeline runner
+    real_swf_powerflow_runner.py     # real SWF compact power-flow wrapper
     delete_scenario_data.py
 
   5.postprocessing/                # Step 5: result analysis + plotting
@@ -275,10 +274,10 @@ uv run python run_pwrflw.py <inputfile_id> --n_cpu <N>
 
 The AGS runner supports two no-flex post-electrification workflows.
 
-Fast no-flex stress run, skipping Step 3 entirely:
+Fast no-flex stress run with full-year Step 2 profiles, skipping Step 3 entirely:
 
 ```bash
-uv run python GridExpand/runme/ags_pipeline_runner.py \
+uv run python GridExpand/runme/synthetic_ags_pipeline_runner.py \
   --repo-root /home/breveron/git/github/SurroGrid \
   --ags <AGS> \
   --profiles all \
@@ -286,10 +285,22 @@ uv run python GridExpand/runme/ags_pipeline_runner.py \
   --no-flex-only
 ```
 
+Fast no-flex stress run with TSAM reduction, skipping only the URBS optimization solve:
+
+```bash
+uv run python GridExpand/runme/synthetic_ags_pipeline_runner.py \
+  --repo-root /home/breveron/git/github/SurroGrid \
+  --ags <AGS> \
+  --profiles all \
+  --powerflow-output summary \
+  --no-flex-only \
+  --tsam
+```
+
 Hybrid comparison run, keeping the normal optimized-flexible Step 3/Step 4 path and adding a second no-flex Step 4 result:
 
 ```bash
-uv run python GridExpand/runme/ags_pipeline_runner.py \
+uv run python GridExpand/runme/synthetic_ags_pipeline_runner.py \
   --repo-root /home/breveron/git/github/SurroGrid \
   --ags <AGS> \
   --profiles all \
@@ -298,7 +309,7 @@ uv run python GridExpand/runme/ags_pipeline_runner.py \
   --no-flex-source auto
 ```
 
-`--no-flex-only` reads raw Step 2 `/urbs_in/*` tables and cannot be combined with `--tsam`, because TSAM is part of Step 3. `--include-no-flex-powerflow` can use `--no-flex-source auto|step2|step3`; use `step3` or `auto` when the realized penetration scenario depends on URBS/reduced-data outputs. In all cases, the no-flex run reuses Step 2 mobility profiles and charging availability; it does not rerun emobpy. Use `--no-flex-ev-charger-kw <kW>` to override the default 11 kW home charger cap.
+Without `--tsam`, `--no-flex-only` reads raw Step 2 `/urbs_in/*` tables and runs Step 4 on the full horizon. With `--tsam`, it calls Step 3 in `--reduce-only` mode to write `/urbs_out/reduced_data/*` and `/urbs_out/tsam/*`, then skips the URBS optimization solve and runs Step 4 no-flex on the reduced horizon. `--include-no-flex-powerflow` can use `--no-flex-source auto|step2|step3`; use `step3` or `auto` when the realized penetration scenario depends on URBS/reduced-data outputs. In all cases, the no-flex run reuses Step 2 mobility profiles and charging availability; it does not rerun emobpy. Use `--no-flex-ev-charger-kw <kW>` to override the default 11 kW home charger cap.
 
 ### Step 5: Postprocessing and plotting
 
