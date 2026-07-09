@@ -6,7 +6,7 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -720,11 +720,21 @@ def _draw_synthetic_expansion_envelope_layers(
     return color_source
 
 
-def plot_synthetic_expansion_envelope_comparison(
+def _ordered_analysis_items(
+    analysis_keys: Mapping[str, str] | Sequence[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    if isinstance(analysis_keys, Mapping):
+        items = list(analysis_keys.items())
+    else:
+        items = list(analysis_keys)
+    if not items:
+        raise ValueError("analysis_keys must contain at least one labeled analysis key.")
+    return [(str(label), str(analysis_key)) for label, analysis_key in items]
+
+
+def plot_synthetic_expansion_envelope_panels(
     *,
-    pre_analysis_key: str,
-    post_analysis_key: str,
-    labels: tuple[str, str] = ("Pre", "Post-all"),
+    analysis_keys: Mapping[str, str] | Sequence[tuple[str, str]],
     value_column: str = "total_cost_eur",
     building_use: str | Sequence[str] | None = None,
     target_epsg: int = 25832,
@@ -741,13 +751,14 @@ def plot_synthetic_expansion_envelope_comparison(
     osm_zoom: str | int = "auto",
     osm_alpha: float = 0.72,
     output_path: str | Path | None = None,
-    figsize: tuple[float, float] = (15.5, 7.3),
+    figsize: tuple[float, float] | None = None,
 ) -> tuple[plt.Figure, np.ndarray, dict[str, dict[str, pd.DataFrame]]]:
-    """Plot pre/post expansion envelopes side by side with shared map extent and color scale."""
+    """Plot multiple synthetic expansion-envelope analyses with one shared color scale."""
 
+    analysis_items = _ordered_analysis_items(analysis_keys)
     value_scale, value_unit = _display_value_scale(value_column)
     datasets = []
-    for analysis_key, label in zip((pre_analysis_key, post_analysis_key), labels):
+    for label, analysis_key in analysis_items:
         points = load_synthetic_expansion_envelope_points(
             analysis_key=analysis_key,
             building_use=building_use,
@@ -791,8 +802,12 @@ def plot_synthetic_expansion_envelope_comparison(
     xlim = (x_min - pad_x, x_max + pad_x)
     ylim = (y_min - pad_y, y_max + pad_y)
 
+    n_panels = len(datasets)
+    if figsize is None:
+        figsize = (max(5.2 * n_panels, 8.0), 7.3)
     cmap_obj = _cost_colormap(cmap)
-    fig, axes = plt.subplots(1, 2, figsize=figsize, constrained_layout=True, sharex=True, sharey=True)
+    fig, axes_raw = plt.subplots(1, n_panels, figsize=figsize, constrained_layout=True, sharex=True, sharey=True)
+    axes = np.atleast_1d(axes_raw)
     color_source = plt.cm.ScalarMappable(norm=norm, cmap=cmap_obj)
     for ax, dataset in zip(axes, datasets):
         color_source = _draw_synthetic_expansion_envelope_layers(
@@ -841,6 +856,53 @@ def plot_synthetic_expansion_envelope_comparison(
         }
         for dataset in datasets
     }
+
+
+def plot_synthetic_expansion_envelope_comparison(
+    *,
+    pre_analysis_key: str,
+    post_analysis_key: str,
+    labels: tuple[str, str] = ("Pre", "Post-all"),
+    value_column: str = "total_cost_eur",
+    building_use: str | Sequence[str] | None = None,
+    target_epsg: int = 25832,
+    clip_quantile: float | None = 0.95,
+    log_scale: bool = False,
+    cmap: str | LinearSegmentedColormap = "cost_green_red",
+    show_points: bool = False,
+    show_buildings: bool = True,
+    building_point_size: float = 3.0,
+    building_alpha: float = 0.24,
+    envelope_alpha: float = 0.46,
+    add_osm_layer: bool = True,
+    osm_source: object | None = None,
+    osm_zoom: str | int = "auto",
+    osm_alpha: float = 0.72,
+    output_path: str | Path | None = None,
+    figsize: tuple[float, float] = (15.5, 7.3),
+) -> tuple[plt.Figure, np.ndarray, dict[str, dict[str, pd.DataFrame]]]:
+    """Plot pre/post expansion envelopes side by side with shared map extent and color scale."""
+
+    return plot_synthetic_expansion_envelope_panels(
+        analysis_keys={labels[0]: pre_analysis_key, labels[1]: post_analysis_key},
+        value_column=value_column,
+        building_use=building_use,
+        target_epsg=target_epsg,
+        clip_quantile=clip_quantile,
+        log_scale=log_scale,
+        cmap=cmap,
+        show_points=show_points,
+        show_buildings=show_buildings,
+        building_point_size=building_point_size,
+        building_alpha=building_alpha,
+        envelope_alpha=envelope_alpha,
+        add_osm_layer=add_osm_layer,
+        osm_source=osm_source,
+        osm_zoom=osm_zoom,
+        osm_alpha=osm_alpha,
+        output_path=output_path,
+        figsize=figsize,
+    )
 
 def plot_synthetic_expansion_envelopes(
     *,

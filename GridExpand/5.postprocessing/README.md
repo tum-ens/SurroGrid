@@ -31,7 +31,7 @@ Import from the owning module instead of using compatibility facades. For exampl
     comparison_data.py                    # DB loaders and synthetic/real comparison datasets
   notebooks/
     asset_powerflow_comparison.ipynb      # real/synthetic power-flow comparison notebook
-    expansion_analysis.ipynb              # expansion analysis notebook
+    expansion_analysis.ipynb              # pre/post-flex/post-no-flex expansion comparison notebook
     grid_area_envelope_comparison.ipynb   # real/synthetic grid-area envelope notebook
     timeseries_plotting.ipynb             # DB-backed time-series diagnostics notebook
   plotting/
@@ -58,7 +58,7 @@ Import from the owning module instead of using compatibility facades. For exampl
 Run the full AGS pipeline and store raw pre/post power-flow time series:
 
 ```bash
-uv run --project GridExpand/4.powerflow python GridExpand/runme/ags_pipeline_runner.py \
+uv run --project GridExpand/4.powerflow python GridExpand/runme/synthetic_ags_pipeline_runner.py \
   --repo-root /path/to/SurroGrid \
   --ags <AGS> \
   --profiles electricity_heat \
@@ -70,7 +70,7 @@ uv run --project GridExpand/4.powerflow python GridExpand/runme/ags_pipeline_run
 Run the pipeline but store only compact summaries, not raw time series:
 
 ```bash
-uv run --project GridExpand/4.powerflow python GridExpand/runme/ags_pipeline_runner.py \
+uv run --project GridExpand/4.powerflow python GridExpand/runme/synthetic_ags_pipeline_runner.py \
   --repo-root /path/to/SurroGrid \
   --ags <AGS> \
   --profiles electricity_heat \
@@ -82,7 +82,7 @@ uv run --project GridExpand/4.powerflow python GridExpand/runme/ags_pipeline_run
 Run a full-year all-assets scenario with TSAM typical weeks and compact post/pre power-flow summaries:
 
 ```bash
-uv run --project GridExpand/4.powerflow python GridExpand/runme/ags_pipeline_runner.py \
+uv run --project GridExpand/4.powerflow python GridExpand/runme/synthetic_ags_pipeline_runner.py \
   --repo-root . \
   --ags <AGS> \
   --profiles all \
