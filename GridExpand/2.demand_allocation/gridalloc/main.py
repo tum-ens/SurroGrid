@@ -151,6 +151,7 @@ if __name__ == '__main__':
                 bcid=args.bcid,
                 candidate_index=args.candidate_index,
                 min_buildings=args.min_buildings,
+                demand_scope=args.demand_scope,
             )
             inputfile = grid_ref["bridge_filename"]
 

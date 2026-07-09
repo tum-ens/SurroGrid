@@ -187,6 +187,16 @@ if __name__ == "__main__":
             "'step3' uses URBS/reduced_data tables; 'auto' uses step3 when present, otherwise step2."
         ),
     )
+    parser.add_argument(
+        "--summary-nonconvergence",
+        choices=["auto", "raise", "nan"],
+        default="auto",
+        help=(
+            "Power-flow non-convergence handling for --summary-only. 'raise' aborts the grid, "
+            "'nan' records failed timesteps and continues, and 'auto' uses 'nan' for no-flex "
+            "summary runs and 'raise' otherwise."
+        ),
+    )
     args = parser.parse_args()
     if args.summary_only and args.storage != "db":
         parser.error("--summary-only requires --storage db.")
@@ -202,6 +212,13 @@ if __name__ == "__main__":
         parser.error("--no-flex-ev-charger-kw requires --post-demand-mode no-flex.")
     if args.no_flex_source != "auto" and args.post_demand_mode != "no-flex":
         parser.error("--no-flex-source only applies to --post-demand-mode no-flex.")
+    if args.summary_nonconvergence != "auto" and not args.summary_only:
+        parser.error("--summary-nonconvergence only applies with --summary-only.")
+
+    summary_nonconvergence = args.summary_nonconvergence
+    if summary_nonconvergence == "auto":
+        summary_nonconvergence = "nan" if args.summary_only and args.post_demand_mode == "no-flex" else "raise"
+    protect_summary_grid_state = summary_nonconvergence == "nan"
 
     # list all .h5 files in your directory
     all_entries = os.listdir("Input/")
@@ -314,6 +331,8 @@ if __name__ == "__main__":
                 cable_max_i_ka=cable_max_i_ka,
                 voltage_buses=voltage_buses,
                 cable_ids=backbone_cable_ids,
+                on_nonconvergence=summary_nonconvergence,
+                protect_grid_state=protect_summary_grid_state,
             )
             SF.save_summary(summary_pre, "pre")
         else:
@@ -334,6 +353,8 @@ if __name__ == "__main__":
                     cable_max_i_ka=cable_max_i_ka,
                     voltage_buses=voltage_buses,
                     cable_ids=backbone_cable_ids,
+                    on_nonconvergence=summary_nonconvergence,
+                    protect_grid_state=protect_summary_grid_state,
                 )
                 SF.save_summary(summary_post, "post")
             else:

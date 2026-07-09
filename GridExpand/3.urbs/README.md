@@ -250,3 +250,7 @@ df_costs = pd.read_hdf(path, key="/urbs_out/MILP/costs")
 
 See [urbs_LICENSE](urbs_LICENSE) for the license information of the urbs code included in this step.
 
+
+### TSAM reduce-only mode
+
+Use `--reduce-only` together with `--tsam` to write reduced input tables and TSAM metadata without solving URBS.

@@ -104,6 +104,17 @@ class SaveFile:
     def has_urbs_results(self):
         return self._hdf_key_exists(self.net_demand_dir)
 
+    def has_reduced_no_flex_inputs(self):
+        return all(
+            self._hdf_key_exists(key)
+            for key in (
+                self.reduced_demand_dir,
+                self.reduced_eff_factor_dir,
+                self.reduced_supim_dir,
+                self.reduced_process_dir,
+            )
+        )
+
     def get_input_demands(self):
         df_raw_demand = self.get_pre_demand()
         df_net_demand = pd.read_hdf(self.input_path, key=self.net_demand_dir)
@@ -113,20 +124,24 @@ class SaveFile:
         if source not in {"auto", "step2", "step3"}:
             raise ValueError("No-flex source must be 'auto', 'step2', or 'step3'.")
 
-        use_step3 = source == "step3" or (source == "auto" and self.has_urbs_results())
+        use_step3 = source == "step3" or (source == "auto" and (self.has_urbs_results() or self.has_reduced_no_flex_inputs()))
         if use_step3:
-            if not self.has_urbs_results():
+            if not (self.has_urbs_results() or self.has_reduced_no_flex_inputs()):
                 raise KeyError(
-                    f"No-flex source 'step3' requires '{self.net_demand_dir}', "
-                    f"but {self.filename} has no URBS result tables."
+                    "No-flex source 'step3' requires URBS results or reduced_data tables, "
+                    f"but {self.filename} has neither."
                 )
+            has_urbs_results = self.has_urbs_results()
+            demand = self.get_pre_demand()
+            reference = pd.read_hdf(self.input_path, key=self.net_demand_dir) if has_urbs_results else demand
             return {
                 "source": "step3",
-                "demand": self.get_pre_demand(),
+                "demand": demand,
                 "eff_factor": self._read_preferred_hdf(self.reduced_eff_factor_dir, self.raw_eff_factor_dir),
                 "supim": self._read_preferred_hdf(self.reduced_supim_dir, self.raw_supim_dir),
                 "process": self._read_preferred_hdf(self.reduced_process_dir, self.raw_process_dir),
-                "reference": pd.read_hdf(self.input_path, key=self.net_demand_dir),
+                "reference": reference,
+                "drop_initial_timestep": not has_urbs_results,
             }
 
         return {

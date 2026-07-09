@@ -26,6 +26,19 @@ def create_result_cache(prob):
     return result_cache
 
 
+def save_reduced_data(data, save_file_name):
+    """Save reduced/filtered urbs input data without optimization results."""
+    with pd.HDFStore(save_file_name, mode='a', complib='blosc', complevel=9) as store:
+        for name in data.keys():
+            if name == "global_prop":
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
+                    store['urbs_out/reduced_data/' + name] = data[name]
+            else:
+                warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
+                store['urbs_out/reduced_data/' + name] = data[name]
+
+
 def save(data, model_results, save_file_name, manyprob=False):
     """Save urbs model input and result cache to a HDF5 store file.
 

@@ -33,7 +33,14 @@ if __name__ == '__main__':
             default="replace_cluster_center",
             help="How TSAM should include cold and solar extreme weeks.",
         )
+        parser.add_argument(
+            "--reduce-only",
+            action="store_true",
+            help="Run preprocessing and TSAM reduction, write reduced_data/tsam outputs, and skip the URBS optimization solve.",
+        )
         args = parser.parse_args()
+        if args.reduce_only and not args.tsam:
+            parser.error("--reduce-only is intended for TSAM preprocessing and requires --tsam.")
 
         ### Obtain relevant input_files
         # list all .h5 files in your directory
@@ -59,6 +66,7 @@ if __name__ == '__main__':
             "noTypicalPeriods": args.tsam_periods, # tsam: number of aggregated typical periods (int, max 52)
             "hoursPerPeriod": args.tsam_hours_per_period,  # tsam: length of typical period (int)
             "tsamExtremePeriodMethod": args.tsam_extreme_method,
+            "reduce_only": args.reduce_only,
 
             # Electrification
             "PV_electr": 100,       # 100           # % of building nodes adopting PV (0-100)

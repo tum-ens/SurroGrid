@@ -161,12 +161,18 @@ def _process_post_demands(df_urbs_demand, df_pre_demand_react):
 
     return df_post_demand_elec, df_post_demand_react, df_react_save
 
-def _reference_timestep_count(reference):
+def _reference_timestep_count(reference, drop_initial_timestep=False):
     if reference is None:
         return None
     if isinstance(reference.index, pd.MultiIndex) and "t" in reference.index.names:
-        return reference.index.get_level_values("t").nunique()
-    return len(reference)
+        timesteps = reference.index.get_level_values("t").nunique()
+        first_timestep = reference.index.get_level_values("t").min()
+    else:
+        timesteps = len(reference)
+        first_timestep = reference.index.min() if len(reference) else None
+    if drop_initial_timestep and timesteps > 1 and first_timestep == 0:
+        return timesteps - 1
+    return timesteps
 
 
 def _align_table_to_timesteps(df, timesteps, label, reference_label):
@@ -332,7 +338,7 @@ def _reactive_from_no_flex_components(df_pre_demand_react, df_heat_elec, df_pv_e
 
 def _process_no_flex_demands(no_flex_inputs, df_pre_demand_elec, df_pre_demand_react, ev_charger_kw):
     reference = no_flex_inputs.get("reference")
-    timesteps = _reference_timestep_count(reference)
+    timesteps = _reference_timestep_count(reference, no_flex_inputs.get("drop_initial_timestep", False))
     reference_label = "urbs output" if reference is not None else "raw no-flex demand"
     if timesteps is None:
         timesteps = len(_use_t_as_index(no_flex_inputs["demand"]))
@@ -382,7 +388,7 @@ def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charge
             raise ValueError("ev_charger_kw must be greater than zero.")
         no_flex_inputs = SF.get_no_flex_inputs(source=no_flex_source)
         reference = no_flex_inputs.get("reference")
-        timesteps = _reference_timestep_count(reference)
+        timesteps = _reference_timestep_count(reference, no_flex_inputs.get("drop_initial_timestep", False))
         if timesteps is None:
             timesteps = len(_use_t_as_index(no_flex_inputs["demand"]))
         reference_label = "urbs output" if reference is not None else "raw no-flex demand"

@@ -85,7 +85,7 @@ Post-electrification runs support two demand modes:
 No-flex supports `--no-flex-source auto|step2|step3`:
 
 - `step2`: read raw `/urbs_in/*` tables and skip URBS entirely. This is the fast stress-reference case.
-- `step3`: read Step 3 / reduced-data tables and align to `urbs_out/MILP/tau_pro`. This is useful when the realized scenario depends on URBS or TSAM output.
+- `step3`: read Step 3 / reduced-data tables. If `urbs_out/MILP/tau_pro` exists, it is used for alignment; otherwise the reduced demand table is used, which supports TSAM reduce-only files without an optimization result. This is useful when the realized scenario depends on URBS or TSAM output.
 - `auto`: use `step3` when URBS results exist in the file; otherwise use `step2`.
 
 The no-flex mode intentionally reuses the existing Step 2 mobility pool and does not rerun emobpy. It is meant as a stress reference between pre-electrification and optimized post-electrification power-flow results.

@@ -202,6 +202,19 @@ def run_lvds_opt(input_path,        # path to input file
     ##### Power Price: #####
     if global_settings["power_price_kw"]!=0: raise NotImplementedError("Power price: Any values different from 0 are currently not safely implemented!") 
 
+    if global_settings.get("reduce_only"):
+        print("Reduce-only mode active: saving TSAM/reduced input data and skipping optimization.")
+        start_time = time.time()
+        save_reduced_data(data, result_path)
+        file_name, file_extension = os.path.splitext(result_path)
+        new_result_path = f"{file_name}_{scenario_name}{file_extension}"
+        if os.path.exists(new_result_path):
+            os.remove(new_result_path)
+        os.rename(result_path, new_result_path)
+        end_time = time.time()
+        print(f"Reduced input data saving took {(end_time-start_time)/60:.2f} minutes\n")
+        return None
+
 
     ############### Carry out building optimization ###############
     # Launch parallel processes equal to previously given thread count (= cpu_count)
