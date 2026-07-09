@@ -609,6 +609,7 @@ class SurroGridDatabase:
         bcid: int | None = None,
         candidate_index: int = 0,
         min_buildings: int = 5,
+        demand_scope: str = "all",
     ) -> dict[str, Any]:
         """Resolve a CLI identifier to one concrete pylovo grid.
 
@@ -658,7 +659,22 @@ class SurroGridDatabase:
                 WHERE ags = :ags
             ),
             building_counts AS (
-                SELECT grid_result_id, version_id, COUNT(*) AS n_buildings
+                SELECT
+                    grid_result_id,
+                    version_id,
+                    COUNT(*) AS n_buildings,
+                    COUNT(*) FILTER (
+                        WHERE
+                            CASE
+                                WHEN UPPER(COALESCE(TRIM(building_type), TRIM(type), '')) IN ('AB', 'MFH', 'TH', 'SFH')
+                                THEN 'Residential'
+                                WHEN LOWER(COALESCE(TRIM(building_use), TRIM(type), '')) LIKE '%%public%%'
+                                THEN 'Public'
+                                WHEN LOWER(COALESCE(TRIM(building_use), TRIM(type), '')) LIKE '%%commercial%%'
+                                THEN 'Commercial'
+                                ELSE 'Commercial'
+                            END = 'Residential'
+                    ) AS n_residential_buildings
                 FROM pylovo.buildings_result
                 GROUP BY grid_result_id, version_id
             ),
@@ -669,13 +685,18 @@ class SurroGridDatabase:
                     gr.plz,
                     gr.kcid,
                     gr.bcid,
-                    bc.n_buildings
+                    bc.n_buildings,
+                    bc.n_residential_buildings
                 FROM pylovo.grid_result gr
                 JOIN ags_plz ap ON ap.plz = gr.plz
                 JOIN building_counts bc
                   ON bc.grid_result_id = gr.grid_result_id
                  AND bc.version_id = gr.version_id
-                WHERE bc.n_buildings >= :min_buildings
+                WHERE
+                  CASE
+                    WHEN :demand_scope = 'residential' THEN bc.n_residential_buildings
+                    ELSE bc.n_buildings
+                  END >= :min_buildings
                   AND (:pylovo_version_id IS NULL OR gr.version_id::text = :pylovo_version_id)
                 ORDER BY gr.plz, gr.kcid, gr.bcid, gr.version_id DESC
             ),
@@ -697,6 +718,7 @@ class SurroGridDatabase:
                     "ags": ags,
                     "candidate_index": int(candidate_index),
                     "min_buildings": int(min_buildings),
+                    "demand_scope": demand_scope,
                     "pylovo_version_id": self.pylovo_version_id,
                 },
             ).mappings().first()
