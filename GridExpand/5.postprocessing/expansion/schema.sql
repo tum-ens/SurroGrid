@@ -5,8 +5,9 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_cost_assumption (
     line_parallel_185_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 45000.0,
     line_parallel_240_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 70000.0,
     line_parallel_default_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 70000.0,
+    line_existing_duct_share DOUBLE PRECISION NOT NULL DEFAULT 0.20,
     line_reopen_rural_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 90000.0,
-    line_reopen_suburban_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 95000.0,
+    line_reopen_suburban_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 100000.0,
     line_reopen_urban_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 165000.0,
     transformer_replace_400_eur DOUBLE PRECISION NOT NULL DEFAULT 33000.0,
     transformer_replace_630_eur DOUBLE PRECISION NOT NULL DEFAULT 38000.0,
@@ -23,8 +24,9 @@ ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXIS
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_parallel_185_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 45000.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_parallel_240_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 70000.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_parallel_default_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 70000.0;
+ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_existing_duct_share DOUBLE PRECISION NOT NULL DEFAULT 0.20;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_reopen_rural_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 90000.0;
-ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_reopen_suburban_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 95000.0;
+ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_reopen_suburban_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 100000.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_reopen_urban_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 165000.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS transformer_replace_400_eur DOUBLE PRECISION NOT NULL DEFAULT 33000.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS transformer_replace_630_eur DOUBLE PRECISION NOT NULL DEFAULT 38000.0;
@@ -40,6 +42,7 @@ INSERT INTO surrogrid.expansion_cost_assumption (
     line_parallel_185_eur_per_km,
     line_parallel_240_eur_per_km,
     line_parallel_default_eur_per_km,
+    line_existing_duct_share,
     line_reopen_rural_eur_per_km,
     line_reopen_suburban_eur_per_km,
     line_reopen_urban_eur_per_km,
@@ -58,8 +61,9 @@ VALUES (
     45000.0,
     70000.0,
     70000.0,
+    0.20,
     90000.0,
-    95000.0,
+    100000.0,
     165000.0,
     33000.0,
     38000.0,
@@ -67,7 +71,7 @@ VALUES (
     48000.0,
     100000.0,
     50,
-    'Default line costs use direct brownfield parallel-cable values in existing route/duct by cable size. Reopened-route values are stored as sensitivity/context. Transformer costs use all-in replacement bins for 400/630/800/1000 kVA and a 100k EUR station-rebuild boundary case.'
+    'Default LV line costs blend 20% existing-duct parallel-cable cost with 80% reopened-route/trenching cost selected by pylovo settlement_type. Transformer costs use all-in replacement bins for 400/630/800/1000 kVA and a 100k EUR station-rebuild boundary case.'
 )
 ON CONFLICT (assumption_key) DO UPDATE SET
     description = EXCLUDED.description,
@@ -75,6 +79,7 @@ ON CONFLICT (assumption_key) DO UPDATE SET
     line_parallel_185_eur_per_km = EXCLUDED.line_parallel_185_eur_per_km,
     line_parallel_240_eur_per_km = EXCLUDED.line_parallel_240_eur_per_km,
     line_parallel_default_eur_per_km = EXCLUDED.line_parallel_default_eur_per_km,
+    line_existing_duct_share = EXCLUDED.line_existing_duct_share,
     line_reopen_rural_eur_per_km = EXCLUDED.line_reopen_rural_eur_per_km,
     line_reopen_suburban_eur_per_km = EXCLUDED.line_reopen_suburban_eur_per_km,
     line_reopen_urban_eur_per_km = EXCLUDED.line_reopen_urban_eur_per_km,
@@ -130,6 +135,9 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_line_result (
     from_bus INTEGER,
     to_bus INTEGER,
     length_km DOUBLE PRECISION,
+    settlement_type INTEGER,
+    line_existing_duct_share DOUBLE PRECISION,
+    line_trenching_share DOUBLE PRECISION,
     critical_component_parallel INTEGER,
     max_component_line INTEGER,
     max_component_line_name TEXT,
@@ -143,6 +151,8 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_line_result (
     estimated_cost_eur DOUBLE PRECISION NOT NULL,
     critical_component_cost_eur_per_km DOUBLE PRECISION,
     critical_component_cost_basis TEXT,
+    critical_component_duct_cost_eur_per_km DOUBLE PRECISION,
+    critical_component_reopen_cost_eur_per_km DOUBLE PRECISION,
     critical_t_index INTEGER,
     critical_ts TIMESTAMPTZ,
     mapped_component_lines INTEGER NOT NULL,
@@ -155,9 +165,14 @@ ALTER TABLE IF EXISTS surrogrid.expansion_line_result DROP COLUMN IF EXISTS targ
 ALTER TABLE IF EXISTS surrogrid.expansion_line_result DROP COLUMN IF EXISTS existing_parallel;
 ALTER TABLE IF EXISTS surrogrid.expansion_line_result DROP COLUMN IF EXISTS line_cost_eur_per_km;
 ALTER TABLE IF EXISTS surrogrid.expansion_line_result DROP COLUMN IF EXISTS line_cost_basis;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS settlement_type INTEGER;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS line_existing_duct_share DOUBLE PRECISION;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS line_trenching_share DOUBLE PRECISION;
 ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS critical_component_parallel INTEGER;
 ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS critical_component_cost_eur_per_km DOUBLE PRECISION;
 ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS critical_component_cost_basis TEXT;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS critical_component_duct_cost_eur_per_km DOUBLE PRECISION;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS critical_component_reopen_cost_eur_per_km DOUBLE PRECISION;
 ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS component_cost_basis_count INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS component_std_type_count INTEGER NOT NULL DEFAULT 1;
 

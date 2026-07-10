@@ -325,9 +325,13 @@ def _materialize_line_results(
                 gc.kcid,
                 gc.bcid,
                 gc.pylovo_grid_result_id,
-                gc.pylovo_version_id
+                gc.pylovo_version_id,
+                pcr.settlement_type
             FROM surrogrid.powerflow_run pr
             JOIN surrogrid.grid_case gc USING (grid_case_id)
+            LEFT JOIN pylovo.postcode_result pcr
+              ON pcr.version_id = gc.pylovo_version_id
+             AND pcr.postcode_result_plz = gc.plz
             WHERE pr.run_name = :run_name
               AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
               AND (:ags IS NULL OR gc.ags = :ags)
@@ -416,6 +420,7 @@ def _materialize_line_results(
                 vm.bcid,
                 vm.pylovo_grid_result_id,
                 vm.pylovo_version_id,
+                vm.settlement_type,
                 vm.visible_line_id,
                 vm.line AS component_line,
                 vm.component_line_name,
@@ -454,6 +459,10 @@ def _materialize_line_results(
                 GREATEST(cl.required_parallel - cl.component_parallel, 0) AS additional_parallel,
                 line_cost.line_cost_eur_per_km,
                 line_cost.line_cost_basis,
+                line_cost.duct_cost_eur_per_km,
+                line_cost.reopen_cost_eur_per_km,
+                line_cost.existing_duct_share,
+                line_cost.trenching_share,
                 GREATEST(cl.required_parallel - cl.component_parallel, 0)
                     * COALESCE(cl.component_length_km, 0.0)
                     * line_cost.line_cost_eur_per_km AS estimated_component_cost_eur
@@ -461,20 +470,63 @@ def _materialize_line_results(
             CROSS JOIN assumption
             CROSS JOIN LATERAL (
                 SELECT
+                    cost_part.duct_cost_eur_per_km,
+                    cost_part.reopen_cost_eur_per_km,
+                    share.existing_duct_share,
+                    1.0 - share.existing_duct_share AS trenching_share,
                     CASE
-                        WHEN cl.component_std_type ~ '240' THEN assumption.line_parallel_240_eur_per_km
-                        WHEN cl.component_std_type ~ '185' THEN assumption.line_parallel_185_eur_per_km
-                        WHEN cl.component_std_type ~ '150' THEN assumption.line_parallel_150_eur_per_km
-                        WHEN cl.component_std_type ~ '120|95|70|50|35' THEN assumption.line_parallel_150_eur_per_km
-                        ELSE assumption.line_parallel_default_eur_per_km
+                        WHEN GREATEST(cl.required_parallel - cl.component_parallel, 0) > 0 THEN
+                            cost_part.duct_cost_eur_per_km
+                            + (1.0 - share.existing_duct_share)
+                              * (cost_part.reopen_cost_eur_per_km - cost_part.duct_cost_eur_per_km)
+                              / GREATEST(cl.required_parallel - cl.component_parallel, 0)
+                        ELSE
+                            share.existing_duct_share * cost_part.duct_cost_eur_per_km
+                            + (1.0 - share.existing_duct_share) * cost_part.reopen_cost_eur_per_km
                     END AS line_cost_eur_per_km,
-                    CASE
-                        WHEN cl.component_std_type ~ '240' THEN 'parallel_existing_route_240mm2'
-                        WHEN cl.component_std_type ~ '185' THEN 'parallel_existing_route_185mm2'
-                        WHEN cl.component_std_type ~ '150' THEN 'parallel_existing_route_150mm2'
-                        WHEN cl.component_std_type ~ '120|95|70|50|35' THEN 'parallel_existing_route_le_150mm2'
-                        ELSE 'parallel_existing_route_default_240mm2'
-                    END AS line_cost_basis
+                    CONCAT(
+                        'blended_',
+                        cost_part.settlement_label,
+                        '_duct', ROUND((share.existing_duct_share * 100.0)::NUMERIC)::TEXT,
+                        '_trench', ROUND(((1.0 - share.existing_duct_share) * 100.0)::NUMERIC)::TEXT,
+                        '_', cost_part.duct_cost_basis
+                    ) AS line_cost_basis
+                FROM (
+                    SELECT
+                        CASE
+                            WHEN cl.component_std_type ~ '240' THEN assumption.line_parallel_240_eur_per_km
+                            WHEN cl.component_std_type ~ '185' THEN assumption.line_parallel_185_eur_per_km
+                            WHEN cl.component_std_type ~ '150' THEN assumption.line_parallel_150_eur_per_km
+                            WHEN cl.component_std_type ~ '120|95|70|50|35' THEN assumption.line_parallel_150_eur_per_km
+                            ELSE assumption.line_parallel_default_eur_per_km
+                        END AS duct_cost_eur_per_km,
+                        CASE
+                            WHEN cl.settlement_type = 1 THEN assumption.line_reopen_rural_eur_per_km
+                            WHEN cl.settlement_type = 3 THEN assumption.line_reopen_urban_eur_per_km
+                            ELSE assumption.line_reopen_suburban_eur_per_km
+                        END AS reopen_cost_eur_per_km,
+                        CASE
+                            WHEN cl.settlement_type = 1 THEN 'rural'
+                            WHEN cl.settlement_type = 3 THEN 'urban'
+                            ELSE 'semiurban'
+                        END AS settlement_label,
+                        CASE
+                            WHEN cl.component_std_type ~ '240' THEN 'duct_parallel_240mm2'
+                            WHEN cl.component_std_type ~ '185' THEN 'duct_parallel_185mm2'
+                            WHEN cl.component_std_type ~ '150' THEN 'duct_parallel_150mm2'
+                            WHEN cl.component_std_type ~ '120|95|70|50|35' THEN 'duct_parallel_le_150mm2'
+                            ELSE 'duct_parallel_default_240mm2'
+                        END AS duct_cost_basis
+                ) cost_part
+                CROSS JOIN LATERAL (
+                    SELECT LEAST(
+                        GREATEST(
+                            COALESCE(:line_existing_duct_share, assumption.line_existing_duct_share),
+                            0.0
+                        ),
+                        1.0
+                    ) AS existing_duct_share
+                ) share
             ) line_cost
         ),
         visible_counts AS (
@@ -521,6 +573,9 @@ def _materialize_line_results(
             from_bus,
             to_bus,
             length_km,
+            settlement_type,
+            line_existing_duct_share,
+            line_trenching_share,
             critical_component_parallel,
             max_component_line,
             max_component_line_name,
@@ -534,6 +589,8 @@ def _materialize_line_results(
             estimated_cost_eur,
             critical_component_cost_eur_per_km,
             critical_component_cost_basis,
+            critical_component_duct_cost_eur_per_km,
+            critical_component_reopen_cost_eur_per_km,
             critical_t_index,
             critical_ts,
             mapped_component_lines,
@@ -559,6 +616,9 @@ def _materialize_line_results(
             lv.from_bus,
             lv.to_bus,
             lv.length_km,
+            cc.settlement_type,
+            cc.existing_duct_share,
+            cc.trenching_share,
             cc.component_parallel,
             cc.component_line,
             cc.component_line_name,
@@ -572,6 +632,8 @@ def _materialize_line_results(
             va.estimated_cost_eur,
             cc.line_cost_eur_per_km,
             cc.line_cost_basis,
+            cc.duct_cost_eur_per_km,
+            cc.reopen_cost_eur_per_km,
             cc.critical_t_index,
             cc.critical_ts,
             vc.mapped_component_lines,
@@ -604,6 +666,7 @@ def _materialize_line_results(
                 "scenario_id": args.scenario_id,
                 "ags": _optional_ags(args.ags),
                 "plz": args.plz,
+                "line_existing_duct_share": args.line_existing_duct_share,
             },
         )
         return int(result.rowcount or 0)
@@ -833,6 +896,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--assumption-key",
         default="de_lv_heuristic_2026",
         help="Cost/planning assumption row to use.",
+    )
+    parser.add_argument(
+        "--line-existing-duct-share",
+        type=float,
+        help=(
+            "Optional share of reinforced LV routes that can use existing ducts/empty pipes. "
+            "If omitted, the value from the selected cost assumption is used."
+        ),
     )
     parser.add_argument("--analysis-key", help="Readable key for this materialized result.")
     parser.add_argument("--note", default="", help="Free-text note stored with the analysis run.")

@@ -776,8 +776,9 @@ def plot_powerflow_asset_cutoff_overview_static(
             bbox_to_anchor=(0.5, 0.91),
             fontsize=legend_fontsize,
         )
+    title_text = title if np.isclose(cutoff, 1.0) else f"{title} ({_cutoff_label(cutoff)} retained-{cutoff_unit} cutoff)"
     fig.suptitle(
-        f"{title} ({_cutoff_label(cutoff)} retained-{cutoff_unit} cutoff)",
+        title_text,
         y=0.99,
         fontsize=title_fontsize,
         fontweight="bold",
