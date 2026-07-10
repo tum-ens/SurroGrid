@@ -49,8 +49,9 @@ The code expects each input file to contain (HDF5 keys / datasets):
 
 - `raw_data/net`: a pandapower network serialized as a JSON string (loaded via `pandapower.from_json_string`).
 - `urbs_in/demand`: raw household electricity demand time series (active power), used for the **pre-expansion** case.
-- `urbs_in/eff_factor`, `urbs_in/supim`, and `urbs_in/process`: required for `--post-demand-mode no-flex --no-flex-source step2`, where post demand is reconstructed without running URBS.
-- `urbs_out/MILP/tau_pro`: required for the default flexible post-expansion case. It is also used by no-flex source `step3` / `auto` when Step 3 results are present.
+- `urbs_in/eff_factor`, `urbs_in/supim`, and `urbs_in/process`: required inputs for no-flex reconstruction after Step 3 has produced a post-flex result file.
+- `urbs_out/MILP/tau_pro`: required for the default flexible post-expansion case and for no-flex timestep alignment.
+- `urbs_out/MILP/cap_pro`: required for no-flex heat reconstruction, because fixed heat demand is split with optimized post-flex `heatpump_air` and `heatpump_booster` capacities.
 
 The exact schema of these tables is defined by upstream steps; this step assumes they match what `src/save_grid.py` and `src/demands.py` read.
 
@@ -80,20 +81,14 @@ uv run python run_pwrflw.py <inputfile_id> --storage db --pre-only
 Post-electrification runs support two demand modes:
 
 - `--post-demand-mode flexible` (default): use optimized URBS net-import time series from `urbs_out/MILP/tau_pro`. This is the existing HEMS/flexibility case.
-- `--post-demand-mode no-flex`: reconstruct post demand without optimized URBS dispatch. Heat demand is converted with the heat-pump COP time series, rooftop PV uses the exogenous `supim` profile and installed `process` capacity, and EV demand reuses the allocated mobility profiles plus charging-station availability. EV energy is redistributed inside home-availability stretches and capped by `Config.EV_HOME_CHARGER_KW` (default 11 kW) unless `--no-flex-ev-charger-kw` is passed.
+- `--post-demand-mode no-flex`: reconstruct post demand without optimized URBS dispatch, but require a post-flex Step 3 result file. Heat demand is split with the optimized `urbs_out/MILP/cap_pro` capacities: `heatpump_air` covers demand up to its optimized electric capacity times COP, and high-demand residual heat at buses with optimized `heatpump_booster` capacity is assigned to auxiliary electric heating. Rooftop PV uses the exogenous `supim` profile and installed `process` capacity, and EV demand reuses the allocated mobility profiles plus charging-station availability. EV energy is redistributed inside home-availability stretches and capped by `Config.EV_HOME_CHARGER_KW` (default 11 kW) unless `--no-flex-ev-charger-kw` is passed.
 
-No-flex supports `--no-flex-source auto|step2|step3`:
+The no-flex mode intentionally reuses the existing Step 2 mobility pool and does not rerun emobpy. It is meant as a stress reference between pre-electrification and optimized post-electrification power-flow results, while keeping the same post-flex technology sizing context.
 
-- `step2`: read raw `/urbs_in/*` tables and skip URBS entirely. This is the fast stress-reference case.
-- `step3`: read Step 3 / reduced-data tables. If `urbs_out/MILP/tau_pro` exists, it is used for alignment; otherwise the reduced demand table is used, which supports TSAM reduce-only files without an optimization result. This is useful when the realized scenario depends on URBS or TSAM output.
-- `auto`: use `step3` when URBS results exist in the file; otherwise use `step2`.
-
-The no-flex mode intentionally reuses the existing Step 2 mobility pool and does not rerun emobpy. It is meant as a stress reference between pre-electrification and optimized post-electrification power-flow results.
-
-Example:
+Example after Step 3 has produced a post-flex result file:
 
 ```bash
-uv run python run_pwrflw.py <inputfile_id> --storage db --summary-only --post-demand-mode no-flex --no-flex-source step2
+uv run python run_pwrflw.py <inputfile_id> --storage db --summary-only --post-demand-mode no-flex
 ```
 
 In DB mode Step 4 still reads `urbs_in/*` and `urbs_out/*` from the input HDF5 file, but reads the pandapower grid from PostgreSQL and writes `pwrflw/*` results to the `surrogrid` schema instead of `Output/*.h5`. Results are grouped under the static `baseline_static` scenario key, integer `scenario_id`, and an interpretable `run_name`; rerunning the same grid/scenario/run overwrites the previous time-series rows. Building-level joins are available through the `surrogrid.grid_building_bus` view.

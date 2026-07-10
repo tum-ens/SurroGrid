@@ -169,7 +169,7 @@ if __name__ == "__main__":
         default="flexible",
         help=(
             "Post-electrification demand reconstruction. 'flexible' uses optimized URBS net import; "
-            "'no-flex' derives fixed heat, PV, and capped EV charging from allocated Step 2 profiles."
+            "'no-flex' derives fixed heat, PV, and capped EV charging while splitting heat via optimized post-flex heatpump_air/heatpump_booster capacities."
         ),
     )
     parser.add_argument(
@@ -177,15 +177,6 @@ if __name__ == "__main__":
         type=float,
         default=None,
         help="EV home charger cap for --post-demand-mode no-flex. Defaults to powerflow config EV_HOME_CHARGER_KW.",
-    )
-    parser.add_argument(
-        "--no-flex-source",
-        choices=["auto", "step2", "step3"],
-        default="auto",
-        help=(
-            "Input source for --post-demand-mode no-flex. 'step2' skips URBS and uses raw urbs_in tables; "
-            "'step3' uses URBS/reduced_data tables; 'auto' uses step3 when present, otherwise step2."
-        ),
     )
     parser.add_argument(
         "--summary-nonconvergence",
@@ -210,8 +201,6 @@ if __name__ == "__main__":
         parser.error("--post-demand-mode no-flex requires a post-electrification run, not --pre-only.")
     if args.no_flex_ev_charger_kw is not None and args.post_demand_mode != "no-flex":
         parser.error("--no-flex-ev-charger-kw requires --post-demand-mode no-flex.")
-    if args.no_flex_source != "auto" and args.post_demand_mode != "no-flex":
-        parser.error("--no-flex-source only applies to --post-demand-mode no-flex.")
     if args.summary_nonconvergence != "auto" and not args.summary_only:
         parser.error("--summary-nonconvergence only applies with --summary-only.")
 
@@ -254,9 +243,9 @@ if __name__ == "__main__":
     }
     if args.post_demand_mode == "no-flex":
         assumptions_extra.update({
-            "no_flex_assumption": "fixed heat pump, rooftop PV, and EV charging profiles; no URBS optimized dispatch for post demand",
+            "no_flex_assumption": "fixed heat, rooftop PV, and EV charging profiles; heat split uses optimized post-flex heatpump_air and heatpump_booster capacities; no URBS optimized dispatch for post demand",
             "no_flex_ev_charger_kw": float(no_flex_ev_charger_kw),
-            "no_flex_source": args.no_flex_source,
+            "no_flex_capacity_source": "post-flex cap_pro",
         })
     if args.hh_only:
         assumptions_extra.update({
@@ -287,7 +276,6 @@ if __name__ == "__main__":
             save_reactive=not args.summary_only,
             post_demand_mode=args.post_demand_mode,
             ev_charger_kw=no_flex_ev_charger_kw,
-            no_flex_source=args.no_flex_source,
         )
 
     if residential_buses is not None:

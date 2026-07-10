@@ -212,13 +212,14 @@ def _sum_columns_by_bus(df, component="electricity"):
     return summed
 
 
-def _heat_pump_electricity(df_raw_demand, df_eff_factor):
+def _heat_and_cop_by_bus(df_raw_demand, df_eff_factor):
     heat_columns = [
         column for column in df_raw_demand.columns
         if getattr(df_raw_demand.columns, "nlevels", 1) >= 2 and str(column[1]) in {"space_heat", "water_heat"}
     ]
     if not heat_columns:
-        return _empty_electricity_frame(df_raw_demand.index)
+        empty = _empty_electricity_frame(df_raw_demand.index)
+        return empty, empty
 
     cop_columns = _columns_with_component(df_eff_factor, "heatpump_air")
     if not cop_columns:
@@ -229,9 +230,71 @@ def _heat_pump_electricity(df_raw_demand, df_eff_factor):
     cop_by_bus.columns = cop_by_bus.columns.get_level_values(0)
     cop_by_bus = cop_by_bus.T.groupby(level=0).mean().T
     cop_by_bus = cop_by_bus.reindex(columns=heat_by_bus.columns)
-    heat_electricity = heat_by_bus.divide(cop_by_bus.replace(0, np.nan)).fillna(0.0)
-    heat_electricity.columns = pd.MultiIndex.from_tuples([(bus, "electricity") for bus in heat_electricity.columns])
-    return heat_electricity
+    return heat_by_bus, cop_by_bus
+
+
+def _capacity_by_bus(cap_pro, process, buses):
+    if cap_pro is None:
+        raise ValueError("No-flex heat split requires optimized post-flex cap_pro results.")
+    if not isinstance(cap_pro.index, pd.MultiIndex):
+        raise ValueError("No-flex heat split expects cap_pro with MultiIndex levels stf, sit, pro.")
+    if "sit" not in cap_pro.index.names or "pro" not in cap_pro.index.names:
+        raise ValueError("No-flex heat split expects cap_pro index levels named 'sit' and 'pro'.")
+
+    process_mask = cap_pro.index.get_level_values("pro") == process
+    process_caps = pd.to_numeric(cap_pro.loc[process_mask], errors="coerce").fillna(0.0)
+    if process_caps.empty:
+        return pd.Series(0.0, index=buses, dtype=float)
+
+    by_site = process_caps.groupby(level="sit").sum()
+    by_site_lookup = {str(site): float(value) for site, value in by_site.items()}
+    return pd.Series([by_site_lookup.get(str(bus), 0.0) for bus in buses], index=buses, dtype=float)
+
+
+def _no_flex_heat_electricity(df_raw_demand, df_eff_factor, cap_pro):
+    heat_by_bus, cop_by_bus = _heat_and_cop_by_bus(df_raw_demand, df_eff_factor)
+    if heat_by_bus.empty:
+        empty = _empty_electricity_frame(df_raw_demand.index)
+        return empty, empty, empty
+
+    buses = list(heat_by_bus.columns)
+    hp_capacity_el = _capacity_by_bus(cap_pro, "heatpump_air", buses)
+    booster_capacity_el = _capacity_by_bus(cap_pro, "heatpump_booster", buses)
+
+    cop_safe = cop_by_bus.replace(0, np.nan)
+    hp_thermal_limit = cop_safe.multiply(hp_capacity_el, axis=1).fillna(0.0)
+
+    heat_values = heat_by_bus.astype(float).to_numpy()
+    hp_limit_values = hp_thermal_limit.to_numpy(dtype=float)
+    uses_auxiliary = (booster_capacity_el.to_numpy(dtype=float) > 1e-9)[None, :]
+
+    # If the optimized flex case installed auxiliary capacity at a bus, the
+    # no-flex reconstruction lets the heat pump serve demand up to its optimized
+    # electric capacity and assigns the high-demand residual to direct auxiliary
+    # electric heating. Buses without optimized auxiliary capacity remain
+    # heat-pump-only to preserve the post-flex technology choice.
+    hp_heat_values = np.where(uses_auxiliary, np.minimum(heat_values, hp_limit_values), heat_values)
+    hp_heat = pd.DataFrame(hp_heat_values, index=heat_by_bus.index, columns=heat_by_bus.columns)
+    auxiliary_heat = (heat_by_bus - hp_heat).clip(lower=0.0)
+
+    hp_electricity = hp_heat.divide(cop_safe).fillna(0.0)
+    auxiliary_electricity = auxiliary_heat
+    total_electricity = hp_electricity.add(auxiliary_electricity, fill_value=0.0)
+
+    for frame in (total_electricity, hp_electricity, auxiliary_electricity):
+        frame.columns = pd.MultiIndex.from_tuples([(bus, "electricity") for bus in frame.columns])
+
+    auxiliary_peak = float(auxiliary_electricity.sum(axis=1).max()) if not auxiliary_electricity.empty else 0.0
+    auxiliary_energy = float(auxiliary_electricity.sum().sum()) if not auxiliary_electricity.empty else 0.0
+    hp_energy = float(hp_electricity.sum().sum()) if not hp_electricity.empty else 0.0
+    print(
+        "No-flex heat split from post-flex capacities: "
+        f"heat-pump electricity={hp_energy:.1f} kWh, "
+        f"auxiliary electricity={auxiliary_energy:.1f} kWh, "
+        f"auxiliary peak={auxiliary_peak:.3f} kW.",
+        flush=True,
+    )
+    return total_electricity, hp_electricity, auxiliary_electricity
 
 
 def _redistribute_ev_energy(energy, availability, charger_kw):
@@ -348,7 +411,11 @@ def _process_no_flex_demands(no_flex_inputs, df_pre_demand_elec, df_pre_demand_r
     df_supim = _align_table_to_timesteps(no_flex_inputs["supim"], timesteps, "No-flex supim", reference_label)
     df_process = no_flex_inputs["process"]
 
-    df_heat_elec = _heat_pump_electricity(df_raw_demand, df_eff_factor)
+    df_heat_elec, df_heat_hp_elec, _df_heat_auxiliary_elec = _no_flex_heat_electricity(
+        df_raw_demand,
+        df_eff_factor,
+        no_flex_inputs["cap_pro"],
+    )
     df_ev_elec = _mobility_electricity(df_raw_demand, df_eff_factor, ev_charger_kw)
     df_pv_elec = _pv_generation(df_supim, df_process)
 
@@ -358,7 +425,7 @@ def _process_no_flex_demands(no_flex_inputs, df_pre_demand_elec, df_pre_demand_r
 
     df_post_demand_react, df_prod_PV_react, df_demand_HP_react = _reactive_from_no_flex_components(
         df_pre_demand_react,
-        df_heat_elec,
+        df_heat_hp_elec,
         df_pv_elec,
     )
     df_react_save = _concat_react_demands(df_pre_demand_react.copy(), df_demand_HP_react, df_prod_PV_react)
@@ -373,7 +440,7 @@ def obtain_pre_demand(SF):
     df_pre_demand_elec, df_pre_demand_react = _process_pre_demands(df_raw_demand)
     return pd.concat([df_pre_demand_elec, df_pre_demand_react], axis=1)
 
-def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charger_kw=None, no_flex_source="auto"):
+def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charger_kw=None):
     if post_demand_mode not in {"flexible", "no-flex"}:
         raise ValueError("post_demand_mode must be 'flexible' or 'no-flex'.")
 
@@ -386,7 +453,7 @@ def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charge
         charger_kw = config.EV_HOME_CHARGER_KW if ev_charger_kw is None else float(ev_charger_kw)
         if charger_kw <= 0:
             raise ValueError("ev_charger_kw must be greater than zero.")
-        no_flex_inputs = SF.get_no_flex_inputs(source=no_flex_source)
+        no_flex_inputs = SF.get_no_flex_inputs()
         reference = no_flex_inputs.get("reference")
         timesteps = _reference_timestep_count(reference, no_flex_inputs.get("drop_initial_timestep", False))
         if timesteps is None:

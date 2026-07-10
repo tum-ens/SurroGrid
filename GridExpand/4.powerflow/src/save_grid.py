@@ -54,6 +54,7 @@ class SaveFile:
         self.raw_demand_dir = "urbs_in/demand"
         self.reduced_demand_dir = "urbs_out/reduced_data/demand"
         self.net_demand_dir = "urbs_out/MILP/tau_pro"
+        self.cap_pro_dir = "urbs_out/MILP/cap_pro"
         self.raw_eff_factor_dir = "urbs_in/eff_factor"
         self.reduced_eff_factor_dir = "urbs_out/reduced_data/eff_factor"
         self.raw_supim_dir = "urbs_in/supim"
@@ -120,37 +121,34 @@ class SaveFile:
         df_net_demand = pd.read_hdf(self.input_path, key=self.net_demand_dir)
         return df_raw_demand, df_net_demand
 
-    def get_no_flex_inputs(self, source="auto"):
-        if source not in {"auto", "step2", "step3"}:
-            raise ValueError("No-flex source must be 'auto', 'step2', or 'step3'.")
+    def get_no_flex_inputs(self):
+        """Read no-flex inputs from a post-flex Step 3 result file.
 
-        use_step3 = source == "step3" or (source == "auto" and (self.has_urbs_results() or self.has_reduced_no_flex_inputs()))
-        if use_step3:
-            if not (self.has_urbs_results() or self.has_reduced_no_flex_inputs()):
-                raise KeyError(
-                    "No-flex source 'step3' requires URBS results or reduced_data tables, "
-                    f"but {self.filename} has neither."
-                )
-            has_urbs_results = self.has_urbs_results()
-            demand = self.get_pre_demand()
-            reference = pd.read_hdf(self.input_path, key=self.net_demand_dir) if has_urbs_results else demand
-            return {
-                "source": "step3",
-                "demand": demand,
-                "eff_factor": self._read_preferred_hdf(self.reduced_eff_factor_dir, self.raw_eff_factor_dir),
-                "supim": self._read_preferred_hdf(self.reduced_supim_dir, self.raw_supim_dir),
-                "process": self._read_preferred_hdf(self.reduced_process_dir, self.raw_process_dir),
-                "reference": reference,
-                "drop_initial_timestep": not has_urbs_results,
-            }
+        No-flex demand reconstruction intentionally depends on the optimized
+        post-flex capacities. Heat demand is dispatched without URBS temporal
+        flexibility, but uses ``cap_pro`` to split heat-pump and auxiliary
+        electric heating in the same technology sizing context.
+        """
+        if not self.has_urbs_results():
+            raise KeyError(
+                "No-flex post demand requires post-flex URBS results in "
+                f"'{self.net_demand_dir}' so timestep alignment and optimized capacities are available."
+            )
+        if not self._hdf_key_exists(self.cap_pro_dir):
+            raise KeyError(
+                "No-flex post demand requires optimized post-flex capacities in "
+                f"'{self.cap_pro_dir}'. Run Step 3 optimization before Step 4 no-flex power flow."
+            )
 
         return {
-            "source": "step2",
-            "demand": self._read_required_hdf(self.raw_demand_dir),
-            "eff_factor": self._read_required_hdf(self.raw_eff_factor_dir),
-            "supim": self._read_required_hdf(self.raw_supim_dir),
-            "process": self._read_required_hdf(self.raw_process_dir),
-            "reference": None,
+            "source": "post-flex",
+            "demand": self.get_pre_demand(),
+            "eff_factor": self._read_preferred_hdf(self.reduced_eff_factor_dir, self.raw_eff_factor_dir),
+            "supim": self._read_preferred_hdf(self.reduced_supim_dir, self.raw_supim_dir),
+            "process": self._read_preferred_hdf(self.reduced_process_dir, self.raw_process_dir),
+            "cap_pro": self._read_required_hdf(self.cap_pro_dir),
+            "reference": pd.read_hdf(self.input_path, key=self.net_demand_dir),
+            "drop_initial_timestep": False,
         }
 
     def save_df(self, df, dir):

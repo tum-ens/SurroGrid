@@ -139,25 +139,17 @@ def parse_args() -> argparse.Namespace:
         "--include-no-flex-powerflow",
         action="store_true",
         help=(
-            "For post-electrification profiles, run an additional Step 4 powerflow where "
-            "post demand is reconstructed from fixed heat, PV, and capped EV charging profiles."
+            "For post-electrification profiles, run an additional Step 4 no-flex powerflow after "
+            "Step 3. Heat is reconstructed from fixed demand using optimized post-flex "
+            "heat-pump and auxiliary-heater capacities; PV and EV profiles remain fixed."
         ),
     )
     parser.add_argument(
         "--no-flex-only",
         action="store_true",
         help=(
-            "Run only the no-flex post-electrification power flow. Without --tsam it runs directly "
-            "from Step 2 outputs; with --tsam it runs Step 3 in reduce-only mode and skips optimization."
-        ),
-    )
-    parser.add_argument(
-        "--no-flex-source",
-        choices=["auto", "step2", "step3"],
-        default="auto",
-        help=(
-            "Input source for additional no-flex powerflow when Step 3 is available. "
-            "--no-flex-only selects Step 2 for full-year runs and Step 3 reduced_data for TSAM runs automatically."
+            "Run Step 3 optimization to obtain post-flex capacities, then run only the "
+            "no-flex post-electrification power flow."
         ),
     )
     parser.add_argument(
@@ -183,8 +175,6 @@ def parse_args() -> argparse.Namespace:
         parser.error("Use either --no-flex-only or --include-no-flex-powerflow, not both.")
     if args.no_flex_ev_charger_kw is not None and not (args.include_no_flex_powerflow or args.no_flex_only):
         parser.error("--no-flex-ev-charger-kw requires --include-no-flex-powerflow or --no-flex-only.")
-    if args.no_flex_source != "auto" and not args.include_no_flex_powerflow:
-        parser.error("--no-flex-source only applies with --include-no-flex-powerflow; --no-flex-only uses Step 2.")
     return args
 
 
@@ -530,7 +520,7 @@ def materialize_expansion_analyses(
             f"{prefix}_post_no_flex",
             (
                 f"Automatically materialized by synthetic_ags_pipeline_runner from {no_flex_run_name} "
-                "summary stage=post using fixed no-flex post-electrification demand."
+                "summary stage=post using fixed no-flex demand with post-flex heat capacity split."
             ),
             "expansion_materialize_post_no_flex",
         )
@@ -562,7 +552,7 @@ def materialize_expansion_analyses(
             no_flex_analysis_key,
             (
                 f"Automatically materialized by synthetic_ags_pipeline_runner from {no_flex_run_name} "
-                "summary stage=post using fixed no-flex post-electrification demand."
+                "summary stage=post using fixed no-flex demand with post-flex heat capacity split."
             ),
             "expansion_materialize_post_no_flex",
         )
@@ -991,23 +981,29 @@ def run_candidate(
 
         if args.no_flex_only:
             validations = []
+            shutil.copy2(step2_output, step3_dir / "Input" / step2_filename)
+
+            step3_cpus, cluster_concurrency, step3_stats = choose_step3_settings(step2_output, args)
+            step3_stats = {**step3_stats, "post_flex_capacity_source": "required_for_no_flex"}
+            status.update(
+                candidate_index,
+                step3_cpus=step3_cpus,
+                urbs_cluster_concurrency=cluster_concurrency,
+                message=json.dumps(step3_stats, sort_keys=True),
+            )
+
+            current_stage = "step3_urbs_for_no_flex"
+            step3_cmd = [
+                "uv",
+                "run",
+                "python",
+                "run_urbs_cluster.py",
+                step2_filename,
+                "--n_cpu",
+                str(step3_cpus),
+            ]
             if args.tsam:
-                status.update(
-                    candidate_index,
-                    step3_cpus=1,
-                    urbs_cluster_concurrency="reduce_only",
-                    message=json.dumps({"scenario_suffix": scenario_suffix, "step3": "tsam_reduce_only"}, sort_keys=True),
-                )
-                shutil.copy2(step2_output, step3_dir / "Input" / step2_filename)
-                current_stage = "step3_tsam_reduce_only"
-                reduce_cmd = [
-                    "uv",
-                    "run",
-                    "python",
-                    "run_urbs_cluster.py",
-                    step2_filename,
-                    "--n_cpu",
-                    "1",
+                step3_cmd.extend([
                     "--tsam",
                     "--tsam-periods",
                     str(args.tsam_periods),
@@ -1015,33 +1011,21 @@ def run_candidate(
                     str(args.tsam_hours_per_period),
                     "--tsam-extreme-method",
                     args.tsam_extreme_method,
-                    "--reduce-only",
-                ]
-                run_command(
-                    cmd=reduce_cmd,
-                    cwd=step3_dir,
-                    log_path=log_file,
-                    status=status,
-                    candidate_index=candidate_index,
-                    stage=current_stage,
-                    env_extra={"URBS_CLUSTER_CONCURRENCY": "1"},
-                )
-                step3_reduce_output = step3_dir / "result" / scenario_filename
-                if not step3_reduce_output.exists():
-                    raise FileNotFoundError(f"Missing Step 3 reduce-only output {step3_reduce_output}")
-                powerflow_filename = scenario_filename
-                no_flex_source = "step3"
-                shutil.copy2(step3_reduce_output, step4_dir / "Input" / powerflow_filename)
-            else:
-                status.update(
-                    candidate_index,
-                    step3_cpus="skipped",
-                    urbs_cluster_concurrency="skipped",
-                    message=json.dumps({"scenario_suffix": scenario_suffix, "step3": "skipped_no_flex_only"}, sort_keys=True),
-                )
-                powerflow_filename = step2_filename
-                no_flex_source = "step2"
-                shutil.copy2(step2_output, step4_dir / "Input" / powerflow_filename)
+                ])
+            run_command(
+                cmd=step3_cmd,
+                cwd=step3_dir,
+                log_path=log_file,
+                status=status,
+                candidate_index=candidate_index,
+                stage=current_stage,
+                env_extra={"URBS_CLUSTER_CONCURRENCY": str(cluster_concurrency)},
+            )
+            step3_output = step3_dir / "result" / scenario_filename
+            if not step3_output.exists():
+                raise FileNotFoundError(f"Missing Step 3 output {step3_output}")
+            powerflow_filename = scenario_filename
+            shutil.copy2(step3_output, step4_dir / "Input" / powerflow_filename)
 
             if args.powerflow_output in {"raw", "both"}:
                 current_stage = "step4_powerflow_raw_no_flex"
@@ -1058,8 +1042,6 @@ def run_candidate(
                     raw_no_flex_run_name,
                     "--post-demand-mode",
                     "no-flex",
-                    "--no-flex-source",
-                    no_flex_source,
                     "--n_cpu",
                     str(args.step4_cpus),
                 ]
@@ -1102,8 +1084,6 @@ def run_candidate(
                     summary_no_flex_run_name,
                     "--post-demand-mode",
                     "no-flex",
-                    "--no-flex-source",
-                    no_flex_source,
                     "--n_cpu",
                     str(args.step4_cpus),
                 ]
@@ -1244,8 +1224,6 @@ def run_candidate(
                 raw_no_flex_run_name,
                 "--post-demand-mode",
                 "no-flex",
-                "--no-flex-source",
-                args.no_flex_source,
                 "--n_cpu",
                 str(args.step4_cpus),
             ]
@@ -1333,8 +1311,6 @@ def run_candidate(
                 summary_no_flex_run_name,
                 "--post-demand-mode",
                 "no-flex",
-                "--no-flex-source",
-                args.no_flex_source,
                 "--n_cpu",
                 str(args.step4_cpus),
             ]
