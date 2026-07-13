@@ -286,6 +286,29 @@ uv run python GridExpand/runme/synthetic_ags_pipeline_runner.py \
 
 Use `--no-flex-only` only when you want to skip the flexible Step 4 power-flow output. It still runs Step 3 optimization first, because the no-flex heat reconstruction needs the optimized post-flex capacities. Use `--no-flex-ev-charger-kw <kW>` to override the default 11 kW home charger cap.
 
+#### Intermediate-file cleanup for large AGS runs
+
+The DB-backed summary pipeline only needs the HDF5 hand-off files while a candidate is actively moving through Steps 2-4. After a candidate has passed Step 4 validation, the later analysis uses the PostgreSQL summary tables and the run logs. Add `--cleanup-intermediates success` to delete successful-candidate hand-off files from:
+
+- `2.demand_allocation/gridalloc/results/`
+- `3.urbs/Input/`
+- `4.powerflow/Input/`
+
+Failed-candidate files are kept for debugging. For an interrupted run that already contains completed candidates, use the same pipeline arguments and run directory with `--cleanup-completed-only`; this removes intermediates for candidates marked done in `status.tsv` or `events.jsonl` and exits without starting new work.
+
+```bash
+uv run --project GridExpand/2.demand_allocation python GridExpand/runme/synthetic_ags_pipeline_runner.py \
+  --repo-root /path/to/SurroGrid \
+  --ags <AGS> \
+  --profiles all \
+  --demand-scope residential \
+  --powerflow-output summary \
+  --tsam \
+  --include-no-flex-powerflow \
+  --cleanup-completed-only \
+  --run-dir GridExpand/run_logs/<EXISTING_RUN_DIR>
+```
+
 ### Step 5: Postprocessing and plotting
 
 Location: `5.postprocessing/`

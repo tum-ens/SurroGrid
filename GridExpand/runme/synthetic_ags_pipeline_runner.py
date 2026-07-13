@@ -59,6 +59,7 @@ PROFILE_CHOICES = (
 
 POWERFLOW_OUTPUT_CHOICES = ("raw", "summary", "both")
 DEMAND_SCOPE_CHOICES = ("all", "residential")
+CLEANUP_CHOICES = ("never", "success")
 
 
 def run_name_profile_token(profile: str) -> str:
@@ -127,6 +128,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-pilot-gate", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--rerun-failed", action="store_true")
+    parser.add_argument(
+        "--cleanup-intermediates",
+        choices=CLEANUP_CHOICES,
+        default="never",
+        help=(
+            "Delete per-candidate HDF5 hand-off files after successful validation. "
+            "'success' keeps failed-candidate files for debugging and keeps DB summaries/logs."
+        ),
+    )
+    parser.add_argument(
+        "--cleanup-completed-only",
+        action="store_true",
+        help=(
+            "Only remove intermediate files for candidates already marked as done in the run log, "
+            "then exit. Use this before resuming an interrupted disk-limited run."
+        ),
+    )
     parser.add_argument("--start-index", type=int)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--no-dynamic-step3", action="store_true")
@@ -176,6 +194,15 @@ def parse_args() -> argparse.Namespace:
     if args.no_flex_ev_charger_kw is not None and not (args.include_no_flex_powerflow or args.no_flex_only):
         parser.error("--no-flex-ev-charger-kw requires --include-no-flex-powerflow or --no-flex-only.")
     return args
+
+
+def step_paths(repo_root: Path) -> dict[str, Path]:
+    gridexpand = repo_root / "GridExpand"
+    return {
+        "step2_results": gridexpand / "2.demand_allocation" / "gridalloc" / "results",
+        "step3_input": gridexpand / "3.urbs" / "Input",
+        "step4_input": gridexpand / "4.powerflow" / "Input",
+    }
 
 
 class StatusLog:
@@ -781,6 +808,106 @@ def candidate_failed_payload(
     }
 
 
+def candidate_intermediate_files(repo_root: Path, candidate: dict[str, object], args: argparse.Namespace) -> list[Path]:
+    paths = step_paths(repo_root)
+    step2_filename = output_filename_for_timeframe(str(candidate["bridge_filename"]), args.timeframe_mode)
+    step2_stem = Path(step2_filename).stem
+    files = [
+        paths["step2_results"] / step2_filename,
+        paths["step3_input"] / step2_filename,
+        paths["step4_input"] / step2_filename,
+    ]
+    files.extend(sorted(paths["step4_input"].glob(f"{step2_stem}_*.h5")))
+    seen: set[Path] = set()
+    unique_files = []
+    for file_path in files:
+        resolved = file_path.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique_files.append(file_path)
+    return unique_files
+
+
+def cleanup_candidate_intermediates(
+    repo_root: Path,
+    candidate: dict[str, object],
+    args: argparse.Namespace,
+    status: StatusLog,
+    *,
+    reason: str,
+) -> dict[str, object]:
+    removed_files = []
+    removed_bytes = 0
+    for file_path in candidate_intermediate_files(repo_root, candidate, args):
+        if not file_path.exists() or not file_path.is_file():
+            continue
+        size = file_path.stat().st_size
+        file_path.unlink()
+        removed_files.append(str(file_path))
+        removed_bytes += size
+    payload = {
+        "event": "candidate_intermediates_cleaned",
+        "candidate_index": int(candidate["candidate_index"]),
+        "reason": reason,
+        "removed_files": len(removed_files),
+        "removed_bytes": removed_bytes,
+    }
+    status.event(**payload)
+    return {**payload, "files": removed_files}
+
+
+def completed_candidate_indexes(status: StatusLog) -> set[int]:
+    completed = {index for index, row in status.rows.items() if row.get("status") == "done"}
+    if not status.events_path.exists():
+        return completed
+    with status.events_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("event") in {"candidate_done", "pilot_finish"} and event.get("status") == "done":
+                candidate_index = event.get("candidate_index")
+                if candidate_index is not None:
+                    completed.add(int(candidate_index))
+    return completed
+
+
+def cleanup_completed_intermediates(
+    repo_root: Path,
+    candidates: list[dict[str, object]],
+    args: argparse.Namespace,
+    status: StatusLog,
+) -> dict[str, object]:
+    completed = completed_candidate_indexes(status)
+    by_index = {int(candidate["candidate_index"]): candidate for candidate in candidates}
+    cleanup_results = []
+    for candidate_index in sorted(completed):
+        candidate = by_index.get(candidate_index)
+        if candidate is None:
+            continue
+        cleanup_results.append(
+            cleanup_candidate_intermediates(
+                repo_root,
+                candidate,
+                args,
+                status,
+                reason="completed_only",
+            )
+        )
+    summary = {
+        "status": "done",
+        "candidate_count": len(cleanup_results),
+        "removed_files": sum(int(result["removed_files"]) for result in cleanup_results),
+        "removed_bytes": sum(int(result["removed_bytes"]) for result in cleanup_results),
+        "finished_at": utc_now(),
+    }
+    status.event(event="cleanup_completed_finish", **summary)
+    return summary
+
+
 def run_candidate(
     *,
     repo_root: Path,
@@ -977,6 +1104,8 @@ def run_candidate(
                 seconds=seconds,
                 message="ok",
             )
+            if args.cleanup_intermediates == "success":
+                cleanup_candidate_intermediates(repo_root, candidate, args, status, reason="success")
             return {"candidate_index": candidate_index, "status": "done", "seconds": seconds}
 
         if args.no_flex_only:
@@ -1124,6 +1253,8 @@ def run_candidate(
                 seconds=seconds,
                 message="ok",
             )
+            if args.cleanup_intermediates == "success":
+                cleanup_candidate_intermediates(repo_root, candidate, args, status, reason="success")
             return {"candidate_index": candidate_index, "status": "done", "seconds": seconds}
 
         shutil.copy2(step2_output, step3_dir / "Input" / step2_filename)
@@ -1352,6 +1483,8 @@ def run_candidate(
             seconds=seconds,
             message="ok",
         )
+        if args.cleanup_intermediates == "success":
+            cleanup_candidate_intermediates(repo_root, candidate, args, status, reason="success")
         return {"candidate_index": candidate_index, "status": "done", "seconds": seconds}
     except Exception as exc:
         seconds = round(time.monotonic() - started, 1)
@@ -1381,11 +1514,12 @@ def filter_candidates(candidates: list[dict[str, object]], args: argparse.Namesp
     if not args.resume:
         return selected
 
+    completed = completed_candidate_indexes(status)
     runnable = []
     for candidate in selected:
         candidate_index = int(candidate["candidate_index"])
         previous = status.status_for(candidate_index)
-        if previous == "done":
+        if previous == "done" or candidate_index in completed:
             status.event(event="candidate_skipped_resume_done", candidate_index=candidate_index)
             continue
         if previous == "failed" and not args.rerun_failed:
@@ -1401,7 +1535,7 @@ def main() -> int:
     run_dir = args.run_dir.resolve()
     args.run_dir = run_dir
     (run_dir / "logs").mkdir(parents=True, exist_ok=True)
-    status = StatusLog(run_dir, resume=args.resume)
+    status = StatusLog(run_dir, resume=args.resume or args.cleanup_completed_only)
 
     started_wall = time.monotonic()
     status.event(
@@ -1425,6 +1559,8 @@ def main() -> int:
         run_dir=str(run_dir),
         resume=args.resume,
         rerun_failed=args.rerun_failed,
+        cleanup_intermediates=args.cleanup_intermediates,
+        cleanup_completed_only=args.cleanup_completed_only,
     )
 
     candidates = get_candidates(repo_root, args.ags, args.min_buildings, args.demand_scope)
@@ -1436,6 +1572,11 @@ def main() -> int:
     if not candidates:
         status.event(event="batch_finish", status="failed", message="No candidates found")
         return 1
+
+    if args.cleanup_completed_only:
+        summary = cleanup_completed_intermediates(repo_root, candidates, args, status)
+        (run_dir / "cleanup_summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+        return 0
 
     candidates = filter_candidates(candidates, args, status)
     status.event(event="candidates_selected", count=len(candidates))

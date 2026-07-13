@@ -25,6 +25,7 @@ uv run --project GridExpand/2.demand_allocation python GridExpand/runme/syntheti
   --workers 6 \
   --step2-cpus 1 \
   --step4-cpus 1 \
+  --cleanup-intermediates success \
   --run-dir GridExpand/run_logs/forchheim_post_flex_hh_tsam_$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
@@ -60,6 +61,7 @@ uv run --project GridExpand/2.demand_allocation python GridExpand/runme/syntheti
   --workers 6 \
   --step2-cpus 1 \
   --step4-cpus 1 \
+  --cleanup-intermediates success \
   --run-dir GridExpand/run_logs/forchheim_post_no_flex_hh_tsam_$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
@@ -89,6 +91,7 @@ uv run --project GridExpand/2.demand_allocation python GridExpand/runme/syntheti
   --step4-cpus 1 \
   --resume \
   --rerun-failed \
+  --cleanup-intermediates success \
   --run-dir GridExpand/run_logs/<EXISTING_RUN_DIR>
 ```
 
@@ -97,3 +100,22 @@ For no-flex reruns, add:
 ```bash
 --no-flex-only
 ```
+
+## Cleanup Completed Intermediates
+
+For disk-limited interrupted runs, clean HDF5 hand-off files for candidates that already completed successfully before resuming:
+
+```bash
+uv run --project GridExpand/2.demand_allocation python GridExpand/runme/synthetic_ags_pipeline_runner.py \
+  --repo-root /home/breveron/git/github/SurroGrid \
+  --ags 9474126 \
+  --profiles all \
+  --demand-scope residential \
+  --powerflow-output summary \
+  --tsam \
+  --include-no-flex-powerflow \
+  --cleanup-completed-only \
+  --run-dir GridExpand/run_logs/<EXISTING_RUN_DIR>
+```
+
+Then resume with `--resume --rerun-failed --cleanup-intermediates success`.
