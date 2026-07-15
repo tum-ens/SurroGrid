@@ -297,9 +297,8 @@ def _no_flex_heat_electricity(df_raw_demand, df_eff_factor, cap_pro):
     return total_electricity, hp_electricity, auxiliary_electricity
 
 
-def _redistribute_ev_energy(energy, availability, charger_kw):
-    energy_values = np.asarray(energy, dtype=float)
-    available = np.asarray(availability, dtype=float) > 0.5
+def _redistribute_ev_energy_linear(energy_values, available, charger_kw):
+    """Assign EV energy to the earliest available hours in non-cyclic windows."""
     result = np.zeros_like(energy_values, dtype=float)
     assigned_energy = 0.0
     i = 0
@@ -322,6 +321,44 @@ def _redistribute_ev_energy(energy, availability, charger_kw):
         if required > 1e-9:
             result[j - 1] += required
         i = j
+
+    return result, assigned_energy
+
+
+def _cyclic_availability_start(available):
+    starts = np.where((~available[:-1]) & (available[1:]))[0] + 1
+    if len(starts) == 0:
+        return None
+    return int(starts[0])
+
+
+def _redistribute_ev_energy(energy, availability, charger_kw):
+    energy_values = np.asarray(energy, dtype=float)
+    available = np.asarray(availability, dtype=float) > 0.5
+    if len(energy_values) == 0:
+        return np.zeros_like(energy_values, dtype=float)
+
+    if available[0] and available[-1]:
+        start = _cyclic_availability_start(available)
+        if start is not None:
+            rotated_result, assigned_energy = _redistribute_ev_energy_linear(
+                np.roll(energy_values, -start),
+                np.roll(available, -start),
+                charger_kw,
+            )
+            result = np.roll(rotated_result, start)
+        else:
+            result, assigned_energy = _redistribute_ev_energy_linear(
+                energy_values,
+                available,
+                charger_kw,
+            )
+    else:
+        result, assigned_energy = _redistribute_ev_energy_linear(
+            energy_values,
+            available,
+            charger_kw,
+        )
 
     total_energy = float(energy_values.sum())
     if abs(total_energy - assigned_energy) > 1e-6:

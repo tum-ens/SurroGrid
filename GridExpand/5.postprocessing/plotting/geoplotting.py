@@ -743,9 +743,10 @@ def plot_synthetic_expansion_envelope_panels(
     cmap: str | LinearSegmentedColormap = "cost_green_red",
     show_points: bool = False,
     show_buildings: bool = True,
-    building_point_size: float = 3.0,
-    building_alpha: float = 0.24,
+    building_point_size: float = 1.2,
+    building_alpha: float = 0.06,
     envelope_alpha: float = 0.46,
+    show_axis_ticks: bool = True,
     add_osm_layer: bool = True,
     osm_source: object | None = None,
     osm_zoom: str | int = "auto",
@@ -838,6 +839,11 @@ def plot_synthetic_expansion_envelope_panels(
             )
         metric_count = len(dataset["layers"]["grid_metrics"])
         ax.set_title(f"{dataset['label']} ({metric_count} grids)")
+        if not show_axis_ticks:
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_xlabel("")
+            ax.set_ylabel("")
 
     title_label = _display_label(value_column, value_unit)
     cbar = fig.colorbar(color_source, ax=axes.ravel().tolist(), shrink=0.78)
@@ -871,9 +877,10 @@ def plot_synthetic_expansion_envelope_comparison(
     cmap: str | LinearSegmentedColormap = "cost_green_red",
     show_points: bool = False,
     show_buildings: bool = True,
-    building_point_size: float = 3.0,
-    building_alpha: float = 0.24,
+    building_point_size: float = 1.2,
+    building_alpha: float = 0.06,
     envelope_alpha: float = 0.46,
+    show_axis_ticks: bool = True,
     add_osm_layer: bool = True,
     osm_source: object | None = None,
     osm_zoom: str | int = "auto",
@@ -896,6 +903,7 @@ def plot_synthetic_expansion_envelope_comparison(
         building_point_size=building_point_size,
         building_alpha=building_alpha,
         envelope_alpha=envelope_alpha,
+        show_axis_ticks=show_axis_ticks,
         add_osm_layer=add_osm_layer,
         osm_source=osm_source,
         osm_zoom=osm_zoom,
@@ -915,8 +923,8 @@ def plot_synthetic_expansion_envelopes(
     cmap: str | LinearSegmentedColormap = "cost_green_red",
     show_points: bool = False,
     show_buildings: bool = True,
-    building_point_size: float = 3.0,
-    building_alpha: float = 0.24,
+    building_point_size: float = 1.2,
+    building_alpha: float = 0.06,
     envelope_alpha: float = 0.58,
     add_osm_layer: bool = True,
     osm_source: object | None = None,

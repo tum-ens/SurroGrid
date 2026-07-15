@@ -76,6 +76,42 @@ DB-backed power-flow result storage can be enabled with the command below. Use `
 uv run python run_pwrflw.py <inputfile_id> --storage db --pre-only
 ```
 
+### Real SWF scenario-plan base-electricity runner
+
+The real-grid scenario calibration audit from Step 2 writes bus-level handover files under `GridExpand/2.demand_allocation/gridalloc/outputs/scenario_calibration/`. The shared calibrated profile builder currently simulates residential-equivalent HH electricity plus calibrated SWF GHD electricity. It preserves the audited EV, heat-pump, PV, and battery capacities in the handover metadata but does not yet translate them into sector-coupling time series.
+
+To materialize one calibrated real-grid HDF with the same `/urbs_in/...` contract as synthetic Step 2, run from `GridExpand/2.demand_allocation/gridalloc`:
+
+```bash
+uv run --project .. python -m src.scenario_calibration.real_swf_urbs_input \
+  --lv-id 149 \
+  --plz 91301 \
+  --scenario-label real_swf_2045_full_local_base_electricity_pilot
+```
+
+The generated file is written to `GridExpand/3.urbs/Input/` and can be checked with the standard Step 3 TSAM preprocessing path:
+
+```bash
+cd GridExpand/3.urbs
+uv run python run_urbs_cluster.py real_swf_LV_149_real_swf_2045_full_local_base_electricity_pilot.h5 \
+  --tsam \
+  --reduce-only \
+  --n_cpu 1
+```
+
+For compact base-electricity power-flow summaries without running Step 3, the DB-backed real runner consumes the same shared profile builder and the same `swf_2045_full_local_demand_bus_allocation_plan.csv`:
+
+```bash
+cd GridExpand/4.powerflow
+uv run python run_real_swf_scenario_powerflow.py \
+  --lv-id 149 \
+  --workers 1 \
+  --run-name real_swf_2045_full_local_base_electricity_pilot \
+  --scenario-key real_swf_2045_full_local_base_electricity_pilot
+```
+
+Use `--max-timesteps 24` for a smoke test before a full 8760-hour run. For the later real-grid post-flex/no-flex implementation, the real and synthetic paths must share the same HDF contract, time-series handling, TSAM settings, sector-coupling assumptions, no-flex reconstruction, and power-flow reconstruction logic so that only the grid topology differs.
+
 ### Post-electrification demand modes
 
 Post-electrification runs support two demand modes:
