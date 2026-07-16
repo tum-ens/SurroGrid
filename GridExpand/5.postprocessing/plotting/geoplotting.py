@@ -753,8 +753,11 @@ def plot_synthetic_expansion_envelope_panels(
     osm_alpha: float = 0.72,
     output_path: str | Path | None = None,
     figsize: tuple[float, float] | None = None,
+    ncols: int | None = None,
+    real_grid_data_path: str | Path | None = None,
+    real_load_type: str | Sequence[str] | None = "HH",
 ) -> tuple[plt.Figure, np.ndarray, dict[str, dict[str, pd.DataFrame]]]:
-    """Plot multiple synthetic expansion-envelope analyses with one shared color scale."""
+    """Plot synthetic expansion envelopes, optionally with a real-reference row."""
 
     analysis_items = _ordered_analysis_items(analysis_keys)
     value_scale, value_unit = _display_value_scale(value_column)
@@ -795,7 +798,20 @@ def plot_synthetic_expansion_envelope_panels(
     else:
         norm = Normalize(vmin=0.0, vmax=vmax)
 
-    all_points = pd.concat([dataset["layers"]["points"][["x", "y"]] for dataset in datasets], ignore_index=True)
+    real_points = pd.DataFrame()
+    real_envelopes = []
+    if real_grid_data_path is not None:
+        real_points = load_real_grid_points(
+            real_grid_data_path=real_grid_data_path,
+            real_load_type=real_load_type,
+        )
+        if not real_points.empty:
+            real_envelopes = _make_envelopes(real_points, "Real SWF", "lv_id")
+
+    point_frames = [dataset["layers"]["points"][["x", "y"]] for dataset in datasets]
+    if not real_points.empty:
+        point_frames.append(real_points[["x", "y"]])
+    all_points = pd.concat(point_frames, ignore_index=True)
     x_min, x_max = float(all_points["x"].min()), float(all_points["x"].max())
     y_min, y_max = float(all_points["y"].min()), float(all_points["y"].max())
     pad_x = max((x_max - x_min) * 0.035, 25.0)
@@ -804,11 +820,22 @@ def plot_synthetic_expansion_envelope_panels(
     ylim = (y_min - pad_y, y_max + pad_y)
 
     n_panels = len(datasets)
+    has_real_row = bool(real_envelopes)
+    if has_real_row:
+        ncols = n_panels
+        synthetic_rows = 1
+    else:
+        if ncols is None:
+            ncols = n_panels
+        ncols = max(1, min(int(ncols), n_panels))
+        synthetic_rows = int(np.ceil(n_panels / ncols))
+    nrows = synthetic_rows + (1 if has_real_row else 0)
     if figsize is None:
-        figsize = (max(5.2 * n_panels, 8.0), 7.3)
+        figsize = (max(5.2 * ncols, 8.0), max(4.6 * nrows, 7.3))
     cmap_obj = _cost_colormap(cmap)
-    fig, axes_raw = plt.subplots(1, n_panels, figsize=figsize, constrained_layout=True, sharex=True, sharey=True)
-    axes = np.atleast_1d(axes_raw)
+    fig, axes_raw = plt.subplots(nrows, ncols, figsize=figsize, constrained_layout=True, sharex=True, sharey=True)
+    axes_grid = np.atleast_2d(axes_raw)
+    axes = axes_grid.ravel()
     color_source = plt.cm.ScalarMappable(norm=norm, cmap=cmap_obj)
     for ax, dataset in zip(axes, datasets):
         color_source = _draw_synthetic_expansion_envelope_layers(
@@ -845,6 +872,39 @@ def plot_synthetic_expansion_envelope_panels(
             ax.set_xlabel("")
             ax.set_ylabel("")
 
+    for ax in axes[len(datasets):synthetic_rows * ncols]:
+        ax.set_axis_off()
+
+    if has_real_row:
+        real_axes = axes_grid[synthetic_rows, :]
+        for col_idx, (ax, dataset) in enumerate(zip(real_axes, datasets)):
+            _add_envelopes(
+                ax,
+                real_envelopes,
+                facecolor="#F58518",
+                edgecolor="#B75D00",
+                point_color="#B75D00",
+                alpha=0.18,
+                linewidth=0.8,
+                show_points=show_points,
+            )
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+            ax.set_title(f"Real SWF reference - {dataset['label']} ({len(real_envelopes)} grids)")
+            ax.set_aspect("equal", adjustable="box")
+            if add_osm_layer:
+                _add_osm_basemap(
+                    ax,
+                    target_epsg=target_epsg,
+                    source=osm_source,
+                    zoom=osm_zoom,
+                    alpha=osm_alpha,
+                )
+            if not show_axis_ticks:
+                ax.set_xticks([])
+                ax.set_yticks([])
+                ax.set_xlabel("")
+                ax.set_ylabel("")
     title_label = _display_label(value_column, value_unit)
     cbar = fig.colorbar(color_source, ax=axes.ravel().tolist(), shrink=0.78)
     cbar.set_label(title_label)
@@ -856,11 +916,23 @@ def plot_synthetic_expansion_envelope_panels(
         fig.savefig(output, dpi=240, bbox_inches="tight")
 
     return fig, axes, {
-        dataset["label"]: {
-            "points": dataset["layers"]["points"],
-            "grid_metrics": dataset["layers"]["grid_metrics"].sort_values(value_column, ascending=False).reset_index(drop=True),
-        }
-        for dataset in datasets
+        **{
+            dataset["label"]: {
+                "points": dataset["layers"]["points"],
+                "grid_metrics": dataset["layers"]["grid_metrics"].sort_values(value_column, ascending=False).reset_index(drop=True),
+            }
+            for dataset in datasets
+        },
+        **({
+            "Real SWF": {
+                "points": real_points,
+                "grid_metrics": pd.DataFrame({
+                    "grid_id": [item.grid_id for item in real_envelopes],
+                    "n_points": [item.n_points for item in real_envelopes],
+                    "has_polygon": [item.envelope is not None for item in real_envelopes],
+                }),
+            }
+        } if has_real_row else {}),
     }
 
 
