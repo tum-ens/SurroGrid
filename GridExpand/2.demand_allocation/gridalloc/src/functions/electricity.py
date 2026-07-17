@@ -223,21 +223,31 @@ def get_elec_demand(df_buildings):
     lps_res_total_demand = pd.read_hdf(config.ELEC_LPS_PATH, key="df_sums")
     df_normalized_lps_ghd = pd.read_csv(config.ELEC_GHD_PATH, skiprows=1, header=[0])
 
-    # Apply function and create a new DataFrame
-    data_dict_res = {row["bus"]: _get_single_building_elec_timeseries_res(row['demand_tot_list'], df_normalized_lps_res, lps_res_total_demand) for idx, row in df_buildings.iterrows() if row["building_use"]=="Residential"}
-    data_dict_ghd = {row["bus"]: _get_single_building_elec_timeseries_ghd(row["building_type"], row["floor_area"], df_normalized_lps_ghd) for idx, row in df_buildings.iterrows() if row["building_use"]!="Residential"}
+    demand_by_bus = {}
+    non_res_demand_by_building = {}
+    for idx, row in df_buildings.iterrows():
+        bus = row["bus"]
+        if row["building_use"] == "Residential":
+            profile = _get_single_building_elec_timeseries_res(
+                row["demand_tot_list"],
+                df_normalized_lps_res,
+                lps_res_total_demand,
+            )
+        else:
+            profile = _get_single_building_elec_timeseries_ghd(
+                row["building_type"],
+                row["floor_area"],
+                df_normalized_lps_ghd,
+            )
+            non_res_demand_by_building[idx] = float(profile.sum())
+        profile = profile.reset_index(drop=True)
+        demand_by_bus[bus] = demand_by_bus.get(bus, 0.0) + profile
 
-    # Convert to DataFrame
-    df_elec_demand_res = pd.DataFrame(data_dict_res).reset_index(drop=True)
-    df_elec_demand_ghd = pd.DataFrame(data_dict_ghd).reset_index(drop=True)
-    df_elec_demand = pd.concat([df_elec_demand_res, df_elec_demand_ghd], axis=1)
+    df_elec_demand = pd.DataFrame(demand_by_bus).reset_index(drop=True)
     df_elec_demand.columns = pd.MultiIndex.from_product([df_elec_demand.columns, ["electricity"]])
 
-    # Assign correct total demand to non-res
-    non_res_mask = df_buildings["building_use"] != "Residential"
-    df_buildings.loc[non_res_mask, "demand_tot_list"] = df_buildings.loc[non_res_mask, "bus"].map(
-        lambda bus: df_elec_demand[bus].sum().tolist()
-    )
+    for idx, annual_demand in non_res_demand_by_building.items():
+        df_buildings.at[idx, "demand_tot_list"] = [annual_demand]
 
     return df_buildings, df_elec_demand
 

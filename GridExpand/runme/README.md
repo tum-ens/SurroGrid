@@ -86,8 +86,10 @@ GridExpand/
 
   runme/                           # Runnable orchestration and maintenance CLIs
     synthetic_ags_pipeline_runner.py # synthetic AGS Step 2-4 pipeline runner
-    real_swf_powerflow_runner.py     # real SWF compact power-flow wrapper
-    delete_scenario_data.py
+    paired_swf_pipeline_runner.py    # paired real/synthetic publication runner
+    pipeline_support.py              # shared runner process helpers
+    delete_scenario_data.py          # targeted DB/file cleanup
+    legacy/                          # superseded diagnostic wrappers
 
   5.postprocessing/                # Step 5: result analysis + plotting
     pyproject.toml                 # uv environment for plotting notebooks
@@ -98,7 +100,7 @@ GridExpand/
     expansion/                     # expansion materialization and summaries
 ```
 
-Shared helpers live in `common/`; runnable orchestration and maintenance scripts live in `executables/`.
+Shared helpers live in `common/`; runnable orchestration and maintenance scripts live in `runme/`.
 
 Each step folder has its own `README.md` with more detail:
 
@@ -308,6 +310,10 @@ uv run --project GridExpand/2.demand_allocation python GridExpand/runme/syntheti
   --cleanup-completed-only \
   --run-dir GridExpand/run_logs/<EXISTING_RUN_DIR>
 ```
+
+### Paired SWF real/synthetic scenario
+
+`paired_swf_pipeline_runner.py` is the comparison runner for the calibrated SWF 2045 scenario. It uses stable scenario units, projects the same profiles onto real and synthetic buses, and runs pre electricity-only, post-flex, and post-no-flex summaries. With `--tsam`, representative periods are selected exclusively from ambient temperature and irradiation. The runner records one canonical mapping in `shared_tsam_reference.json` and verifies every real and synthetic URBS result against it before power flow starts. See `2.demand_allocation/gridalloc/src/scenario_calibration/PAIRED_SCENARIO.md` for the publication gate and command.
 
 ### Step 5: Postprocessing and plotting
 

@@ -32,7 +32,7 @@ GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
-from common.timeframe import (
+from common.timeframe import (  # noqa: E402
     TIMEFRAME_MODES,
     build_initial_metadata,
     horizon_hours_from_hdf,
@@ -71,9 +71,15 @@ def utc_now() -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run DB-backed synthetic GridExpand pipeline batch for one AGS.")
+    parser = argparse.ArgumentParser(
+        description="Run DB-backed synthetic GridExpand pipeline batch for one AGS."
+    )
     parser.add_argument("--repo-root", type=Path, required=True)
-    parser.add_argument("--ags", required=True, help="AGS identifier for the region to process, e.g. 09162000.")
+    parser.add_argument(
+        "--ags",
+        required=True,
+        help="AGS identifier for the region to process, e.g. 09162000.",
+    )
     parser.add_argument("--min-buildings", type=int, default=5)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--step2-cpus", type=int, default=4)
@@ -82,9 +88,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step3-target-columns", type=int, default=35)
     parser.add_argument("--step3-cluster-concurrency", type=int, default=1)
     parser.add_argument("--step4-cpus", type=int, default=4)
-    parser.add_argument("--tsam", action="store_true", help="Enable TSAM type-week aggregation in Step 3.")
-    parser.add_argument("--tsam-periods", type=int, default=6, help="Number of TSAM type weeks for Step 3.")
-    parser.add_argument("--tsam-hours-per-period", type=int, default=168, help="Hours per TSAM period.")
+    parser.add_argument(
+        "--tsam",
+        action="store_true",
+        help="Enable TSAM type-week aggregation in Step 3.",
+    )
+    parser.add_argument(
+        "--tsam-periods",
+        type=int,
+        default=6,
+        help="Number of TSAM type weeks for Step 3.",
+    )
+    parser.add_argument(
+        "--tsam-hours-per-period", type=int, default=168, help="Hours per TSAM period."
+    )
     parser.add_argument(
         "--tsam-extreme-method",
         choices=["append", "new_cluster_center", "replace_cluster_center"],
@@ -116,7 +133,9 @@ def parse_args() -> argparse.Namespace:
             "household-only URBS and power-flow pipeline."
         ),
     )
-    parser.add_argument("--step2-timeseries-storage", choices=["db", "temp", "both"], default="temp")
+    parser.add_argument(
+        "--step2-timeseries-storage", choices=["db", "temp", "both"], default="temp"
+    )
     parser.add_argument(
         "--timeframe-mode",
         choices=TIMEFRAME_MODES,
@@ -184,15 +203,27 @@ def parse_args() -> argparse.Namespace:
     )
     args = parser.parse_args()
     if args.profiles == "status_quo" and args.tsam:
-        parser.error("--profiles status_quo runs pre-only power flow directly after Step 2 and cannot use --tsam.")
+        parser.error(
+            "--profiles status_quo runs pre-only power flow directly after Step 2 and cannot use --tsam."
+        )
     if args.include_no_flex_powerflow and args.profiles == "status_quo":
-        parser.error("--include-no-flex-powerflow requires post-electrification profiles, not status_quo.")
+        parser.error(
+            "--include-no-flex-powerflow requires post-electrification profiles, not status_quo."
+        )
     if args.no_flex_only and args.profiles == "status_quo":
-        parser.error("--no-flex-only requires post-electrification profiles, not status_quo.")
+        parser.error(
+            "--no-flex-only requires post-electrification profiles, not status_quo."
+        )
     if args.no_flex_only and args.include_no_flex_powerflow:
-        parser.error("Use either --no-flex-only or --include-no-flex-powerflow, not both.")
-    if args.no_flex_ev_charger_kw is not None and not (args.include_no_flex_powerflow or args.no_flex_only):
-        parser.error("--no-flex-ev-charger-kw requires --include-no-flex-powerflow or --no-flex-only.")
+        parser.error(
+            "Use either --no-flex-only or --include-no-flex-powerflow, not both."
+        )
+    if args.no_flex_ev_charger_kw is not None and not (
+        args.include_no_flex_powerflow or args.no_flex_only
+    ):
+        parser.error(
+            "--no-flex-ev-charger-kw requires --include-no-flex-powerflow or --no-flex-only."
+        )
     return args
 
 
@@ -240,7 +271,9 @@ class StatusLog:
 
     def update(self, candidate_index: int, **updates: object) -> None:
         with self.lock:
-            row = self.rows.setdefault(candidate_index, {"candidate_index": candidate_index})
+            row = self.rows.setdefault(
+                candidate_index, {"candidate_index": candidate_index}
+            )
             row.update(updates)
             self._write_status_locked()
 
@@ -292,12 +325,16 @@ def normalize_ags(value: str) -> int:
     return int(str(value).strip().lstrip("0") or "0")
 
 
-def get_candidates(repo_root: Path, ags: str, min_buildings: int, demand_scope: str = "all") -> list[dict[str, object]]:
+def get_candidates(
+    repo_root: Path, ags: str, min_buildings: int, demand_scope: str = "all"
+) -> list[dict[str, object]]:
     configure_imports(repo_root)
     from common.database import SurroGridDatabase
 
     db = SurroGridDatabase()
-    count_column = "n_residential_buildings" if demand_scope == "residential" else "n_buildings"
+    count_column = (
+        "n_residential_buildings" if demand_scope == "residential" else "n_buildings"
+    )
     query = text(
         """
         WITH ags_plz AS (
@@ -405,7 +442,13 @@ def run_command(
     env_extra: dict[str, str] | None = None,
 ) -> None:
     status.update(candidate_index, stage=stage, status="running", message="")
-    status.event(candidate_index=candidate_index, stage=stage, event="start", cmd=cmd, env_extra=env_extra or {})
+    status.event(
+        candidate_index=candidate_index,
+        stage=stage,
+        event="start",
+        cmd=cmd,
+        env_extra=env_extra or {},
+    )
     started = time.monotonic()
     with log_path.open("a", encoding="utf-8") as log_handle:
         log_handle.write(f"\n[{utc_now()}] START {stage}: {' '.join(cmd)}\n")
@@ -422,7 +465,9 @@ def run_command(
             check=False,
         )
         seconds = round(time.monotonic() - started, 1)
-        log_handle.write(f"[{utc_now()}] END {stage}: rc={completed.returncode} seconds={seconds}\n")
+        log_handle.write(
+            f"[{utc_now()}] END {stage}: rc={completed.returncode} seconds={seconds}\n"
+        )
     status.event(
         candidate_index=candidate_index,
         stage=stage,
@@ -460,18 +505,28 @@ def run_batch_command(
             check=False,
         )
         seconds = round(time.monotonic() - started, 1)
-        log_handle.write(f"[{utc_now()}] END {stage}: rc={completed.returncode} seconds={seconds}\n")
-    status.event(stage=stage, event="finish", returncode=completed.returncode, seconds=seconds)
+        log_handle.write(
+            f"[{utc_now()}] END {stage}: rc={completed.returncode} seconds={seconds}\n"
+        )
+    status.event(
+        stage=stage, event="finish", returncode=completed.returncode, seconds=seconds
+    )
     if completed.returncode != 0:
         raise RuntimeError(f"{stage} failed with return code {completed.returncode}")
 
 
 def scenario_base_key(args: argparse.Namespace) -> str:
-    return "baseline_static_hh_only" if args.demand_scope == "residential" else "baseline_static"
+    return (
+        "baseline_static_hh_only"
+        if args.demand_scope == "residential"
+        else "baseline_static"
+    )
 
 
 def pipeline_scenario_key(args: argparse.Namespace) -> str:
-    return scenario_key_for_timeframe(args.timeframe_mode, base_key=scenario_base_key(args))
+    return scenario_key_for_timeframe(
+        args.timeframe_mode, base_key=scenario_base_key(args)
+    )
 
 
 def powerflow_run_name(args: argparse.Namespace, mode: str) -> str:
@@ -492,7 +547,10 @@ def materialize_expansion_analyses(
     args: argparse.Namespace,
     status: StatusLog,
 ) -> list[dict[str, str]]:
-    if args.no_materialize_expansion or args.powerflow_output not in {"summary", "both"}:
+    if args.no_materialize_expansion or args.powerflow_output not in {
+        "summary",
+        "both",
+    }:
         return []
 
     summary_pre_only = args.profiles == "status_quo"
@@ -501,7 +559,9 @@ def materialize_expansion_analyses(
     log_path = args.run_dir / "expansion_materialization.log"
     materialized = []
 
-    def materialize_one(run_name: str, stage: str, analysis_key: str, note: str, log_stage: str) -> None:
+    def materialize_one(
+        run_name: str, stage: str, analysis_key: str, note: str, log_stage: str
+    ) -> None:
         cmd = [
             "uv",
             "run",
@@ -551,7 +611,9 @@ def materialize_expansion_analyses(
             ),
             "expansion_materialize_post_no_flex",
         )
-        materialized.append({"stage": "post_no_flex", "analysis_key": f"{prefix}_post_no_flex"})
+        materialized.append(
+            {"stage": "post_no_flex", "analysis_key": f"{prefix}_post_no_flex"}
+        )
         return materialized
 
     stages = ("pre",) if summary_pre_only else ("pre", "post")
@@ -583,7 +645,9 @@ def materialize_expansion_analyses(
             ),
             "expansion_materialize_post_no_flex",
         )
-        materialized.append({"stage": "post_no_flex", "analysis_key": no_flex_analysis_key})
+        materialized.append(
+            {"stage": "post_no_flex", "analysis_key": no_flex_analysis_key}
+        )
 
     return materialized
 
@@ -596,7 +660,11 @@ def hdf_column_count(path: Path, key: str) -> int:
         group = h5[group_name]
         total = 0
         for name, node in group.items():
-            if name.startswith("block") and name.endswith("_values") and len(node.shape) == 2:
+            if (
+                name.startswith("block")
+                and name.endswith("_values")
+                and len(node.shape) == 2
+            ):
                 total += int(node.shape[1])
         return total
 
@@ -621,10 +689,18 @@ def _contains_any(labels: list[str], tokens: tuple[str, ...]) -> bool:
 
 def scenario_suffix_from_hdf(path: Path) -> str:
     with pd.HDFStore(path, mode="r") as store:
-        demand = store["/urbs_in/demand"] if "/urbs_in/demand" in store else pd.DataFrame()
+        demand = (
+            store["/urbs_in/demand"] if "/urbs_in/demand" in store else pd.DataFrame()
+        )
         supim = store["/urbs_in/supim"] if "/urbs_in/supim" in store else pd.DataFrame()
-        process = store["/urbs_in/process"] if "/urbs_in/process" in store else pd.DataFrame()
-        commodity = store["/urbs_in/commodity"] if "/urbs_in/commodity" in store else pd.DataFrame()
+        process = (
+            store["/urbs_in/process"] if "/urbs_in/process" in store else pd.DataFrame()
+        )
+        commodity = (
+            store["/urbs_in/commodity"]
+            if "/urbs_in/commodity" in store
+            else pd.DataFrame()
+        )
 
     demand_labels = _labels_from_columns(demand)
     supim_labels = _labels_from_columns(supim)
@@ -651,18 +727,27 @@ def scenario_suffix_from_hdf(path: Path) -> str:
     )
 
 
-def choose_step3_settings(step2_output: Path, args: argparse.Namespace) -> tuple[int, int, dict[str, int]]:
+def choose_step3_settings(
+    step2_output: Path, args: argparse.Namespace
+) -> tuple[int, int, dict[str, int]]:
     if args.no_dynamic_step3:
         return int(args.step3_cpus), int(args.step3_cluster_concurrency), {}
 
     stats: dict[str, int] = {}
-    for key, name in (("urbs_in/demand", "demand_columns"), ("urbs_in/eff_factor", "eff_factor_columns")):
+    for key, name in (
+        ("urbs_in/demand", "demand_columns"),
+        ("urbs_in/eff_factor", "eff_factor_columns"),
+    ):
         try:
             stats[name] = hdf_column_count(step2_output, key)
         except Exception:
             stats[name] = 0
     largest_columns = max(stats.values() or [0])
-    required = math.ceil(largest_columns / max(1, int(args.step3_target_columns))) if largest_columns else args.step3_cpus
+    required = (
+        math.ceil(largest_columns / max(1, int(args.step3_target_columns)))
+        if largest_columns
+        else args.step3_cpus
+    )
     choices = [4, 8, 12, 16, 24, 32]
     max_cpus = max(1, int(args.step3_max_cpus))
     choices = [value for value in choices if value <= max_cpus] or [max_cpus]
@@ -682,16 +767,19 @@ def validate_powerflow_db(
     expected_summary_stages: tuple[str, ...] = ("pre",),
 ) -> dict[str, Any]:
     configure_imports(repo_root)
-    scenario_path = repo_root / "GridExpand" / "4.powerflow" / "Input" / scenario_filename
+    scenario_path = (
+        repo_root / "GridExpand" / "4.powerflow" / "Input" / scenario_filename
+    )
     expected_horizon = horizon_hours_from_hdf(scenario_path)
     expected_max_t = expected_horizon - 1
     from common.database import SurroGridDatabase
 
     db = SurroGridDatabase()
     with db.engine.connect() as conn:
-        run = conn.execute(
-            text(
-                """
+        run = (
+            conn.execute(
+                text(
+                    """
                 SELECT powerflow_run_id, run_name, pre_only, updated_at
                 FROM surrogrid.powerflow_run
                 WHERE urbs_input_file = :scenario_filename
@@ -700,9 +788,16 @@ def validate_powerflow_db(
                 ORDER BY updated_at DESC, powerflow_run_id DESC
                 LIMIT 1
                 """
-            ),
-            {"scenario_filename": scenario_filename, "pre_only": pre_only, "run_name": run_name},
-        ).mappings().first()
+                ),
+                {
+                    "scenario_filename": scenario_filename,
+                    "pre_only": pre_only,
+                    "run_name": run_name,
+                },
+            )
+            .mappings()
+            .first()
+        )
         if run is None:
             mode = "summary" if summary_only else "raw"
             raise RuntimeError(f"No {mode} powerflow_run found for {scenario_filename}")
@@ -717,19 +812,27 @@ def validate_powerflow_db(
         }
         missing: list[str] = []
         if summary_only:
-            for table_name in ("powerflow_summary", "powerflow_cable_summary", "powerflow_bus_voltage_summary"):
-                rows = conn.execute(
-                    text(
-                        f"""
+            for table_name in (
+                "powerflow_summary",
+                "powerflow_cable_summary",
+                "powerflow_bus_voltage_summary",
+            ):
+                rows = (
+                    conn.execute(
+                        text(
+                            f"""
                         SELECT stage, count(*) AS rows
                         FROM surrogrid.{table_name}
                         WHERE powerflow_run_id = :run_id
                         GROUP BY stage
                         ORDER BY stage
                         """
-                    ),
-                    {"run_id": run_id},
-                ).mappings().all()
+                        ),
+                        {"run_id": run_id},
+                    )
+                    .mappings()
+                    .all()
+                )
                 by_stage = {str(row["stage"]): dict(row) for row in rows}
                 validation["tables"][table_name] = by_stage
                 for stage in expected_summary_stages:
@@ -737,25 +840,31 @@ def validate_powerflow_db(
                     if not row or int(row["rows"]) <= 0:
                         missing.append(f"{table_name}:{stage}:missing")
             if missing:
-                raise RuntimeError("Incomplete Step 4 DB summary results: " + ", ".join(missing))
+                raise RuntimeError(
+                    "Incomplete Step 4 DB summary results: " + ", ".join(missing)
+                )
             return validation
 
         expected_stage_filter = ("pre",) if pre_only else None
         for table_name, expected_stages in EXPECTED_POWERFLOW_TABLES.items():
             if expected_stage_filter is not None:
                 expected_stages = expected_stage_filter
-            rows = conn.execute(
-                text(
-                    f"""
+            rows = (
+                conn.execute(
+                    text(
+                        f"""
                     SELECT stage, count(*) AS rows, min(t_index) AS min_t, max(t_index) AS max_t
                     FROM surrogrid.{table_name}
                     WHERE powerflow_run_id = :run_id
                     GROUP BY stage
                     ORDER BY stage
                     """
-                ),
-                {"run_id": run_id},
-            ).mappings().all()
+                    ),
+                    {"run_id": run_id},
+                )
+                .mappings()
+                .all()
+            )
             by_stage = {str(row["stage"]): dict(row) for row in rows}
             validation["tables"][table_name] = by_stage
             for stage in expected_stages:
@@ -763,22 +872,36 @@ def validate_powerflow_db(
                 if not row:
                     missing.append(f"{table_name}:{stage}:missing")
                     continue
-                if int(row["rows"]) <= 0 or int(row["min_t"]) != 0 or int(row["max_t"]) != expected_max_t:
+                if (
+                    int(row["rows"]) <= 0
+                    or int(row["min_t"]) != 0
+                    or int(row["max_t"]) != expected_max_t
+                ):
                     missing.append(f"{table_name}:{stage}:incomplete")
 
         if not pre_only:
-            reactive_rows = conn.execute(
-                text(
-                    """
+            reactive_rows = (
+                conn.execute(
+                    text(
+                        """
                     SELECT count(*) AS rows, min(t_index) AS min_t, max(t_index) AS max_t
                     FROM surrogrid.powerflow_reactive_component
                     WHERE powerflow_run_id = :run_id
                     """
-                ),
-                {"run_id": run_id},
-            ).mappings().one()
-            validation["tables"]["powerflow_reactive_component"] = {"all": dict(reactive_rows)}
-            if int(reactive_rows["rows"]) <= 0 or int(reactive_rows["min_t"]) != 0 or int(reactive_rows["max_t"]) != expected_max_t:
+                    ),
+                    {"run_id": run_id},
+                )
+                .mappings()
+                .one()
+            )
+            validation["tables"]["powerflow_reactive_component"] = {
+                "all": dict(reactive_rows)
+            }
+            if (
+                int(reactive_rows["rows"]) <= 0
+                or int(reactive_rows["min_t"]) != 0
+                or int(reactive_rows["max_t"]) != expected_max_t
+            ):
                 missing.append("powerflow_reactive_component:all:incomplete")
 
         if missing:
@@ -808,9 +931,13 @@ def candidate_failed_payload(
     }
 
 
-def candidate_intermediate_files(repo_root: Path, candidate: dict[str, object], args: argparse.Namespace) -> list[Path]:
+def candidate_intermediate_files(
+    repo_root: Path, candidate: dict[str, object], args: argparse.Namespace
+) -> list[Path]:
     paths = step_paths(repo_root)
-    step2_filename = output_filename_for_timeframe(str(candidate["bridge_filename"]), args.timeframe_mode)
+    step2_filename = output_filename_for_timeframe(
+        str(candidate["bridge_filename"]), args.timeframe_mode
+    )
     step2_stem = Path(step2_filename).stem
     files = [
         paths["step2_results"] / step2_filename,
@@ -857,7 +984,9 @@ def cleanup_candidate_intermediates(
 
 
 def completed_candidate_indexes(status: StatusLog) -> set[int]:
-    completed = {index for index, row in status.rows.items() if row.get("status") == "done"}
+    completed = {
+        index for index, row in status.rows.items() if row.get("status") == "done"
+    }
     if not status.events_path.exists():
         return completed
     with status.events_path.open("r", encoding="utf-8") as handle:
@@ -868,7 +997,10 @@ def completed_candidate_indexes(status: StatusLog) -> set[int]:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if event.get("event") in {"candidate_done", "pilot_finish"} and event.get("status") == "done":
+            if (
+                event.get("event") in {"candidate_done", "pilot_finish"}
+                and event.get("status") == "done"
+            ):
                 candidate_index = event.get("candidate_index")
                 if candidate_index is not None:
                     completed.add(int(candidate_index))
@@ -882,7 +1014,9 @@ def cleanup_completed_intermediates(
     status: StatusLog,
 ) -> dict[str, object]:
     completed = completed_candidate_indexes(status)
-    by_index = {int(candidate["candidate_index"]): candidate for candidate in candidates}
+    by_index = {
+        int(candidate["candidate_index"]): candidate for candidate in candidates
+    }
     cleanup_results = []
     for candidate_index in sorted(completed):
         candidate = by_index.get(candidate_index)
@@ -900,8 +1034,12 @@ def cleanup_completed_intermediates(
     summary = {
         "status": "done",
         "candidate_count": len(cleanup_results),
-        "removed_files": sum(int(result["removed_files"]) for result in cleanup_results),
-        "removed_bytes": sum(int(result["removed_bytes"]) for result in cleanup_results),
+        "removed_files": sum(
+            int(result["removed_files"]) for result in cleanup_results
+        ),
+        "removed_bytes": sum(
+            int(result["removed_bytes"]) for result in cleanup_results
+        ),
         "finished_at": utc_now(),
     }
     status.event(event="cleanup_completed_finish", **summary)
@@ -923,9 +1061,10 @@ def run_candidate(
     candidate_index = int(candidate["candidate_index"])
     bridge_filename = str(candidate["bridge_filename"])
     step2_filename = output_filename_for_timeframe(bridge_filename, args.timeframe_mode)
-    prefix = step2_filename.split("_", 1)[0]
     scenario_filename = ""
-    log_file = args.run_dir / "logs" / f"candidate_{candidate_index:03d}_{step2_filename}.log"
+    log_file = (
+        args.run_dir / "logs" / f"candidate_{candidate_index:03d}_{step2_filename}.log"
+    )
     started = time.monotonic()
     current_stage = "queued"
     timeframe_metadata = build_initial_metadata(args.timeframe_mode)
@@ -1008,7 +1147,10 @@ def run_candidate(
                 candidate_index,
                 step3_cpus="skipped",
                 urbs_cluster_concurrency="skipped",
-                message=json.dumps({"scenario_suffix": scenario_suffix, "step3": "skipped_status_quo"}, sort_keys=True),
+                message=json.dumps(
+                    {"scenario_suffix": scenario_suffix, "step3": "skipped_status_quo"},
+                    sort_keys=True,
+                ),
             )
             shutil.copy2(step2_output, step4_dir / "Input" / step2_filename)
             validations = []
@@ -1093,7 +1235,10 @@ def run_candidate(
 
             with log_file.open("a", encoding="utf-8") as log_handle:
                 log_handle.write(f"\n[{utc_now()}] STEP4 STATUS-QUO VALIDATION OK\n")
-                log_handle.write(json.dumps(validations, indent=2, sort_keys=True, default=str) + "\n")
+                log_handle.write(
+                    json.dumps(validations, indent=2, sort_keys=True, default=str)
+                    + "\n"
+                )
 
             seconds = round(time.monotonic() - started, 1)
             status.update(
@@ -1105,15 +1250,26 @@ def run_candidate(
                 message="ok",
             )
             if args.cleanup_intermediates == "success":
-                cleanup_candidate_intermediates(repo_root, candidate, args, status, reason="success")
-            return {"candidate_index": candidate_index, "status": "done", "seconds": seconds}
+                cleanup_candidate_intermediates(
+                    repo_root, candidate, args, status, reason="success"
+                )
+            return {
+                "candidate_index": candidate_index,
+                "status": "done",
+                "seconds": seconds,
+            }
 
         if args.no_flex_only:
             validations = []
             shutil.copy2(step2_output, step3_dir / "Input" / step2_filename)
 
-            step3_cpus, cluster_concurrency, step3_stats = choose_step3_settings(step2_output, args)
-            step3_stats = {**step3_stats, "post_flex_capacity_source": "required_for_no_flex"}
+            step3_cpus, cluster_concurrency, step3_stats = choose_step3_settings(
+                step2_output, args
+            )
+            step3_stats = {
+                **step3_stats,
+                "post_flex_capacity_source": "required_for_no_flex",
+            }
             status.update(
                 candidate_index,
                 step3_cpus=step3_cpus,
@@ -1132,15 +1288,17 @@ def run_candidate(
                 str(step3_cpus),
             ]
             if args.tsam:
-                step3_cmd.extend([
-                    "--tsam",
-                    "--tsam-periods",
-                    str(args.tsam_periods),
-                    "--tsam-hours-per-period",
-                    str(args.tsam_hours_per_period),
-                    "--tsam-extreme-method",
-                    args.tsam_extreme_method,
-                ])
+                step3_cmd.extend(
+                    [
+                        "--tsam",
+                        "--tsam-periods",
+                        str(args.tsam_periods),
+                        "--tsam-hours-per-period",
+                        str(args.tsam_hours_per_period),
+                        "--tsam-extreme-method",
+                        args.tsam_extreme_method,
+                    ]
+                )
             run_command(
                 cmd=step3_cmd,
                 cwd=step3_dir,
@@ -1175,7 +1333,9 @@ def run_candidate(
                     str(args.step4_cpus),
                 ]
                 if args.no_flex_ev_charger_kw is not None:
-                    raw_no_flex_cmd.extend(["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)])
+                    raw_no_flex_cmd.extend(
+                        ["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)]
+                    )
                 if args.demand_scope == "residential":
                     raw_no_flex_cmd.append("--hh-only")
                 run_command(
@@ -1217,7 +1377,9 @@ def run_candidate(
                     str(args.step4_cpus),
                 ]
                 if args.no_flex_ev_charger_kw is not None:
-                    summary_no_flex_cmd.extend(["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)])
+                    summary_no_flex_cmd.extend(
+                        ["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)]
+                    )
                 if args.demand_scope == "residential":
                     summary_no_flex_cmd.append("--hh-only")
                 run_command(
@@ -1242,7 +1404,10 @@ def run_candidate(
 
             with log_file.open("a", encoding="utf-8") as log_handle:
                 log_handle.write(f"\n[{utc_now()}] STEP4 NO-FLEX VALIDATION OK\n")
-                log_handle.write(json.dumps(validations, indent=2, sort_keys=True, default=str) + "\n")
+                log_handle.write(
+                    json.dumps(validations, indent=2, sort_keys=True, default=str)
+                    + "\n"
+                )
 
             seconds = round(time.monotonic() - started, 1)
             status.update(
@@ -1254,12 +1419,20 @@ def run_candidate(
                 message="ok",
             )
             if args.cleanup_intermediates == "success":
-                cleanup_candidate_intermediates(repo_root, candidate, args, status, reason="success")
-            return {"candidate_index": candidate_index, "status": "done", "seconds": seconds}
+                cleanup_candidate_intermediates(
+                    repo_root, candidate, args, status, reason="success"
+                )
+            return {
+                "candidate_index": candidate_index,
+                "status": "done",
+                "seconds": seconds,
+            }
 
         shutil.copy2(step2_output, step3_dir / "Input" / step2_filename)
 
-        step3_cpus, cluster_concurrency, step3_stats = choose_step3_settings(step2_output, args)
+        step3_cpus, cluster_concurrency, step3_stats = choose_step3_settings(
+            step2_output, args
+        )
         status.update(
             candidate_index,
             step3_cpus=step3_cpus,
@@ -1278,15 +1451,17 @@ def run_candidate(
             str(step3_cpus),
         ]
         if args.tsam:
-            step3_cmd.extend([
-                "--tsam",
-                "--tsam-periods",
-                str(args.tsam_periods),
-                "--tsam-hours-per-period",
-                str(args.tsam_hours_per_period),
-                "--tsam-extreme-method",
-                args.tsam_extreme_method,
-            ])
+            step3_cmd.extend(
+                [
+                    "--tsam",
+                    "--tsam-periods",
+                    str(args.tsam_periods),
+                    "--tsam-hours-per-period",
+                    str(args.tsam_hours_per_period),
+                    "--tsam-extreme-method",
+                    args.tsam_extreme_method,
+                ]
+            )
         run_command(
             cmd=step3_cmd,
             cwd=step3_dir,
@@ -1359,7 +1534,9 @@ def run_candidate(
                 str(args.step4_cpus),
             ]
             if args.no_flex_ev_charger_kw is not None:
-                raw_no_flex_cmd.extend(["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)])
+                raw_no_flex_cmd.extend(
+                    ["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)]
+                )
             if args.demand_scope == "residential":
                 raw_no_flex_cmd.append("--hh-only")
             run_command(
@@ -1426,7 +1603,10 @@ def run_candidate(
                 )
             )
 
-        if args.include_no_flex_powerflow and args.powerflow_output in {"summary", "both"}:
+        if args.include_no_flex_powerflow and args.powerflow_output in {
+            "summary",
+            "both",
+        }:
             current_stage = "step4_powerflow_summary_no_flex"
             summary_no_flex_run_name = powerflow_run_name(args, "summary_no_flex")
             summary_no_flex_cmd = [
@@ -1446,7 +1626,9 @@ def run_candidate(
                 str(args.step4_cpus),
             ]
             if args.no_flex_ev_charger_kw is not None:
-                summary_no_flex_cmd.extend(["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)])
+                summary_no_flex_cmd.extend(
+                    ["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)]
+                )
             if args.demand_scope == "residential":
                 summary_no_flex_cmd.append("--hh-only")
             run_command(
@@ -1472,7 +1654,9 @@ def run_candidate(
 
         with log_file.open("a", encoding="utf-8") as log_handle:
             log_handle.write(f"\n[{utc_now()}] STEP4 VALIDATION OK\n")
-            log_handle.write(json.dumps(validations, indent=2, sort_keys=True, default=str) + "\n")
+            log_handle.write(
+                json.dumps(validations, indent=2, sort_keys=True, default=str) + "\n"
+            )
 
         seconds = round(time.monotonic() - started, 1)
         status.update(
@@ -1484,14 +1668,22 @@ def run_candidate(
             message="ok",
         )
         if args.cleanup_intermediates == "success":
-            cleanup_candidate_intermediates(repo_root, candidate, args, status, reason="success")
-        return {"candidate_index": candidate_index, "status": "done", "seconds": seconds}
+            cleanup_candidate_intermediates(
+                repo_root, candidate, args, status, reason="success"
+            )
+        return {
+            "candidate_index": candidate_index,
+            "status": "done",
+            "seconds": seconds,
+        }
     except Exception as exc:
         seconds = round(time.monotonic() - started, 1)
         with log_file.open("a", encoding="utf-8") as log_handle:
             log_handle.write(f"\n[{utc_now()}] FAILURE in {current_stage}: {exc}\n")
             log_handle.write(traceback.format_exc())
-        payload = candidate_failed_payload(candidate, current_stage, str(exc), seconds, log_file)
+        payload = candidate_failed_payload(
+            candidate, current_stage, str(exc), seconds, log_file
+        )
         status.update(
             candidate_index,
             status="failed",
@@ -1502,13 +1694,24 @@ def run_candidate(
         )
         status.failed_grid(**payload)
         status.event(event="candidate_failed", **payload)
-        return {"candidate_index": candidate_index, "status": "failed", "seconds": seconds, "message": str(exc)}
+        return {
+            "candidate_index": candidate_index,
+            "status": "failed",
+            "seconds": seconds,
+            "message": str(exc),
+        }
 
 
-def filter_candidates(candidates: list[dict[str, object]], args: argparse.Namespace, status: StatusLog) -> list[dict[str, object]]:
+def filter_candidates(
+    candidates: list[dict[str, object]], args: argparse.Namespace, status: StatusLog
+) -> list[dict[str, object]]:
     selected = candidates
     if args.start_index is not None:
-        selected = [candidate for candidate in selected if int(candidate["candidate_index"]) >= args.start_index]
+        selected = [
+            candidate
+            for candidate in selected
+            if int(candidate["candidate_index"]) >= args.start_index
+        ]
     if args.limit is not None:
         selected = selected[: args.limit]
     if not args.resume:
@@ -1520,10 +1723,14 @@ def filter_candidates(candidates: list[dict[str, object]], args: argparse.Namesp
         candidate_index = int(candidate["candidate_index"])
         previous = status.status_for(candidate_index)
         if previous == "done" or candidate_index in completed:
-            status.event(event="candidate_skipped_resume_done", candidate_index=candidate_index)
+            status.event(
+                event="candidate_skipped_resume_done", candidate_index=candidate_index
+            )
             continue
         if previous == "failed" and not args.rerun_failed:
-            status.event(event="candidate_skipped_resume_failed", candidate_index=candidate_index)
+            status.event(
+                event="candidate_skipped_resume_failed", candidate_index=candidate_index
+            )
             continue
         runnable.append(candidate)
     return runnable
@@ -1554,7 +1761,8 @@ def main() -> int:
         step3_cluster_concurrency=args.step3_cluster_concurrency,
         step4_cpus=args.step4_cpus,
         powerflow_output=args.powerflow_output,
-        materialize_expansion=not args.no_materialize_expansion and args.powerflow_output in {"summary", "both"},
+        materialize_expansion=not args.no_materialize_expansion
+        and args.powerflow_output in {"summary", "both"},
         expansion_analysis_prefix=expansion_analysis_prefix(args),
         run_dir=str(run_dir),
         resume=args.resume,
@@ -1563,19 +1771,25 @@ def main() -> int:
         cleanup_completed_only=args.cleanup_completed_only,
     )
 
-    candidates = get_candidates(repo_root, args.ags, args.min_buildings, args.demand_scope)
+    candidates = get_candidates(
+        repo_root, args.ags, args.min_buildings, args.demand_scope
+    )
     (run_dir / "candidates.json").write_text(
         json.dumps(candidates, indent=2, sort_keys=True, default=str),
         encoding="utf-8",
     )
     status.event(event="candidates_loaded", count=len(candidates))
     if not candidates:
-        status.event(event="batch_finish", status="failed", message="No candidates found")
+        status.event(
+            event="batch_finish", status="failed", message="No candidates found"
+        )
         return 1
 
     if args.cleanup_completed_only:
         summary = cleanup_completed_intermediates(repo_root, candidates, args, status)
-        (run_dir / "cleanup_summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+        (run_dir / "cleanup_summary.json").write_text(
+            json.dumps(summary, indent=2, default=str), encoding="utf-8"
+        )
         return 0
 
     candidates = filter_candidates(candidates, args, status)
@@ -1589,11 +1803,15 @@ def main() -> int:
             "finished_at": utc_now(),
             "message": "No runnable candidates after filtering/resume.",
         }
-        (run_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        (run_dir / "summary.json").write_text(
+            json.dumps(summary, indent=2), encoding="utf-8"
+        )
         status.event(event="batch_finish", **summary)
         return 0
 
-    by_index = {int(candidate["candidate_index"]): candidate for candidate in candidates}
+    by_index = {
+        int(candidate["candidate_index"]): candidate for candidate in candidates
+    }
     completed: list[dict[str, object]] = []
     failures: list[dict[str, object]] = []
 
@@ -1623,12 +1841,20 @@ def main() -> int:
                     "total_seconds": total_seconds,
                     "finished_at": utc_now(),
                 }
-                (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+                (run_dir / "summary.json").write_text(
+                    json.dumps(summary, indent=2, default=str), encoding="utf-8"
+                )
                 status.event(event="batch_finish", **summary)
                 return 1
 
-    remaining = [candidate for candidate in candidates if int(candidate["candidate_index"]) != args.pilot_index]
-    status.event(event="batch_workers_start", remaining=len(remaining), workers=args.workers)
+    remaining = [
+        candidate
+        for candidate in candidates
+        if int(candidate["candidate_index"]) != args.pilot_index
+    ]
+    status.event(
+        event="batch_workers_start", remaining=len(remaining), workers=args.workers
+    )
     with ThreadPoolExecutor(max_workers=max(1, int(args.workers))) as executor:
         future_map = {
             executor.submit(
@@ -1646,8 +1872,16 @@ def main() -> int:
             try:
                 result = future.result()
             except Exception as exc:
-                result = {"candidate_index": candidate_index, "status": "failed", "message": str(exc)}
-                status.event(event="candidate_failed_unhandled", candidate_index=candidate_index, message=str(exc))
+                result = {
+                    "candidate_index": candidate_index,
+                    "status": "failed",
+                    "message": str(exc),
+                }
+                status.event(
+                    event="candidate_failed_unhandled",
+                    candidate_index=candidate_index,
+                    message=str(exc),
+                )
             if result.get("status") == "done":
                 completed.append(result)
                 status.event(event="candidate_done", **result)
@@ -1658,10 +1892,14 @@ def main() -> int:
     materialized_expansion = []
     expansion_failure = None
     try:
-        materialized_expansion = materialize_expansion_analyses(repo_root=repo_root, args=args, status=status)
+        materialized_expansion = materialize_expansion_analyses(
+            repo_root=repo_root, args=args, status=status
+        )
     except Exception as exc:
         expansion_failure = str(exc)
-        status.event(event="expansion_materialization_failed", message=expansion_failure)
+        status.event(
+            event="expansion_materialization_failed", message=expansion_failure
+        )
 
     total_seconds = round(time.monotonic() - started_wall, 1)
     batch_status = "done" if not failures else "completed_with_failures"
@@ -1678,7 +1916,9 @@ def main() -> int:
         "total_seconds": total_seconds,
         "finished_at": utc_now(),
     }
-    (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    (run_dir / "summary.json").write_text(
+        json.dumps(summary, indent=2, default=str), encoding="utf-8"
+    )
     status.event(event="batch_finish", **summary)
     return 0 if not failures else 2
 

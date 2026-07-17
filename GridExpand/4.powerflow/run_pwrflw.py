@@ -142,6 +142,15 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--grid-case-id",
+        type=int,
+        default=None,
+        help=(
+            "Explicit synthetic surrogrid.grid_case_id. Required when a paired "
+            "scenario HDF filename does not encode the pylovo grid identifier."
+        ),
+    )
+    parser.add_argument(
         "--run-name",
         default=None,
         help="Optional DB powerflow run name. Useful for storing backbone-only summaries separately.",
@@ -261,6 +270,7 @@ if __name__ == "__main__":
         pre_only=args.pre_only,
         run_name=args.run_name,
         assumptions_extra=assumptions_extra,
+        grid_case_id=args.grid_case_id,
     )
     residential_buses = _synthetic_residential_buses(SF) if args.hh_only else None
 
@@ -277,6 +287,16 @@ if __name__ == "__main__":
             post_demand_mode=args.post_demand_mode,
             ev_charger_kw=no_flex_ev_charger_kw,
         )
+
+    if SF.timeframe_metadata.get("optimization_space") == "scenario_unit":
+        allocation = SF.get_allocation_plan()
+        df_pre_demand = dmnds.project_scenario_units_to_buses(
+            df_pre_demand, allocation
+        )
+        if df_post_demand is not None:
+            df_post_demand = dmnds.project_scenario_units_to_buses(
+                df_post_demand, allocation
+            )
 
     if residential_buses is not None:
         df_pre_demand = _filter_demand_to_buses(df_pre_demand, residential_buses, "pre")

@@ -94,10 +94,46 @@ def _load_electricity_module():
     return module
 
 
+def _comparison_manifest(root: Path) -> pd.DataFrame:
+    station_manifest_path = root / "station_split_manifest.csv"
+    radial_manifest_path = root / "station_radialization_manifest.csv"
+    if station_manifest_path.exists() and radial_manifest_path.exists():
+        stations = pd.read_csv(station_manifest_path)
+        radial = pd.read_csv(radial_manifest_path).rename(
+            columns={
+                "grid": "station_id",
+                "file": "radial_file",
+                "status": "radial_status",
+            }
+        )
+        manifest = stations.merge(
+            radial[["station_id", "radial_file", "radial_status"]],
+            on="station_id",
+            how="inner",
+            validate="one_to_one",
+        )
+        manifest["lv_id"] = (
+            manifest["station_id"]
+            .astype(str)
+            .str.extract(r"^LV_(\d+)")[0]
+            .astype(int)
+        )
+        manifest["variant"] = "station_radialized"
+        manifest["file"] = manifest["radial_file"]
+        manifest["status"] = (
+            manifest["radial_status"]
+            .map({"ok": "exported"})
+            .fillna(manifest["radial_status"])
+        )
+        return manifest
+
+    return pd.read_csv(root / "split_manifest.csv")
+
+
 def _select_manifest_rows(root: Path, plz: int, limit: int | None, lv_id: str | None) -> list[dict[str, Any]]:
-    manifest = pd.read_csv(root / "split_manifest.csv")
+    manifest = _comparison_manifest(root)
     selected = manifest[
-        (manifest["variant"] == "radialized")
+        manifest["variant"].isin({"radialized", "station_radialized"})
         & (manifest["status"] == "exported")
         & (manifest["category"] == "regular")
         & (manifest["load_status"] == "lvload")

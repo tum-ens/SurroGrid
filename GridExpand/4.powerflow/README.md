@@ -76,41 +76,15 @@ DB-backed power-flow result storage can be enabled with the command below. Use `
 uv run python run_pwrflw.py <inputfile_id> --storage db --pre-only
 ```
 
-### Real SWF scenario-plan base-electricity runner
+### Paired real/synthetic scenario power flow
 
-The real-grid scenario calibration audit from Step 2 writes bus-level handover files under `GridExpand/2.demand_allocation/gridalloc/outputs/scenario_calibration/`. The shared calibrated profile builder currently simulates residential-equivalent HH electricity plus calibrated SWF GHD electricity. It preserves the audited EV, heat-pump, PV, and battery capacities in the handover metadata but does not yet translate them into sector-coupling time series.
+The active paired pipeline materializes the same physical-building scenario for both network models and calls `run_real_swf_scenario_powerflow.py` for the real target and `run_pwrflw.py` for the synthetic target. Use `GridExpand/runme/paired_swf_pipeline_runner.py` rather than invoking the old one-sided materializer.
 
-To materialize one calibrated real-grid HDF with the same `/urbs_in/...` contract as synthetic Step 2, run from `GridExpand/2.demand_allocation/gridalloc`:
+Paired HDFs use `optimization_space=scenario_unit`. Step 3 therefore optimizes stable `(source LV, source connection bus, physical building)` units rather than network buses. Both Step-4 paths read `raw_data/allocation_plan` and aggregate these profiles onto the selected target buses immediately before power flow. This projection conserves active and reactive demand and prevents network partitioning from changing optimization resolution.
 
-```bash
-uv run --project .. python -m src.scenario_calibration.real_swf_urbs_input \
-  --lv-id 149 \
-  --plz 91301 \
-  --scenario-label real_swf_2045_full_local_base_electricity_pilot
-```
+`run_real_swf_powerflow.py` remains the shared real-grid topology and status-quo implementation used by the paired projection and Step-5 audits. It is not a competing post-electrification pipeline.
 
-The generated file is written to `GridExpand/3.urbs/Input/` and can be checked with the standard Step 3 TSAM preprocessing path:
-
-```bash
-cd GridExpand/3.urbs
-uv run python run_urbs_cluster.py real_swf_LV_149_real_swf_2045_full_local_base_electricity_pilot.h5 \
-  --tsam \
-  --reduce-only \
-  --n_cpu 1
-```
-
-For compact base-electricity power-flow summaries without running Step 3, the DB-backed real runner consumes the same shared profile builder and the same `swf_2045_full_local_demand_bus_allocation_plan.csv`:
-
-```bash
-cd GridExpand/4.powerflow
-uv run python run_real_swf_scenario_powerflow.py \
-  --lv-id 149 \
-  --workers 1 \
-  --run-name real_swf_2045_full_local_base_electricity_pilot \
-  --scenario-key real_swf_2045_full_local_base_electricity_pilot
-```
-
-Use `--max-timesteps 24` for a smoke test before a full 8760-hour run. For the later real-grid post-flex/no-flex implementation, the real and synthetic paths must share the same HDF contract, time-series handling, TSAM settings, sector-coupling assumptions, no-flex reconstruction, and power-flow reconstruction logic so that only the grid topology differs.
+With the current TSAM setup, the reduced result contains six 168-hour representative weeks plus an initialization row. Shared demand reconstruction drops the initialization row, giving 1,008 simulated power-flow timesteps. The paired runner verifies identical weather-derived TSAM period selection for both targets before accepting any result.
 
 ### Post-electrification demand modes
 

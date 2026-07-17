@@ -85,6 +85,34 @@ These are already included in the repository under `gridalloc/data/statistics/**
 
 ---
 
+## Real/Synthetic Scenario Calibration
+
+The publication comparison is organized under `gridalloc/src/scenario_calibration/` by responsibility:
+
+- `allocation/`: SWF-to-building matching, scope calibration, and paired allocation plans.
+- `profiles/`: shared electricity, PV, mobility, and heat-profile construction and readiness checks.
+- `pipeline/`: active paired URBS-input materialization and shared input-table helpers.
+- `legacy/`: superseded one-sided real-SWF workflows retained only for provenance.
+
+Build the common physical-building scenario and verify exact heat-profile coverage from `GridExpand/2.demand_allocation/gridalloc`:
+
+```bash
+uv run --project .. python -m src.scenario_calibration.allocation.paired_allocation \
+  --plz 91301 \
+  --final-year 2045 \
+  --pylovo-version-id 3 \
+  --min-buildings 5 \
+  --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \
+  --output-dir outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2
+
+uv run --project .. python -m src.scenario_calibration.profiles.paired_profile_readiness \
+  --paired-dir outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2
+```
+
+The paired contract fixes one `scenario_unit_id` for each `(source LV, source connection bus, physical building)` tuple. Real and synthetic plans must contain the same scenario units and HH/GHD energy before optimization. Profiles remain at scenario-unit resolution through URBS and are projected to the selected network buses only at the Step-4 boundary. See [`gridalloc/src/scenario_calibration/PAIRED_SCENARIO.md`](gridalloc/src/scenario_calibration/PAIRED_SCENARIO.md) for the current audit, strict publication gate, and complete runner command.
+
+The exploratory one-sided real-SWF materializer and readiness audit are documented inside `scenario_calibration/legacy/README.md`. Their historical database outputs predate paired heat-pump deduplication and are not valid final comparison evidence.
+
 ## Generated outputs
 
 ### 1) Result `.h5` file

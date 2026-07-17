@@ -212,6 +212,60 @@ def _sum_columns_by_bus(df, component="electricity"):
     return summed
 
 
+def project_scenario_units_to_buses(df, allocation):
+    """Project canonical scenario-unit columns onto one target network."""
+    if df is None or df.empty:
+        return df
+    required = {"scenario_unit_id", "allocation_bus"}
+    missing = required.difference(allocation.columns)
+    if missing:
+        raise ValueError(
+            "Scenario-unit projection requires allocation columns "
+            f"{sorted(missing)}."
+        )
+    mapping = allocation[["scenario_unit_id", "allocation_bus"]].copy()
+    mapping["scenario_unit_id"] = pd.to_numeric(
+        mapping["scenario_unit_id"], errors="raise"
+    ).astype(int)
+    mapping["allocation_bus"] = pd.to_numeric(
+        mapping["allocation_bus"], errors="raise"
+    ).astype(int)
+    ambiguous = mapping.groupby("scenario_unit_id", observed=True)[
+        "allocation_bus"
+    ].nunique()
+    if ambiguous.gt(1).any():
+        units = ambiguous[ambiguous.gt(1)].index.tolist()[:10]
+        raise ValueError(
+            "Scenario units map to multiple buses within one target plan: "
+            f"{units}."
+        )
+    bus_by_unit = (
+        mapping.drop_duplicates("scenario_unit_id")
+        .set_index("scenario_unit_id")["allocation_bus"]
+        .to_dict()
+    )
+    if getattr(df.columns, "nlevels", 1) < 2:
+        raise ValueError("Projected power-flow demand requires MultiIndex columns.")
+    projected_columns = []
+    missing_units = set()
+    for column in df.columns.to_flat_index():
+        unit = int(column[0])
+        if unit not in bus_by_unit:
+            missing_units.add(unit)
+            continue
+        projected_columns.append((bus_by_unit[unit], *column[1:]))
+    if missing_units:
+        raise ValueError(
+            "Demand contains scenario units absent from the target plan: "
+            f"{sorted(missing_units)[:10]}."
+        )
+    projected = df.copy()
+    projected.columns = pd.MultiIndex.from_tuples(projected_columns)
+    levels = list(range(projected.columns.nlevels))
+    projected = projected.T.groupby(level=levels, observed=True, sort=False).sum().T
+    return projected.sort_index(axis=1)
+
+
 def _heat_and_cop_by_bus(df_raw_demand, df_eff_factor):
     heat_columns = [
         column for column in df_raw_demand.columns

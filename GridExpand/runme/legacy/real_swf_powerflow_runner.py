@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 STEP4_DIR = REPO_ROOT / "GridExpand" / "4.powerflow"
 DEFAULT_RUN_NAME = "real_hybrid"
 
@@ -35,8 +35,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--measured-profile-band-pct", type=float, default=10.0)
     parser.add_argument("--measured-profile-min-candidates", type=int, default=10)
-    parser.add_argument("--skip-existing", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--lv-id", default=None, help="Optional single LV id for a pilot run, e.g. 28 or LV_028.")
+    parser.add_argument(
+        "--skip-existing", action=argparse.BooleanOptionalAction, default=False
+    )
+    parser.add_argument(
+        "--lv-id",
+        default=None,
+        help="Optional single LV id for a pilot run, e.g. 28 or LV_028.",
+    )
     parser.add_argument("--limit", type=int, default=None)
     return parser.parse_args()
 

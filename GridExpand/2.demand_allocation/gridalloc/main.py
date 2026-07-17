@@ -76,6 +76,13 @@ if __name__ == '__main__':
         parser.add_argument("--kcid", type=int, help="DB mode: pin one KCID.")
         parser.add_argument("--bcid", type=int, help="DB mode: pin one BCID.")
         parser.add_argument(
+            "--pylovo-version-id",
+            help=(
+                "DB mode: explicitly pin the pylovo version for this run. "
+                "Overrides PYLOVO_VERSION_ID from GridExpand/.env."
+            ),
+        )
+        parser.add_argument(
             "--min-buildings",
             type=int,
             default=5,
@@ -144,6 +151,8 @@ if __name__ == '__main__':
             inputfile = matched_files[0]
         else:
             db = SurroGridDatabase()
+            if args.pylovo_version_id is not None:
+                db.pylovo_version_id = str(args.pylovo_version_id)
             grid_ref = db.resolve_grid_identifier(
                 args.inputfile_id,
                 plz=args.plz,

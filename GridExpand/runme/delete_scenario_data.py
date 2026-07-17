@@ -13,7 +13,7 @@ GRIDEXPAND_DIR = REPO_ROOT / "GridExpand"
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
-from common.database import SurroGridDatabase
+from common.database import SurroGridDatabase  # noqa: E402
 
 STEP3_DIR = REPO_ROOT / "GridExpand" / "3.urbs"
 STEP3_ARTIFACT_DIRS = (
@@ -28,7 +28,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Delete SurroGrid data for one scenario_key. Defaults to dry-run."
     )
-    parser.add_argument("scenario_key", help="Readable surrogrid.scenario.scenario_key to clean up.")
+    parser.add_argument(
+        "scenario_key", help="Readable surrogrid.scenario.scenario_key to clean up."
+    )
     parser.add_argument(
         "--execute",
         action="store_true",
@@ -47,7 +49,9 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _step3_artifact_names(db: SurroGridDatabase, scenario_key: str) -> tuple[set[str], set[str]]:
+def _step3_artifact_names(
+    db: SurroGridDatabase, scenario_key: str
+) -> tuple[set[str], set[str]]:
     query = text(
         """
         WITH selected_scenario AS (
@@ -70,14 +74,23 @@ def _step3_artifact_names(db: SurroGridDatabase, scenario_key: str) -> tuple[set
     )
     db.ensure_schema()
     with db.engine.connect() as conn:
-        filenames = {Path(str(row.filename)).name for row in conn.execute(query, {"scenario_key": scenario_key})}
+        filenames = {
+            Path(str(row.filename)).name
+            for row in conn.execute(query, {"scenario_key": scenario_key})
+        }
 
     log_prefixes = {f"{Path(filename).stem}_PV" for filename in filenames}
-    log_prefixes.update(f"{Path(filename).stem}_" for filename in filenames if "_PV" in Path(filename).stem)
+    log_prefixes.update(
+        f"{Path(filename).stem}_"
+        for filename in filenames
+        if "_PV" in Path(filename).stem
+    )
     return filenames, log_prefixes
 
 
-def _step3_artifacts_for_scenario(db: SurroGridDatabase, scenario_key: str) -> list[Path]:
+def _step3_artifacts_for_scenario(
+    db: SurroGridDatabase, scenario_key: str
+) -> list[Path]:
     exact_filenames, log_prefixes = _step3_artifact_names(db, scenario_key)
     matches: list[Path] = []
     for directory in STEP3_ARTIFACT_DIRS:
@@ -89,7 +102,9 @@ def _step3_artifacts_for_scenario(db: SurroGridDatabase, scenario_key: str) -> l
                 continue
             if path.name in exact_filenames:
                 matches.append(path)
-            elif is_log_dir and any(path.name.startswith(prefix) for prefix in log_prefixes):
+            elif is_log_dir and any(
+                path.name.startswith(prefix) for prefix in log_prefixes
+            ):
                 matches.append(path)
     return sorted(set(matches))
 

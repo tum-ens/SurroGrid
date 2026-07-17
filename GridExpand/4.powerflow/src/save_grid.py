@@ -8,6 +8,7 @@ import shutil
 import h5py
 import pandapower as pp
 import sys
+from sqlalchemy import text
 from pathlib import Path
 
 GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
@@ -19,7 +20,7 @@ from common.timeframe import read_hdf_metadata, scenario_key_for_timeframe
 
 
 class SaveFile:
-    def __init__(self, filename, storage="h5", pre_only=False, run_name=None, assumptions_extra=None):
+    def __init__(self, filename, storage="h5", pre_only=False, run_name=None, assumptions_extra=None, grid_case_id=None):
         # Copy input file to destination directory
         self.filename = filename
         self.storage = storage
@@ -33,7 +34,11 @@ class SaveFile:
         if self.storage == "h5":
             shutil.copy2(self.input_path, self.output_path)
         else:
-            self.grid_ref = self.db.resolve_grid_identifier(filename)
+            self.grid_ref = (
+                self._grid_ref_from_case_id(grid_case_id)
+                if grid_case_id is not None
+                else self.db.resolve_grid_identifier(filename)
+            )
             assumptions = dict(self.timeframe_metadata)
             if assumptions_extra:
                 assumptions.update(assumptions_extra)
@@ -61,6 +66,26 @@ class SaveFile:
         self.reduced_supim_dir = "urbs_out/reduced_data/supim"
         self.raw_process_dir = "urbs_in/process"
         self.reduced_process_dir = "urbs_out/reduced_data/process"
+
+    def _grid_ref_from_case_id(self, grid_case_id):
+        query = text(
+            """
+            SELECT
+                ags, plz, kcid, bcid,
+                pylovo_grid_result_id AS grid_result_id,
+                pylovo_version_id AS version_id,
+                cell_id
+            FROM surrogrid.grid_case
+            WHERE grid_case_id = :grid_case_id
+            """
+        )
+        with self.db.engine.connect() as conn:
+            row = conn.execute(
+                query, {"grid_case_id": int(grid_case_id)}
+            ).mappings().one_or_none()
+        if row is None:
+            raise ValueError(f"Unknown synthetic grid_case_id={grid_case_id}.")
+        return {**dict(row), "grid_case_id": int(grid_case_id)}
 
     def _get_readpath(self):
         directory = config.DATA_DIR
@@ -92,6 +117,9 @@ class SaveFile:
     def get_pre_demand(self):
         demand_key = self.reduced_demand_dir if self.uses_reduced_demand() else self.raw_demand_dir
         return pd.read_hdf(self.input_path, key=demand_key)
+
+    def get_allocation_plan(self):
+        return self._read_required_hdf("raw_data/allocation_plan")
 
     def _read_preferred_hdf(self, reduced_key, raw_key):
         key = reduced_key if self._hdf_key_exists(reduced_key) else raw_key
