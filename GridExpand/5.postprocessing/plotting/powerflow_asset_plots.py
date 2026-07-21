@@ -53,6 +53,76 @@ def _powerflow_y_axis_slider_layout(y_axis_ranges: dict[str, list[float]]) -> di
     return layout
 
 
+def plot_cable_max_loading_ecdf(
+    profile: pd.DataFrame,
+    *,
+    group_col: str = "comparison_group",
+    color_map: dict[str, str] | None = None,
+    title: str = "Cable Maximum Loading ECDF",
+    thresholds: tuple[float, ...] = (80.0, 100.0),
+    show: bool = True,
+) -> go.Figure:
+    """Plot the ECDF of each cable's maximum loading for every comparison group."""
+    required = {group_col, "metric", "percentile", "value"}
+    missing = required.difference(profile.columns)
+    if missing:
+        missing_columns = ", ".join(sorted(missing))
+        raise ValueError(
+            "plot_cable_max_loading_ecdf expects the asset-level percentile "
+            f"profile dataframe; missing column(s): {missing_columns}."
+        )
+
+    cable_maxima = profile.loc[
+        profile["metric"].eq("Cables") & profile["percentile"].eq("max")
+    ].copy()
+    cable_maxima["value"] = pd.to_numeric(cable_maxima["value"], errors="coerce")
+    cable_maxima = cable_maxima.dropna(subset=[group_col, "value"])
+    if cable_maxima.empty:
+        raise ValueError("No cable maximum-loading values are available for the ECDF.")
+
+    colors = color_map or {}
+    figure = go.Figure()
+    for group, group_frame in cable_maxima.groupby(group_col, sort=False, observed=True):
+        values = np.sort(group_frame["value"].to_numpy(dtype=float))
+        cumulative_share = np.arange(1, values.size + 1, dtype=float) / values.size * 100.0
+        figure.add_trace(
+            go.Scatter(
+                x=values,
+                y=cumulative_share,
+                mode="lines",
+                name=str(group),
+                line={"width": 2.6, "color": colors.get(str(group))},
+                hovertemplate=(
+                    "Grid model: %{fullData.name}<br>"
+                    "Cable maximum loading: %{x:.2f}%<br>"
+                    "Share of cables at or below loading: %{y:.1f}%<extra></extra>"
+                ),
+            )
+        )
+
+    for threshold in thresholds:
+        figure.add_vline(
+            x=float(threshold),
+            line_dash="dash",
+            line_color="#777777",
+            annotation_text=f"{float(threshold):g}%",
+            annotation_position="top right",
+        )
+    figure.update_layout(
+        title=title,
+        xaxis_title="Cable maximum loading [%]",
+        yaxis_title="Share of cables at or below loading [%]",
+        xaxis={"rangemode": "tozero"},
+        yaxis={"range": [0, 100]},
+        legend_title="Grid model",
+        margin={"l": 80, "r": 35, "t": 70, "b": 65},
+        height=460,
+    )
+    if show:
+        figure.show()
+    return figure
+
+
 def plot_powerflow_asset_cutoff_overview(
     profile: pd.DataFrame,
     group_col: str | None = None,
@@ -465,8 +535,8 @@ def plot_powerflow_asset_cutoff_overview(
         },
         autosize=False,
         legend={"title": {"text": f"{center_label}, range, distribution"}},
-        height=860,
-        width=1500,
+        height=1000,
+        width=1800,
         margin={"l": 60, "r": 25, "t": 100, "b": 110},
         violingap=0.12,
         sliders=[
@@ -500,6 +570,7 @@ def plot_powerflow_asset_cutoff_overview_static(
     filter_scope: str = "asset",
     source_col: str | None = None,
     source_style_map: dict[str, dict[str, object]] | None = None,
+    figsize: tuple[float, float] | None = None,
     save_path: str | Path | None = None,
     save_formats: tuple[str, ...] = ("svg", "pdf"),
 ):
@@ -686,10 +757,12 @@ def plot_powerflow_asset_cutoff_overview_static(
     legend_fontsize = 15
 
     plt.style.use("seaborn-v0_8-whitegrid")
+    if figsize is None:
+        figsize = (5.1 * len(selected_metrics), 8.2)
     fig, axes = plt.subplots(
         2,
         len(selected_metrics),
-        figsize=(4.6 * len(selected_metrics), 7.2),
+        figsize=figsize,
         gridspec_kw={"height_ratios": [1.0, 1.15], "hspace": 0.34, "wspace": 0.28},
         squeeze=False,
     )
@@ -1158,4 +1231,114 @@ def plot_powerflow_headline_violins(
     )
     if show:
         fig.show()
+    return fig
+
+
+def plot_cable_capacity_current_loading_comparison(
+    cable_data: pd.DataFrame,
+    *,
+    stage_order: tuple[str, ...],
+    color_map: dict[str, str],
+    asset_percentiles: tuple[float, ...] = (0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99),
+    title: str = "Cable Capacity, Peak Current, and Loading",
+    figsize: tuple[float, float] = (16.0, 5.4),
+    save_path: str | Path | None = None,
+    save_formats: tuple[str, ...] = ("svg", "pdf"),
+):
+    """Compare cable capacity, annual peak current, and annual peak loading."""
+    required = {
+        "data_source",
+        "comparison_stage",
+        "installed_capacity_a",
+        "max_current_a",
+        "max_loading_percent",
+    }
+    missing = required.difference(cable_data.columns)
+    if missing:
+        raise ValueError(f"Cable decomposition data is missing: {', '.join(sorted(missing))}.")
+    if cable_data.empty:
+        raise ValueError("No cable decomposition rows are available.")
+
+    percentiles = tuple(
+        sorted({float(value) / 100.0 if float(value) > 1 else float(value) for value in asset_percentiles})
+    )
+    if not percentiles or any(value <= 0 or value > 1 for value in percentiles):
+        raise ValueError("asset_percentiles must satisfy 0 < value <= 1, or 0 < value <= 100.")
+
+    metrics = (
+        ("installed_capacity_a", "Installed capacity [A]"),
+        ("max_current_a", "Annual peak current [A]"),
+        ("max_loading_percent", "Annual max loading [%]"),
+    )
+    source_styles = {
+        "Synthetic": {"linestyle": "-", "marker": "o"},
+        "Real SWF": {"linestyle": "--", "marker": "s"},
+    }
+    stages = [
+        stage for stage in stage_order if stage in set(cable_data["comparison_stage"].astype(str))
+    ]
+    sources = [
+        source for source in ("Synthetic", "Real SWF")
+        if source in set(cable_data["data_source"].astype(str))
+    ]
+
+    plt.style.use("seaborn-v0_8-whitegrid")
+    fig, axes = plt.subplots(1, len(metrics), figsize=figsize, squeeze=False)
+    axes = axes.ravel()
+    for ax, (column, y_label) in zip(axes, metrics):
+        for stage in stages:
+            for source in sources:
+                values = pd.to_numeric(
+                    cable_data.loc[
+                        cable_data["comparison_stage"].astype(str).eq(stage)
+                        & cable_data["data_source"].astype(str).eq(source),
+                        column,
+                    ],
+                    errors="coerce",
+                ).dropna()
+                if values.empty:
+                    continue
+                style = source_styles[source]
+                curve = [float(values.quantile(percentile)) for percentile in percentiles]
+                ax.plot(
+                    percentiles,
+                    curve,
+                    color=color_map.get(stage, "#555555"),
+                    linestyle=style["linestyle"],
+                    marker=style["marker"],
+                    linewidth=2.3,
+                    markersize=5.5,
+                    label=f"{stage} - {source}",
+                )
+        ax.set_xlabel("Asset percentile")
+        ax.set_ylabel(y_label)
+        ax.set_xticks(percentiles)
+        ax.set_xticklabels(
+            [f"P{int(round(value * 100)):02d}" for value in percentiles],
+            rotation=35,
+            ha="right",
+        )
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.grid(axis="y", color="#d8d8d8", linewidth=0.8)
+        ax.grid(False, axis="x")
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(
+            handles,
+            labels,
+            loc="upper center",
+            ncol=min(3, len(labels)),
+            frameon=False,
+            bbox_to_anchor=(0.5, 0.91),
+            handlelength=2.8,
+        )
+    fig.suptitle(title, y=0.995, fontsize=17, fontweight="bold")
+    fig.subplots_adjust(top=0.72, bottom=0.20, left=0.065, right=0.985, wspace=0.28)
+
+    if save_path is not None:
+        base_path = Path(save_path).with_suffix("")
+        base_path.parent.mkdir(parents=True, exist_ok=True)
+        for image_format in save_formats:
+            fig.savefig(base_path.with_suffix(f".{image_format.lstrip('.')}"), bbox_inches="tight")
     return fig

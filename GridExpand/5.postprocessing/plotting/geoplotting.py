@@ -20,7 +20,7 @@ GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
-from common.database import SurroGridDatabase
+from common.database import SurroGridDatabase  # noqa: E402
 
 COST_CMAP = LinearSegmentedColormap.from_list(
     "cost_green_red",
@@ -226,13 +226,51 @@ def load_real_grid_points(
     """Load real SWF load-bus points from radialized split-grid Excel files."""
 
     root = Path(real_grid_data_path)
-    manifest = pd.read_csv(root / "split_manifest.csv")
-    selected = manifest[
-        (manifest["variant"] == variant)
-        & (manifest["category"] == category)
-        & (manifest["load_status"] == load_status)
-        & (manifest["status"] == "exported")
-    ].copy()
+    legacy_manifest = root / "split_manifest.csv"
+    station_manifest = root / "station_split_manifest.csv"
+    radialization_manifest = root / "station_radialization_manifest.csv"
+    if legacy_manifest.exists():
+        manifest = pd.read_csv(legacy_manifest)
+        selected = manifest[
+            (manifest["variant"] == variant)
+            & (manifest["category"] == category)
+            & (manifest["load_status"] == load_status)
+            & (manifest["status"] == "exported")
+        ].copy()
+    elif station_manifest.exists() and radialization_manifest.exists():
+        if variant != "radialized":
+            raise ValueError(
+                "Station-based splitter output currently supports only "
+                "variant='radialized' in this plot."
+            )
+        stations = pd.read_csv(station_manifest)
+        stations = stations[
+            (stations["category"] == category)
+            & (stations["load_status"] == load_status)
+            & (stations["status"] == "ready")
+        ].copy()
+        radialized = pd.read_csv(radialization_manifest)
+        radialized = radialized[radialized["status"] == "ok"].copy()
+        radialized_files = radialized[["grid", "file"]].rename(
+            columns={"file": "radialized_file"}
+        )
+        selected = stations.merge(
+            radialized_files,
+            left_on="station_id",
+            right_on="grid",
+            how="inner",
+            validate="one_to_one",
+        )
+        selected["file"] = selected.pop("radialized_file")
+        selected["lv_id"] = (
+            selected["station_id"].astype(str).str.removeprefix("LV_")
+        )
+    else:
+        raise FileNotFoundError(
+            "Could not find a supported real-grid manifest in "
+            f"{root}. Expected split_manifest.csv or the station-based "
+            "split/radialization manifests."
+        )
 
     frames: list[pd.DataFrame] = []
     for row in selected.to_dict("records"):
@@ -808,9 +846,9 @@ def plot_synthetic_expansion_envelope_panels(
         if not real_points.empty:
             real_envelopes = _make_envelopes(real_points, "Real SWF", "lv_id")
 
+    # Keep both rows on the synthetic model scope. Real-grid coordinate
+    # outliers must not change the comparison extent.
     point_frames = [dataset["layers"]["points"][["x", "y"]] for dataset in datasets]
-    if not real_points.empty:
-        point_frames.append(real_points[["x", "y"]])
     all_points = pd.concat(point_frames, ignore_index=True)
     x_min, x_max = float(all_points["x"].min()), float(all_points["x"].max())
     y_min, y_max = float(all_points["y"].min()), float(all_points["y"].max())
@@ -1154,4 +1192,177 @@ def plot_synthetic_expansion_envelopes(
         "points": points,
         "grid_metrics": metrics.sort_values(value_column, ascending=False).reset_index(drop=True),
     }
+
+def load_paired_synthetic_building_coverage(
+    *,
+    paired_plan_path: str | Path,
+    target_epsg: int = 25832,
+) -> pd.DataFrame:
+    """Mark which existing synthetic buildings carry paired scenario demand."""
+    plan_path = Path(paired_plan_path)
+    plan = pd.read_csv(plan_path)
+    required = {"synthetic_grid_case_id", "building_objectid"}
+    missing = required.difference(plan.columns)
+    if missing:
+        raise ValueError(
+            f"Paired allocation plan is missing columns: {sorted(missing)}"
+        )
+
+    grid_case_ids = sorted(
+        int(value)
+        for value in pd.to_numeric(
+            plan["synthetic_grid_case_id"], errors="raise"
+        ).unique()
+    )
+    paired_buildings = set(
+        plan["building_objectid"].dropna().astype(str).unique()
+    )
+    if not grid_case_ids or not paired_buildings:
+        raise ValueError("Paired allocation plan contains no synthetic buildings.")
+
+    query = text(
+        """
+        SELECT
+            gbb.grid_case_id,
+            gbb.objectid AS building_objectid,
+            gbb.building_use,
+            gbb.street,
+            gbb.house_number,
+            ST_X(ST_Transform(gbb.centroid, :target_epsg)) AS x,
+            ST_Y(ST_Transform(gbb.centroid, :target_epsg)) AS y
+        FROM surrogrid.grid_building_bus gbb
+        WHERE gbb.grid_case_id = ANY(:grid_case_ids)
+          AND gbb.centroid IS NOT NULL
+        ORDER BY gbb.grid_case_id, gbb.objectid
+        """
+    )
+    db = SurroGridDatabase()
+    with db.engine.connect() as conn:
+        points = pd.read_sql_query(
+            query,
+            conn,
+            params={
+                "grid_case_ids": grid_case_ids,
+                "target_epsg": int(target_epsg),
+            },
+        )
+
+    points["paired_status"] = np.where(
+        points["building_objectid"].astype(str).isin(paired_buildings),
+        "Included in paired demand",
+        "Not selected for paired demand",
+    )
+    points.attrs.update(
+        {
+            "paired_plan_path": str(plan_path.resolve()),
+            "target_epsg": int(target_epsg),
+            "paired_buildings": int(
+                points["paired_status"].eq("Included in paired demand").sum()
+            ),
+            "unselected_buildings": int(
+                points["paired_status"].eq("Not selected for paired demand").sum()
+            ),
+        }
+    )
+    return points
+
+
+def plot_paired_synthetic_building_coverage(
+    *,
+    paired_plan_path: str | Path,
+    target_epsg: int = 25832,
+    show_grid_envelopes: bool = True,
+    add_osm_layer: bool = True,
+    output_path: str | Path | None = None,
+    figsize: tuple[float, float] = (11.0, 10.0),
+) -> tuple[plt.Figure, plt.Axes, pd.DataFrame]:
+    """Map existing synthetic buildings with and without paired scenario demand."""
+    points = load_paired_synthetic_building_coverage(
+        paired_plan_path=paired_plan_path,
+        target_epsg=target_epsg,
+    )
+    retained = points[points["paired_status"].eq("Included in paired demand")]
+    omitted = points[points["paired_status"].eq("Not selected for paired demand")]
+    if retained.empty or omitted.empty:
+        raise ValueError("Coverage map requires both paired and omitted buildings.")
+
+    fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+
+    if show_grid_envelopes:
+        for envelope in _make_envelopes(points, "Synthetic", "grid_case_id"):
+            if envelope.envelope is not None:
+                ax.plot(
+                    envelope.envelope[:, 0],
+                    envelope.envelope[:, 1],
+                    color="#5f6368",
+                    linewidth=0.45,
+                    alpha=0.28,
+                    zorder=2,
+                )
+
+    ax.scatter(
+        retained["x"],
+        retained["y"],
+        s=5.0,
+        color="#2166ac",
+        alpha=0.32,
+        edgecolors="none",
+        label=f"Included in paired demand ({len(retained):,})",
+        zorder=3,
+    )
+    ax.scatter(
+        omitted["x"],
+        omitted["y"],
+        s=7.0,
+        color="#d73027",
+        alpha=0.72,
+        edgecolors="none",
+        label=f"Existing, not selected for paired demand ({len(omitted):,})",
+        zorder=4,
+    )
+
+    x_span = float(points["x"].max() - points["x"].min())
+    y_span = float(points["y"].max() - points["y"].min())
+    ax.set_xlim(
+        float(points["x"].min()) - max(0.025 * x_span, 50.0),
+        float(points["x"].max()) + max(0.025 * x_span, 50.0),
+    )
+    ax.set_ylim(
+        float(points["y"].min()) - max(0.025 * y_span, 50.0),
+        float(points["y"].max()) + max(0.025 * y_span, 50.0),
+    )
+    ax.set_aspect("equal", adjustable="box")
+
+    if add_osm_layer:
+        _add_osm_basemap(
+            ax,
+            target_epsg=target_epsg,
+            alpha=0.62,
+        )
+
+    omitted_share = 100.0 * len(omitted) / len(points)
+    ax.set_title(
+        "Paired demand-allocation scope\n"
+        f"{len(omitted):,} of {len(points):,} existing synthetic buildings not selected "
+        f"({omitted_share:.1f}%)",
+        fontsize=15,
+    )
+    ax.legend(
+        loc="upper right",
+        frameon=True,
+        framealpha=0.94,
+        fontsize=10,
+        markerscale=2.2,
+    )
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+
+    if output_path is not None:
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output, dpi=300, bbox_inches="tight")
+
+    return fig, ax, points
 

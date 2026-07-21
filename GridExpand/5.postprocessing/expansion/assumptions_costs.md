@@ -20,9 +20,9 @@ This table is the single source of truth for the numerical assumptions used by t
 | LV cable reinforcement with trenching | Rural settlement (`settlement_type = 1`) | 90,000 | EUR/km | about 80k-120k EUR/km | Verteilnetzstudie Baden-Wuerttemberg reports rural NS cable costs around 80k EUR/km; Agora/FfE and WEI/GridSim support a broader 67k-120k EUR/km corridor. | yes |
 | LV cable reinforcement with trenching | Semi-urban settlement (`settlement_type = 2`) | 100,000 | EUR/km | about 100k EUR/km | Verteilnetzstudie Baden-Wuerttemberg semi-urban NS cable benchmark. Also used as fallback if settlement type is missing. | yes |
 | LV cable reinforcement with trenching | Urban settlement (`settlement_type = 3`) | 165,000 | EUR/km | about 125k-200k EUR/km; difficult cases up to about 380k EUR/km | Verteilnetzstudie Baden-Wuerttemberg, Wintzek/PuBStadt, and dena Verteilnetzstudie II. The 380k EUR/km value is treated as difficult-case boundary, not the default. | yes |
-| LV parallel cable in existing duct / empty pipe | <=150 mm2 equivalent | 25,000 | EUR/km | about 20k EUR/km | Wintzek/PuBStadt first-vs-parallel cable distinction; value includes a modest current-cost uplift and is also used for smaller LV service/backbone classes. | yes |
-| LV parallel cable in existing duct / empty pipe | 185 mm2 equivalent | 45,000 | EUR/km | about 40k-55k EUR/km | Wintzek/PuBStadt plus current-cost uplift. | yes |
-| LV parallel cable in existing duct / empty pipe | 240 mm2 equivalent | 70,000 | EUR/km | about 60k EUR/km; material checks around 25k-28k EUR/km | Wintzek/PuBStadt, Agora/FfE, and WEI/GridSim. Also used as default for unknown larger LV cable type. | yes |
+| Standard LV reinforcement cable | NAYY_4_150, 270 A | 25,000 | EUR/km | about 20k EUR/km | Wintzek/PuBStadt first-vs-parallel cable distinction; value includes a modest current-cost uplift and is also used for smaller LV service/backbone classes. | yes |
+| Standard LV reinforcement cable | NAYY_4_185, 313 A | 45,000 | EUR/km | about 40k-55k EUR/km | Wintzek/PuBStadt plus current-cost uplift. | yes |
+| Standard LV reinforcement cable | NAYY_4_240, 357 A | 70,000 | EUR/km | about 60k EUR/km; material checks around 25k-28k EUR/km | Wintzek/PuBStadt, Agora/FfE, and WEI/GridSim. Also used as default for unknown larger LV cable type. | yes |
 | Transformer capacity upgrade in existing station context | Replacement / upgrade to 400 kVA | 33,000 | EUR/unit | all-in replacement/model bins about 30k EUR; equipment-only lower bounds about 10k-15k EUR | WEI/GridSim all-in transformer replacement bins, checked against Wintzek and BW-study equipment lower bounds. | yes |
 | Transformer capacity upgrade in existing station context | Replacement / upgrade to 630 kVA | 38,000 | EUR/unit | all-in replacement/model bins about 35k EUR; equipment-only lower bounds about 10k-15k EUR | WEI/GridSim all-in transformer replacement bins, checked against Wintzek and BW-study equipment lower bounds. | yes |
 | Transformer capacity upgrade in existing station context | Replacement / upgrade to 800 kVA | 42,000 | EUR/unit | interpolated between 630 kVA and 1,000 kVA all-in bins | Interpolation between WEI/GridSim 630 kVA and 1 MVA bins, checked against Wintzek 800 kVA equipment anchor. | yes |
@@ -35,54 +35,58 @@ This table is the single source of truth for the numerical assumptions used by t
 
 ## Cable Reinforcement Heuristic
 
-Cable capacity is evaluated on raw electrical line components, ideally `pylovo.pandapower_line` joined to `surrogrid.powerflow_cable_summary`. The line current from the power-flow result is compared with the installed capacity of the same electrical component.
+Cable capacity is evaluated on P100 loading: the maximum current represented by the complete power-flow horizon. No grid or asset percentile cutoff is applied to the expansion decision.
 
 ```text
-installed_capacity_ka = max_i_ka * component_parallel
-loading_percent = peak_current_ka / installed_capacity_ka * 100
-required_parallel = ceil(peak_current_ka / max_i_ka)
-additional_parallel = max(required_parallel - component_parallel, 0)
-requires_expansion = additional_parallel > 0
+installed_capacity_ka = existing_max_i_ka * existing_parallel
+required_added_capacity_ka = max(peak_current_ka - installed_capacity_ka, 0)
 ```
 
-The route-cost component is now explicitly split between routes with existing ducts and routes requiring trenching. The settlement class comes from `pylovo.postcode_result.settlement_type`:
+The existing cable is retained regardless of its SWF or pylovo type. Every added circuit must be selected from the same catalogue on both network sources:
+
+| Added cable | Ampacity | Cable-in-duct cost |
+| --- | ---: | ---: |
+| `NAYY_4_150` | 0.270 kA | 25,000 EUR/km |
+| `NAYY_4_185` | 0.313 kA | 45,000 EUR/km |
+| `NAYY_4_240` | 0.357 kA | 70,000 EUR/km |
+
+All nonnegative integer combinations are considered. The selected combination is the least-cost option whose added nominal ampacity covers `required_added_capacity_ka`. Ties are resolved by fewer circuits, then lower excess capacity. This is a thermal screening approximation: actual current sharing between unlike parallel cables is not recalculated.
+
+The settlement class controls the reopened-route cost:
 
 ```text
-settlement_type = 1 -> rural reopened-route cost
-settlement_type = 2 -> semi-urban reopened-route cost
-settlement_type = 3 -> urban reopened-route cost
-missing settlement_type -> semi-urban reopened-route cost
+settlement_type = 1 -> rural
+settlement_type = 2 -> semi-urban
+settlement_type = 3 -> urban
+missing settlement_type -> semi-urban
 ```
 
-For a reinforced component, the one-time expansion cost is estimated as:
+For a selected combination:
 
 ```text
-if additional_parallel == 0:
-    component_cost_eur = 0
-else:
-    duct_cost = selected cable-in-duct cost by cable std_type
-    reopen_cost = selected reopened-route cost by settlement_type
-    trenching_share = 1 - existing_duct_share
+duct_total = sum(selected cable-in-duct costs)
+primary_duct_cost = highest cable-in-duct cost among selected cables
+trenching_share = 1 - existing_duct_share
 
-    component_cost_eur = component_length_km * (
-        additional_parallel * duct_cost
-        + trenching_share * (reopen_cost - duct_cost)
-    )
+route_cost_eur_per_km =
+    duct_total
+    + trenching_share * (reopened_route_cost - primary_duct_cost)
+
+component_cost_eur = component_length_km * route_cost_eur_per_km
 ```
 
-This formula reflects the current modelling choice: all required parallel capacity is added in one expansion step. Therefore the trenching premium is charged once per reinforced route, while the cable/material component scales with the number of additional parallel equivalents. If a route already has ducts, only the cable-in-duct component remains.
+The reopened-route cost represents the first cable plus civil works. Further selected circuits add their cable-in-duct cost, so trenching is charged once per reinforced route.
 
-For reporting, the result table stores the effective cost basis for the critical mapped component:
+The result tables store:
 
-- `settlement_type`
-- `line_existing_duct_share`
-- `line_trenching_share`
-- `critical_component_cost_eur_per_km`
-- `critical_component_cost_basis`
-- `critical_component_duct_cost_eur_per_km`
-- `critical_component_reopen_cost_eur_per_km`
+- `reinforcement_150_count`
+- `reinforcement_185_count`
+- `reinforcement_240_count`
+- `reinforcement_added_capacity_ka`
+- `reinforcement_catalog`
+- route cost basis, duct/trenching shares, and estimated cost
 
-If several raw electrical components are mapped to one visible QGIS segment, `estimated_cost_eur` and `additional_parallel` are aggregated over all mapped components. The `critical_component_*` fields describe the component with the highest loading, and `component_cost_basis_count` / `component_std_type_count` indicate whether the visible segment combines heterogeneous assumptions.
+For synthetic display geometries that combine several raw electrical components, cable counts, added capacity, and cost are summed over those components. Critical-component fields still identify the electrically most loaded mapped component.
 
 ## Transformer Heuristic
 
@@ -141,6 +145,19 @@ Primary/context sources and how they are used:
 - Agora/FfE and related FfE distribution-grid modelling: cable material and laying decomposition, transformer and rONT equipment anchors, and method context.
 - WEI/GridSim 2025 modelling assumptions: cable material, installation, transformer replacement, and station rebuild consistency checks.
 - dena 2012: historical DSO-validated lower-bound plausibility check; not used as the primary default because the cost base is old.
+
+## Application to Synthetic and Real Networks
+
+The same `de_lv_heuristic_2026` assumption row and the same asset-level formulas are applied to both network sources. The implementation differs only where source-specific identifiers and geometry must be read:
+
+- Synthetic assets are joined through pylovo grid, line, and transformer identifiers.
+- Real SWF assets are joined through `real_grid_case_id`, pandapower line indices, transformer ratings, and geometries from the exported station grid.
+- Cable reinforcement uses the P100 current, existing installed capacity, common three-cable reinforcement catalogue, line length, settlement class, and duct/trenching blend on both sides.
+- Transformer reinforcement uses the P100 apparent-power loading, installed rating, 50 kVA rounding step, and the same replacement/rebuild cost bins on both sides.
+
+A real grid-stage is priced only when every simulated timestep converged. A grid with failed timesteps is stored as `incomplete`, receives no cable or transformer cost rows, and is excluded from aggregate costs rather than being interpreted as a zero-cost grid. Methodological exclusions are stored separately as `excluded`. Cost comparisons must therefore report both total cost and coverage; per-complete-grid values are useful when source coverage differs.
+
+The current real-SWF implementation deliberately follows the same thermal-only boundary as the synthetic calculation. It does not add a separate cost for voltage violations, meshing, switchgear changes, or rONT installation.
 
 ## Interpretation Guidance
 

@@ -17,10 +17,26 @@ Step 5 is split by workflow responsibility:
 
 - `powerflow.comparison_data`: load compact synthetic and real power-flow summaries, build comparison datasets, and compute similarity tables.
 - `plotting.*`: create figures from prepared data. Notebooks import the concrete plotting modules directly.
-- `audits.*`: diagnostic scripts for demand allocation and topology bottlenecks.
+- `audits.topology_bottleneck`: reusable diagnostics for critical real-grid voltage paths and bottlenecks.
 - `expansion.*`: materialize expansion summaries/costs and load expansion overview tables.
 
 Import from the owning module instead of using compatibility facades. For example, use `powerflow.comparison_data` for DB loaders and `plotting.powerflow_asset_plots` for asset stress plots.
+
+## Output Layout
+
+All generated Step 5 files belong below `5.postprocessing/output/`. Plotting modules do not own an output directory; notebooks and callers provide a destination below `output/plots/`. Audit CLIs default to `output/audits/<workflow>/`. Scenario-calibration exports remain owned by Step 2 under `2.demand_allocation/gridalloc/outputs/` and must not be duplicated in Step 5.
+
+```text
+output/
+  plots/
+    asset_powerflow/
+    expansion/<AGS>/<scenario_prefix>/
+  audits/
+    building_coverage/
+    topology/
+```
+
+The entire `output/` tree is generated and ignored by Git. Durable conclusions and methodological decisions belong in the Markdown files under `audits/` or `expansion/`, not only in generated CSV or figure files.
 
 ## Main Files
 
@@ -30,27 +46,26 @@ Import from the owning module instead of using compatibility facades. For exampl
   powerflow/
     comparison_data.py                    # DB loaders and synthetic/real comparison datasets
   notebooks/
-    asset_powerflow_comparison.ipynb      # real/synthetic power-flow comparison notebook
-    expansion_analysis.ipynb              # pre/post-flex/post-no-flex expansion comparison notebook
-    grid_area_envelope_comparison.ipynb   # real/synthetic grid-area envelope notebook
-    timeseries_plotting.ipynb             # DB-backed time-series diagnostics notebook
+    analysis_powerflow.ipynb           # paired real/synthetic status-quo power-flow analysis
+    analysis_expansion.ipynb           # paired pre/post-flex/post-no-flex expansion analysis
+    grid_area_envelope_comparison.ipynb # spatial supplied-area diagnostic
   plotting/
-    powerflow_heatmaps.py                 # HDF/DB timestep heatmaps and line-loading CLI helpers
+    powerflow_heatmaps.py                 # HDF/DB timestep heatmaps and single-grid loading CLI
     powerflow_asset_plots.py              # asset cutoff, percentile, and violin plot functions
     powerflow_voltage.py                  # voltage deviation summaries and plots
     powerflow_transformer.py              # transformer import and stage-comparison plots
     powerflow_io.py                       # shared Plotly export helper
     geoplotting.py                        # envelope and geospatial plotting helpers
   audits/
-    demand.py                             # real/synthetic annual demand diagnostics
     topology_bottleneck.py                # critical voltage path/bottleneck audit
-    topology_whatif.py                    # read-only topology what-if checks
   expansion/
-    grid_expansion.py                     # CLI/orchestration for expansion-cost materialization
+    grid_expansion.py                     # source-neutral CLI/orchestration for expansion costs
+    real_materialization.py                # real SWF asset adapter for the shared cost heuristic
     overview.py                           # read-only expansion summary loaders for notebooks
     materialize_powerflow_summary.py      # derive compact summaries from stored raw rows
     schema.sql                            # expansion tables, assumptions, QGIS views
-    cost_assumptions.md                   # cost-assumption notes
+    assumptions_costs.md                  # cost assumptions and source evidence
+    assumptions_scenario.md               # authoritative scenario-run summary
 ```
 
 ## Command Summary
@@ -126,7 +141,7 @@ cd GridExpand/5.postprocessing
 uv run python -m expansion.grid_expansion --schema-only
 ```
 
-Materialize expansion costs from stored raw post power-flow results:
+Materialize expansion costs from stored compact power-flow summaries:
 
 ```bash
 cd GridExpand/5.postprocessing
@@ -139,16 +154,31 @@ uv run python -m expansion.grid_expansion \
   --replace
 ```
 
+Materialize an equivalent real SWF analysis from compact summaries and the exported pandapower assets:
+
+```bash
+uv run python -m expansion.grid_expansion \
+  --data-source real_swf \
+  --run-name <real_powerflow_run_name> \
+  --stage post \
+  --plz <PLZ> \
+  --analysis-key <analysis_key> \
+  --exclude-real-lv-id <LV_ID> \
+  --replace
+```
+
+Real grids with non-converged timesteps remain in `expansion_real_grid_status` with `cost_status=incomplete`; they are not assigned zero cost. Explicit exclusions remain visible with `cost_status=excluded`. Synthetic and real results use the same row from `expansion_cost_assumption`. Existing cables are retained; added circuits are selected from the shared `NAYY_4_150`, `NAYY_4_185`, and `NAYY_4_240` catalogue.
+
 Which Path Should I Use?
 
 - Use `--powerflow-output summary` when storage should stay small and the notebooks only need compact stress metrics; combine it with `--tsam` for faster full-year screening. This now also creates `expansion_analysis_run` rows automatically.
-- Use `--powerflow-output raw` when later expansion-cost materialization, detailed diagnostics, or custom postprocessing are needed.
+- Use `--powerflow-output raw` for detailed timestep diagnostics or custom postprocessing. Expansion-cost materialization now works from compact summary rows for both synthetic and real SWF runs.
 - Use `materialize_powerflow_summary.py` only when raw time series already exist and compact notebook summaries are missing or stale.
 - Use `grid_expansion.py` manually only when you need to re-materialize or rename expansion-cost estimates; the normal summary pipeline does this automatically from compact summary rows.
 
 ## Expansion Outputs
 
-`grid_expansion.py` writes one analysis run plus derived cable and transformer expansion rows. It also refreshes:
+`grid_expansion.py` writes one source-labelled analysis run plus derived cable and transformer expansion rows. Synthetic rows retain pylovo foreign keys; real rows retain SWF pandapower asset ids and source geometry. It also refreshes the existing synthetic QGIS views:
 
 - `surrogrid.expansion_line_qgis_mv`
 - `surrogrid.expansion_transformer_qgis_mv`
@@ -159,13 +189,15 @@ Useful fields for QGIS or notebooks:
 - `requires_expansion`: true if the heuristic adds capacity.
 - `loading_percent`: critical peak loading.
 - `estimated_cost_eur`: heuristic expansion cost.
-- `additional_parallel`: additional cable parallels.
+- `additional_parallel`: total selected additional cable circuits.
+- `reinforcement_150_count`, `reinforcement_185_count`, and `reinforcement_240_count`: selected standard reinforcement cables.
 - `additional_transformer_kva`: additional transformer capacity.
 
-The default cost assumptions are documented in `expansion/cost_assumptions.md`. They are screening assumptions, not construction estimates.
+The default cost assumptions are documented in `expansion/assumptions_costs.md`. They are screening assumptions, not construction estimates.
 
 ## Notes
 
 - Compact summaries can now represent `post` electrification results. Older summary-only runs may contain only `pre` rows.
+- `grid_area_envelope_comparison.ipynb` is the dedicated spatial diagnostic for comparing convex supplied-area envelopes; it is not duplicated in the main power-flow or expansion notebooks.
 - Expansion notebook envelope plots use `plotting/geoplotting.py`; OSM background tiles require `contextily` and network access at plot time.
 - Keep raw run names, compact summary run names, and expansion `analysis_key`s explicit in notes or run logs. This is the easiest way to avoid mixing analysis generations.

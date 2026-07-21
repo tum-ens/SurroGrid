@@ -19,18 +19,20 @@ SCHEMA_SQL_PATH = Path(__file__).with_name("schema.sql")
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
-from common.database import SurroGridDatabase, normalize_ags
+from common.database import SurroGridDatabase, normalize_ags  # noqa: E402
 
 try:
     from .overview import (  # noqa: F401
         latest_expansion_analysis_key,
         load_expansion_overview,
     )
+    from .real_materialization import materialize_real_results
 except ImportError:
     from overview import (  # noqa: F401
         latest_expansion_analysis_key,
         load_expansion_overview,
     )
+    from real_materialization import materialize_real_results
 
 
 def _execute_sql_file(db: SurroGridDatabase, path: Path) -> None:
@@ -87,11 +89,11 @@ def _create_analysis_run(
         """
         INSERT INTO surrogrid.expansion_analysis_run (
             analysis_key, assumption_key, run_name, stage,
-            scenario_id, ags, plz, note
+            scenario_id, ags, plz, note, data_source
         )
         VALUES (
             :analysis_key, :assumption_key, :run_name, :stage,
-            :scenario_id, :ags, :plz, :note
+            :scenario_id, :ags, :plz, :note, :data_source
         )
         RETURNING expansion_analysis_run_id
         """
@@ -110,6 +112,7 @@ def _create_analysis_run(
                         "ags": _optional_ags(args.ags),
                         "plz": args.plz,
                         "note": args.note,
+                        "data_source": "Real SWF" if args.data_source == "real_swf" else "Synthetic",
                     },
                 ).scalar_one()
             )
@@ -429,6 +432,13 @@ def _materialize_line_results(
                 COALESCE(vm.component_parallel, 1) AS component_parallel,
                 peak.max_i_from_ka,
                 NULLIF(vm.max_i_ka, 0.0) AS max_i_ka,
+                NULLIF(vm.max_i_ka, 0.0) * COALESCE(vm.component_parallel, 1)
+                    AS installed_capacity_ka,
+                GREATEST(
+                    peak.max_i_from_ka
+                        - NULLIF(vm.max_i_ka, 0.0) * COALESCE(vm.component_parallel, 1),
+                    0.0
+                ) AS required_added_capacity_ka,
                 peak.critical_t_index,
                 peak.critical_ts,
                 CASE
@@ -436,17 +446,7 @@ def _materialize_line_results(
                     ELSE peak.max_i_from_ka
                         / (vm.max_i_ka * COALESCE(vm.component_parallel, 1))
                         * 100.0
-                END AS loading_percent,
-                CASE
-                    WHEN vm.max_i_ka IS NULL OR vm.max_i_ka = 0.0 THEN COALESCE(vm.component_parallel, 1)
-                    ELSE GREATEST(
-                        CEIL(
-                            peak.max_i_from_ka
-                            / NULLIF(vm.max_i_ka, 0.0)
-                        )::INTEGER,
-                        COALESCE(vm.component_parallel, 1)
-                    )
-                END AS required_parallel
+                END AS loading_percent
             FROM visible_map vm
             JOIN peak_line peak
               ON peak.powerflow_run_id = vm.powerflow_run_id
@@ -456,78 +456,137 @@ def _materialize_line_results(
         component_cost AS (
             SELECT
                 cl.*,
-                GREATEST(cl.required_parallel - cl.component_parallel, 0) AS additional_parallel,
-                line_cost.line_cost_eur_per_km,
-                line_cost.line_cost_basis,
-                line_cost.duct_cost_eur_per_km,
-                line_cost.reopen_cost_eur_per_km,
-                line_cost.existing_duct_share,
-                line_cost.trenching_share,
-                GREATEST(cl.required_parallel - cl.component_parallel, 0)
-                    * COALESCE(cl.component_length_km, 0.0)
-                    * line_cost.line_cost_eur_per_km AS estimated_component_cost_eur
+                cl.component_parallel + selection.additional_parallel AS required_parallel,
+                selection.additional_parallel,
+                selection.reinforcement_150_count,
+                selection.reinforcement_185_count,
+                selection.reinforcement_240_count,
+                selection.reinforcement_added_capacity_ka,
+                'NAYY_4_150|NAYY_4_185|NAYY_4_240'::TEXT AS reinforcement_catalog,
+                selection.line_cost_eur_per_km,
+                selection.line_cost_basis,
+                selection.duct_cost_eur_per_km,
+                selection.reopen_cost_eur_per_km,
+                selection.existing_duct_share,
+                selection.trenching_share,
+                COALESCE(cl.component_length_km, 0.0)
+                    * selection.line_cost_eur_per_km AS estimated_component_cost_eur
             FROM component_loading cl
             CROSS JOIN assumption
             CROSS JOIN LATERAL (
+                SELECT LEAST(
+                    GREATEST(
+                        COALESCE(:line_existing_duct_share, assumption.line_existing_duct_share),
+                        0.0
+                    ),
+                    1.0
+                ) AS existing_duct_share
+            ) share
+            CROSS JOIN LATERAL (
                 SELECT
-                    cost_part.duct_cost_eur_per_km,
-                    cost_part.reopen_cost_eur_per_km,
+                    CASE
+                        WHEN cl.settlement_type = 1 THEN assumption.line_reopen_rural_eur_per_km
+                        WHEN cl.settlement_type = 3 THEN assumption.line_reopen_urban_eur_per_km
+                        ELSE assumption.line_reopen_suburban_eur_per_km
+                    END AS reopen_cost_eur_per_km,
+                    CASE
+                        WHEN cl.settlement_type = 1 THEN 'rural'
+                        WHEN cl.settlement_type = 3 THEN 'urban'
+                        ELSE 'semiurban'
+                    END AS settlement_label
+            ) route
+            CROSS JOIN LATERAL (
+                SELECT
+                    candidate.n150 AS reinforcement_150_count,
+                    candidate.n185 AS reinforcement_185_count,
+                    candidate.n240 AS reinforcement_240_count,
+                    candidate.n150 + candidate.n185 + candidate.n240 AS additional_parallel,
+                    candidate.added_capacity_ka AS reinforcement_added_capacity_ka,
+                    candidate.total_duct_cost_eur_per_km AS duct_cost_eur_per_km,
+                    route.reopen_cost_eur_per_km,
                     share.existing_duct_share,
                     1.0 - share.existing_duct_share AS trenching_share,
+                    candidate.total_cost_eur_per_km AS line_cost_eur_per_km,
                     CASE
-                        WHEN GREATEST(cl.required_parallel - cl.component_parallel, 0) > 0 THEN
-                            cost_part.duct_cost_eur_per_km
-                            + (1.0 - share.existing_duct_share)
-                              * (cost_part.reopen_cost_eur_per_km - cost_part.duct_cost_eur_per_km)
-                              / GREATEST(cl.required_parallel - cl.component_parallel, 0)
-                        ELSE
-                            share.existing_duct_share * cost_part.duct_cost_eur_per_km
-                            + (1.0 - share.existing_duct_share) * cost_part.reopen_cost_eur_per_km
-                    END AS line_cost_eur_per_km,
-                    CONCAT(
-                        'blended_',
-                        cost_part.settlement_label,
-                        '_duct', ROUND((share.existing_duct_share * 100.0)::NUMERIC)::TEXT,
-                        '_trench', ROUND(((1.0 - share.existing_duct_share) * 100.0)::NUMERIC)::TEXT,
-                        '_', cost_part.duct_cost_basis
-                    ) AS line_cost_basis
+                        WHEN candidate.n150 + candidate.n185 + candidate.n240 = 0
+                            THEN 'none_existing_capacity_sufficient'
+                        ELSE CONCAT(
+                            'catalog_', route.settlement_label,
+                            '_duct', ROUND((share.existing_duct_share * 100.0)::NUMERIC)::TEXT,
+                            '_trench', ROUND(((1.0 - share.existing_duct_share) * 100.0)::NUMERIC)::TEXT,
+                            '_150x', candidate.n150,
+                            '_185x', candidate.n185,
+                            '_240x', candidate.n240
+                        )
+                    END AS line_cost_basis
                 FROM (
                     SELECT
+                        n150,
+                        n185,
+                        n240,
+                        n150 * assumption.line_reinforcement_150_max_i_ka
+                            + n185 * assumption.line_reinforcement_185_max_i_ka
+                            + n240 * assumption.line_reinforcement_240_max_i_ka
+                            AS added_capacity_ka,
+                        n150 * assumption.line_parallel_150_eur_per_km
+                            + n185 * assumption.line_parallel_185_eur_per_km
+                            + n240 * assumption.line_parallel_240_eur_per_km
+                            AS total_duct_cost_eur_per_km,
                         CASE
-                            WHEN cl.component_std_type ~ '240' THEN assumption.line_parallel_240_eur_per_km
-                            WHEN cl.component_std_type ~ '185' THEN assumption.line_parallel_185_eur_per_km
-                            WHEN cl.component_std_type ~ '150' THEN assumption.line_parallel_150_eur_per_km
-                            WHEN cl.component_std_type ~ '120|95|70|50|35' THEN assumption.line_parallel_150_eur_per_km
-                            ELSE assumption.line_parallel_default_eur_per_km
-                        END AS duct_cost_eur_per_km,
-                        CASE
-                            WHEN cl.settlement_type = 1 THEN assumption.line_reopen_rural_eur_per_km
-                            WHEN cl.settlement_type = 3 THEN assumption.line_reopen_urban_eur_per_km
-                            ELSE assumption.line_reopen_suburban_eur_per_km
-                        END AS reopen_cost_eur_per_km,
-                        CASE
-                            WHEN cl.settlement_type = 1 THEN 'rural'
-                            WHEN cl.settlement_type = 3 THEN 'urban'
-                            ELSE 'semiurban'
-                        END AS settlement_label,
-                        CASE
-                            WHEN cl.component_std_type ~ '240' THEN 'duct_parallel_240mm2'
-                            WHEN cl.component_std_type ~ '185' THEN 'duct_parallel_185mm2'
-                            WHEN cl.component_std_type ~ '150' THEN 'duct_parallel_150mm2'
-                            WHEN cl.component_std_type ~ '120|95|70|50|35' THEN 'duct_parallel_le_150mm2'
-                            ELSE 'duct_parallel_default_240mm2'
-                        END AS duct_cost_basis
-                ) cost_part
-                CROSS JOIN LATERAL (
-                    SELECT LEAST(
-                        GREATEST(
-                            COALESCE(:line_existing_duct_share, assumption.line_existing_duct_share),
-                            0.0
-                        ),
-                        1.0
-                    ) AS existing_duct_share
-                ) share
-            ) line_cost
+                            WHEN n150 + n185 + n240 = 0 THEN 0.0
+                            ELSE
+                                n150 * assumption.line_parallel_150_eur_per_km
+                                + n185 * assumption.line_parallel_185_eur_per_km
+                                + n240 * assumption.line_parallel_240_eur_per_km
+                                + (1.0 - share.existing_duct_share) * (
+                                    route.reopen_cost_eur_per_km
+                                    - GREATEST(
+                                        CASE WHEN n150 > 0 THEN assumption.line_parallel_150_eur_per_km ELSE 0.0 END,
+                                        CASE WHEN n185 > 0 THEN assumption.line_parallel_185_eur_per_km ELSE 0.0 END,
+                                        CASE WHEN n240 > 0 THEN assumption.line_parallel_240_eur_per_km ELSE 0.0 END
+                                    )
+                                )
+                        END AS total_cost_eur_per_km
+                    FROM generate_series(
+                        0,
+                        CEIL(
+                            cl.required_added_capacity_ka
+                            / assumption.line_reinforcement_150_max_i_ka
+                        )::INTEGER
+                    ) n150
+                    CROSS JOIN generate_series(
+                        0,
+                        CEIL(
+                            cl.required_added_capacity_ka
+                            / assumption.line_reinforcement_150_max_i_ka
+                        )::INTEGER
+                    ) n185
+                    CROSS JOIN generate_series(
+                        0,
+                        CEIL(
+                            cl.required_added_capacity_ka
+                            / assumption.line_reinforcement_150_max_i_ka
+                        )::INTEGER
+                    ) n240
+                    WHERE (
+                        cl.required_added_capacity_ka <= 1e-12
+                        AND n150 + n185 + n240 = 0
+                    ) OR (
+                        n150 + n185 + n240 > 0
+                        AND n150 * assumption.line_reinforcement_150_max_i_ka
+                            + n185 * assumption.line_reinforcement_185_max_i_ka
+                            + n240 * assumption.line_reinforcement_240_max_i_ka
+                            >= cl.required_added_capacity_ka - 1e-12
+                    )
+                ) candidate
+                ORDER BY
+                    candidate.total_cost_eur_per_km,
+                    candidate.n150 + candidate.n185 + candidate.n240,
+                    candidate.added_capacity_ka - cl.required_added_capacity_ka,
+                    candidate.n240 DESC,
+                    candidate.n185 DESC
+                LIMIT 1
+            ) selection
         ),
         visible_counts AS (
             SELECT powerflow_run_id, visible_line_id, COUNT(*) AS mapped_component_lines
@@ -540,6 +599,10 @@ def _materialize_line_results(
                 visible_line_id,
                 MAX(required_parallel) AS required_parallel,
                 SUM(additional_parallel)::INTEGER AS additional_parallel,
+                SUM(reinforcement_150_count)::INTEGER AS reinforcement_150_count,
+                SUM(reinforcement_185_count)::INTEGER AS reinforcement_185_count,
+                SUM(reinforcement_240_count)::INTEGER AS reinforcement_240_count,
+                SUM(reinforcement_added_capacity_ka) AS reinforcement_added_capacity_ka,
                 BOOL_OR(additional_parallel > 0) AS requires_expansion,
                 BOOL_OR(COALESCE(loading_percent, 0.0) > 100.0) AS overloaded_at_100_percent,
                 COALESCE(SUM(estimated_component_cost_eur), 0.0) AS estimated_cost_eur,
@@ -584,6 +647,11 @@ def _materialize_line_results(
             loading_percent,
             required_parallel,
             additional_parallel,
+            reinforcement_150_count,
+            reinforcement_185_count,
+            reinforcement_240_count,
+            reinforcement_added_capacity_ka,
+            reinforcement_catalog,
             requires_expansion,
             overloaded_at_100_percent,
             estimated_cost_eur,
@@ -627,6 +695,11 @@ def _materialize_line_results(
             cc.loading_percent,
             va.required_parallel,
             va.additional_parallel,
+            va.reinforcement_150_count,
+            va.reinforcement_185_count,
+            va.reinforcement_240_count,
+            va.reinforcement_added_capacity_ka,
+            cc.reinforcement_catalog,
             va.requires_expansion,
             va.overloaded_at_100_percent,
             va.estimated_cost_eur,
@@ -840,33 +913,62 @@ def _materialize_transformer_results(
 def _print_summary(db: SurroGridDatabase, analysis_key: str) -> None:
     query = text(
         """
+        WITH selected AS (
+            SELECT expansion_analysis_run_id, analysis_key, data_source
+            FROM surrogrid.expansion_analysis_run
+            WHERE analysis_key = :analysis_key
+        ), synthetic AS (
+            SELECT
+                COUNT(DISTINCT elr.grid_case_id) AS grids_with_line_rows,
+                COUNT(*) FILTER (WHERE elr.requires_expansion) AS cable_expansion_segments,
+                COALESCE(SUM(elr.estimated_cost_eur), 0.0) AS cable_cost_eur,
+                (SELECT COUNT(*) FROM surrogrid.expansion_transformer_result etr
+                 WHERE etr.expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM selected)
+                   AND etr.requires_expansion) AS transformer_expansion_count,
+                (SELECT COALESCE(SUM(etr.estimated_cost_eur), 0.0)
+                 FROM surrogrid.expansion_transformer_result etr
+                 WHERE etr.expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM selected)) AS transformer_cost_eur
+            FROM surrogrid.expansion_line_result elr
+            WHERE elr.expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM selected)
+        ), real AS (
+            SELECT
+                COUNT(DISTINCT erlr.real_grid_case_id) AS grids_with_line_rows,
+                COUNT(*) FILTER (WHERE erlr.requires_expansion) AS cable_expansion_segments,
+                COALESCE(SUM(erlr.estimated_cost_eur), 0.0) AS cable_cost_eur,
+                (SELECT COUNT(*) FROM surrogrid.expansion_real_transformer_result ertr
+                 WHERE ertr.expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM selected)
+                   AND ertr.requires_expansion) AS transformer_expansion_count,
+                (SELECT COALESCE(SUM(ertr.estimated_cost_eur), 0.0)
+                 FROM surrogrid.expansion_real_transformer_result ertr
+                 WHERE ertr.expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM selected)) AS transformer_cost_eur
+            FROM surrogrid.expansion_real_line_result erlr
+            WHERE erlr.expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM selected)
+        )
         SELECT
-            ar.analysis_key,
-            COUNT(DISTINCT elr.grid_case_id) AS grids_with_line_rows,
-            COUNT(*) FILTER (WHERE elr.requires_expansion) AS cable_expansion_segments,
-            COALESCE(SUM(elr.estimated_cost_eur), 0.0) AS cable_cost_eur,
-            (
-                SELECT COUNT(*)
-                FROM surrogrid.expansion_transformer_result etr
-                WHERE etr.expansion_analysis_run_id = ar.expansion_analysis_run_id
-                  AND etr.requires_expansion
-            ) AS transformer_expansion_count,
-            (
-                SELECT COALESCE(SUM(etr.estimated_cost_eur), 0.0)
-                FROM surrogrid.expansion_transformer_result etr
-                WHERE etr.expansion_analysis_run_id = ar.expansion_analysis_run_id
-            ) AS transformer_cost_eur
-        FROM surrogrid.expansion_analysis_run ar
-        LEFT JOIN surrogrid.expansion_line_result elr USING (expansion_analysis_run_id)
-        WHERE ar.analysis_key = :analysis_key
-        GROUP BY ar.expansion_analysis_run_id, ar.analysis_key
+            selected.analysis_key,
+            selected.data_source,
+            CASE WHEN selected.data_source = 'Real SWF' THEN real.grids_with_line_rows ELSE synthetic.grids_with_line_rows END AS grids_with_line_rows,
+            CASE WHEN selected.data_source = 'Real SWF' THEN real.cable_expansion_segments ELSE synthetic.cable_expansion_segments END AS cable_expansion_segments,
+            CASE WHEN selected.data_source = 'Real SWF' THEN real.cable_cost_eur ELSE synthetic.cable_cost_eur END AS cable_cost_eur,
+            CASE WHEN selected.data_source = 'Real SWF' THEN real.transformer_expansion_count ELSE synthetic.transformer_expansion_count END AS transformer_expansion_count,
+            CASE WHEN selected.data_source = 'Real SWF' THEN real.transformer_cost_eur ELSE synthetic.transformer_cost_eur END AS transformer_cost_eur,
+            (SELECT COUNT(*) FROM surrogrid.expansion_real_grid_status s
+             WHERE s.expansion_analysis_run_id = selected.expansion_analysis_run_id
+               AND s.cost_status = 'incomplete') AS incomplete_grids,
+            (SELECT COUNT(*) FROM surrogrid.expansion_real_grid_status s
+             WHERE s.expansion_analysis_run_id = selected.expansion_analysis_run_id
+               AND s.cost_status = 'excluded') AS excluded_grids
+        FROM selected CROSS JOIN synthetic CROSS JOIN real
         """
     )
     with db.engine.connect() as conn:
         row = conn.execute(query, {"analysis_key": analysis_key}).mappings().one()
     total = float(row["cable_cost_eur"]) + float(row["transformer_cost_eur"])
     print(f"analysis_key: {row['analysis_key']}")
+    print(f"data_source: {row['data_source']}")
     print(f"grids_with_line_rows: {row['grids_with_line_rows']}")
+    print(f"incomplete_grids: {row['incomplete_grids']}")
+    print(f"excluded_grids: {row['excluded_grids']}")
     print(f"cable_expansion_segments: {row['cable_expansion_segments']}")
     print(f"transformer_expansion_count: {row['transformer_expansion_count']}")
     print(f"cable_cost_eur: {float(row['cable_cost_eur']):.2f}")
@@ -884,6 +986,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Power-flow run name to analyze.",
     )
     parser.add_argument(
+        "--data-source",
+        choices=("synthetic", "real_swf"),
+        default="synthetic",
+        help="Network model whose compact power-flow summaries are materialized.",
+    )
+    parser.add_argument(
         "--stage",
         default="post",
         choices=("pre", "post"),
@@ -892,6 +1000,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scenario-id", type=int, help="Optional scenario_id filter.")
     parser.add_argument("--ags", help="Optional AGS filter, for example 09162000 for Munich.")
     parser.add_argument("--plz", type=int, help="Optional PLZ filter.")
+    parser.add_argument(
+        "--exclude-real-lv-id",
+        action="append",
+        type=int,
+        default=[],
+        help="Real SWF LV id to retain in coverage reporting but exclude from costing; repeatable.",
+    )
     parser.add_argument(
         "--assumption-key",
         default="de_lv_heuristic_2026",
@@ -931,17 +1046,28 @@ def main() -> None:
         return
 
     analysis_key = _analysis_key(args)
-    _audit_unmapped_line_components(db, args=args)
+    if args.data_source == "synthetic":
+        _audit_unmapped_line_components(db, args=args)
     run_id = _create_analysis_run(db, analysis_key=analysis_key, args=args)
-    line_rows = _materialize_line_results(db, expansion_analysis_run_id=run_id, args=args)
-    transformer_rows = _materialize_transformer_results(
-        db,
-        expansion_analysis_run_id=run_id,
-        args=args,
-    )
+    if args.data_source == "real_swf":
+        result = materialize_real_results(
+            db,
+            expansion_analysis_run_id=run_id,
+            args=args,
+        )
+        print(f"grid status rows inserted: {result['grid_status_rows']}")
+        print(f"line rows inserted: {result['line_rows']}")
+        print(f"transformer rows inserted: {result['transformer_rows']}")
+    else:
+        line_rows = _materialize_line_results(db, expansion_analysis_run_id=run_id, args=args)
+        transformer_rows = _materialize_transformer_results(
+            db,
+            expansion_analysis_run_id=run_id,
+            args=args,
+        )
+        print(f"line rows inserted: {line_rows}")
+        print(f"transformer rows inserted: {transformer_rows}")
     _refresh_qgis_materialized_views(db)
-    print(f"line rows inserted: {line_rows}")
-    print(f"transformer rows inserted: {transformer_rows}")
     print("QGIS materialized views refreshed.")
     _print_summary(db, analysis_key)
 

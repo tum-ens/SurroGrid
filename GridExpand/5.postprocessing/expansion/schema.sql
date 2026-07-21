@@ -4,7 +4,9 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_cost_assumption (
     line_parallel_150_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 25000.0,
     line_parallel_185_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 45000.0,
     line_parallel_240_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 70000.0,
-    line_parallel_default_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 70000.0,
+    line_reinforcement_150_max_i_ka DOUBLE PRECISION NOT NULL DEFAULT 0.270,
+    line_reinforcement_185_max_i_ka DOUBLE PRECISION NOT NULL DEFAULT 0.313,
+    line_reinforcement_240_max_i_ka DOUBLE PRECISION NOT NULL DEFAULT 0.357,
     line_existing_duct_share DOUBLE PRECISION NOT NULL DEFAULT 0.20,
     line_reopen_rural_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 90000.0,
     line_reopen_suburban_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 100000.0,
@@ -23,7 +25,9 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_cost_assumption (
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_parallel_150_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 25000.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_parallel_185_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 45000.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_parallel_240_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 70000.0;
-ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_parallel_default_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 70000.0;
+ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_reinforcement_150_max_i_ka DOUBLE PRECISION NOT NULL DEFAULT 0.270;
+ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_reinforcement_185_max_i_ka DOUBLE PRECISION NOT NULL DEFAULT 0.313;
+ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_reinforcement_240_max_i_ka DOUBLE PRECISION NOT NULL DEFAULT 0.357;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_existing_duct_share DOUBLE PRECISION NOT NULL DEFAULT 0.20;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_reopen_rural_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 90000.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_reopen_suburban_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 100000.0;
@@ -41,7 +45,9 @@ INSERT INTO surrogrid.expansion_cost_assumption (
     line_parallel_150_eur_per_km,
     line_parallel_185_eur_per_km,
     line_parallel_240_eur_per_km,
-    line_parallel_default_eur_per_km,
+    line_reinforcement_150_max_i_ka,
+    line_reinforcement_185_max_i_ka,
+    line_reinforcement_240_max_i_ka,
     line_existing_duct_share,
     line_reopen_rural_eur_per_km,
     line_reopen_suburban_eur_per_km,
@@ -60,7 +66,9 @@ VALUES (
     25000.0,
     45000.0,
     70000.0,
-    70000.0,
+    0.270,
+    0.313,
+    0.357,
     0.20,
     90000.0,
     100000.0,
@@ -71,14 +79,16 @@ VALUES (
     48000.0,
     100000.0,
     50,
-    'Default LV line costs blend 20% existing-duct parallel-cable cost with 80% reopened-route/trenching cost selected by pylovo settlement_type. Transformer costs use all-in replacement bins for 400/630/800/1000 kVA and a 100k EUR station-rebuild boundary case.'
+    'Added LV capacity is selected from NAYY_4_150 (270 A), NAYY_4_185 (313 A), and NAYY_4_240 (357 A). Route costs blend 20% existing-duct cable cost with 80% reopened-route/trenching cost selected by pylovo settlement_type. Transformer costs use all-in replacement bins for 400/630/800/1000 kVA and a 100k EUR station-rebuild boundary case.'
 )
 ON CONFLICT (assumption_key) DO UPDATE SET
     description = EXCLUDED.description,
     line_parallel_150_eur_per_km = EXCLUDED.line_parallel_150_eur_per_km,
     line_parallel_185_eur_per_km = EXCLUDED.line_parallel_185_eur_per_km,
     line_parallel_240_eur_per_km = EXCLUDED.line_parallel_240_eur_per_km,
-    line_parallel_default_eur_per_km = EXCLUDED.line_parallel_default_eur_per_km,
+    line_reinforcement_150_max_i_ka = EXCLUDED.line_reinforcement_150_max_i_ka,
+    line_reinforcement_185_max_i_ka = EXCLUDED.line_reinforcement_185_max_i_ka,
+    line_reinforcement_240_max_i_ka = EXCLUDED.line_reinforcement_240_max_i_ka,
     line_existing_duct_share = EXCLUDED.line_existing_duct_share,
     line_reopen_rural_eur_per_km = EXCLUDED.line_reopen_rural_eur_per_km,
     line_reopen_suburban_eur_per_km = EXCLUDED.line_reopen_suburban_eur_per_km,
@@ -95,6 +105,7 @@ ON CONFLICT (assumption_key) DO UPDATE SET
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption DROP COLUMN IF EXISTS line_target_loading_percent;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption DROP COLUMN IF EXISTS transformer_target_loading_percent;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption DROP COLUMN IF EXISTS line_cost_eur_per_km;
+ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption DROP COLUMN IF EXISTS line_parallel_default_eur_per_km;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption DROP COLUMN IF EXISTS transformer_cost_eur_per_kva;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption DROP COLUMN IF EXISTS transformer_fixed_replacement_eur;
 
@@ -110,6 +121,9 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_analysis_run (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     note TEXT NOT NULL DEFAULT ''
 );
+
+ALTER TABLE IF EXISTS surrogrid.expansion_analysis_run
+    ADD COLUMN IF NOT EXISTS data_source TEXT NOT NULL DEFAULT 'Synthetic';
 
 DROP MATERIALIZED VIEW IF EXISTS surrogrid.expansion_line_qgis_mv;
 DROP MATERIALIZED VIEW IF EXISTS surrogrid.expansion_transformer_qgis_mv;
@@ -146,6 +160,11 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_line_result (
     loading_percent DOUBLE PRECISION,
     required_parallel INTEGER NOT NULL,
     additional_parallel INTEGER NOT NULL,
+    reinforcement_150_count INTEGER NOT NULL DEFAULT 0,
+    reinforcement_185_count INTEGER NOT NULL DEFAULT 0,
+    reinforcement_240_count INTEGER NOT NULL DEFAULT 0,
+    reinforcement_added_capacity_ka DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    reinforcement_catalog TEXT NOT NULL DEFAULT 'NAYY_4_150|NAYY_4_185|NAYY_4_240',
     requires_expansion BOOLEAN NOT NULL,
     overloaded_at_100_percent BOOLEAN NOT NULL,
     estimated_cost_eur DOUBLE PRECISION NOT NULL,
@@ -175,6 +194,11 @@ ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS c
 ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS critical_component_reopen_cost_eur_per_km DOUBLE PRECISION;
 ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS component_cost_basis_count INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS component_std_type_count INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS reinforcement_150_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS reinforcement_185_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS reinforcement_240_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS reinforcement_added_capacity_ka DOUBLE PRECISION NOT NULL DEFAULT 0.0;
+ALTER TABLE IF EXISTS surrogrid.expansion_line_result ADD COLUMN IF NOT EXISTS reinforcement_catalog TEXT NOT NULL DEFAULT 'NAYY_4_150|NAYY_4_185|NAYY_4_240';
 
 CREATE INDEX IF NOT EXISTS idx_expansion_line_result_grid
     ON surrogrid.expansion_line_result (grid_case_id, powerflow_run_id);
@@ -216,6 +240,102 @@ CREATE INDEX IF NOT EXISTS idx_expansion_transformer_result_grid
     ON surrogrid.expansion_transformer_result (grid_case_id, powerflow_run_id);
 CREATE INDEX IF NOT EXISTS idx_expansion_transformer_result_need
     ON surrogrid.expansion_transformer_result (expansion_analysis_run_id, requires_expansion, overloaded_at_100_percent);
+
+
+CREATE TABLE IF NOT EXISTS surrogrid.expansion_real_grid_status (
+    expansion_analysis_run_id BIGINT NOT NULL REFERENCES surrogrid.expansion_analysis_run(expansion_analysis_run_id) ON DELETE CASCADE,
+    real_powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.real_powerflow_run(real_powerflow_run_id) ON DELETE CASCADE,
+    real_grid_case_id BIGINT NOT NULL REFERENCES surrogrid.real_grid_case(real_grid_case_id) ON DELETE CASCADE,
+    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE,
+    plz INTEGER,
+    lv_id TEXT NOT NULL,
+    n_timesteps INTEGER NOT NULL,
+    n_failed_timesteps INTEGER NOT NULL,
+    cost_status TEXT NOT NULL,
+    status_reason TEXT,
+    PRIMARY KEY (expansion_analysis_run_id, real_powerflow_run_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_expansion_real_grid_status_analysis
+    ON surrogrid.expansion_real_grid_status (expansion_analysis_run_id, cost_status, lv_id);
+
+CREATE TABLE IF NOT EXISTS surrogrid.expansion_real_line_result (
+    expansion_analysis_run_id BIGINT NOT NULL REFERENCES surrogrid.expansion_analysis_run(expansion_analysis_run_id) ON DELETE CASCADE,
+    real_powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.real_powerflow_run(real_powerflow_run_id) ON DELETE CASCADE,
+    real_grid_case_id BIGINT NOT NULL REFERENCES surrogrid.real_grid_case(real_grid_case_id) ON DELETE CASCADE,
+    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE,
+    plz INTEGER,
+    lv_id TEXT NOT NULL,
+    cable INTEGER NOT NULL,
+    cable_name TEXT,
+    std_type TEXT,
+    from_bus INTEGER,
+    to_bus INTEGER,
+    length_km DOUBLE PRECISION,
+    settlement_type INTEGER,
+    line_existing_duct_share DOUBLE PRECISION,
+    line_trenching_share DOUBLE PRECISION,
+    existing_parallel INTEGER NOT NULL,
+    max_i_from_ka DOUBLE PRECISION,
+    max_i_ka DOUBLE PRECISION,
+    installed_capacity_ka DOUBLE PRECISION,
+    loading_percent DOUBLE PRECISION,
+    required_parallel INTEGER NOT NULL,
+    additional_parallel INTEGER NOT NULL,
+    reinforcement_150_count INTEGER NOT NULL DEFAULT 0,
+    reinforcement_185_count INTEGER NOT NULL DEFAULT 0,
+    reinforcement_240_count INTEGER NOT NULL DEFAULT 0,
+    reinforcement_added_capacity_ka DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    reinforcement_catalog TEXT NOT NULL DEFAULT 'NAYY_4_150|NAYY_4_185|NAYY_4_240',
+    requires_expansion BOOLEAN NOT NULL,
+    overloaded_at_100_percent BOOLEAN NOT NULL,
+    estimated_cost_eur DOUBLE PRECISION NOT NULL,
+    cost_eur_per_km DOUBLE PRECISION,
+    cost_basis TEXT,
+    duct_cost_eur_per_km DOUBLE PRECISION,
+    reopen_cost_eur_per_km DOUBLE PRECISION,
+    critical_t_index INTEGER,
+    geom geometry(LineString, 25832),
+    PRIMARY KEY (expansion_analysis_run_id, real_powerflow_run_id, cable)
+);
+
+ALTER TABLE IF EXISTS surrogrid.expansion_real_line_result ADD COLUMN IF NOT EXISTS reinforcement_150_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS surrogrid.expansion_real_line_result ADD COLUMN IF NOT EXISTS reinforcement_185_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS surrogrid.expansion_real_line_result ADD COLUMN IF NOT EXISTS reinforcement_240_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS surrogrid.expansion_real_line_result ADD COLUMN IF NOT EXISTS reinforcement_added_capacity_ka DOUBLE PRECISION NOT NULL DEFAULT 0.0;
+ALTER TABLE IF EXISTS surrogrid.expansion_real_line_result ADD COLUMN IF NOT EXISTS reinforcement_catalog TEXT NOT NULL DEFAULT 'NAYY_4_150|NAYY_4_185|NAYY_4_240';
+
+CREATE INDEX IF NOT EXISTS idx_expansion_real_line_result_need
+    ON surrogrid.expansion_real_line_result (expansion_analysis_run_id, requires_expansion, overloaded_at_100_percent);
+CREATE INDEX IF NOT EXISTS idx_expansion_real_line_result_geom
+    ON surrogrid.expansion_real_line_result USING GIST (geom);
+
+CREATE TABLE IF NOT EXISTS surrogrid.expansion_real_transformer_result (
+    expansion_analysis_run_id BIGINT NOT NULL REFERENCES surrogrid.expansion_analysis_run(expansion_analysis_run_id) ON DELETE CASCADE,
+    real_powerflow_run_id BIGINT NOT NULL REFERENCES surrogrid.real_powerflow_run(real_powerflow_run_id) ON DELETE CASCADE,
+    real_grid_case_id BIGINT NOT NULL REFERENCES surrogrid.real_grid_case(real_grid_case_id) ON DELETE CASCADE,
+    scenario_id BIGINT NOT NULL REFERENCES surrogrid.scenario(scenario_id) ON DELETE CASCADE,
+    plz INTEGER,
+    lv_id TEXT NOT NULL,
+    transformer_rated_power_kva DOUBLE PRECISION NOT NULL,
+    transformer_equipment_name TEXT,
+    max_s_mva DOUBLE PRECISION NOT NULL,
+    loading_percent DOUBLE PRECISION NOT NULL,
+    required_transformer_kva DOUBLE PRECISION NOT NULL,
+    additional_transformer_kva DOUBLE PRECISION NOT NULL,
+    requires_expansion BOOLEAN NOT NULL,
+    overloaded_at_100_percent BOOLEAN NOT NULL,
+    estimated_cost_eur DOUBLE PRECISION NOT NULL,
+    transformer_cost_basis TEXT,
+    critical_t_index INTEGER,
+    geom geometry(Point, 25832),
+    PRIMARY KEY (expansion_analysis_run_id, real_powerflow_run_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_expansion_real_transformer_result_need
+    ON surrogrid.expansion_real_transformer_result (expansion_analysis_run_id, requires_expansion, overloaded_at_100_percent);
+CREATE INDEX IF NOT EXISTS idx_expansion_real_transformer_result_geom
+    ON surrogrid.expansion_real_transformer_result USING GIST (geom);
 
 ALTER TABLE IF EXISTS surrogrid.expansion_analysis_run DROP CONSTRAINT IF EXISTS expansion_analysis_run_scenario_id_fkey;
 ALTER TABLE IF EXISTS surrogrid.expansion_analysis_run DROP CONSTRAINT IF EXISTS fk_expansion_analysis_run_scenario;

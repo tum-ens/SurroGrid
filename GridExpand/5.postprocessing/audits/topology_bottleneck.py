@@ -31,7 +31,7 @@ if str(GRIDEXPAND_DIR) not in sys.path:
 if str(STEP4_DIR) not in sys.path:
     sys.path.insert(0, str(STEP4_DIR))
 
-from common.database import SurroGridDatabase
+from common.database import SurroGridDatabase  # noqa: E402
 
 
 def _load_real_runner():
@@ -600,7 +600,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=POSTPROCESSING_DIR / "output" / "topology_bottleneck_audit",
+        default=POSTPROCESSING_DIR / "output" / "audits" / "topology",
     )
     args = parser.parse_args()
 
