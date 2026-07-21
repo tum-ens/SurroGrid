@@ -148,6 +148,7 @@ def _read_pylovo_buildings(config: MatchConfig) -> pd.DataFrame:
             id,
             feature_id,
             building_use,
+            building_use_id,
             building_type,
             type,
             households,
@@ -567,6 +568,7 @@ def match_assets_to_buildings(
                 "building_house_number": None,
                 "building_address": None,
                 "building_use": None,
+                "building_use_id": None,
                 "building_type": None,
                 "building_is_residential": False,
                 "building_households": np.nan,
@@ -585,6 +587,7 @@ def match_assets_to_buildings(
                 "building_house_number": building_row["house_number"],
                 "building_address": building_row["building_address"],
                 "building_use": building_row["building_use"],
+                "building_use_id": building_row["building_use_id"],
                 "building_type": building_row["building_type"],
                 "building_is_residential": bool(
                     building_row["building_is_residential"]

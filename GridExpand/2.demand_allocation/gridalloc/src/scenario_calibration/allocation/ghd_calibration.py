@@ -93,6 +93,28 @@ def build_synthetic_ghd_calibration(
         return "no_swf_ghd_evidence"
 
     calibration["ghd_calibration_class"] = calibration.apply(_classify, axis=1)
+    calibration["has_address"] = (
+        calibration["street"].fillna("").astype(str).str.strip().ne("")
+        & calibration["house_number"].fillna("").astype(str).str.strip().ne("")
+    )
+
+    def _evidence_class(row: pd.Series) -> str:
+        if row["swf_ghd_rows"] > 0:
+            return "direct_swf_ghd"
+        if row["swf_hh_rows"] > 0:
+            return "direct_swf_hh_mixed_use_proxy"
+        generic_unaddressed = (
+            row.get("building_use_id") == "31001_2000"
+            and not row["has_address"]
+        )
+        if generic_unaddressed:
+            return "generic_commercial_structure_without_load_evidence"
+        return "building_without_swf_load_evidence"
+
+    calibration["ghd_evidence_class"] = calibration.apply(_evidence_class, axis=1)
+    calibration["independent_ghd_load_supported"] = calibration[
+        "swf_ghd_rows"
+    ].gt(0)
     direct_mask = calibration["swf_ghd_rows"].gt(0)
     calibration["calibrated_annual_ghd_kwh"] = np.where(
         direct_mask,
@@ -110,6 +132,7 @@ def build_synthetic_ghd_calibration(
         "objectid",
         "feature_id",
         "building_use",
+        "building_use_id",
         "building_type",
         "type",
         "street",
@@ -117,6 +140,9 @@ def build_synthetic_ghd_calibration(
         "floor_area",
         "households",
         "ghd_calibration_class",
+        "ghd_evidence_class",
+        "has_address",
+        "independent_ghd_load_supported",
         "swf_ghd_rows",
         "swf_ghd_annual_kwh",
         "swf_hh_rows",
@@ -141,12 +167,14 @@ def _summarize_calibration(
     rows: list[dict[str, Any]] = []
     if not calibration.empty:
         grouped = calibration.groupby(
-            ["ghd_calibration_class", "building_use"], dropna=False
+            ["ghd_calibration_class", "ghd_evidence_class", "building_use"],
+            dropna=False,
         )
-        for (calibration_class, building_use), group in grouped:
+        for (calibration_class, evidence_class, building_use), group in grouped:
             rows.append(
                 {
                     "ghd_calibration_class": calibration_class,
+                    "ghd_evidence_class": evidence_class,
                     "building_use": building_use,
                     "buildings": int(len(group)),
                     "floor_area_m2": float(
@@ -174,6 +202,7 @@ def _summarize_calibration(
         rows.append(
             {
                 "ghd_calibration_class": "unmatched_swf_ghd_not_allocated",
+                "ghd_evidence_class": "unmatched_swf_ghd_row",
                 "building_use": "unmatched",
                 "buildings": 0,
                 "floor_area_m2": 0.0,
@@ -191,6 +220,8 @@ def _summarize_calibration(
 
     return (
         pd.DataFrame(rows)
-        .sort_values(["ghd_calibration_class", "building_use"])
+        .sort_values(
+            ["ghd_calibration_class", "ghd_evidence_class", "building_use"]
+        )
         .reset_index(drop=True)
     )

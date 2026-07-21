@@ -53,10 +53,12 @@ def build_grid_scope_summary(
     summary["recommended_for_residential_equivalent_scope"] = summary[
         "passes_min_residential_equivalent_hh_buildings"
     ]
-    summary["recommended_for_full_local_demand_scope"] = (
-        summary["passes_min_residential_equivalent_hh_buildings"]
-        & ~summary["has_unmatched_ghd"]
-    )
+    # Unmatched GHD rows are excluded individually from the calibrated demand.
+    # Rejecting their entire LV grid would also discard valid HH and matched GHD
+    # demand and would make one geocoding failure a topology-level filter.
+    summary["recommended_for_full_local_demand_scope"] = summary[
+        "passes_min_residential_equivalent_hh_buildings"
+    ]
     return summary.sort_values("lv_id").reset_index(drop=True)
 
 
