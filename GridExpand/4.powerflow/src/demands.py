@@ -116,37 +116,45 @@ def _obtain_post_reactive_power(df_pre_demand_react, df_demand_HP_elec, df_prod_
     
     ### Heat pump
     df_demand_HP_react = df_demand_HP_elec*np.tan(np.arccos(config.PF_HP))*(-1) # -1 as inductive/lagging and thus a demand
-    df_demand_HP_react.columns = df_demand_HP_react.columns.map(lambda x: (x[0], "electricity-reactive"))
+    df_demand_HP_react = _set_electricity_component(
+        df_demand_HP_react,
+        "electricity-reactive",
+    )
+
+    react_without_pv = df_pre_demand_react.add(
+        df_demand_HP_react,
+        fill_value=0.0,
+    )
+    if df_prod_PV_elec.empty:
+        df_prod_PV_react = _empty_electricity_frame(df_pre_demand_react.index)
+        return react_without_pv, df_prod_PV_react, df_demand_HP_react
 
     ### Determine PV as optimal operation between -tan(phi) <= Q/P <= tan(phi) to obtain minimal reactive power demand from grid
-    # Constraints as above:
     upper_constraint = df_prod_PV_elec*np.tan(np.arccos(config.PF_PV_MIN))
-    upper_constraint.columns = upper_constraint.columns.map(lambda x: (x[0], "electricity-reactive"))
-    lower_constraint = -upper_constraint
-    # Ideal PV react production would be cancelling out other react demands
-
-    df_prod_PV_react = -(df_pre_demand_react + df_demand_HP_react)
-    # Now clip ideal PV production to constraints
-    df_prod_PV_react = df_prod_PV_react.clip(lower=lower_constraint, upper=upper_constraint)
-
-    ### Total reactive demand
-    df_post_demand_react = df_prod_PV_react + df_pre_demand_react + df_demand_HP_react
+    upper_constraint = _set_electricity_component(
+        upper_constraint,
+        "electricity-reactive",
+    )
+    ideal_pv_react = -react_without_pv.reindex(
+        columns=upper_constraint.columns,
+        fill_value=0.0,
+    )
+    df_prod_PV_react = ideal_pv_react.clip(
+        lower=-upper_constraint,
+        upper=upper_constraint,
+    )
+    df_post_demand_react = react_without_pv.add(
+        df_prod_PV_react,
+        fill_value=0.0,
+    )
 
     return df_post_demand_react, df_prod_PV_react, df_demand_HP_react
 
 def _concat_react_demands(df_HH_reactive, df_HP_reactive, df_PV_reactive):
     ### Convert PV, HP, HH react demand to be saved as urbs-output
-    new_tuples = [tup + ('household',) for tup in df_HH_reactive.columns.to_flat_index()]
-    new_columns = pd.MultiIndex.from_tuples(new_tuples, names=[None, *df_HH_reactive.columns.names])
-    df_HH_reactive.columns = new_columns
-
-    new_tuples = [tup + ('heatpump_air',) for tup in df_HP_reactive.columns.to_flat_index()]
-    new_columns = pd.MultiIndex.from_tuples(new_tuples, names=[None, *df_HP_reactive.columns.names])
-    df_HP_reactive.columns = new_columns
-
-    new_tuples = [tup + ('solar',) for tup in df_PV_reactive.columns.to_flat_index()]
-    new_columns = pd.MultiIndex.from_tuples(new_tuples, names=[None, *df_PV_reactive.columns.names])
-    df_PV_reactive.columns = new_columns
+    df_HH_reactive = _append_component_level(df_HH_reactive, "household")
+    df_HP_reactive = _append_component_level(df_HP_reactive, "heatpump_air")
+    df_PV_reactive = _append_component_level(df_PV_reactive, "solar")
 
     df_react_save = pd.concat([df_HH_reactive, df_HP_reactive, df_PV_reactive], axis=1)
     return df_react_save
@@ -189,7 +197,34 @@ def _align_table_to_timesteps(df, timesteps, label, reference_label):
 
 
 def _empty_electricity_frame(index):
-    return pd.DataFrame(index=index, columns=pd.MultiIndex.from_tuples([]), dtype=float)
+    columns = pd.MultiIndex.from_arrays([[], []], names=[None, None])
+    return pd.DataFrame(index=index, columns=columns, dtype=float)
+
+
+def _set_electricity_component(df, component):
+    result = df.copy()
+    if result.shape[1] == 0:
+        return _empty_electricity_frame(result.index)
+    result.columns = pd.MultiIndex.from_tuples(
+        [(column[0], component) for column in result.columns],
+        names=[None, None],
+    )
+    return result
+
+
+def _append_component_level(df, component):
+    result = df.copy()
+    if result.shape[1] == 0:
+        result.columns = pd.MultiIndex.from_arrays(
+            [[], [], []],
+            names=[None, None, None],
+        )
+        return result
+    result.columns = pd.MultiIndex.from_tuples(
+        [tuple(column) + (component,) for column in result.columns.to_flat_index()],
+        names=[None, *result.columns.names],
+    )
+    return result
 
 
 def _columns_with_component(df, component):
@@ -445,7 +480,7 @@ def _mobility_electricity(df_raw_demand, df_eff_factor, ev_charger_kw):
     return _sum_columns_by_bus(mobility)
 
 
-def _pv_generation(df_supim, df_process):
+def _pv_generation(df_supim, df_process, cap_pro):
     if df_supim.empty or df_process.empty:
         return _empty_electricity_frame(df_supim.index)
 
@@ -464,7 +499,13 @@ def _pv_generation(df_supim, df_process):
         column = (row["Site"], commodity)
         if column not in df_supim.columns:
             continue
-        parts.append(pd.to_numeric(df_supim[column], errors="coerce").fillna(0.0) * float(row["cap-up"]))
+        optimized_capacity_kw = float(
+            _capacity_by_bus(cap_pro, process_name, [row["Site"]]).iloc[0]
+        )
+        parts.append(
+            pd.to_numeric(df_supim[column], errors="coerce").fillna(0.0)
+            * optimized_capacity_kw
+        )
         labels.append((row["Site"], commodity))
 
     if not parts:
@@ -473,17 +514,179 @@ def _pv_generation(df_supim, df_process):
     return _sum_columns_by_bus(pv)
 
 
+def _fixed_stationary_batteries(df_storage):
+    """Return fixed SWF batteries; ignore generic zero-installed potentials."""
+    if df_storage is None or df_storage.empty:
+        return pd.DataFrame()
+
+    storage = df_storage.reset_index()
+    required = {
+        "Site",
+        "Storage",
+        "inst-cap-c",
+        "cap-up-c",
+        "inst-cap-p",
+        "cap-up-p",
+        "eff-in",
+        "eff-out",
+    }
+    if not required.issubset(storage.columns):
+        raise ValueError(
+            "No-flex battery control requires storage columns "
+            f"{sorted(required)}."
+        )
+    storage = storage[storage["Storage"].astype(str).eq("battery_private")].copy()
+    storage["Site"] = pd.to_numeric(storage["Site"], errors="raise").astype(int)
+    for column in required.difference({"Site", "Storage"}):
+        storage[column] = pd.to_numeric(storage[column], errors="coerce").fillna(0.0)
+    storage = storage[storage["inst-cap-c"].gt(0.0)]
+    if storage.empty:
+        return storage
+
+    fixed_energy = np.isclose(storage["inst-cap-c"], storage["cap-up-c"])
+    fixed_power = np.isclose(storage["inst-cap-p"], storage["cap-up-p"])
+    if not bool((fixed_energy & fixed_power).all()):
+        raise ValueError(
+            "No-flex battery control only accepts fixed installed capacities; "
+            "found an endogenous battery investment row."
+        )
+    if storage["Site"].duplicated().any():
+        raise ValueError("Expected at most one stationary battery per scenario unit.")
+    return storage.set_index("Site").sort_index()
+
+
+def _simulate_self_consumption_period(
+    net_demand,
+    *,
+    initial_soc_kwh,
+    energy_kwh,
+    power_kw,
+    charge_efficiency,
+    discharge_efficiency,
+):
+    soc = float(initial_soc_kwh)
+    adjusted = np.asarray(net_demand, dtype=float).copy()
+    charged_kwh = 0.0
+    discharged_kwh = 0.0
+    for index, net_kw in enumerate(adjusted):
+        if net_kw < 0.0:
+            charge_kw = min(
+                -float(net_kw),
+                power_kw,
+                max(energy_kwh - soc, 0.0) / charge_efficiency,
+            )
+            soc += charge_kw * charge_efficiency
+            adjusted[index] += charge_kw
+            charged_kwh += charge_kw
+        elif net_kw > 0.0:
+            discharge_kw = min(
+                float(net_kw),
+                power_kw,
+                soc * discharge_efficiency,
+            )
+            soc -= discharge_kw / discharge_efficiency
+            adjusted[index] -= discharge_kw
+            discharged_kwh += discharge_kw
+    return adjusted, soc, charged_kwh, discharged_kwh
+
+
+def _cyclic_self_consumption_period(net_demand, battery):
+    energy_kwh = float(battery["inst-cap-c"])
+    power_kw = float(battery["inst-cap-p"])
+    charge_efficiency = float(battery["eff-in"])
+    discharge_efficiency = float(battery["eff-out"])
+    if energy_kwh <= 0.0 or power_kw <= 0.0:
+        return np.asarray(net_demand, dtype=float), 0.0, 0.0
+    if not 0.0 < charge_efficiency <= 1.0:
+        raise ValueError("Stationary-battery charging efficiency must be in (0, 1].")
+    if not 0.0 < discharge_efficiency <= 1.0:
+        raise ValueError("Stationary-battery discharging efficiency must be in (0, 1].")
+
+    initial_soc = energy_kwh / 2.0
+    for _ in range(1000):
+        _, final_soc, _, _ = _simulate_self_consumption_period(
+            net_demand,
+            initial_soc_kwh=initial_soc,
+            energy_kwh=energy_kwh,
+            power_kw=power_kw,
+            charge_efficiency=charge_efficiency,
+            discharge_efficiency=discharge_efficiency,
+        )
+        if abs(final_soc - initial_soc) <= 1e-7:
+            break
+        initial_soc = final_soc
+    else:
+        raise RuntimeError("Stationary-battery cyclic state did not converge.")
+
+    adjusted, _, charged, discharged = _simulate_self_consumption_period(
+        net_demand,
+        initial_soc_kwh=initial_soc,
+        energy_kwh=energy_kwh,
+        power_kw=power_kw,
+        charge_efficiency=charge_efficiency,
+        discharge_efficiency=discharge_efficiency,
+    )
+    return adjusted, charged, discharged
+
+
+def _apply_no_flex_battery_control(
+    net_demand,
+    df_storage,
+    *,
+    hours_per_period=None,
+):
+    batteries = _fixed_stationary_batteries(df_storage)
+    if batteries.empty:
+        return net_demand
+
+    adjusted = net_demand.copy()
+    adjusted.columns = adjusted.columns.get_level_values(0)
+    period_hours = int(hours_per_period or len(adjusted))
+    if period_hours <= 0:
+        raise ValueError("Battery-control period length must be positive.")
+
+    total_charged = 0.0
+    total_discharged = 0.0
+    for site, battery in batteries.iterrows():
+        if site not in adjusted.columns:
+            adjusted[site] = 0.0
+        values = adjusted[site].to_numpy(dtype=float)
+        controlled = values.copy()
+        for start in range(0, len(values), period_hours):
+            stop = min(start + period_hours, len(values))
+            segment, charged, discharged = _cyclic_self_consumption_period(
+                values[start:stop], battery
+            )
+            controlled[start:stop] = segment
+            total_charged += charged
+            total_discharged += discharged
+        adjusted[site] = controlled
+
+    adjusted = adjusted.sort_index(axis=1)
+    adjusted.columns = pd.MultiIndex.from_tuples(
+        [(site, "electricity") for site in adjusted.columns]
+    )
+    print(
+        "No-flex stationary batteries: "
+        f"sites={len(batteries)}, charged={total_charged:.1f} kWh, "
+        f"discharged={total_discharged:.1f} kWh, "
+        f"control_period_hours={period_hours}.",
+        flush=True,
+    )
+    return adjusted
+
+
 def _reactive_from_no_flex_components(df_pre_demand_react, df_heat_elec, df_pv_elec):
     heat_react = df_heat_elec * np.tan(np.arccos(config.PF_HP)) * (-1)
-    heat_react.columns = heat_react.columns.map(lambda x: (x[0], "electricity-reactive"))
+    heat_react = _set_electricity_component(heat_react, "electricity-reactive")
 
     react_without_pv = df_pre_demand_react.add(heat_react, fill_value=0.0)
     if df_pv_elec.empty:
-        pv_react = pd.DataFrame(index=df_pre_demand_react.index, columns=pd.MultiIndex.from_tuples([]), dtype=float)
+        pv_react = _empty_electricity_frame(df_pre_demand_react.index)
         return react_without_pv, pv_react, heat_react
 
     pv_limit = df_pv_elec * np.tan(np.arccos(config.PF_PV_MIN))
-    pv_limit.columns = pv_limit.columns.map(lambda x: (x[0], "electricity-reactive"))
+    pv_limit = _set_electricity_component(pv_limit, "electricity-reactive")
     ideal_pv_react = -react_without_pv.reindex(columns=pv_limit.columns, fill_value=0.0)
     pv_react = ideal_pv_react.clip(lower=-pv_limit, upper=pv_limit)
     post_react = react_without_pv.add(pv_react, fill_value=0.0)
@@ -508,11 +711,22 @@ def _process_no_flex_demands(no_flex_inputs, df_pre_demand_elec, df_pre_demand_r
         no_flex_inputs["cap_pro"],
     )
     df_ev_elec = _mobility_electricity(df_raw_demand, df_eff_factor, ev_charger_kw)
-    df_pv_elec = _pv_generation(df_supim, df_process)
+    df_pv_elec = _pv_generation(
+        df_supim, df_process, no_flex_inputs["cap_pro"]
+    )
 
     active_parts = [df_pre_demand_elec, df_heat_elec, df_ev_elec, -df_pv_elec]
-    df_post_demand_elec = pd.concat(active_parts, axis=1).T.groupby(level=0).sum().T
-    df_post_demand_elec.columns = pd.MultiIndex.from_tuples([(bus, "electricity") for bus in df_post_demand_elec.columns])
+    net_before_battery = pd.concat(active_parts, axis=1).T.groupby(
+        level=0, observed=True
+    ).sum().T
+    net_before_battery.columns = pd.MultiIndex.from_tuples(
+        [(site, "electricity") for site in net_before_battery.columns]
+    )
+    df_post_demand_elec = _apply_no_flex_battery_control(
+        net_before_battery,
+        no_flex_inputs["storage"],
+        hours_per_period=no_flex_inputs.get("tsam_hours_per_period"),
+    )
 
     df_post_demand_react, df_prod_PV_react, df_demand_HP_react = _reactive_from_no_flex_components(
         df_pre_demand_react,

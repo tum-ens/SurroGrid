@@ -66,6 +66,8 @@ class SaveFile:
         self.reduced_supim_dir = "urbs_out/reduced_data/supim"
         self.raw_process_dir = "urbs_in/process"
         self.reduced_process_dir = "urbs_out/reduced_data/process"
+        self.raw_storage_dir = "urbs_in/storage"
+        self.reduced_storage_dir = "urbs_out/reduced_data/storage"
 
     def _grid_ref_from_case_id(self, grid_case_id):
         query = text(
@@ -174,6 +176,18 @@ class SaveFile:
             "eff_factor": self._read_preferred_hdf(self.reduced_eff_factor_dir, self.raw_eff_factor_dir),
             "supim": self._read_preferred_hdf(self.reduced_supim_dir, self.raw_supim_dir),
             "process": self._read_preferred_hdf(self.reduced_process_dir, self.raw_process_dir),
+            "storage": self._read_preferred_hdf(
+                self.reduced_storage_dir, self.raw_storage_dir
+            ),
+            "tsam_hours_per_period": (
+                int(
+                    self._read_required_hdf("urbs_out/tsam/hoursPerPeriod")
+                    .to_numpy()
+                    .reshape(-1)[0]
+                )
+                if self._hdf_key_exists("urbs_out/tsam/hoursPerPeriod")
+                else None
+            ),
             "cap_pro": self._read_required_hdf(self.cap_pro_dir),
             "reference": pd.read_hdf(self.input_path, key=self.net_demand_dir),
             "drop_initial_timestep": False,

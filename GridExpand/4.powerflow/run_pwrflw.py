@@ -116,6 +116,28 @@ def _scale_hh_annual_demand(df, scale: float, label: str):
     )
     return scaled
 
+
+def _demand_buses(*demand_frames) -> set[int]:
+    buses = set()
+    for frame in demand_frames:
+        if frame is None or frame.empty:
+            continue
+        if getattr(frame.columns, "nlevels", 1) < 2:
+            raise ValueError(
+                "Scenario demand must use MultiIndex columns (bus, component)."
+            )
+        for column in frame.columns.to_flat_index():
+            try:
+                buses.add(int(column[0]))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Invalid scenario demand bus in column {column!r}."
+                ) from exc
+    if not buses:
+        raise ValueError("Scenario demand contains no buses.")
+    return buses
+
+
 if __name__ == "__main__":
     ##### Read args + Obtain relevant input_files #####:
     parser = argparse.ArgumentParser(description="Low voltage grid DER allocation.")
@@ -252,7 +274,7 @@ if __name__ == "__main__":
     }
     if args.post_demand_mode == "no-flex":
         assumptions_extra.update({
-            "no_flex_assumption": "fixed heat, rooftop PV, and EV charging profiles; heat split uses optimized post-flex heatpump_air and heatpump_booster capacities; no URBS optimized dispatch for post demand",
+            "no_flex_assumption": "fixed heat and EV profiles; optimized post-flex PV capacity; fixed SWF battery inventory with causal local PV self-consumption control, no grid charging, and no battery export; heat split uses optimized post-flex heatpump_air and heatpump_booster capacities",
             "no_flex_ev_charger_kw": float(no_flex_ev_charger_kw),
             "no_flex_capacity_source": "post-flex cap_pro",
         })
@@ -288,7 +310,10 @@ if __name__ == "__main__":
             ev_charger_kw=no_flex_ev_charger_kw,
         )
 
-    if SF.timeframe_metadata.get("optimization_space") == "scenario_unit":
+    scenario_unit_optimization = (
+        SF.timeframe_metadata.get("optimization_space") == "scenario_unit"
+    )
+    if scenario_unit_optimization:
         allocation = SF.get_allocation_plan()
         df_pre_demand = dmnds.project_scenario_units_to_buses(
             df_pre_demand, allocation
@@ -315,13 +340,34 @@ if __name__ == "__main__":
     ##### Powerflow #####
     # Readout grid from file
     grid = SF.get_input_grid()
-    if residential_buses is not None:
+    if scenario_unit_optimization:
+        load_buses = sorted(_demand_buses(df_pre_demand, df_post_demand))
+        original_load_rows = len(grid.load)
+        original_static_p_mw = (
+            float(grid.load["p_mw"].fillna(0.0).sum())
+            if "p_mw" in grid.load.columns
+            else 0.0
+        )
+        grid = pwrflw.set_scenario_load_buses(grid, load_buses)
+        print(
+            "Scenario grid.load: replaced "
+            f"{original_load_rows} static rows ({original_static_p_mw:.6f} MW) "
+            f"with {len(grid.load)} zeroed scenario-bus rows.",
+            flush=True,
+        )
+    elif residential_buses is not None:
         grid = _filter_grid_loads_to_buses(grid, residential_buses)
+        load_buses = grid.load["bus"].dropna().astype(int).unique().tolist()
+    else:
+        load_buses = (
+            grid.load["bus"].dropna().astype(int).unique().tolist()
+            if "bus" in grid.load.columns
+            else []
+        )
     transformer_s_rated_mva = float(grid.trafo["sn_mva"].sum()) if "sn_mva" in grid.trafo.columns else float("nan")
     cable_max_i_ka = grid.line.get("max_i_ka")
     if cable_max_i_ka is None:
         cable_max_i_ka = grid.line.assign(max_i_ka=float("nan"))["max_i_ka"]
-    load_buses = grid.load["bus"].dropna().astype(int).unique().tolist() if "bus" in grid.load.columns else []
     voltage_buses = load_buses or grid.bus.index.tolist()
     # Remove any load restrictions and replace transformer with switch
     grid = pwrflw.prepare_grid(grid)

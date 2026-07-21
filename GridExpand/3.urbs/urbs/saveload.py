@@ -55,15 +55,15 @@ def save(data, model_results, save_file_name, manyprob=False):
         results_all = model_results
     else: 
         ### Concatenate all results of parallelly run models into one dataframe
-        results_all = dict.fromkeys(list(model_results[0].keys()), pd.DataFrame()) # initialize results with empty dataframes
-        for model_res in model_results.values():            
-            for name in model_res.keys():
-                if (name == 'costs') and not results_all[name].empty:          # only if costs and if cost result frame already has some costs inserted
-                    results_all[name] += model_res[name]                       # for costs, add them, not concat
-                else: # all other results -> concatenate
-                    if results_all[name].empty: 
-                        results_all[name] = model_res[name]             # if empty assign
-                    else: results_all[name] = pd.concat([results_all[name], model_res[name]])   # else concat
+        results_all = {}
+        for model_res in model_results.values():
+            for name, result in model_res.items():
+                if name not in results_all or results_all[name].empty:
+                    results_all[name] = result
+                elif name == 'costs':
+                    results_all[name] += result
+                else:
+                    results_all[name] = pd.concat([results_all[name], result])
 
     ### save data and results
     with pd.HDFStore(save_file_name, mode='a', complib='blosc', complevel=9) as store:

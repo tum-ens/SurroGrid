@@ -125,6 +125,8 @@ class RealUrbsResultAdapter:
         self.reduced_supim_dir = "urbs_out/reduced_data/supim"
         self.raw_process_dir = "urbs_in/process"
         self.reduced_process_dir = "urbs_out/reduced_data/process"
+        self.raw_storage_dir = "urbs_in/storage"
+        self.reduced_storage_dir = "urbs_out/reduced_data/storage"
 
     def _hdf_key_exists(self, key: str) -> bool:
         import h5py
@@ -171,6 +173,18 @@ class RealUrbsResultAdapter:
             ),
             "process": self._read_preferred_hdf(
                 self.reduced_process_dir, self.raw_process_dir
+            ),
+            "storage": self._read_preferred_hdf(
+                self.reduced_storage_dir, self.raw_storage_dir
+            ),
+            "tsam_hours_per_period": (
+                int(
+                    self._read_required_hdf("urbs_out/tsam/hoursPerPeriod")
+                    .to_numpy()
+                    .reshape(-1)[0]
+                )
+                if self._hdf_key_exists("urbs_out/tsam/hoursPerPeriod")
+                else None
             ),
             "cap_pro": self._read_required_hdf(self.cap_pro_dir),
             "reference": pd.read_hdf(self.input_path, key=self.net_demand_dir),
@@ -559,6 +573,11 @@ def run_one_urbs_result(
         else float(no_flex_ev_charger_kw),
         **load_scope,
     }
+    if post_demand_mode == "no-flex":
+        assumptions["no_flex_battery_control"] = (
+            "fixed SWF battery inventory; causal local PV self-consumption; "
+            "no grid charging or battery export; cyclic state per TSAM period"
+        )
     for stage, summary in summaries.items():
         assumptions[f"{stage}_nonconverged_timesteps"] = int(
             summary["grid_summary"].get("n_failed_timesteps", 0)

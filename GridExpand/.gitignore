@@ -18,5 +18,4 @@ gurobi.lic
 Archive/
 Plots/
 **/logs_0/
-5.postprocessing/outputs/
 2.demand_allocation/gridalloc/outputs/

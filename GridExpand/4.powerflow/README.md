@@ -82,6 +82,8 @@ The active paired pipeline materializes the same physical-building scenario for 
 
 Paired HDFs use `optimization_space=scenario_unit`. Step 3 therefore optimizes stable `(source LV, source connection bus, physical building)` units rather than network buses. Both Step-4 paths read `raw_data/allocation_plan` and aggregate these profiles onto the selected target buses immediately before power flow. This projection conserves active and reactive demand and prevents network partitioning from changing optimization resolution.
 
+Before solving, both target paths replace the pandapower load table with one zero-initialized row per selected scenario bus. Original static dimensioning loads and static generators are not part of a paired scenario power flow. The demand-carrying backbone and upstream voltage scope are derived only from these selected buses.
+
 `run_real_swf_powerflow.py` remains the shared real-grid topology and status-quo implementation used by the paired projection and Step-5 audits. It is not a competing post-electrification pipeline.
 
 With the current TSAM setup, the reduced result contains six 168-hour representative weeks plus an initialization row. Shared demand reconstruction drops the initialization row, giving 1,008 simulated power-flow timesteps. The paired runner verifies identical weather-derived TSAM period selection for both targets before accepting any result.

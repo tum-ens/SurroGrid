@@ -73,10 +73,71 @@ def prepare_grid(grid):
     return grid
 
 
+def set_scenario_load_buses(grid, load_buses):
+    """Replace static loads with one zeroed row per scenario demand bus."""
+    load_buses = sorted({int(bus) for bus in load_buses})
+    if not load_buses:
+        raise ValueError("Scenario power flow requires at least one demand bus.")
+
+    missing_buses = sorted(set(load_buses).difference(map(int, grid.bus.index)))
+    if missing_buses:
+        raise ValueError(
+            "Scenario demand references buses missing from the pandapower grid: "
+            f"{missing_buses[:10]}"
+        )
+
+    existing_load = grid.load.copy()
+    template_columns = (
+        list(existing_load.columns)
+        if not existing_load.empty
+        else ["bus", "p_mw", "q_mvar", "name"]
+    )
+    rows = [
+        {
+            "bus": bus,
+            "p_mw": 0.0,
+            "q_mvar": 0.0,
+            "name": f"Scenario_Profile_{bus}",
+        }
+        for bus in load_buses
+    ]
+    grid.load = (
+        pd.DataFrame(rows)
+        .reindex(columns=template_columns)
+        .reset_index(drop=True)
+    )
+    grid.load["bus"] = grid.load["bus"].astype(int)
+    grid.load["p_mw"] = 0.0
+    grid.load["q_mvar"] = 0.0
+    grid.load["max_p_mw"] = 1000.0
+    for column, value in {
+        "const_z_percent": 0.0,
+        "const_i_percent": 0.0,
+        "const_z_p_percent": 0.0,
+        "const_z_q_percent": 0.0,
+        "const_i_p_percent": 0.0,
+        "const_i_q_percent": 0.0,
+        "scaling": 1.0,
+        "in_service": True,
+    }.items():
+        grid.load[column] = value
+
+    for element_name in ("sgen", "gen", "storage"):
+        element = getattr(grid, element_name, None)
+        if element is not None and not element.empty:
+            element["in_service"] = False
+    return grid
+
+
 def run_single_pf(grid, new_load, algorithm="bfsw"):
     # 1. Ensure that 'bus' is the index in both DataFrames
     df_load = grid.load.copy()
     df_load_indexed = df_load.set_index('bus')
+    # The demand frame is the complete operating state. Loads omitted from a
+    # timestep must not retain static values from grid generation or a prior run.
+    for column in ("p_mw", "q_mvar"):
+        if column in df_load_indexed.columns:
+            df_load_indexed[column] = 0.0
     new_load_indexed = new_load.set_index('bus')
     # 2. Use DataFrame.update to overwrite only the overlapping entries
     df_load_indexed.update(new_load_indexed)
