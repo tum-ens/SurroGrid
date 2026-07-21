@@ -11,7 +11,7 @@ import pandas as pd
 from ..paths import GRIDALLOC_DIR, GRIDEXPAND_DIR
 
 DEFAULT_PAIRED_DIR = (
-    GRIDALLOC_DIR / "outputs" / "scenario_calibration" / "swf_2045_paired_v3_91301"
+    GRIDALLOC_DIR / "outputs" / "scenario_calibration" / "swf_2045_paired_v3_91301_station_hybrid_v2"
 )
 DEFAULT_OUTPUT_DIR = GRIDEXPAND_DIR / "3.urbs" / "Input"
 
@@ -82,7 +82,11 @@ def _combine_static_tables(
     sector_inputs,
     electricity_module,
 ) -> dict[str, pd.DataFrame]:
-    tables = urbs_static_tables(active_buses, electricity_module)
+    tables = urbs_static_tables(
+        active_buses,
+        electricity_module,
+        include_generic_battery=False,
+    )
     for key in ("process", "commodity", "process_commodity", "storage"):
         sector_table = getattr(sector_inputs, key)
         if not sector_table.empty:

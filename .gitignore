@@ -9,5 +9,4 @@ paper_draft_pylovo-validation/*
 *.png
 *.pdf
 *.svg
-GridExpand/5.postprocessing/plotting/output/*
 GridExpand/5.postprocessing/paper.md

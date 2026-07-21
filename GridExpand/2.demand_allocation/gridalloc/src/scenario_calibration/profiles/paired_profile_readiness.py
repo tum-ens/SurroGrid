@@ -11,7 +11,7 @@ import pandas as pd
 from ..paths import GRIDALLOC_DIR, SYNTHETIC_INPUT_DIR
 
 DEFAULT_PAIRED_DIR = (
-    GRIDALLOC_DIR / "outputs" / "scenario_calibration" / "swf_2045_paired_v3_91301"
+    GRIDALLOC_DIR / "outputs" / "scenario_calibration" / "swf_2045_paired_v3_91301_station_hybrid_v2"
 )
 
 

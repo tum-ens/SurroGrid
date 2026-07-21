@@ -25,7 +25,7 @@ A physical building can be associated with several real SWF connection buses. Th
 (source_lv_id, source_allocation_bus, building_objectid)
 ```
 
-For PLZ 91301 and pylovo version 3, the station-hybrid-v2 scope contains 7,493 scenario units covering 7,156 physical buildings. The same units are projected to 84 real grids and 81 synthetic grids.
+For PLZ 91301 and pylovo version 3, the revised station-hybrid-v2 scope contains 8,001 scenario units covering 7,647 physical buildings. The same units are projected to 88 real grids and 83 synthetic grids.
 
 Optimization remains at scenario-unit resolution. Aggregating units to real or synthetic buses before URBS can change flexibility and therefore violates the paired comparison contract. Bus aggregation belongs at the power-flow boundary. Each target-grid batch recreates the same deterministic scenario-unit inputs and uses the same optimization and TSAM settings; only the target-grid grouping and final bus projection differ.
 
@@ -35,27 +35,65 @@ The station-hybrid-v2 allocation generated:
 
 | Quantity | Real SWF | Synthetic |
 |---|---:|---:|
-| Target grids | 84 | 81 |
-| Physical buildings | 7,156 | 7,156 |
-| Scenario units | 7,493 | 7,493 |
-| HH rows | 13,730 | 13,730 |
-| HH annual demand | 38.718 GWh | 38.718 GWh |
-| Calibrated GHD annual demand | 8.931 GWh | 8.931 GWh |
+| Target grids | 88 | 83 |
+| Physical buildings | 7,647 | 7,647 |
+| Scenario units | 8,001 | 8,001 |
+| HH rows | 14,408 | 14,408 |
+| HH annual demand | 40.888 GWh | 40.888 GWh |
+| Calibrated GHD annual demand | 9.275 GWh | 9.275 GWh |
 
-One additional physical building from the calibrated source scope is absent from pylovo version 3. It represents one HH row and about 5.2 MWh/a and is reported separately rather than silently assigned.
+Two additional physical buildings from the calibrated source scope are absent from pylovo version 3. They represent two HH rows, 8.610 MWh/a HH demand, and 23.755 MWh/a GHD demand and are reported separately rather than silently assigned.
+
+### Electrification Penetration and Capacity
+
+For external communication, the 2045 electrification assumptions are summarized at physical-building level:
+
+| Electrification assumption | 2045 scenario |
+|---|---|
+| Heat pump | 47% of buildings; heat-pump and auxiliary-heater capacities are optimized |
+| PV and stationary battery | 48% of buildings; mean available PV capacity 14.5 kW and mean installed battery capacity 29.1 kWh |
+| EV charging | 76% of buildings; 11 kW per charging point |
+
+The SWF inventory provides heat-pump locations but no positive heat-pump capacities, so URBS selects the heat-pump and auxiliary-heater capacities. SWF PV capacity is treated as the upper installation limit and post-no-flex reuses the PV capacity selected in post-flex. Charging-station capacities are fixed; a building can carry more than one 11 kW charging point.
+
+Stationary batteries are fixed to the deduplicated SWF 2045 inventory in both post scenarios. SWF provides battery energy capacity but no separate inverter-power field. The model therefore assumes a two-hour battery and sets charge and discharge power to half its energy capacity. Post-flex dispatch is optimized by URBS. Post-no-flex uses causal local self-consumption control without forecasts: PV first supplies simultaneous demand, surplus PV charges the battery, and stored electricity later covers local residual demand. Grid charging and battery export are excluded. Each TSAM representative week uses a cyclic state-of-charge boundary so unrelated representative weeks cannot exchange energy.
+
+| Electrification combination | Buildings | Share of buildings |
+|---|---:|---:|
+| PV + battery only | 430 | 5.6% |
+| PV + battery + heat pump | 407 | 5.3% |
+| PV + battery + EV | 1,472 | 19.3% |
+| PV + battery + heat pump + EV | 1,345 | 17.6% |
+| Heat pump + EV | 1,332 | 17.4% |
+| Heat pump only | 498 | 6.5% |
+| EV only | 1,688 | 22.1% |
+| None | 475 | 6.2% |
+
+The seven electrified combinations cover 93.8% of retained buildings. The remaining 475 buildings (6.2%) carry none of the three modeled electrification dimensions.
+
+## GHD and Mixed-Use Calibration
+
+Pylovo's open building layer contains many more Commercial/Public polygons than SWF contains GHD customer rows. These quantities are not directly comparable: an ALKIS building polygon is not necessarily an active independent electricity customer, while one electrical connection can represent a mixed-use building. The paired scenario therefore applies the following evidence rules:
+
+1. SWF GHD demand is retained only where the GHD row can be matched to a physical building.
+2. SWF HH rows that match a Commercial/Public polygon are retained as mixed-use household proxies.
+3. Unsupported pylovo per-square-metre GHD defaults are not added to either target network.
+4. An unmatched SWF GHD row is excluded and audited at row level; it does not reject the otherwise valid LV grid.
+
+The full audit contains 2,991 generic Commercial structures without direct SWF load evidence. Most are unaddressed and small, and all use the broad ALKIS `31001_2000` category. Conversely, 719 Commercial/Public buildings already receive 1,647 SWF HH rows and are represented as mixed-use proxies. A blanket conversion of the remaining generic structures to households would duplicate demand or displace demand from explicitly residential buildings. See [GHD_CALIBRATION.md](GHD_CALIBRATION.md) for the complete evidence table and interpretation.
 
 ## Heat-Profile Readiness
 
 SWF contains 10,851 heat-pump rows but only 3,617 `(lv_id, bus, name, Baujahr)` installation identities. Every installation occurs as three component records: the heat-pump/COP reference (`load_type=hp`), space-heating demand (`load_type=heat`), and domestic-hot-water demand (`load_type=dhw`). These records share the same adoption year and must be combined as one physical heat-pump system before a complete heat profile is assigned; they are not three scenario-year installations.
 
-The hybrid-v2 paired scope contains 3,359 physical heat-pump buildings. Before repair, 244 Public or Commercial buildings used area-scaled diagnostic substitutes because the residential-only Step 2 sources omitted their `space_heat`, `water_heat`, and heat-pump COP columns.
+The revised paired scope contains 3,582 physical heat-profile buildings. The additional scope initially exposed one Public building without an exact source profile (`DEBY_LOD2_3229113`, source `9474126-45_91301_8_1.h5`, bus 248).
 
 The targeted `paired_heat_profile_regeneration` command regenerated the 61 affected source HDFs with all building uses and validated all 244 missing building buses. The pilot also exposed a temporal-index bug: residential profiles used a `DatetimeIndex`, while GHD profiles used a `RangeIndex`; pandas consequently produced 17,520 rows when both sectors were combined. Step 2 now normalizes both sources to one positional 8,760-hour index before bus aggregation.
 
-The final readiness catalog contains 3,359 `exact_physical_building` rows, all with `publication_ready=true`, and no diagnostic substitutions. Reproduce or resume the repair with:
+After targeted regeneration, the final readiness catalog contains 3,582 `exact_physical_building` rows, all with `publication_ready=true`, and no diagnostic substitutions. Reproduce or resume the repair with:
 
 ```bash
-uv run --project .. python -m src.scenario_calibration.profiles.paired_heat_profile_regeneration --paired-dir outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2 --pylovo-version-id 3 --workers 4 --n-cpu 1 --resume
+uv run --project .. python -m src.scenario_calibration.profiles.paired_heat_profile_regeneration --paired-dir outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2 --workers 4 --n-cpu 1 --resume
 ```
 
 ## Diagnostic Pilot: LV113
@@ -81,12 +119,13 @@ Topology also matters. Restoring all 15 lines removed by radialization improves 
 
 Build and audit the paired allocation:
 
+Both commands read `PYLOVO_VERSION_ID` from `GridExpand/.env`. The setting is required and is recorded in the paired-scenario metadata.
+
 ```bash
 cd GridExpand/2.demand_allocation/gridalloc
 uv run --project .. python -m src.scenario_calibration.allocation.paired_allocation \
   --plz 91301 \
   --final-year 2045 \
-  --pylovo-version-id 3 \
   --min-buildings 5 \
   --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \
   --output-dir outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2
@@ -116,9 +155,9 @@ uv run --project GridExpand/2.demand_allocation \
   --step3-cluster-concurrency 1 \
   --step4-cpus 2 \
   --cleanup-intermediates \
-  --scenario-label forchheim_paired_tsam \
-  --run-name-prefix forchheim_paired_tsam \
-  --run-dir GridExpand/run_logs/forchheim_paired_tsam_$(date -u +%Y%m%dT%H%M%SZ)
+  --scenario-label forchheim_paired_battery_tsam \
+  --run-name-prefix forchheim_paired_battery_tsam \
+  --run-dir GridExpand/run_logs/forchheim_paired_battery_tsam_$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
 Omit `--allow-diagnostic-heat-fallback` for the publication run. The strict runner blocks before computation if any paired heat profile is not publication-ready. Use `--resume` only with the same run directory and unchanged TSAM settings; the runner validates those settings against the saved reference.

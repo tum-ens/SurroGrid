@@ -37,7 +37,7 @@ DEFAULT_PAIRED_DIR = (
     / "gridalloc"
     / "outputs"
     / "scenario_calibration"
-    / "swf_2045_paired_v3_91301"
+    / "swf_2045_paired_v3_91301_station_hybrid_v2"
 )
 TARGET_CHOICES = ("real_swf", "synthetic", "both")
 

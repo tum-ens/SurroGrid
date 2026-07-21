@@ -74,6 +74,12 @@ class _PvInputs:
     audit: pd.DataFrame
 
 
+@dataclass(frozen=True)
+class _BatteryInputs:
+    storage: pd.DataFrame
+    audit: pd.DataFrame
+
+
 def _source_values(row: dict[str, Any]) -> tuple[int, int]:
     source_lv = row.get("source_lv_id", row.get("lv_id"))
     source_bus = row.get("source_allocation_bus", row.get("allocation_bus"))
@@ -260,6 +266,7 @@ def build_paired_sector_urbs_inputs(
 ) -> SectorUrbsInputs:
     """Build SWF-2045 sector profiles once and remap them to target buses."""
     pv = _build_paired_pv(allocation, hours=hours, source_hdf=weather_source_hdf)
+    battery = _build_paired_battery(allocation)
     mobility = _build_paired_mobility(allocation, hours=hours, seed=seed)
     heat = _build_paired_heat(
         allocation,
@@ -270,12 +277,13 @@ def build_paired_sector_urbs_inputs(
     )
 
     parts = [part for part in (pv, mobility, heat) if part is not None]
-    audit = _concat_static([part.audit for part in parts])
+    audit_parts = [part for part in (pv, battery, mobility, heat) if part is not None]
+    audit = _concat_static([part.audit for part in audit_parts])
     process = _concat_static([part.process for part in parts])
     commodity = _concat_static([part.commodity for part in parts])
     process_commodity = _concat_static([part.process_commodity for part in parts])
     storage = _concat_static(
-        [part.storage for part in (mobility, heat) if part is not None]
+        [part.storage for part in (battery, mobility, heat) if part is not None]
     )
     demand = _concat_timeseries(
         [part.demand for part in (mobility, heat) if part is not None],
@@ -302,11 +310,12 @@ def build_paired_sector_urbs_inputs(
         storage=storage,
         audit=audit,
         metadata={
-            "sector_assets_simulated": bool(parts),
+            "sector_assets_simulated": bool(audit_parts),
             "sector_assets_simulated_components": [
                 name
                 for name, part in (
                     ("pv", pv),
+                    ("stationary_battery", battery),
                     ("mobility", mobility),
                     ("heat", heat),
                 )
@@ -316,6 +325,10 @@ def build_paired_sector_urbs_inputs(
             "heat_profile_source": (
                 "matched physical building from pylovo version-specific "
                 "synthetic URBS input"
+            ),
+            "stationary_battery_model": (
+                "fixed SWF energy capacity; fixed charge/discharge power equal "
+                "to half the energy capacity; optimized post-flex dispatch"
             ),
         },
     )
@@ -438,6 +451,65 @@ def _build_paired_pv(
         audit=audit,
     )
 
+
+def _build_paired_battery(
+    allocation: pd.DataFrame,
+) -> _BatteryInputs | None:
+    """Create the fixed SWF stationary-battery inventory at scenario-unit sites."""
+    capacity = _sum_numeric_columns(
+        allocation,
+        ("residential_battery_kwh", "ghd_battery_kwh"),
+    )
+    profile_sites = allocation.get(
+        "_profile_site_id", allocation["allocation_bus"]
+    ).astype(int)
+    capacity_by_site = capacity.groupby(profile_sites).sum()
+    capacity_by_site = capacity_by_site[capacity_by_site.gt(0.0)]
+    if capacity_by_site.empty:
+        return None
+
+    electricity = load_electricity_module()
+    config = electricity.config
+    rows = []
+    audit_rows = []
+    for site, energy_kwh in capacity_by_site.items():
+        power_kw = float(energy_kwh) / 2.0
+        rows.append(
+            {
+                "Site": int(site),
+                "Storage": "battery_private",
+                "Commodity": "electricity",
+                "inst-cap-c": float(energy_kwh),
+                "cap-up-c": float(energy_kwh),
+                "inst-cap-p": power_kw,
+                "cap-up-p": power_kw,
+                "eff-in": config.BS_EFF_IN,
+                "eff-out": config.BS_EFF_OUT,
+                "discharge": config.BS_DISCHARGE,
+                "ep-ratio": 2.0,
+                "inv-cost-p": 0.0,
+                "inv-cost-c": 0.0,
+                "fix-cost-p": 0.0,
+                "fix-cost-c": 0.0,
+                "var-cost-p": config.BS_VAR_COST_P,
+                "wacc": config.BS_WACC,
+                "depreciation": config.BS_DEPRECIATION,
+            }
+        )
+        audit_rows.append(
+            {
+                "sector": "stationary_battery",
+                "allocation_bus": int(site),
+                "energy_capacity_kwh": float(energy_kwh),
+                "power_capacity_kw": power_kw,
+                "energy_to_power_hours": 2.0,
+                "capacity_source": "deduplicated_swf_2045_inventory",
+            }
+        )
+    return _BatteryInputs(
+        storage=pd.DataFrame(rows),
+        audit=pd.DataFrame(audit_rows),
+    )
 
 def _build_paired_mobility(
     allocation: pd.DataFrame,

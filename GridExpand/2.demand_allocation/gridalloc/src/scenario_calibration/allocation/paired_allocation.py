@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from dotenv import load_dotenv
 from sqlalchemy import text
 
 from .allocation_plan import build_scenario_allocation_plan
@@ -17,8 +16,8 @@ from .ghd_calibration import build_synthetic_ghd_calibration
 from ..profiles.profile_contract import assert_paired_plan_equivalence
 from .scope_filters import build_grid_scope_summary
 from .sector_asset_calibration import build_sector_asset_calibration
+from ..paths import configured_pylovo_version_id
 from .swf_2045_building_match import (
-    ENV_PATH,
     GRIDALLOC_DIR,
     MatchConfig,
     _database_engine,
@@ -29,9 +28,6 @@ from .swf_2045_building_match import (
     match_assets_to_buildings,
 )
 
-DEFAULT_OUTPUT_DIR = (
-    GRIDALLOC_DIR / "outputs" / "scenario_calibration" / "swf_2045_paired_v3_91301"
-)
 WP_IDENTITY_COLUMNS = ["lv_id", "bus", "name", "Baujahr"]
 SCENARIO_UNIT_COLUMNS = [
     "source_lv_id",
@@ -243,14 +239,18 @@ def build_paired_allocation(
     *,
     plz: int,
     final_year: int,
-    pylovo_version_id: str,
-    output_dir: Path,
+    output_dir: Path | None = None,
     grid_data_path: Path | None = None,
     max_match_distance_m: float = 100.0,
     min_buildings: int = 5,
 ) -> dict[str, pd.DataFrame]:
-    load_dotenv(ENV_PATH, override=True)
-    os.environ["PYLOVO_VERSION_ID"] = str(pylovo_version_id)
+    pylovo_version_id = configured_pylovo_version_id()
+    output_dir = output_dir or (
+        GRIDALLOC_DIR
+        / "outputs"
+        / "scenario_calibration"
+        / f"swf_2045_paired_v{pylovo_version_id}_{plz}"
+    )
     grid_root = grid_data_path or Path(os.environ["GRID_DATA_PATH"])
     config = MatchConfig(
         plz=int(plz),
@@ -268,7 +268,7 @@ def build_paired_allocation(
     matches = add_comparison_asset_class(
         match_assets_to_buildings(assets, buildings, config)
     )
-    ghd_calibration, _ = build_synthetic_ghd_calibration(
+    ghd_calibration, ghd_calibration_summary = build_synthetic_ghd_calibration(
         buildings,
         matches,
         _expected_ghd_kwh_per_m2_by_building_use(),
@@ -305,6 +305,7 @@ def build_paired_allocation(
         "max_match_distance_m": float(max_match_distance_m),
         "min_physical_buildings_per_target_grid": int(min_buildings),
         "scenario_scope": "paired_full_local_demand",
+        "unmatched_ghd_policy": "exclude_row_retain_grid",
         **wp_dedup,
     }
     outputs = {
@@ -316,6 +317,8 @@ def build_paired_allocation(
         "paired_scenario_scope_totals": scope_totals,
         "paired_asset_building_matches": matches,
         "paired_grid_scope_audit": grid_scope,
+        "paired_synthetic_ghd_calibration": ghd_calibration,
+        "paired_synthetic_ghd_calibration_summary": ghd_calibration_summary,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, frame in outputs.items():
@@ -331,16 +334,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plz", type=int, default=91301)
     parser.add_argument("--final-year", type=int, default=2045)
-    parser.add_argument("--pylovo-version-id", required=True)
     parser.add_argument("--grid-data-path", type=Path, default=None)
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--max-match-distance-m", type=float, default=100.0)
     parser.add_argument("--min-buildings", type=int, default=5)
     args = parser.parse_args()
     outputs = build_paired_allocation(
         plz=args.plz,
         final_year=args.final_year,
-        pylovo_version_id=args.pylovo_version_id,
         output_dir=args.output_dir,
         grid_data_path=args.grid_data_path,
         max_match_distance_m=args.max_match_distance_m,

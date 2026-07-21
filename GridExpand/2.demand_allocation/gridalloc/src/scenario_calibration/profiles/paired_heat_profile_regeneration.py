@@ -16,7 +16,11 @@ from typing import Any
 import pandas as pd
 
 
-from ..paths import GRIDALLOC_DIR, SYNTHETIC_INPUT_DIR
+from ..paths import (
+    GRIDALLOC_DIR,
+    SYNTHETIC_INPUT_DIR,
+    configured_pylovo_version_id,
+)
 
 DEFAULT_SYNTHETIC_LIBRARY = SYNTHETIC_INPUT_DIR
 
@@ -183,7 +187,6 @@ def _regenerate_one(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--paired-dir", type=Path, required=True)
-    parser.add_argument("--pylovo-version-id", required=True)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--n-cpu", type=int, default=1)
     parser.add_argument("--limit", type=int)
@@ -196,6 +199,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.workers < 1 or args.n_cpu < 1:
         parser.error("--workers and --n-cpu must be positive integers")
+    pylovo_version_id = configured_pylovo_version_id()
 
     paired_dir = args.paired_dir.resolve()
     catalog = pd.read_csv(paired_dir / "paired_heat_profile_catalog.csv")
@@ -218,7 +222,7 @@ def main() -> None:
                 "sources": len(sources),
                 "workers": args.workers,
                 "n_cpu": args.n_cpu,
-                "pylovo_version_id": str(args.pylovo_version_id),
+                "pylovo_version_id": pylovo_version_id,
             },
             sort_keys=True,
         ),
@@ -232,7 +236,7 @@ def main() -> None:
                 _regenerate_one,
                 source_name=source_name,
                 buses=required_buses(catalog, source_name),
-                pylovo_version_id=str(args.pylovo_version_id),
+                pylovo_version_id=pylovo_version_id,
                 n_cpu=args.n_cpu,
                 result_dir=result_dir,
                 synthetic_library=synthetic_library,

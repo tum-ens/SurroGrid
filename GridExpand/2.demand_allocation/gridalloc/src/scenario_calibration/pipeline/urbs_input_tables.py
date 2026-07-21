@@ -49,11 +49,19 @@ def buy_sell_price(hours: int, electricity_module) -> pd.DataFrame:
 
 
 def urbs_static_tables(
-    active_buses: list[int], electricity_module
+    active_buses: list[int],
+    electricity_module,
+    *,
+    include_generic_battery: bool = True,
 ) -> dict[str, pd.DataFrame]:
+    storage = (
+        electricity_module.create_sto_elec(active_buses)
+        if include_generic_battery
+        else electricity_module.create_sto_elec([])
+    )
     return {
         "process": electricity_module.create_pro_elec(active_buses),
         "commodity": electricity_module.create_com_elec(active_buses),
         "process_commodity": electricity_module.create_pro_com_elec(),
-        "storage": electricity_module.create_sto_elec(active_buses),
+        "storage": storage,
     }
