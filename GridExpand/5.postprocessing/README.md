@@ -18,6 +18,7 @@ Step 5 is split by workflow responsibility:
 - `powerflow.comparison_data`: load compact synthetic and real power-flow summaries, build comparison datasets, and compute similarity tables.
 - `plotting.*`: create figures from prepared data. Notebooks import the concrete plotting modules directly.
 - `audits.topology_bottleneck`: reusable diagnostics for critical real-grid voltage paths and bottlenecks.
+- `audits.feeder_structure`: graph-normalized feeder, downstream-demand, path-depth, and physical-corridor comparison.
 - `expansion.*`: materialize expansion summaries/costs and load expansion overview tables.
 
 Import from the owning module instead of using compatibility facades. For example, use `powerflow.comparison_data` for DB loaders and `plotting.powerflow_asset_plots` for asset stress plots.
@@ -33,6 +34,7 @@ output/
     expansion/<AGS>/<scenario_prefix>/
   audits/
     building_coverage/
+    feeder_structure/<AGS>/<scenario_prefix>/
     topology/
 ```
 
@@ -57,6 +59,8 @@ The entire `output/` tree is generated and ignored by Git. Durable conclusions a
     powerflow_io.py                       # shared Plotly export helper
     geoplotting.py                        # envelope and geospatial plotting helpers
   audits/
+    feeder_structure.py                  # synthetic/real feeder and physical-corridor audit
+    feeder_structure_comparison.md       # current paired-scenario findings and interpretation
     topology_bottleneck.py                # critical voltage path/bottleneck audit
   expansion/
     grid_expansion.py                     # source-neutral CLI/orchestration for expansion costs

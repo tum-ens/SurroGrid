@@ -1,27 +1,28 @@
 # Synthetic and Real SWF Equipment Capacity Comparison
 
-This audit compares the equipment represented in the paired Forchheim power-flow runs. Cable statistics cover the demand-carrying backbone and exclude final service connections. Real grid `LV 113` is excluded where noted because it is temporarily excluded from the power-flow comparison.
+This audit compares the equipment represented in the current paired power-flow runs. Cable statistics cover the demand-carrying backbone, exclude final service connections, and omit real LV 113 consistently with the analysis notebook.
 
 | Quantity | Synthetic | Real SWF |
 |---|---:|---:|
-| Transformer grids | 81 | 84 |
-| Total transformer capacity | 45.970 MVA | 45.645 MVA |
-| Total transformer capacity excluding real `LV 113` | 45.970 MVA | 45.015 MVA |
-| Mean transformer capacity | 0.568 MVA | 0.543 MVA |
+| Transformer grids | 83 | 87 |
+| Total transformer capacity | 47.000 MVA | 47.305 MVA |
+| Mean transformer capacity | 0.566 MVA | 0.544 MVA |
 | Median transformer capacity | 0.630 MVA | 0.630 MVA |
-| Backbone cable rows excluding real `LV 113` | 9,077 | 8,321 |
-| Mean installed cable capacity | 289 A | 291 A |
+| Backbone cable rows | 8,460 | 8,918 |
+| Mean installed cable capacity | 291 A | 290 A |
 | Median installed cable capacity | 242 A | 276 A |
-| P90 installed cable capacity | 357 A | 426 A |
+| P90 installed cable capacity | 425 A | 426 A |
 | P95 installed cable capacity | 626 A | 426 A |
 
 ## Interpretation
 
-- Transformer capacity is closely aligned: both distributions have a median of 630 kVA and their regional totals differ by less than 1% before excluding `LV 113`.
-- Mean installed backbone-cable capacity is effectively equal. Real single cables tend to have higher ratings through P90, whereas the synthetic P95 is higher because pylovo uses parallel feeder cables in its upper capacity tail.
-- Equipment capacity does not explain the substantially lower loading observed in the real SWF results.
-- The loading comparison was found to be contaminated by original static loads retained on unselected synthetic buses. Across the 81 synthetic grids, 13.407 MW of static load remained active outside the paired allocation scope. The synthetic power-flow preparation must therefore be corrected and rerun before interpreting loading differences as structural grid differences.
+- Transformer capacity is closely aligned: both distributions have a median of 630 kVA and their retained regional totals differ by less than 1%.
+- Mean installed backbone-cable capacity is also effectively equal. Real cable rows have higher ratings through P90, while pylovo has the higher P95 because its upper tail uses parallel feeder circuits.
+- These unweighted equipment distributions do not describe where capacity occurs relative to downstream demand. The graph-normalized feeder audit finds median downstream-demand-weighted capacities of 307 A synthetic and 326 A real.
+- More importantly, the median grid-level downstream demand per installed ampere is 166.5 kWh/a/A synthetic versus 86.2 kWh/a/A real. The loading difference is therefore tied to feeder branching, load attachment, and capacity placement rather than the equipment catalogue alone.
 
 ## Cable Representation Note
 
-Synthetic installed capacity is `max_i_ka * parallel`. Of 9,077 synthetic backbone cable rows, 682 use `parallel > 1`. Almost all real cable rows use `parallel = 1`; physical parallel cables may instead appear as separate line rows in the SWF model.
+The graph-normalized audit consolidates parallel physical rows between the same buses and degree-two cable chains. It finds 8,460 synthetic and 8,946 real physical backbone line rows, which become 8,460 and 8,892 parallel-normalized edges. Thus, separate real parallel rows account for only 54 additional rows and do not explain the loading difference.
+
+SWF NS_StLt rows using NS-Leitungstyp_fiktiv are classified as control connectors, not physical cable capacity. Their role and the complete feeder-structure findings are documented in feeder_structure_comparison.md.

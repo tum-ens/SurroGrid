@@ -37,7 +37,9 @@ def _active_line_ids(net: pp.pandapowerNet) -> pd.Index:
     active = pd.Series(True, index=net.line.index)
     if "in_service" in net.line.columns:
         active &= net.line["in_service"].fillna(True).astype(bool)
-    if not net.switch.empty and {"et", "element", "closed"}.issubset(net.switch.columns):
+    if not net.switch.empty and {"et", "element", "closed"}.issubset(
+        net.switch.columns
+    ):
         open_lines = net.switch.loc[
             net.switch["et"].astype(str).eq("l")
             & ~net.switch["closed"].fillna(True).astype(bool),
@@ -49,19 +51,28 @@ def _active_line_ids(net: pp.pandapowerNet) -> pd.Index:
 
 def _root_bus(net: pp.pandapowerNet) -> int:
     if not net.trafo.empty and "lv_bus" in net.trafo.columns:
-        roots = net.trafo.loc[
-            net.trafo.get("in_service", pd.Series(True, index=net.trafo.index))
-            .fillna(True)
-            .astype(bool),
-            "lv_bus",
-        ].dropna().astype(int).unique()
+        roots = (
+            net.trafo.loc[
+                net.trafo.get("in_service", pd.Series(True, index=net.trafo.index))
+                .fillna(True)
+                .astype(bool),
+                "lv_bus",
+            ]
+            .dropna()
+            .astype(int)
+            .unique()
+        )
         if len(roots) == 1:
             return int(roots[0])
         if len(roots) > 1:
-            raise ValueError(f"Expected one LV transformer root, found {roots.tolist()}.")
+            raise ValueError(
+                f"Expected one LV transformer root, found {roots.tolist()}."
+            )
     if not net.ext_grid.empty and "bus" in net.ext_grid.columns:
         return int(net.ext_grid.iloc[0]["bus"])
-    raise ValueError("Grid has neither an active LV transformer nor an external-grid root.")
+    raise ValueError(
+        "Grid has neither an active LV transformer nor an external-grid root."
+    )
 
 
 def _finite_float(value: Any, default: float = 0.0) -> float:
@@ -72,31 +83,67 @@ def _finite_float(value: Any, default: float = 0.0) -> float:
     return result if math.isfinite(result) else default
 
 
+def _is_control_line(lines: pd.DataFrame) -> pd.Series:
+    std_type = (
+        lines.get("std_type", pd.Series("", index=lines.index)).fillna("").astype(str)
+    )
+    name = lines.get("name", pd.Series("", index=lines.index)).fillna("").astype(str)
+    return std_type.str.contains(
+        "NS-Leitungstyp_fiktiv", case=False, regex=False
+    ) | name.str.startswith("NS_StLt")
+
+
 def _line_bundle(net: pp.pandapowerNet, line_ids: list[int]) -> dict[str, Any]:
     lines = net.line.loc[line_ids]
-    lengths = pd.to_numeric(lines.get("length_km"), errors="coerce").dropna()
+    control_mask = _is_control_line(lines)
+    physical = lines.loc[~control_mask]
+    control_ids = tuple(sorted(map(int, lines.index[control_mask])))
+    if physical.empty:
+        return {
+            "edge_kind": "connector",
+            "line_ids": (),
+            "control_line_ids": control_ids,
+            "line_row_count": 0,
+            "control_line_row_count": len(control_ids),
+            "length_km": 0.0,
+            "capacity_a": float("nan"),
+            "impedance_ohm": 0.0,
+            "path_weight": 1e-12,
+        }
+
+    lengths = pd.to_numeric(physical.get("length_km"), errors="coerce").dropna()
     length_km = float(lengths.median()) if not lengths.empty else 0.0
-    capacities = (
-        pd.to_numeric(lines.get("max_i_ka"), errors="coerce")
-        * pd.to_numeric(lines.get("parallel", 1.0), errors="coerce").fillna(1.0)
+    parallel = pd.to_numeric(
+        physical.get("parallel", pd.Series(1.0, index=physical.index)), errors="coerce"
+    ).fillna(1.0)
+    capacities = pd.to_numeric(physical.get("max_i_ka"), errors="coerce") * parallel
+    capacity_a = float(
+        capacities.replace([np.inf, -np.inf], np.nan).sum(min_count=1) * 1000.0
     )
-    capacity_a = float(capacities.replace([np.inf, -np.inf], np.nan).sum(min_count=1) * 1000.0)
 
     admittance = 0.0j
-    for _, line in lines.iterrows():
+    for _, line in physical.iterrows():
         row_length = max(_finite_float(line.get("length_km")), 0.0)
-        parallel = max(_finite_float(line.get("parallel"), 1.0), 1.0)
-        impedance = complex(
-            _finite_float(line.get("r_ohm_per_km")) * row_length,
-            _finite_float(line.get("x_ohm_per_km")) * row_length,
-        ) / parallel
+        row_parallel = max(_finite_float(line.get("parallel"), 1.0), 1.0)
+        impedance = (
+            complex(
+                _finite_float(line.get("r_ohm_per_km")) * row_length,
+                _finite_float(line.get("x_ohm_per_km")) * row_length,
+            )
+            / row_parallel
+        )
         if abs(impedance) > 0:
             admittance += 1.0 / impedance
     equivalent_impedance = abs(1.0 / admittance) if abs(admittance) > 0 else 0.0
-    path_weight = equivalent_impedance if equivalent_impedance > 0 else max(length_km, 1e-9)
+    path_weight = (
+        equivalent_impedance if equivalent_impedance > 0 else max(length_km, 1e-9)
+    )
     return {
-        "line_ids": tuple(sorted(map(int, line_ids))),
-        "line_row_count": int(len(line_ids)),
+        "edge_kind": "line",
+        "line_ids": tuple(sorted(map(int, physical.index))),
+        "control_line_ids": control_ids,
+        "line_row_count": int(len(physical)),
+        "control_line_row_count": len(control_ids),
         "length_km": length_km,
         "capacity_a": capacity_a,
         "impedance_ohm": float(equivalent_impedance),
@@ -111,7 +158,7 @@ def _electrical_graph(net: pp.pandapowerNet) -> nx.Graph:
         edge = tuple(sorted((int(line["from_bus"]), int(line["to_bus"]))))
         line_ids_by_edge[edge].append(int(line_id))
     for (from_bus, to_bus), line_ids in line_ids_by_edge.items():
-        graph.add_edge(from_bus, to_bus, edge_kind="line", **_line_bundle(net, line_ids))
+        graph.add_edge(from_bus, to_bus, **_line_bundle(net, line_ids))
 
     if not net.switch.empty and {"bus", "element", "et"}.issubset(net.switch.columns):
         switches = net.switch
@@ -128,7 +175,9 @@ def _electrical_graph(net: pp.pandapowerNet) -> nx.Graph:
                 element,
                 edge_kind="switch",
                 line_ids=(),
+                control_line_ids=(),
                 line_row_count=0,
+                control_line_row_count=0,
                 length_km=0.0,
                 capacity_a=float("nan"),
                 impedance_ohm=0.0,
@@ -148,7 +197,11 @@ def _line_paths(
 ) -> tuple[dict[int, list[tuple[int, int]]], pd.Series, list[int]]:
     paths = nx.single_source_dijkstra_path(graph, root, weight="path_weight")
     line_degree = {
-        bus: sum(1 for neighbor in graph.neighbors(bus) if graph[bus][neighbor]["edge_kind"] == "line")
+        bus: sum(
+            1
+            for neighbor in graph.neighbors(bus)
+            if graph[bus][neighbor]["edge_kind"] == "line"
+        )
         for bus in graph.nodes
     }
     retained_paths: dict[int, list[tuple[int, int]]] = {}
@@ -165,7 +218,11 @@ def _line_paths(
             continue
         mapped_bus = bus
         pairs = list(zip(path_nodes[:-1], path_nodes[1:]))
-        if pairs and line_degree.get(bus, 0) <= 1 and graph[pairs[-1][0]][pairs[-1][1]]["edge_kind"] == "line":
+        if (
+            pairs
+            and line_degree.get(bus, 0) <= 1
+            and graph[pairs[-1][0]][pairs[-1][1]]["edge_kind"] == "line"
+        ):
             mapped_bus = int(pairs[-1][0])
             pairs = pairs[:-1]
         line_edges = [
@@ -198,7 +255,9 @@ def _feeder_sections(
     boundaries = {
         int(node)
         for node in tree.nodes
-        if int(node) == root or tree.degree(node) != 2 or float(mapped_demand.get(node, 0.0)) > 0
+        if int(node) == root
+        or tree.degree(node) != 2
+        or float(mapped_demand.get(node, 0.0)) > 0
     }
     visited: set[tuple[int, int]] = set()
     sections: list[dict[str, Any]] = []
@@ -213,7 +272,9 @@ def _feeder_sections(
             visited.add(first_edge)
             previous, current = start, neighbor
             while current not in boundaries:
-                next_nodes = [node for node in tree.neighbors(current) if node != previous]
+                next_nodes = [
+                    node for node in tree.neighbors(current) if node != previous
+                ]
                 if len(next_nodes) != 1:
                     break
                 following = int(next_nodes[0])
@@ -234,12 +295,26 @@ def _feeder_sections(
                     "from_bus": int(nodes[0]),
                     "to_bus": int(nodes[-1]),
                     "edge_count": len(edges),
-                    "line_row_count": int(sum(item["line_row_count"] for item in attributes)),
-                    "line_ids": tuple(line_id for item in attributes for line_id in item["line_ids"]),
+                    "line_row_count": int(
+                        sum(item["line_row_count"] for item in attributes)
+                    ),
+                    "control_line_row_count": int(
+                        sum(item["control_line_row_count"] for item in attributes)
+                    ),
+                    "line_ids": tuple(
+                        line_id for item in attributes for line_id in item["line_ids"]
+                    ),
+                    "control_line_ids": tuple(
+                        line_id
+                        for item in attributes
+                        for line_id in item["control_line_ids"]
+                    ),
                     "edge_line_ids": tuple(item["line_ids"] for item in attributes),
                     "length_km": float(sum(item["length_km"] for item in attributes)),
                     "capacity_a": float(min(item["capacity_a"] for item in attributes)),
-                    "impedance_ohm": float(sum(item["impedance_ohm"] for item in attributes)),
+                    "impedance_ohm": float(
+                        sum(item["impedance_ohm"] for item in attributes)
+                    ),
                 }
             )
     return sections, edge_to_section
@@ -251,12 +326,26 @@ def _analyze_grid(
     *,
     data_source: str,
     grid: str,
-) -> tuple[dict[str, Any], pd.DataFrame]:
+) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame]:
     root = _root_bus(net)
     graph = _electrical_graph(net)
     if root not in graph:
-        raise ValueError(f"Transformer root bus {root} is absent from the active line graph for {grid}.")
-    retained_paths, mapped_demand, missing_buses = _line_paths(graph, root, demand_by_bus)
+        raise ValueError(
+            f"Transformer root bus {root} is absent from the active line graph for {grid}."
+        )
+    retained_paths, mapped_demand, missing_buses = _line_paths(
+        graph, root, demand_by_bus
+    )
+    control_parallel_rows = sum(
+        int(attributes["control_line_row_count"])
+        for _, _, attributes in graph.edges(data=True)
+        if attributes["edge_kind"] == "line"
+    )
+    control_connector_rows = sum(
+        int(attributes["control_line_row_count"])
+        for _, _, attributes in graph.edges(data=True)
+        if attributes["edge_kind"] == "connector"
+    )
     tree = _retained_tree(graph, retained_paths)
     sections, edge_to_section = _feeder_sections(tree, root, mapped_demand)
 
@@ -270,17 +359,31 @@ def _analyze_grid(
             continue
         for edge in line_path:
             edge_demand[edge] += demand
-        section_path = list(dict.fromkeys(edge_to_section[edge] for edge in line_path if edge in edge_to_section))
+        section_path = list(
+            dict.fromkeys(
+                edge_to_section[edge] for edge in line_path if edge in edge_to_section
+            )
+        )
         if section_path:
             feeder_demand[section_path[0]] += demand
         path_length = sum(graph[edge[0]][edge[1]]["length_km"] for edge in line_path)
-        path_impedance = sum(graph[edge[0]][edge[1]]["impedance_ohm"] for edge in line_path)
-        depth_rows.append((demand, len(line_path), len(section_path), path_length, path_impedance))
+        path_impedance = sum(
+            graph[edge[0]][edge[1]]["impedance_ohm"] for edge in line_path
+        )
+        depth_rows.append(
+            (demand, len(line_path), len(section_path), path_length, path_impedance)
+        )
 
     section_rows = []
     for section in sections:
-        section_edges = [edge for edge, section_id in edge_to_section.items() if section_id == section["section_id"]]
-        downstream_demand = max((edge_demand[edge] for edge in section_edges), default=0.0)
+        section_edges = [
+            edge
+            for edge, section_id in edge_to_section.items()
+            if section_id == section["section_id"]
+        ]
+        downstream_demand = max(
+            (edge_demand[edge] for edge in section_edges), default=0.0
+        )
         section_rows.append(
             {
                 **section,
@@ -289,7 +392,9 @@ def _analyze_grid(
                 "root_bus": root,
                 "downstream_annual_kwh": float(downstream_demand),
                 "is_outgoing_feeder": bool(section["section_id"] in feeder_demand),
-                "feeder_annual_kwh": float(feeder_demand.get(section["section_id"], 0.0)),
+                "feeder_annual_kwh": float(
+                    feeder_demand.get(section["section_id"], 0.0)
+                ),
             }
         )
     section_frame = pd.DataFrame(section_rows)
@@ -297,7 +402,13 @@ def _analyze_grid(
     total_demand = float(demand_by_bus.sum())
     depth = pd.DataFrame(
         depth_rows,
-        columns=["demand", "edge_depth", "section_depth", "path_length_km", "path_impedance_ohm"],
+        columns=[
+            "demand",
+            "edge_depth",
+            "section_depth",
+            "path_length_km",
+            "path_impedance_ohm",
+        ],
     )
 
     def weighted_mean(column: str) -> float:
@@ -309,6 +420,8 @@ def _analyze_grid(
         load_weighted_capacity = float("nan")
         rows_per_section = float("nan")
         downstream_median = float("nan")
+        downstream_per_capacity_median = float("nan")
+        feeder_per_capacity_median = float("nan")
     else:
         weights = section_frame["downstream_annual_kwh"].clip(lower=0.0)
         load_weighted_capacity = (
@@ -318,6 +431,17 @@ def _analyze_grid(
         )
         rows_per_section = float(section_frame["line_row_count"].mean())
         downstream_median = float(section_frame["downstream_annual_kwh"].median())
+        downstream_per_capacity_median = float(
+            (
+                section_frame["downstream_annual_kwh"] / section_frame["capacity_a"]
+            ).median()
+        )
+        feeders = section_frame[section_frame["is_outgoing_feeder"]]
+        feeder_per_capacity_median = (
+            float((feeders["feeder_annual_kwh"] / feeders["capacity_a"]).median())
+            if not feeders.empty
+            else float("nan")
+        )
     feeder_values = np.asarray(list(feeder_demand.values()), dtype=float)
     grid_row = {
         "data_source": data_source,
@@ -326,30 +450,65 @@ def _analyze_grid(
         "annual_demand_kwh": total_demand,
         "allocation_buses": int((demand_by_bus > 0).sum()),
         "unmapped_allocation_buses": len(missing_buses),
-        "unmapped_annual_kwh": float(demand_by_bus.reindex(missing_buses).fillna(0.0).sum()),
+        "unmapped_annual_kwh": float(
+            demand_by_bus.reindex(missing_buses).fillna(0.0).sum()
+        ),
+        "backbone_demand_buses": int((mapped_demand > 0).sum()),
+        "mean_demand_per_backbone_bus_kwh": (
+            float(mapped_demand[mapped_demand > 0].mean())
+            if (mapped_demand > 0).any()
+            else float("nan")
+        ),
+        "control_parallel_rows": int(control_parallel_rows),
+        "control_connector_rows": int(control_connector_rows),
         "outgoing_feeders": len(feeder_demand),
         "max_feeder_demand_share": (
-            float(feeder_values.max() / feeder_values.sum()) if feeder_values.sum() > 0 else float("nan")
+            float(feeder_values.max() / feeder_values.sum())
+            if feeder_values.sum() > 0
+            else float("nan")
         ),
         "mean_demand_per_feeder_kwh": (
             float(feeder_values.mean()) if feeder_values.size else float("nan")
         ),
-        "backbone_line_rows": int(section_frame["line_row_count"].sum()) if not section_frame.empty else 0,
+        "backbone_line_rows": int(section_frame["line_row_count"].sum())
+        if not section_frame.empty
+        else 0,
         "backbone_edges": int(tree.number_of_edges()),
         "feeder_sections": int(len(section_frame)),
         "mean_line_rows_per_section": rows_per_section,
         "median_downstream_demand_kwh": downstream_median,
+        "median_downstream_demand_per_capacity_kwh_per_a": downstream_per_capacity_median,
+        "median_feeder_demand_per_capacity_kwh_per_a": feeder_per_capacity_median,
         "downstream_demand_weighted_capacity_a": load_weighted_capacity,
         "demand_weighted_edge_depth": weighted_mean("edge_depth"),
         "demand_weighted_section_depth": weighted_mean("section_depth"),
         "demand_weighted_path_length_km": weighted_mean("path_length_km"),
         "demand_weighted_path_impedance_ohm": weighted_mean("path_impedance_ohm"),
     }
-    return grid_row, section_frame
+    control_rows = [
+        {
+            "data_source": data_source,
+            "grid": grid,
+            "from_bus": int(left),
+            "to_bus": int(right),
+            "line_id": int(line_id),
+            "control_role": (
+                "parallel_to_physical_cable"
+                if attributes["edge_kind"] == "line"
+                else "connector_only"
+            ),
+        }
+        for left, right, attributes in graph.edges(data=True)
+        for line_id in attributes["control_line_ids"]
+    ]
+    return grid_row, section_frame, pd.DataFrame(control_rows)
 
 
 def _read_plan_demands(paired_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
-    demand_columns = ["residential_equivalent_hh_annual_kwh", "calibrated_annual_ghd_kwh"]
+    demand_columns = [
+        "residential_equivalent_hh_annual_kwh",
+        "calibrated_annual_ghd_kwh",
+    ]
     synthetic = pd.read_csv(paired_dir / "paired_synthetic_bus_allocation_plan.csv")
     real = pd.read_csv(paired_dir / "paired_real_bus_allocation_plan.csv")
     for frame in (synthetic, real):
@@ -357,18 +516,18 @@ def _read_plan_demands(paired_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
             pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
             for column in demand_columns
         )
-    synthetic = (
-        synthetic.groupby(["synthetic_grid_case_id", "synthetic_bus"], as_index=False, observed=True)
-        ["annual_demand_kwh"].sum()
-    )
-    real = (
-        real.groupby(["lv_id", "allocation_bus"], as_index=False, observed=True)
-        ["annual_demand_kwh"].sum()
-    )
+    synthetic = synthetic.groupby(
+        ["synthetic_grid_case_id", "synthetic_bus"], as_index=False, observed=True
+    )["annual_demand_kwh"].sum()
+    real = real.groupby(["lv_id", "allocation_bus"], as_index=False, observed=True)[
+        "annual_demand_kwh"
+    ].sum()
     return synthetic, real
 
 
-def _synthetic_grid_rows(db: SurroGridDatabase, spec: Mapping[str, str], ags: str | int) -> pd.DataFrame:
+def _synthetic_grid_rows(
+    db: SurroGridDatabase, spec: Mapping[str, str], ags: str | int
+) -> pd.DataFrame:
     query = text(
         """
         SELECT DISTINCT ON (pr.grid_case_id)
@@ -386,7 +545,11 @@ def _synthetic_grid_rows(db: SurroGridDatabase, spec: Mapping[str, str], ags: st
         return pd.read_sql_query(
             query,
             conn,
-            params={"run_name": spec["run_name"], "stage": spec["stage"], "ags": _normalized_ags(ags)},
+            params={
+                "run_name": spec["run_name"],
+                "stage": spec["stage"],
+                "ags": _normalized_ags(ags),
+            },
         )
 
 
@@ -473,7 +636,9 @@ def _cable_summaries(
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
-def _attach_section_loading(sections: pd.DataFrame, cable_summaries: pd.DataFrame) -> pd.DataFrame:
+def _attach_section_loading(
+    sections: pd.DataFrame, cable_summaries: pd.DataFrame
+) -> pd.DataFrame:
     rows = []
     summaries = cable_summaries.copy()
     summaries["line_id"] = summaries["line_id"].astype(int)
@@ -493,13 +658,17 @@ def _attach_section_loading(sections: pd.DataFrame, cable_summaries: pd.DataFram
                     continue
                 capacity = float(edge_lines["installed_capacity_a"].sum())
                 current = float(edge_lines["max_current_a"].sum())
-                edge_groups.append(100.0 * current / capacity if capacity > 0 else float("nan"))
+                edge_groups.append(
+                    100.0 * current / capacity if capacity > 0 else float("nan")
+                )
             rows.append(
                 {
                     **section,
                     "comparison_stage": stage,
                     "matched_line_rows": int(len(lines)),
-                    "section_max_loading_percent": max(edge_groups) if edge_groups else float("nan"),
+                    "section_max_loading_percent": max(edge_groups)
+                    if edge_groups
+                    else float("nan"),
                 }
             )
     return pd.DataFrame(rows)
@@ -507,6 +676,10 @@ def _attach_section_loading(sections: pd.DataFrame, cable_summaries: pd.DataFram
 
 def _grid_summary(grid_metrics: pd.DataFrame) -> pd.DataFrame:
     metrics = [
+        "backbone_demand_buses",
+        "mean_demand_per_backbone_bus_kwh",
+        "control_parallel_rows",
+        "control_connector_rows",
         "outgoing_feeders",
         "max_feeder_demand_share",
         "mean_demand_per_feeder_kwh",
@@ -515,6 +688,8 @@ def _grid_summary(grid_metrics: pd.DataFrame) -> pd.DataFrame:
         "feeder_sections",
         "mean_line_rows_per_section",
         "median_downstream_demand_kwh",
+        "median_downstream_demand_per_capacity_kwh_per_a",
+        "median_feeder_demand_per_capacity_kwh_per_a",
         "downstream_demand_weighted_capacity_a",
         "demand_weighted_edge_depth",
         "demand_weighted_section_depth",
@@ -560,13 +735,14 @@ def build_feeder_structure_comparison(
 
     grid_rows: list[dict[str, Any]] = []
     section_frames: list[pd.DataFrame] = []
+    control_frames: list[pd.DataFrame] = []
     for row in synthetic_grids.to_dict("records"):
         grid_case_id = int(row["grid_case_id"])
         demand = synthetic_plan.loc[
             synthetic_plan["synthetic_grid_case_id"].astype(int).eq(grid_case_id)
         ].set_index("synthetic_bus")["annual_demand_kwh"]
         net = db.read_pandapower_grid(row)
-        grid_row, sections = _analyze_grid(
+        grid_row, sections, control_lines = _analyze_grid(
             net,
             demand,
             data_source="Synthetic",
@@ -575,14 +751,16 @@ def build_feeder_structure_comparison(
         grid_rows.append(grid_row)
         if not sections.empty:
             section_frames.append(sections)
+        if not control_lines.empty:
+            control_frames.append(control_lines)
 
     for row in real_grids.to_dict("records"):
         lv_id = int(row["lv_id_int"])
-        demand = real_plan.loc[real_plan["lv_id"].astype(int).eq(lv_id)].set_index("allocation_bus")[
-            "annual_demand_kwh"
-        ]
+        demand = real_plan.loc[real_plan["lv_id"].astype(int).eq(lv_id)].set_index(
+            "allocation_bus"
+        )["annual_demand_kwh"]
         net = pp.from_excel(Path(str(row["source_file"])))
-        grid_row, sections = _analyze_grid(
+        grid_row, sections, control_lines = _analyze_grid(
             net,
             demand,
             data_source="Real SWF",
@@ -591,9 +769,15 @@ def build_feeder_structure_comparison(
         grid_rows.append(grid_row)
         if not sections.empty:
             section_frames.append(sections)
+        if not control_lines.empty:
+            control_frames.append(control_lines)
 
     grid_metrics = pd.DataFrame(grid_rows)
-    sections = pd.concat(section_frames, ignore_index=True) if section_frames else pd.DataFrame()
+    sections = (
+        pd.concat(section_frames, ignore_index=True)
+        if section_frames
+        else pd.DataFrame()
+    )
 
     synthetic_cables = _cable_summaries(
         db,
@@ -616,11 +800,38 @@ def build_feeder_structure_comparison(
     for source, source_sections in sections.groupby("data_source", observed=True):
         source_cables = cable_summaries[cable_summaries["data_source"].eq(source)]
         loading_frames.append(_attach_section_loading(source_sections, source_cables))
-    section_loading = pd.concat(loading_frames, ignore_index=True) if loading_frames else pd.DataFrame()
+    section_loading = (
+        pd.concat(loading_frames, ignore_index=True)
+        if loading_frames
+        else pd.DataFrame()
+    )
+    control_lines = (
+        pd.concat(control_frames, ignore_index=True)
+        if control_frames
+        else pd.DataFrame()
+    )
+    if not control_lines.empty:
+        control_lines = control_lines.merge(
+            cable_summaries[
+                [
+                    "data_source",
+                    "grid",
+                    "line_id",
+                    "comparison_stage",
+                    "installed_capacity_a",
+                    "max_current_a",
+                    "max_loading_percent",
+                ]
+            ],
+            on=["data_source", "grid", "line_id"],
+            how="left",
+            validate="one_to_many",
+        )
     return {
         "grid_metrics": grid_metrics,
         "sections": sections,
         "section_loading": section_loading,
+        "control_lines": control_lines,
         "summary": _grid_summary(grid_metrics),
     }
 
@@ -633,7 +844,13 @@ def export_feeder_structure_comparison(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     paths = {}
-    for name in ("grid_metrics", "sections", "section_loading", "summary"):
+    for name in (
+        "grid_metrics",
+        "sections",
+        "section_loading",
+        "control_lines",
+        "summary",
+    ):
         path = output_dir / f"feeder_structure_{name}.csv"
         comparison[name].to_csv(path, index=False)
         paths[name] = path
@@ -645,7 +862,11 @@ def export_feeder_structure_comparison(
                 "section_definition": "maximal_edge_chain_through_degree_two_buses_without_allocated_demand",
                 "demand_basis": "paired_annual_household_plus_calibrated_ghd_demand",
                 "service_connections": "terminal_line_into_load_bus_excluded",
-                "section_loading": "maximum_capacity_weighted_row_peak_loading_across_section_edges",
+                "control_lines": "NS_StLt_and_NS-Leitungstyp_fiktiv_excluded_from_physical_cables",
+                "section_loading": (
+                    "maximum_capacity_weighted_physical_row_peak_loading_across_section_edges; "
+                    "row_peak_times_may_differ"
+                ),
             },
             indent=2,
         ),
