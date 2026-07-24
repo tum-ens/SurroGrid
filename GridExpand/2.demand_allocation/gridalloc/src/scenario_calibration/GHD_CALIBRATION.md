@@ -8,7 +8,7 @@ Unmatched SWF GHD rows are excluded individually and reported. They no longer ex
 
 ## Forchheim Audit
 
-The full building calibration for PLZ 91301 and pylovo version 3 contains the following evidence classes:
+The full building calibration for PLZ 91301 and pylovo version 5 contains the following evidence classes:
 
 | Evidence class | Buildings | Floor area | Synthetic default GHD | SWF/calibrated GHD |
 |---|---:|---:|---:|---:|
@@ -26,20 +26,20 @@ The current SWF matcher already allocates household demand to synthetic non-resi
 
 | Quantity | Real SWF | Synthetic |
 |---|---:|---:|
-| Target grids | 88 | 83 |
-| Physical buildings | 7,647 | 7,647 |
-| Scenario units | 8,001 | 8,001 |
-| HH rows | 14,408 | 14,408 |
-| HH annual demand | 40.888 GWh | 40.888 GWh |
-| Calibrated GHD annual demand | 9.275 GWh | 9.275 GWh |
+| Target grids | 88 | 91 |
+| Physical buildings | 7,643 | 7,643 |
+| Scenario units | 7,994 | 7,994 |
+| HH rows | 14,398 | 14,398 |
+| HH annual demand | 40.847 GWh | 40.847 GWh |
+| Calibrated GHD annual demand | 9.147 GWh | 9.147 GWh |
 
-Two additional scenario buildings are absent from pylovo version 3 and remain reported instead of being silently assigned. They account for two HH rows, 8.610 MWh/a HH demand, and 23.755 MWh/a GHD demand.
+Pylovo version 5 covers every physical building retained by the paired scope; the unmapped-building audit is empty.
 
 ## Interpretation
 
 The apparent difference of roughly 3,000 GHD buildings is not evidence for 3,000 missing SWF customers. Most are generic, unaddressed cadastral structures for which neither SWF GHD nor SWF HH demand provides direct load evidence. The fair paired power-flow comparison therefore uses equal measured/calibrated demand totals rather than pylovo's raw per-square-metre default for every polygon.
 
-This does not erase the topology-generation limitation: pylovo version 3 was generated with `residential_only_generation = false`, so transformer and cable dimensioning still reflects the original open-data GHD assumptions. A later topology sensitivity should test an open-data-only rule for identifying load-active generic commercial buildings. That rule must not use SWF matching, because doing so would leak the reference network into synthetic grid generation.
+This does not erase the topology-generation limitation: pylovo version 5 was generated with `residential_only_generation = false`, so transformer and cable dimensioning still reflects the original open-data GHD assumptions. A later topology sensitivity should test an open-data-only rule for identifying load-active generic commercial buildings. That rule must not use SWF matching, because doing so would leak the reference network into synthetic grid generation.
 
 ## Sources
 

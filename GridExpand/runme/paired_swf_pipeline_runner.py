@@ -17,6 +17,7 @@ import shutil
 import time
 from typing import Any
 
+import h5py
 import pandas as pd
 from dotenv import load_dotenv
 
@@ -37,7 +38,7 @@ DEFAULT_PAIRED_DIR = (
     / "gridalloc"
     / "outputs"
     / "scenario_calibration"
-    / "swf_2045_paired_v3_91301_station_hybrid_v2"
+    / "swf_2045_paired_v5_91301_station_hybrid_v2"
 )
 TARGET_CHOICES = ("real_swf", "synthetic", "both")
 
@@ -119,6 +120,8 @@ def _materialize_command(job: dict[str, Any], args: argparse.Namespace) -> list[
         "--weather-source-hdf",
         str(args.weather_source_hdf),
     ]
+    if args.heat_profile_library is not None:
+        command.extend(["--heat-profile-library", str(args.heat_profile_library)])
     if args.allow_diagnostic_heat_fallback:
         command.append("--allow-diagnostic-heat-fallback")
     return command
@@ -470,6 +473,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target", choices=TARGET_CHOICES, default="both")
     parser.add_argument("--target-grid-id", type=int, default=None)
     parser.add_argument("--weather-source-hdf", type=Path, required=True)
+    parser.add_argument("--heat-profile-library", type=Path)
     parser.add_argument("--scenario-label", default="swf_2045_paired_full_local")
     parser.add_argument("--run-name-prefix", default="paired_swf_2045_full_local")
     parser.add_argument("--seed", type=int, default=91301)
@@ -514,6 +518,12 @@ def main() -> None:
     if args.grid_data_path is not None:
         args.grid_data_path = args.grid_data_path.resolve()
     args.weather_source_hdf = args.weather_source_hdf.resolve()
+    if args.heat_profile_library is not None:
+        args.heat_profile_library = args.heat_profile_library.resolve()
+        if not args.heat_profile_library.exists():
+            raise FileNotFoundError(
+                f"Physical heat-profile library not found: {args.heat_profile_library}"
+            )
     args.run_dir = (
         (repo_root / args.run_dir).resolve()
         if not args.run_dir.is_absolute()
@@ -524,6 +534,32 @@ def main() -> None:
 
     catalog_path = args.paired_dir / "paired_heat_profile_catalog.csv"
     catalog = pd.read_csv(catalog_path)
+    library_sources = (
+        catalog.get("profile_source_kind", pd.Series(dtype=str))
+        .astype(str)
+        .eq("physical_heat_library")
+    )
+    if library_sources.any() and args.heat_profile_library is None:
+        raise ValueError(
+            "The paired heat catalog uses the physical heat-profile library. "
+            "Pass --heat-profile-library with the library used by readiness."
+        )
+    if library_sources.any():
+        expected_profile_sets = (
+            catalog.loc[library_sources, "profile_set_id"].dropna().astype(str).unique()
+        )
+        if len(expected_profile_sets) != 1:
+            raise ValueError(
+                "The paired heat catalog must reference exactly one profile set; "
+                f"found {expected_profile_sets.tolist()}."
+            )
+        with h5py.File(args.heat_profile_library, "r") as store:
+            actual_profile_set = str(store.attrs.get("profile_set_id", ""))
+        if actual_profile_set != expected_profile_sets[0]:
+            raise ValueError(
+                "Heat-profile library mismatch: paired catalog expects "
+                f"{expected_profile_sets[0]!r}, got {actual_profile_set!r}."
+            )
     diagnostic_profiles = int((~catalog["publication_ready"].astype(bool)).sum())
     if diagnostic_profiles and not args.allow_diagnostic_heat_fallback:
         raise ValueError(

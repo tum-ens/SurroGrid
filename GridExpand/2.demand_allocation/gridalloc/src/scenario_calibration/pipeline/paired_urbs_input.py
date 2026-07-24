@@ -11,7 +11,10 @@ import pandas as pd
 from ..paths import GRIDALLOC_DIR, GRIDEXPAND_DIR
 
 DEFAULT_PAIRED_DIR = (
-    GRIDALLOC_DIR / "outputs" / "scenario_calibration" / "swf_2045_paired_v3_91301_station_hybrid_v2"
+    GRIDALLOC_DIR
+    / "outputs"
+    / "scenario_calibration"
+    / "swf_2045_paired_v5_91301_station_hybrid_v2"
 )
 DEFAULT_OUTPUT_DIR = GRIDEXPAND_DIR / "3.urbs" / "Input"
 
@@ -24,6 +27,9 @@ from src.scenario_calibration.profiles.paired_profiles import (  # noqa: E402
     build_paired_base_electric_demand,
     build_paired_sector_urbs_inputs,
     load_electricity_module,
+)
+from src.scenario_calibration.profiles.physical_heat_profile_library import (  # noqa: E402
+    PhysicalHeatProfileLibrary,
 )
 from src.scenario_calibration.pipeline.urbs_input_tables import (  # noqa: E402
     buy_sell_price,
@@ -107,6 +113,7 @@ def materialize_paired_urbs_input(
     scenario_label: str,
     seed: int,
     weather_source_hdf: Path,
+    heat_profile_library: Path | None,
     allow_diagnostic_heat_fallback: bool,
 ) -> Path:
     """Write one paired full-year Step-3 input HDF."""
@@ -126,6 +133,32 @@ def materialize_paired_urbs_input(
     if not catalog_path.exists():
         raise FileNotFoundError(f"Run paired_profile_readiness first: {catalog_path}")
     heat_catalog = pd.read_csv(catalog_path)
+    library_sources = (
+        heat_catalog.get("profile_source_kind", pd.Series(dtype=str))
+        .astype(str)
+        .eq("physical_heat_library")
+    )
+    if library_sources.any():
+        if heat_profile_library is None:
+            raise ValueError(
+                "The paired heat catalog requires --heat-profile-library."
+            )
+        library = PhysicalHeatProfileLibrary(heat_profile_library)
+        expected_profile_sets = (
+            heat_catalog.loc[library_sources, "profile_set_id"]
+            .dropna()
+            .astype(str)
+            .unique()
+        )
+        profile_set_matches = (
+            len(expected_profile_sets) == 1
+            and library.profile_set_id == expected_profile_sets[0]
+        )
+        if not profile_set_matches:
+            raise ValueError(
+                "Heat-profile library mismatch: paired catalog expects "
+                f"{expected_profile_sets.tolist()}, got {library.profile_set_id!r}."
+            )
     demand, demand_audit = build_paired_base_electric_demand(
         allocation,
         seed=seed,
@@ -136,6 +169,7 @@ def materialize_paired_urbs_input(
         seed=seed,
         weather_source_hdf=weather_source_hdf.resolve(),
         heat_profile_catalog=heat_catalog,
+        heat_profile_library=heat_profile_library,
         allow_diagnostic_heat_fallback=allow_diagnostic_heat_fallback,
     )
     if not sector_inputs.demand.empty:
@@ -252,6 +286,7 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=91301)
     parser.add_argument("--weather-source-hdf", type=Path, required=True)
+    parser.add_argument("--heat-profile-library", type=Path)
     parser.add_argument(
         "--allow-diagnostic-heat-fallback",
         action="store_true",
@@ -270,6 +305,11 @@ def main() -> None:
         scenario_label=args.scenario_label,
         seed=args.seed,
         weather_source_hdf=args.weather_source_hdf,
+        heat_profile_library=(
+            args.heat_profile_library.resolve()
+            if args.heat_profile_library is not None
+            else None
+        ),
         allow_diagnostic_heat_fallback=(args.allow_diagnostic_heat_fallback),
     )
     print(output)

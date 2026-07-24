@@ -25,7 +25,7 @@ A physical building can be associated with several real SWF connection buses. Th
 (source_lv_id, source_allocation_bus, building_objectid)
 ```
 
-For PLZ 91301 and pylovo version 3, the revised station-hybrid-v2 scope contains 8,001 scenario units covering 7,647 physical buildings. The same units are projected to 88 real grids and 83 synthetic grids.
+For PLZ 91301 and pylovo version 5, the revised station-hybrid-v2 scope contains 7,994 scenario units covering 7,643 physical buildings. The same units are projected to 88 real grids and 91 synthetic grids.
 
 Optimization remains at scenario-unit resolution. Aggregating units to real or synthetic buses before URBS can change flexibility and therefore violates the paired comparison contract. Bus aggregation belongs at the power-flow boundary. Each target-grid batch recreates the same deterministic scenario-unit inputs and uses the same optimization and TSAM settings; only the target-grid grouping and final bus projection differ.
 
@@ -35,14 +35,14 @@ The station-hybrid-v2 allocation generated:
 
 | Quantity | Real SWF | Synthetic |
 |---|---:|---:|
-| Target grids | 88 | 83 |
-| Physical buildings | 7,647 | 7,647 |
-| Scenario units | 8,001 | 8,001 |
-| HH rows | 14,408 | 14,408 |
-| HH annual demand | 40.888 GWh | 40.888 GWh |
-| Calibrated GHD annual demand | 9.275 GWh | 9.275 GWh |
+| Target grids | 88 | 91 |
+| Physical buildings | 7,643 | 7,643 |
+| Scenario units | 7,994 | 7,994 |
+| HH rows | 14,398 | 14,398 |
+| HH annual demand | 40.847 GWh | 40.847 GWh |
+| Calibrated GHD annual demand | 9.147 GWh | 9.147 GWh |
 
-Two additional physical buildings from the calibrated source scope are absent from pylovo version 3. They represent two HH rows, 8.610 MWh/a HH demand, and 23.755 MWh/a GHD demand and are reported separately rather than silently assigned.
+Pylovo version 5 covers every physical building retained by the paired scope; the unmapped-building audit is empty.
 
 ### Electrification Penetration and Capacity
 
@@ -86,15 +86,11 @@ The full audit contains 2,991 generic Commercial structures without direct SWF l
 
 SWF contains 10,851 heat-pump rows but only 3,617 `(lv_id, bus, name, Baujahr)` installation identities. Every installation occurs as three component records: the heat-pump/COP reference (`load_type=hp`), space-heating demand (`load_type=heat`), and domestic-hot-water demand (`load_type=dhw`). These records share the same adoption year and must be combined as one physical heat-pump system before a complete heat profile is assigned; they are not three scenario-year installations.
 
-The revised paired scope contains 3,582 physical heat-profile buildings. The additional scope initially exposed one Public building without an exact source profile (`DEBY_LOD2_3229113`, source `9474126-45_91301_8_1.h5`, bus 248).
+The revised pylovo-version-5 paired scope contains 3,580 physical heat-profile buildings. The additional scope initially exposed one Public building without an exact source profile (`DEBY_LOD2_3229113`, source `9474126-45_91301_8_1.h5`, bus 248).
 
-The targeted `paired_heat_profile_regeneration` command regenerated the 61 affected source HDFs with all building uses and validated all 244 missing building buses. The pilot also exposed a temporal-index bug: residential profiles used a `DatetimeIndex`, while GHD profiles used a `RangeIndex`; pandas consequently produced 17,520 rows when both sectors were combined. Step 2 now normalizes both sources to one positional 8,760-hour index before bus aggregation.
+The validated physical heat and COP time series are generated once and stored in a network-independent regional HDF5 library keyed by `building_objectid`. A library represents one explicit physical-profile assumption set, so topology changes can reuse it while refurbishment or weather changes require a new profile-set identifier. The current `forchheim_2045_physical_heat_v1` library contains 3,582 buildings and 8,760 hours in approximately 196 MB. It is a slight superset of the 3,580 profiles required by the version-5 paired scope.
 
-After targeted regeneration, the final readiness catalog contains 3,582 `exact_physical_building` rows, all with `publication_ready=true`, and no diagnostic substitutions. Reproduce or resume the repair with:
-
-```bash
-uv run --project .. python -m src.scenario_calibration.profiles.paired_heat_profile_regeneration --paired-dir outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2 --workers 4 --n-cpu 1 --resume
-```
+Paired readiness checks building coverage against this library, and URBS input generation reads the same building profile before projecting it to the current real or synthetic target bus. Changing the pylovo grid version therefore requires a new paired allocation but no repeated heat-profile generation when the physical profile assumptions are unchanged. The legacy per-grid HDF workflow remains available only for constructing a new library or explicitly diagnostic fallbacks.
 
 ## Diagnostic Pilot: LV113
 
@@ -117,9 +113,9 @@ Topology also matters. Restoring all 15 lines removed by radialization improves 
 
 ## Commands
 
-Build and audit the paired allocation:
+Build and audit the paired allocation. Creating the physical heat-profile library is a one-time regional preparation step; skip that command when the named profile set already exists:
 
-Both commands read `PYLOVO_VERSION_ID` from `GridExpand/.env`. The setting is required and is recorded in the paired-scenario metadata.
+The allocation command reads `PYLOVO_VERSION_ID` from `GridExpand/.env`. The setting is required and is recorded in the paired-scenario metadata. The shown V4 catalog is needed only for the one-time migration of already validated physical profiles into the reusable library; later topology versions use the library directly.
 
 ```bash
 cd GridExpand/2.demand_allocation/gridalloc
@@ -128,10 +124,17 @@ uv run --project .. python -m src.scenario_calibration.allocation.paired_allocat
   --final-year 2045 \
   --min-buildings 5 \
   --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \
-  --output-dir outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2
+  --output-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2
+
+uv run --project .. python -m src.scenario_calibration.profiles.physical_heat_profile_library \
+  --source-catalog outputs/scenario_calibration/swf_2045_paired_v4_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
+  --source-hdf-dir ../../3.urbs/Input \
+  --output outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5 \
+  --profile-set-id forchheim_2045_physical_heat_v1
 
 uv run --project .. python -m src.scenario_calibration.profiles.paired_profile_readiness \
-  --paired-dir outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2
+  --paired-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
+  --heat-profile-library outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5
 ```
 
 The paired runner produces pre electricity-only, post-flex, and post-no-flex power-flow summaries for every selected target. The publication run uses six representative weeks selected only from ambient temperature and irradiation. One canonical mapping is stored in the run directory and every real and synthetic optimization result must reproduce it before its power flows are accepted.
@@ -142,9 +145,10 @@ uv run --project GridExpand/2.demand_allocation \
   python GridExpand/runme/paired_swf_pipeline_runner.py \
   --repo-root /home/breveron/git/github/SurroGrid \
   --plz 91301 \
-  --paired-dir GridExpand/2.demand_allocation/gridalloc/outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2 \
+  --paired-dir GridExpand/2.demand_allocation/gridalloc/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
   --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \
   --weather-source-hdf GridExpand/2.demand_allocation/gridalloc/results/9474126-00_91301_1_2.h5 \
+  --heat-profile-library GridExpand/2.demand_allocation/gridalloc/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5 \
   --target both \
   --tsam \
   --tsam-periods 6 \
@@ -155,9 +159,9 @@ uv run --project GridExpand/2.demand_allocation \
   --step3-cluster-concurrency 1 \
   --step4-cpus 2 \
   --cleanup-intermediates \
-  --scenario-label forchheim_paired_battery_tsam \
-  --run-name-prefix forchheim_paired_battery_tsam \
-  --run-dir GridExpand/run_logs/forchheim_paired_battery_tsam_$(date -u +%Y%m%dT%H%M%SZ)
+  --scenario-label forchheim_paired_v5_tsam \
+  --run-name-prefix forchheim_paired_v5_tsam \
+  --run-dir GridExpand/run_logs/forchheim_paired_v5_tsam_$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
 Omit `--allow-diagnostic-heat-fallback` for the publication run. The strict runner blocks before computation if any paired heat profile is not publication-ready. Use `--resume` only with the same run directory and unchanged TSAM settings; the runner validates those settings against the saved reference.

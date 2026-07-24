@@ -313,7 +313,7 @@ uv run --project GridExpand/2.demand_allocation python GridExpand/runme/syntheti
 
 ### Paired SWF real/synthetic scenario
 
-`paired_swf_pipeline_runner.py` is the comparison runner for the calibrated SWF 2045 scenario. It uses stable scenario units, projects the same profiles onto real and synthetic buses, and runs pre electricity-only, post-flex, and post-no-flex summaries. With `--tsam`, representative periods are selected exclusively from ambient temperature and irradiation. The runner records one canonical mapping in `shared_tsam_reference.json` and verifies every real and synthetic URBS result against it before power flow starts. See `2.demand_allocation/gridalloc/src/scenario_calibration/PAIRED_SCENARIO.md` for the publication gate and command.
+`paired_swf_pipeline_runner.py` is the comparison runner for the calibrated SWF 2045 scenario. It uses stable scenario units, reuses a network-independent physical-building heat-profile library, projects the same profiles onto real and synthetic buses, and runs pre electricity-only, post-flex, and post-no-flex summaries. With `--tsam`, representative periods are selected exclusively from ambient temperature and irradiation. The runner records one canonical mapping in `shared_tsam_reference.json` and verifies every real and synthetic URBS result against it before power flow starts. See `2.demand_allocation/gridalloc/src/scenario_calibration/PAIRED_SCENARIO.md` for the publication gate and command.
 
 ### Step 5: Postprocessing and plotting
 

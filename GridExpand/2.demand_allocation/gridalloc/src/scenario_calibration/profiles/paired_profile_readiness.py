@@ -9,9 +9,13 @@ import numpy as np
 import pandas as pd
 
 from ..paths import GRIDALLOC_DIR, SYNTHETIC_INPUT_DIR
+from .physical_heat_profile_library import PhysicalHeatProfileLibrary
 
 DEFAULT_PAIRED_DIR = (
-    GRIDALLOC_DIR / "outputs" / "scenario_calibration" / "swf_2045_paired_v3_91301_station_hybrid_v2"
+    GRIDALLOC_DIR
+    / "outputs"
+    / "scenario_calibration"
+    / "swf_2045_paired_v5_91301_station_hybrid_v2"
 )
 
 
@@ -20,8 +24,14 @@ def build_heat_profile_catalog(
     building_plan: pd.DataFrame,
     *,
     synthetic_input_dir: Path = SYNTHETIC_INPUT_DIR,
+    heat_profile_library: Path | None = None,
 ) -> pd.DataFrame:
     """Map each SWF heat-pump building to an exact or area-matched profile."""
+    library = (
+        PhysicalHeatProfileLibrary(heat_profile_library)
+        if heat_profile_library is not None
+        else None
+    )
     wp_count = pd.to_numeric(
         allocation.get("residential_wp_rows", 0.0),
         errors="coerce",
@@ -50,44 +60,55 @@ def build_heat_profile_catalog(
     column_cache: dict[str, tuple[pd.Index, pd.Index]] = {}
     records = []
     for row in selected.to_dict("records"):
+        building_id = str(row["building_objectid"])
         source_name = str(row["synthetic_bridge_filename"])
         source_bus = int(row["synthetic_bus"])
-        source_path = synthetic_input_dir / source_name
-        if source_name not in column_cache:
-            if not source_path.exists():
-                demand_columns = pd.Index([])
-                efficiency_columns = pd.Index([])
-            else:
-                demand_columns = pd.read_hdf(
-                    source_path,
-                    key="urbs_in/demand",
-                    start=0,
-                    stop=1,
-                ).columns
-                efficiency_columns = pd.read_hdf(
-                    source_path,
-                    key="urbs_in/eff_factor",
-                    start=0,
-                    stop=1,
-                ).columns
-            column_cache[source_name] = (
-                demand_columns,
-                efficiency_columns,
+        library_exact = library is not None and building_id in library
+        exact = False
+        if not library_exact:
+            source_path = synthetic_input_dir / source_name
+            if source_name not in column_cache:
+                if not source_path.exists():
+                    demand_columns = pd.Index([])
+                    efficiency_columns = pd.Index([])
+                else:
+                    demand_columns = pd.read_hdf(
+                        source_path,
+                        key="urbs_in/demand",
+                        start=0,
+                        stop=1,
+                    ).columns
+                    efficiency_columns = pd.read_hdf(
+                        source_path,
+                        key="urbs_in/eff_factor",
+                        start=0,
+                        stop=1,
+                    ).columns
+                column_cache[source_name] = (
+                    demand_columns,
+                    efficiency_columns,
+                )
+            demand_columns, efficiency_columns = column_cache[source_name]
+            exact = (
+                (source_bus, "space_heat") in demand_columns
+                and (source_bus, "water_heat") in demand_columns
+                and (source_bus, "heatpump_air") in efficiency_columns
             )
-        demand_columns, efficiency_columns = column_cache[source_name]
-        exact = (
-            (source_bus, "space_heat") in demand_columns
-            and (source_bus, "water_heat") in demand_columns
-            and (source_bus, "heatpump_air") in efficiency_columns
-        )
         records.append(
             {
-                "building_objectid": row["building_objectid"],
+                "building_objectid": building_id,
                 "building_use": row.get("building_use"),
                 "building_floor_area": float(row.get("building_floor_area") or np.nan),
                 "exact_source_hdf": source_name,
                 "exact_source_bus": source_bus,
-                "exact_profile_available": bool(exact),
+                "exact_profile_available": bool(library_exact or exact),
+                "exact_profile_source": (
+                    "physical_heat_library"
+                    if library_exact
+                    else "legacy_grid_hdf"
+                    if exact
+                    else "missing"
+                ),
             }
         )
     catalog = pd.DataFrame(records)
@@ -124,8 +145,29 @@ def build_heat_profile_catalog(
                 **row,
                 "profile_method": method,
                 "profile_source_building_objectid": source["building_objectid"],
-                "profile_source_hdf": source["exact_source_hdf"],
-                "profile_source_bus": int(source["exact_source_bus"]),
+                "profile_source_kind": source["exact_profile_source"],
+                "profile_source_hdf": (
+                    source["exact_source_hdf"]
+                    if source["exact_profile_source"] == "legacy_grid_hdf"
+                    else None
+                ),
+                "profile_source_bus": (
+                    int(source["exact_source_bus"])
+                    if source["exact_profile_source"] == "legacy_grid_hdf"
+                    else None
+                ),
+                "profile_library_path": (
+                    str(library.path)
+                    if source["exact_profile_source"] == "physical_heat_library"
+                    and library is not None
+                    else None
+                ),
+                "profile_set_id": (
+                    library.profile_set_id
+                    if source["exact_profile_source"] == "physical_heat_library"
+                    and library is not None
+                    else None
+                ),
                 "profile_source_floor_area": source_area,
                 "profile_scale": (
                     target_area / source_area
@@ -162,6 +204,7 @@ def main() -> None:
         type=Path,
         default=SYNTHETIC_INPUT_DIR,
     )
+    parser.add_argument("--heat-profile-library", type=Path)
     args = parser.parse_args()
     paired_dir = args.paired_dir.resolve()
     allocation = pd.read_csv(paired_dir / "paired_real_bus_allocation_plan.csv")
@@ -170,6 +213,11 @@ def main() -> None:
         allocation,
         buildings,
         synthetic_input_dir=args.synthetic_input_dir.resolve(),
+        heat_profile_library=(
+            args.heat_profile_library.resolve()
+            if args.heat_profile_library is not None
+            else None
+        ),
     )
     output = paired_dir / "paired_heat_profile_catalog.csv"
     catalog.to_csv(output, index=False)

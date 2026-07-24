@@ -41,6 +41,8 @@ from .real_swf_sector_profiles import (
 )
 
 from ..paths import SYNTHETIC_INPUT_DIR
+from .heat_profile_source import load_physical_heat_profile
+from .physical_heat_profile_library import PhysicalHeatProfileLibrary
 
 
 @dataclass(frozen=True)
@@ -262,6 +264,7 @@ def build_paired_sector_urbs_inputs(
     weather_source_hdf: Path,
     synthetic_input_dir: Path = SYNTHETIC_INPUT_DIR,
     heat_profile_catalog: pd.DataFrame | None = None,
+    heat_profile_library: Path | None = None,
     allow_diagnostic_heat_fallback: bool = False,
 ) -> SectorUrbsInputs:
     """Build SWF-2045 sector profiles once and remap them to target buses."""
@@ -271,6 +274,7 @@ def build_paired_sector_urbs_inputs(
     heat = _build_paired_heat(
         allocation,
         heat_profile_catalog=heat_profile_catalog,
+        heat_profile_library=heat_profile_library,
         allow_diagnostic_fallback=allow_diagnostic_heat_fallback,
         hours=hours,
         synthetic_input_dir=synthetic_input_dir,
@@ -703,6 +707,7 @@ def _build_paired_heat(
     hours: int,
     synthetic_input_dir: Path,
     heat_profile_catalog: pd.DataFrame | None,
+    heat_profile_library: Path | None,
     allow_diagnostic_fallback: bool,
 ) -> _HeatInputs | None:
     wp_count = _sum_numeric_columns(
@@ -726,6 +731,12 @@ def _build_paired_heat(
             f"{sorted(missing)}"
         )
 
+    library = (
+        PhysicalHeatProfileLibrary(heat_profile_library)
+        if heat_profile_library is not None
+        else None
+    )
+
     source_cache: dict[
         str,
         tuple[pd.DataFrame, pd.DataFrame],
@@ -746,94 +757,23 @@ def _build_paired_heat(
         sort=True,
         observed=True,
     ):
-        source_files = group["synthetic_bridge_filename"].dropna().unique()
-        source_buses = (
-            pd.to_numeric(
-                group["synthetic_bus"],
-                errors="coerce",
-            )
-            .dropna()
-            .astype(int)
-            .unique()
-        )
-        if len(source_files) != 1 or len(source_buses) != 1:
-            raise ValueError(
-                f"Physical building {building_id} has ambiguous synthetic heat "
-                "profile sources."
-            )
-        source_name = str(source_files[0])
-        source_bus = int(source_buses[0])
-        profile_method = "exact_physical_building"
-        profile_scale = 1.0
-        catalog_row = catalog_by_building.get(building_id)
-        if catalog_row is not None and not bool(
-            catalog_row.get("exact_profile_available", True)
-        ):
-            if not allow_diagnostic_fallback:
-                raise ValueError(
-                    "No exact physical heat profile is available for "
-                    f"{building_id}. Generate a full-local synthetic source "
-                    "profile or explicitly enable the diagnostic fallback."
-                )
-            source_name = str(catalog_row["profile_source_hdf"])
-            source_bus = int(catalog_row["profile_source_bus"])
-            profile_method = str(catalog_row["profile_method"])
-            profile_scale = float(catalog_row["profile_scale"])
-        if source_name not in source_cache:
-            source_path = synthetic_input_dir / source_name
-            if not source_path.exists():
-                raise FileNotFoundError(
-                    f"Missing physical-building profile source {source_path}."
-                )
-            source_cache[source_name] = (
-                pd.read_hdf(source_path, key="urbs_in/demand"),
-                pd.read_hdf(source_path, key="urbs_in/eff_factor"),
-            )
-        source_demand, source_eff = source_cache[source_name]
-        needed_demand = [
-            (source_bus, "space_heat"),
-            (source_bus, "water_heat"),
-        ]
-        needed_eff = (source_bus, "heatpump_air")
-        if any(column not in source_demand for column in needed_demand):
-            raise ValueError(
-                f"Missing heat demand for physical building {building_id} "
-                f"at {source_name}:{source_bus}."
-            )
-        if needed_eff not in source_eff:
-            raise ValueError(
-                f"Missing heat-pump COP for physical building {building_id} "
-                f"at {source_name}:{source_bus}."
-            )
-        space = (
-            pd.to_numeric(
-                source_demand[needed_demand[0]],
-                errors="coerce",
-            )
-            .fillna(0.0)
-            .iloc[:hours]
-            .reset_index(drop=True)
-            * profile_scale
-        )
-        water = (
-            pd.to_numeric(
-                source_demand[needed_demand[1]],
-                errors="coerce",
-            )
-            .fillna(0.0)
-            .iloc[:hours]
-            .reset_index(drop=True)
-            * profile_scale
-        )
-        cop = (
-            pd.to_numeric(
-                source_eff[needed_eff],
-                errors="coerce",
-            )
-            .fillna(1.0)
-            .iloc[:hours]
-            .reset_index(drop=True)
-            .clip(lower=0.1)
+        (
+            space,
+            water,
+            cop,
+            source_name,
+            source_bus,
+            profile_method,
+            profile_scale,
+        ) = load_physical_heat_profile(
+            building_objectid=building_id,
+            group=group,
+            hours=hours,
+            synthetic_input_dir=synthetic_input_dir,
+            library=library,
+            catalog_by_building=catalog_by_building,
+            source_cache=source_cache,
+            allow_diagnostic_fallback=allow_diagnostic_fallback,
         )
         total_weight = float(group["_wp_count"].sum())
         for row in group.to_dict("records"):
