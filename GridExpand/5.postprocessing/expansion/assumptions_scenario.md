@@ -94,7 +94,7 @@ These are the identifiers used by `5.postprocessing/notebooks/analysis_expansion
 
 ## Expansion Cost Comparison
 
-The same `de_lv_heuristic_2026` thermal-reinforcement heuristic is materialized independently for the synthetic and real grids. Existing cables are retained, while added capacity is selected from the common `NAYY_4_150`, `NAYY_4_185`, and `NAYY_4_240` catalogue. The real totals include only complete grid-stage simulations: 87 real grids are complete in the status quo, while 85 are complete in each post scenario. LV 113 is explicitly excluded in all stages; LV 38 and LV 47 are additionally incomplete in both post scenarios because some timesteps did not converge. Synthetic coverage is 83 complete grids in every stage.
+The same `de_lv_heuristic_2026` thermal-reinforcement heuristic is materialized independently for the synthetic and real grids. Existing cables are retained, while added capacity is selected from the common `NAYY_4_150`, `NAYY_4_185`, and `NAYY_4_240` catalogue. Parallel SWF line rows with identical endpoints and route lengths within 5% are costed as one physical corridor; their installed capacities and currents are aggregated, and civil works are charged once. The real totals include only complete grid-stage simulations: 87 real grids are complete in the status quo, while 85 are complete in each post scenario. LV 113 is explicitly excluded in all stages; LV 38 and LV 47 are additionally incomplete in both post scenarios because some timesteps did not converge. Synthetic coverage is 83 complete grids in every stage.
 
 | Source | Scenario | Cable cost | Transformer cost | Total cost |
 |---|---|---:|---:|---:|
@@ -102,10 +102,10 @@ The same `de_lv_heuristic_2026` thermal-reinforcement heuristic is materialized 
 | Synthetic | Post-no-flex | EUR 843,270 | EUR 830,000 | EUR 1,673,270 |
 | Synthetic | Post-flex / HEMS | EUR 532,413 | EUR 544,000 | EUR 1,076,413 |
 | Real SWF | Status quo | EUR 27,674 | EUR 33,000 | EUR 60,674 |
-| Real SWF | Post-no-flex | EUR 964,839 | EUR 856,000 | EUR 1,820,839 |
+| Real SWF | Post-no-flex | EUR 937,028 | EUR 856,000 | EUR 1,793,028 |
 | Real SWF | Post-flex / HEMS | EUR 705,572 | EUR 492,000 | EUR 1,197,572 |
 
-HEMS reduces the modeled total thermal-reinforcement cost by 35.7% on the synthetic networks and 34.2% on the complete real-SWF networks. These are heuristic, loading-driven screening costs; voltage mitigation remains outside the cost total. Because source coverage differs, publication tables must show complete, incomplete, and excluded grid counts alongside totals and should include a per-complete-grid comparison.
+HEMS reduces the modeled total thermal-reinforcement cost by 35.7% on the synthetic networks and 33.2% on the complete real-SWF networks. These are heuristic, loading-driven screening costs; voltage mitigation remains outside the cost total. Because source coverage differs, publication tables must show complete, incomplete, and excluded grid counts alongside totals and should include a per-complete-grid comparison.
 
 ## Important Methodological Constraints
 

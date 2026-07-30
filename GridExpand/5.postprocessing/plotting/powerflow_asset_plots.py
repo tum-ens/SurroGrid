@@ -581,7 +581,7 @@ def plot_powerflow_asset_cutoff_overview_static(
     bottom row and the maximum cutoff shown in the top-row curves.
     ``filter_scope`` switches between asset-level and grid-level filtering.
     Static Matplotlib output can be saved as SVG/PDF through ``save_path``.
-    ``source_col`` adds a second comparison dimension, e.g. Synthetic vs Real SWF:
+    ``source_col`` adds a second comparison dimension, e.g. Synthetic vs Real:
     colors still follow ``group_col`` while line style and violin/scatter offsets
     follow ``source_col``.
     """
@@ -745,7 +745,7 @@ def plot_powerflow_asset_cutoff_overview_static(
     def _short_source_label(source: str) -> str:
         lowered = str(source).strip().lower()
         if lowered in {"synthetic", "syn"}:
-            return "Syn."
+            return "Synthetic"
         if lowered in {"real swf", "real_swf", "real"}:
             return "Real"
         return str(source)[:6]
@@ -786,8 +786,14 @@ def plot_powerflow_asset_cutoff_overview_static(
     def _source_style(source: str) -> dict[str, object]:
         return default_source_styles.get(str(source), {"linestyle": "--", "dashes": (3.0, 2.0), "offset": 0.18, "alpha": 0.18, "marker_alpha": 0.46})
 
+    def _source_display_label(source: str) -> str:
+        lowered = str(source).strip().lower()
+        if lowered in {"real swf", "real_swf", "real"}:
+            return "Real"
+        return str(source)
+
     def _legend_label(group: str, source: str) -> str:
-        return group if source == "" else f"{group} - {source}"
+        return group if source == "" else f"{group} - {_source_display_label(source)}"
 
     for col_idx, metric in enumerate(selected_metrics):
         metric_df = df[

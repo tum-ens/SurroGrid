@@ -269,6 +269,9 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_real_line_result (
     cable INTEGER NOT NULL,
     cable_name TEXT,
     std_type TEXT,
+    corridor_cable_ids TEXT NOT NULL,
+    corridor_line_count INTEGER NOT NULL DEFAULT 1,
+    corridor_grouping_method TEXT NOT NULL DEFAULT 'single_line',
     from_bus INTEGER,
     to_bus INTEGER,
     length_km DOUBLE PRECISION,
@@ -304,6 +307,11 @@ ALTER TABLE IF EXISTS surrogrid.expansion_real_line_result ADD COLUMN IF NOT EXI
 ALTER TABLE IF EXISTS surrogrid.expansion_real_line_result ADD COLUMN IF NOT EXISTS reinforcement_240_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE IF EXISTS surrogrid.expansion_real_line_result ADD COLUMN IF NOT EXISTS reinforcement_added_capacity_ka DOUBLE PRECISION NOT NULL DEFAULT 0.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_real_line_result ADD COLUMN IF NOT EXISTS reinforcement_catalog TEXT NOT NULL DEFAULT 'NAYY_4_150|NAYY_4_185|NAYY_4_240';
+ALTER TABLE IF EXISTS surrogrid.expansion_real_line_result ADD COLUMN IF NOT EXISTS corridor_cable_ids TEXT;
+ALTER TABLE IF EXISTS surrogrid.expansion_real_line_result ADD COLUMN IF NOT EXISTS corridor_line_count INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE IF EXISTS surrogrid.expansion_real_line_result ADD COLUMN IF NOT EXISTS corridor_grouping_method TEXT NOT NULL DEFAULT 'single_line';
+UPDATE surrogrid.expansion_real_line_result SET corridor_cable_ids = cable::TEXT WHERE corridor_cable_ids IS NULL;
+ALTER TABLE IF EXISTS surrogrid.expansion_real_line_result ALTER COLUMN corridor_cable_ids SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_expansion_real_line_result_need
     ON surrogrid.expansion_real_line_result (expansion_analysis_run_id, requires_expansion, overloaded_at_100_percent);

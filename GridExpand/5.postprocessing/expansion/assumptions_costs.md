@@ -52,6 +52,8 @@ The existing cable is retained regardless of its SWF or pylovo type. Every added
 
 All nonnegative integer combinations are considered. The selected combination is the least-cost option whose added nominal ampacity covers `required_added_capacity_ka`. Ties are resolved by fewer circuits, then lower excess capacity. This is a thermal screening approximation: actual current sharing between unlike parallel cables is not recalculated.
 
+For real SWF grids, parallel physical line rows are normalized to construction corridors before this selection is applied. Rows are grouped only when they connect the same unordered bus pair and their recorded lengths differ by no more than 5%. The exported SWF station files do not contain route geometries, so agreement in endpoints and length is the conservative available proxy for a common physical route; same-bus rows with materially different lengths remain separate. Installed ampacity and row-level P100 currents are summed, the longest member length represents the corridor, and trenching is charged once. The result retains the member cable IDs and grouping method for auditability. Synthetic parallel circuits already use pandapower's `parallel` attribute and therefore enter the same calculation as one electrical corridor.
+
 The settlement class controls the reopened-route cost:
 
 ```text
