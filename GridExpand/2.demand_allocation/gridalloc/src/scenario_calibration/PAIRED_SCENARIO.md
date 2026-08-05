@@ -51,10 +51,40 @@ For external communication, the 2045 electrification assumptions are summarized 
 | Electrification assumption | 2045 scenario |
 |---|---|
 | Heat pump | 47% of buildings; heat-pump and auxiliary-heater capacities are optimized |
-| PV and stationary battery | 48% of buildings; mean available PV capacity 14.5 kW and mean installed battery capacity 29.1 kWh |
+| PV and stationary battery | SWF-location mode retains the 2045 PV building locations; available PV capacity and production profiles come from LoD2 roof surfaces; mean installed battery capacity is 29.1 kWh |
 | EV charging | 76% of buildings; 11 kW per charging point |
 
-The SWF inventory provides heat-pump locations but no positive heat-pump capacities, so URBS selects the heat-pump and auxiliary-heater capacities. SWF PV capacity is treated as the upper installation limit and post-no-flex reuses the PV capacity selected in post-flex. Charging-station capacities are fixed; a building can carry more than one 11 kW charging point.
+The SWF inventory provides heat-pump locations but no positive heat-pump capacities, so URBS selects the heat-pump and auxiliary-heater capacities. SWF PV capacity is not used as an installation limit. The SWF pandapower file is cumulative: existing and future PV rows with different `Baujahr` values coexist in the final network and are `in_service`. In `swf` location mode, any PV row with `Baujahr <= 2045` establishes building/location eligibility; legacy rows without a usable year are retained as existing assets. Repeated rows at the same connection collapse to one eligibility record. In `all_buildings` mode, every retained physical building is eligible. Charging-station capacities are fixed; a building can carry more than one 11 kW charging point.
+
+### LoD2 PV roof potential and profiles
+
+The paired allocator joins `pylovo.buildings_result.objectid` to the corresponding
+`citydb.feature`, follows its `boundary` property to child roof-surface features,
+and reads `Flaeche`, `Dachneigung`, and `Dachorientierung`. Available capacity is
+calculated independently for every usable roof section:
+
+```text
+available_pv_kw = Flaeche × roof_utilization × 0.202 kW/m²
+```
+
+Flat roofs retain the 0.27 utilization assumption and slanted roofs use 0.58.
+Because `Flaeche` is the actual LoD2 surface area, no footprint/cosine area
+reconstruction is applied. The pvlib tilt is `90° - Dachneigung`; flat surfaces
+use azimuth 0° when the source orientation is undefined. Non-flat sections with
+an invalid orientation are excluded and audited. Only when a building has no
+usable LoD2 section is one 14.5 kW fallback section at 45°/180° created.
+
+Capacity always uses the exact surface area. Generation profiles use deterministic
+1° tilt and 5° azimuth bins so equal orientations share a normalized annual
+pvlib profile. The paired runner builds `paired_pv_profile_library.h5` once from
+the selected weather source before starting parallel real/synthetic grid jobs.
+For DB-mode result files without embedded raw weather, it resolves the source
+grid coordinates from PostgreSQL and obtains the same PVGIS SARAH3 TMY once
+during cache construction. Subsequent runs reuse the library while its weather
+source and required angle set are unchanged.
+Within a scenario unit, roof sections in the same angle bin are aggregated into
+one URBS process. The optimized PV dimension remains bounded by the summed LoD2
+section `cap-up`, and post-no-flex reuses the post-flex optimized capacity.
 
 Stationary batteries are fixed to the deduplicated SWF 2045 inventory in both post scenarios. SWF provides battery energy capacity but no separate inverter-power field. The model therefore assumes a two-hour battery and sets charge and discharge power to half its energy capacity. Post-flex dispatch is optimized by URBS. Post-no-flex uses causal local self-consumption control without forecasts: PV first supplies simultaneous demand, surplus PV charges the battery, and stored electricity later covers local residual demand. Grid charging and battery export are excluded. Each TSAM representative week uses a cyclic state-of-charge boundary so unrelated representative weeks cannot exchange energy.
 

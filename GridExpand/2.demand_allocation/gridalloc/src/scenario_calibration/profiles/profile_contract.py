@@ -113,3 +113,32 @@ def assert_paired_plan_equivalence(
                 f"Paired plans differ in {column}: "
                 f"real={real_value:.6f}, synthetic={synthetic_value:.6f}."
             )
+
+    if "pv_roof_capacity_kw" in real_plan and "pv_roof_capacity_kw" in synthetic_plan:
+        real_capacity = float(
+            pd.to_numeric(real_plan["pv_roof_capacity_kw"], errors="coerce")
+            .fillna(0.0)
+            .sum()
+        )
+        synthetic_capacity = float(
+            pd.to_numeric(synthetic_plan["pv_roof_capacity_kw"], errors="coerce")
+            .fillna(0.0)
+            .sum()
+        )
+        if not np.isclose(real_capacity, synthetic_capacity, rtol=0.0, atol=1e-6):
+            raise ValueError(
+                "Paired plans differ in LoD2 PV roof capacity: "
+                f"real={real_capacity:.6f}, synthetic={synthetic_capacity:.6f}."
+            )
+        real_units = set(
+            real_plan.loc[
+                real_plan["pv_roof_eligible"].astype(bool), "scenario_unit_id"
+            ].astype(int)
+        )
+        synthetic_units = set(
+            synthetic_plan.loc[
+                synthetic_plan["pv_roof_eligible"].astype(bool), "scenario_unit_id"
+            ].astype(int)
+        )
+        if real_units != synthetic_units:
+            raise ValueError("Paired plans select different PV scenario units.")

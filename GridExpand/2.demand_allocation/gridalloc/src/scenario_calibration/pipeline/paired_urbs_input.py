@@ -133,6 +133,18 @@ def materialize_paired_urbs_input(
     if not catalog_path.exists():
         raise FileNotFoundError(f"Run paired_profile_readiness first: {catalog_path}")
     heat_catalog = pd.read_csv(catalog_path)
+    roof_catalog_path = paired_dir / "paired_roof_sections.csv"
+    if not roof_catalog_path.exists():
+        raise FileNotFoundError(
+            f"Regenerate the paired allocation with LoD2 PV roofs: {roof_catalog_path}"
+        )
+    roof_catalog = pd.read_csv(roof_catalog_path)
+    pv_profile_library = paired_dir / "paired_pv_profile_library.h5"
+    if allocation["pv_roof_eligible"].astype(bool).any() and not pv_profile_library.exists():
+        raise FileNotFoundError(
+            "Build the shared PV profile library before materialization: "
+            f"{pv_profile_library}"
+        )
     library_sources = (
         heat_catalog.get("profile_source_kind", pd.Series(dtype=str))
         .astype(str)
@@ -168,6 +180,8 @@ def materialize_paired_urbs_input(
         hours=len(demand),
         seed=seed,
         weather_source_hdf=weather_source_hdf.resolve(),
+        roof_catalog=roof_catalog,
+        pv_profile_library=pv_profile_library,
         heat_profile_catalog=heat_catalog,
         heat_profile_library=heat_profile_library,
         allow_diagnostic_heat_fallback=allow_diagnostic_heat_fallback,

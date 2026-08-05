@@ -101,6 +101,7 @@ uv run --project .. python -m src.scenario_calibration.allocation.paired_allocat
   --plz 91301 \
   --final-year 2045 \
   --min-buildings 5 \
+  --pv-location-mode swf \
   --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \
   --output-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2
 
@@ -115,6 +116,24 @@ uv run --project .. python -m src.scenario_calibration.profiles.paired_profile_r
   --paired-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
   --heat-profile-library outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5
 ```
+
+`--pv-location-mode swf` uses every cumulative, in-service SWF PV installation
+with `Baujahr <= 2045` only as evidence that a physical building is a permitted
+PV location; legacy rows without a usable `Baujahr` are retained as existing
+assets. `--pv-location-mode all_buildings` instead makes every retained
+physical building PV-eligible and does not require SWF PV locations. In both
+modes, `paired_roof_sections.csv` supplies the available capacity and angle bins
+from LoD2 roof surfaces. A building without any usable LoD2 roof section receives
+a 14.5 kW fallback at 45°/180°.
+
+The paired runner automatically creates or reuses
+`paired_pv_profile_library.h5` before parallel grid jobs start. The library uses
+the exact LoD2 surface area for capacity, bins profile tilt to 1° and azimuth to
+5°, and runs the existing pvlib model once per required angle bin. Real and
+synthetic grids therefore use identical normalized PV profiles.
+If the selected DB-mode result HDF does not contain `raw_data/weather`, the
+builder resolves that grid's database coordinates and requests the same PVGIS
+SARAH3 TMY input once while creating the shared cache.
 
 The regional physical heat-profile library is keyed by stable building identifiers and is reused across pylovo topology versions whenever weather and building assumptions are unchanged. The paired contract fixes one `scenario_unit_id` for each `(source LV, source connection bus, physical building)` tuple. Real and synthetic plans must contain the same scenario units and HH/GHD energy before optimization. Profiles remain at scenario-unit resolution through URBS and are projected to the selected network buses only at the Step-4 boundary. See [`gridalloc/src/scenario_calibration/PAIRED_SCENARIO.md`](gridalloc/src/scenario_calibration/PAIRED_SCENARIO.md) for the current audit, strict publication gate, and complete runner command.
 
@@ -293,6 +312,8 @@ This section documents the first-party code in `gridalloc/src`. Vendored third-p
   - Samples roof sections (`roofs`) per building from tilt distributions and assigns flat vs. gabled roofs.
   - Uses `pvlib` to compute PV AC power time series per `(tilt, azimuth)` combination and builds the URBS `supim` (Supply-Import) table.
   - Creates URBS process/commodity mappings for PV.
+  - The paired pipeline replaces randomized roofs with the CityDB LoD2 roof
+    catalog and a shared angle-binned pvlib profile library.
 
 - `electricity.py`
   - Samples household occupancy distribution per building and total annual electricity per household from CDFs.
@@ -442,7 +463,7 @@ Notes:
 - **Run directory matters**: paths like `data/grids` and `data/statistics` are relative; run from `gridalloc/`.
 - **Time resolution**: all outputs are designed around **8760 hourly** time steps (1 year). The DST correction in `Grid` uses fixed indices for 2009.
 - **Randomness / reproducibility**:
-  - PV roof sections and several demand assignments use NumPy random sampling without a global seed.
+  - The legacy standalone allocation samples PV roof sections without a global seed; the paired pipeline uses deterministic LoD2 roof surfaces.
   - EV simulation uses deterministic per-vehicle seeds derived from `(bcid, plz, kcid, bus, vehicle_id)` with retries that increment the seed if emobpy fails.
 - **Parallel execution**:
   - `--n_cpu > 1` parallelizes heat generation (multiprocessing) and mobility simulation (process pool).
@@ -458,4 +479,3 @@ Notes:
 - Missing weather columns (`temp_air`, `ghi`, `dni`, …): ensure `raw_data/weather` exists in the input `.h5`, or switch to API fetching.
 - `IndexError` during input selection: no file matched your `inputfile_id`, or multiple matches exist and the selected one is unexpected.
 - Mobility failures: emobpy may throw sporadic errors for certain sampled vehicles; the code retries up to 3 times with bumped seeds.
-

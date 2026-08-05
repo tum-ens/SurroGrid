@@ -16,6 +16,7 @@ from .ghd_calibration import build_synthetic_ghd_calibration
 from ..profiles.profile_contract import assert_paired_plan_equivalence
 from .scope_filters import build_grid_scope_summary
 from .sector_asset_calibration import build_sector_asset_calibration
+from .pv_roof_potential import building_roof_capacity, load_lod2_roof_catalog
 from ..paths import configured_pylovo_version_id
 from .swf_2045_building_match import (
     GRIDALLOC_DIR,
@@ -34,6 +35,7 @@ SCENARIO_UNIT_COLUMNS = [
     "source_allocation_bus",
     "building_objectid",
 ]
+PV_LOCATION_MODES = ("swf", "all_buildings")
 
 
 def _deduplicate_exact_wp_identities(
@@ -235,6 +237,96 @@ def _plan_summary(label: str, plan: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def _pv_scenario_unit_assignments(
+    real_plan: pd.DataFrame,
+    matches: pd.DataFrame,
+    *,
+    location_mode: str,
+) -> pd.DataFrame:
+    """Choose exactly one source connection for each eligible physical roof."""
+    if location_mode not in PV_LOCATION_MODES:
+        raise ValueError(f"pv_location_mode must be one of {PV_LOCATION_MODES}.")
+    candidates = real_plan.copy()
+    candidates["building_objectid"] = candidates["building_objectid"].astype(str)
+    if location_mode == "swf":
+        pv = matches[
+            matches["matched"].fillna(False)
+            & matches["asset_type"].eq("Photovoltaik")
+        ].copy()
+        counts = (
+            pv.groupby(["building_objectid", "lv_id", "bus"], dropna=False)
+            .size()
+            .rename("swf_pv_rows_at_connection")
+            .reset_index()
+            .rename(
+                columns={
+                    "lv_id": "source_lv_id",
+                    "bus": "source_allocation_bus",
+                }
+            )
+        )
+        counts["building_objectid"] = counts["building_objectid"].astype(str)
+        candidates = candidates.merge(
+            counts,
+            on=[
+                "building_objectid",
+                "source_lv_id",
+                "source_allocation_bus",
+            ],
+            how="inner",
+        )
+        candidates = candidates.sort_values(
+            [
+                "building_objectid",
+                "swf_pv_rows_at_connection",
+                "source_lv_id",
+                "source_allocation_bus",
+                "scenario_unit_id",
+            ],
+            ascending=[True, False, True, True, True],
+        )
+        method = "swf_cumulative_pv_location"
+    else:
+        candidates["_base_annual_kwh"] = (
+            pd.to_numeric(
+                candidates["residential_equivalent_hh_annual_kwh"], errors="coerce"
+            ).fillna(0.0)
+            + pd.to_numeric(
+                candidates["calibrated_annual_ghd_kwh"], errors="coerce"
+            ).fillna(0.0)
+        )
+        candidates = candidates.sort_values(
+            ["building_objectid", "_base_annual_kwh", "scenario_unit_id"],
+            ascending=[True, False, True],
+        )
+        method = "all_buildings_primary_demand_connection"
+    chosen = candidates.drop_duplicates("building_objectid", keep="first").copy()
+    chosen["pv_roof_assignment_method"] = method
+    return chosen[
+        ["building_objectid", "scenario_unit_id", "pv_roof_assignment_method"]
+    ].reset_index(drop=True)
+
+
+def _add_pv_roof_assignment(
+    plan: pd.DataFrame,
+    assignments: pd.DataFrame,
+    capacity_by_building: pd.Series,
+) -> pd.DataFrame:
+    result = plan.copy()
+    result["building_objectid"] = result["building_objectid"].astype(str)
+    result = result.merge(
+        assignments,
+        on=["building_objectid", "scenario_unit_id"],
+        how="left",
+    )
+    result["pv_roof_eligible"] = result["pv_roof_assignment_method"].notna()
+    result["pv_roof_capacity_kw"] = (
+        result["building_objectid"].map(capacity_by_building).fillna(0.0)
+        * result["pv_roof_eligible"].astype(float)
+    )
+    return result
+
+
 def build_paired_allocation(
     *,
     plz: int,
@@ -243,6 +335,7 @@ def build_paired_allocation(
     grid_data_path: Path | None = None,
     max_match_distance_m: float = 100.0,
     min_buildings: int = 5,
+    pv_location_mode: str = "swf",
 ) -> dict[str, pd.DataFrame]:
     pylovo_version_id = configured_pylovo_version_id()
     output_dir = output_dir or (
@@ -297,6 +390,31 @@ def build_paired_allocation(
         synthetic_mapping,
         min_buildings=min_buildings,
     )
+    retained_buildings = sorted(
+        real_plan["building_objectid"].dropna().astype(str).unique()
+    )
+    roof_catalog = load_lod2_roof_catalog(_database_engine(), retained_buildings)
+    roof_capacity = building_roof_capacity(roof_catalog)
+    pv_assignments = _pv_scenario_unit_assignments(
+        real_plan,
+        matches,
+        location_mode=pv_location_mode,
+    )
+    real_plan = _add_pv_roof_assignment(real_plan, pv_assignments, roof_capacity)
+    synthetic_plan = _add_pv_roof_assignment(
+        synthetic_plan,
+        pv_assignments,
+        roof_capacity,
+    )
+    building_plan["building_objectid"] = building_plan["building_objectid"].astype(str)
+    building_plan["pv_roof_capacity_kw"] = (
+        building_plan["building_objectid"].map(roof_capacity).fillna(0.0)
+    )
+    eligible_buildings = set(pv_assignments["building_objectid"])
+    building_plan["pv_roof_eligible"] = building_plan["building_objectid"].isin(
+        eligible_buildings
+    )
+    assert_paired_plan_equivalence(real_plan, synthetic_plan)
 
     metadata = {
         "plz": int(plz),
@@ -305,6 +423,19 @@ def build_paired_allocation(
         "max_match_distance_m": float(max_match_distance_m),
         "min_physical_buildings_per_target_grid": int(min_buildings),
         "scenario_scope": "paired_full_local_demand",
+        "pv_location_mode": pv_location_mode,
+        "pv_capacity_source": "citydb_lod2_roof_surfaces",
+        "pv_fallback_capacity_kw": 14.5,
+        "pv_eligible_buildings": int(len(eligible_buildings)),
+        "pv_available_capacity_kw": float(
+            roof_capacity.reindex(sorted(eligible_buildings)).fillna(0.0).sum()
+        ),
+        "pv_fallback_buildings": int(
+            roof_catalog.loc[
+                roof_catalog["quality_flag"].eq("fallback_14_5_kw"),
+                "building_objectid",
+            ].nunique()
+        ),
         "unmatched_ghd_policy": "exclude_row_retain_grid",
         **wp_dedup,
     }
@@ -319,6 +450,8 @@ def build_paired_allocation(
         "paired_grid_scope_audit": grid_scope,
         "paired_synthetic_ghd_calibration": ghd_calibration,
         "paired_synthetic_ghd_calibration_summary": ghd_calibration_summary,
+        "paired_roof_sections": roof_catalog,
+        "paired_pv_roof_assignments": pv_assignments,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, frame in outputs.items():
@@ -338,6 +471,15 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--max-match-distance-m", type=float, default=100.0)
     parser.add_argument("--min-buildings", type=int, default=5)
+    parser.add_argument(
+        "--pv-location-mode",
+        choices=PV_LOCATION_MODES,
+        default="swf",
+        help=(
+            "Use cumulative SWF PV locations or make every retained physical "
+            "building PV-eligible."
+        ),
+    )
     args = parser.parse_args()
     outputs = build_paired_allocation(
         plz=args.plz,
@@ -346,6 +488,7 @@ def main() -> None:
         grid_data_path=args.grid_data_path,
         max_match_distance_m=args.max_match_distance_m,
         min_buildings=args.min_buildings,
+        pv_location_mode=args.pv_location_mode,
     )
     print(outputs["paired_scope_audit"].to_string(index=False))
 

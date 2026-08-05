@@ -242,6 +242,41 @@ def _prepare_shared_tsam_reference(
     return signature
 
 
+def _prepare_shared_pv_profiles(
+    *,
+    args: argparse.Namespace,
+    repo_root: Path,
+    status: StatusLog,
+) -> Path:
+    """Build the angle-binned pvlib profiles once before parallel grid jobs."""
+    gridalloc_dir = repo_root / "GridExpand" / "2.demand_allocation" / "gridalloc"
+    output = args.paired_dir / "paired_pv_profile_library.h5"
+    run_batch_command(
+        cmd=[
+            "uv",
+            "run",
+            "--project",
+            "..",
+            "python",
+            "-m",
+            "src.scenario_calibration.profiles.pv_profile_library",
+            "--roof-catalog",
+            str(args.paired_dir / "paired_roof_sections.csv"),
+            "--allocation-plan",
+            str(args.paired_dir / "paired_real_bus_allocation_plan.csv"),
+            "--weather-source-hdf",
+            str(args.weather_source_hdf),
+            "--output",
+            str(output),
+        ],
+        cwd=gridalloc_dir,
+        log_path=args.run_dir / "logs" / "shared_pv_profile_library.log",
+        status=status,
+        stage="shared_pv_profile_library",
+    )
+    return output
+
+
 def _validate_shared_tsam(result_hdf: Path, expected: dict[str, Any] | None) -> None:
     if expected is None:
         return
@@ -577,6 +612,11 @@ def main() -> None:
     if not jobs:
         raise ValueError("No paired target grids matched the requested scope.")
     status = StatusLog(args.run_dir, resume=args.resume)
+    args.pv_profile_library = _prepare_shared_pv_profiles(
+        args=args,
+        repo_root=repo_root,
+        status=status,
+    )
     args.shared_tsam_signature = _prepare_shared_tsam_reference(
         args=args, jobs=jobs, repo_root=repo_root, status=status
     )

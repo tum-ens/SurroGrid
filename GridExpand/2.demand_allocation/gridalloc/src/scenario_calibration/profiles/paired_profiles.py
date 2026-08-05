@@ -43,6 +43,7 @@ from .real_swf_sector_profiles import (
 from ..paths import SYNTHETIC_INPUT_DIR
 from .heat_profile_source import load_physical_heat_profile
 from .physical_heat_profile_library import PhysicalHeatProfileLibrary
+from .pv_profile_library import profile_label, read_pv_profile_library
 
 
 @dataclass(frozen=True)
@@ -262,13 +263,20 @@ def build_paired_sector_urbs_inputs(
     hours: int,
     seed: int,
     weather_source_hdf: Path,
+    roof_catalog: pd.DataFrame,
+    pv_profile_library: Path,
     synthetic_input_dir: Path = SYNTHETIC_INPUT_DIR,
     heat_profile_catalog: pd.DataFrame | None = None,
     heat_profile_library: Path | None = None,
     allow_diagnostic_heat_fallback: bool = False,
 ) -> SectorUrbsInputs:
     """Build SWF-2045 sector profiles once and remap them to target buses."""
-    pv = _build_paired_pv(allocation, hours=hours, source_hdf=weather_source_hdf)
+    pv = _build_paired_pv(
+        allocation,
+        roof_catalog=roof_catalog,
+        hours=hours,
+        profile_library=pv_profile_library,
+    )
     battery = _build_paired_battery(allocation)
     mobility = _build_paired_mobility(allocation, hours=hours, seed=seed)
     heat = _build_paired_heat(
@@ -354,48 +362,77 @@ def _sum_numeric_columns(
 def _build_paired_pv(
     allocation: pd.DataFrame,
     *,
+    roof_catalog: pd.DataFrame,
     hours: int,
-    source_hdf: Path,
+    profile_library: Path,
 ) -> _PvInputs | None:
-    capacity = _sum_numeric_columns(
-        allocation,
-        ("residential_pv_kw", "ghd_pv_kw"),
-    )
-    profile_sites = allocation.get(
-        "_profile_site_id", allocation["allocation_bus"]
-    ).astype(int)
-    capacity_by_bus = capacity.groupby(profile_sites).sum()
-    capacity_by_bus = capacity_by_bus[capacity_by_bus.gt(0.0)]
-    if capacity_by_bus.empty:
-        return None
-
-    source_supim = pd.read_hdf(source_hdf, key="urbs_in/supim")
-    profile_label, source_column = _choose_source_pv_profile(source_supim)
-    base = (
-        pd.to_numeric(
-            source_supim[source_column],
-            errors="coerce",
+    if "pv_roof_eligible" not in allocation:
+        raise ValueError(
+            "Paired allocation is missing pv_roof_eligible. Regenerate the "
+            "LoD2-aware paired allocation first."
         )
-        .fillna(0.0)
-        .iloc[:hours]
-        .reset_index(drop=True)
+    eligible = allocation[allocation["pv_roof_eligible"].astype(bool)].copy()
+    if eligible.empty:
+        return None
+    eligible["building_objectid"] = eligible["building_objectid"].astype(str)
+    eligible["_profile_site_id"] = eligible.get(
+        "_profile_site_id", eligible["allocation_bus"]
+    ).astype(int)
+    roofs = roof_catalog[roof_catalog["profile_usable"].astype(bool)].copy()
+    roofs["building_objectid"] = roofs["building_objectid"].astype(str)
+    sections = eligible[["building_objectid", "_profile_site_id"]].merge(
+        roofs,
+        on="building_objectid",
+        how="left",
+        validate="one_to_many",
     )
-    if len(base) != hours:
-        raise ValueError(f"PV source profile has {len(base)} rows, expected {hours}.")
-    process_name = profile_label.replace("solar", "Rooftop PV", 1)
-    supim = pd.concat(
-        [base.rename((int(bus), profile_label)) for bus in capacity_by_bus.index],
-        axis=1,
+    if sections["available_pv_kw"].isna().any():
+        missing = sections.loc[
+            sections["available_pv_kw"].isna(), "building_objectid"
+        ].unique()[:10]
+        raise ValueError(f"Eligible buildings lack roof profiles: {missing.tolist()}")
+    grouped = (
+        sections.groupby(
+            ["_profile_site_id", "profile_tilt_deg", "profile_azimuth_deg"],
+            dropna=False,
+        )
+        .agg(
+            available_pv_kw=("available_pv_kw", "sum"),
+            roof_sections=("roof_surface_id", "count"),
+            building_objectid=("building_objectid", "first"),
+            fallback_used=(
+                "quality_flag",
+                lambda values: values.eq("fallback_14_5_kw").any(),
+            ),
+        )
+        .reset_index()
+        .rename(columns={"_profile_site_id": "Site"})
     )
+    profiles = read_pv_profile_library(profile_library).iloc[:hours].reset_index(drop=True)
+    if len(profiles) != hours:
+        raise ValueError(
+            f"PV profile library has {len(profiles)} rows, expected {hours}."
+        )
+    profile_columns = []
+    for row in grouped.itertuples(index=False):
+        label = profile_label(row.profile_tilt_deg, row.profile_azimuth_deg)
+        if label not in profiles:
+            raise ValueError(f"PV profile library is missing {label!r}.")
+        profile_columns.append(
+            profiles[label].rename((int(row.Site), label))
+        )
+    supim = pd.concat(profile_columns, axis=1)
     supim.columns = pd.MultiIndex.from_tuples(supim.columns)
     supim.index.name = "t"
     process = pd.DataFrame(
         [
             {
-                "Site": int(bus),
-                "Process": process_name,
+                "Site": int(row.Site),
+                "Process": profile_label(
+                    row.profile_tilt_deg, row.profile_azimuth_deg
+                ).replace("solar", "Rooftop PV", 1),
                 "inst-cap": 0,
-                "cap-up": float(capacity_kw),
+                "cap-up": float(row.available_pv_kw),
                 "inv-cost-fix": 6565,
                 "inv-cost": 533.7,
                 "fix-cost": 0,
@@ -404,49 +441,51 @@ def _build_paired_pv(
                 "depreciation": 15,
                 "pf-min": np.nan,
             }
-            for bus, capacity_kw in capacity_by_bus.items()
+            for row in grouped.itertuples(index=False)
         ]
     )
     commodity = pd.DataFrame(
         [
             {
-                "Site": int(bus),
-                "Commodity": profile_label,
+                "Site": int(row.Site),
+                "Commodity": profile_label(
+                    row.profile_tilt_deg, row.profile_azimuth_deg
+                ),
                 "Type": "SupIm",
                 "price": np.nan,
             }
-            for bus in capacity_by_bus.index
+            for row in grouped.itertuples(index=False)
         ]
+    )
+    labels = sorted(
+        {
+            profile_label(row.profile_tilt_deg, row.profile_azimuth_deg)
+            for row in grouped.itertuples(index=False)
+        }
     )
     process_commodity = pd.DataFrame(
         [
-            {
-                "Process": process_name,
-                "Commodity": profile_label,
-                "Direction": "In",
-                "ratio": 1,
-            },
-            {
-                "Process": process_name,
-                "Commodity": "electricity",
-                "Direction": "Out",
-                "ratio": 1,
-            },
+            row
+            for label in labels
+            for row in (
+                {
+                    "Process": label.replace("solar", "Rooftop PV", 1),
+                    "Commodity": label,
+                    "Direction": "In",
+                    "ratio": 1,
+                },
+                {
+                    "Process": label.replace("solar", "Rooftop PV", 1),
+                    "Commodity": "electricity",
+                    "Direction": "Out",
+                    "ratio": 1,
+                },
+            )
         ]
     )
-    audit = pd.DataFrame(
-        [
-            {
-                "sector": "pv",
-                "allocation_bus": int(bus),
-                "capacity_kw": float(capacity_kw),
-                "profile_label": profile_label,
-                "source_hdf": str(source_hdf),
-                "source_column": str(source_column),
-            }
-            for bus, capacity_kw in capacity_by_bus.items()
-        ]
-    )
+    audit = grouped.rename(columns={"available_pv_kw": "capacity_kw"})
+    audit["sector"] = "pv"
+    audit["profile_method"] = "lod2_roof_angles_pvlib"
     return _PvInputs(
         supim=supim,
         process=process,
