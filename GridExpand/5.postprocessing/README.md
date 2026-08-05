@@ -107,10 +107,7 @@ uv run --project GridExpand/4.powerflow python GridExpand/runme/synthetic_ags_pi
   --profiles all \
   --timeframe-mode full_year \
   --powerflow-output summary \
-  --tsam \
-  --tsam-periods 6 \
-  --tsam-hours-per-period 168 \
-  --tsam-extreme-method replace_cluster_center \
+  --scenario-config GridExpand/scenario_pipeline/configurations/scenarios/forchheim_2045.yaml \
   --run-dir GridExpand/run_logs/<run_name> \
   --workers 1 \
   --step2-cpus 4 \
@@ -175,7 +172,7 @@ Real grids with non-converged timesteps remain in `expansion_real_grid_status` w
 
 Which Path Should I Use?
 
-- Use `--powerflow-output summary` when storage should stay small and the notebooks only need compact stress metrics; combine it with `--tsam` for faster full-year screening. This now also creates `expansion_analysis_run` rows automatically.
+- Use `--powerflow-output summary` when storage should stay small and the notebooks only need compact stress metrics; enable representative periods in the Scenario YAML for faster full-year screening. This now also creates `expansion_analysis_run` rows automatically.
 - Use `--powerflow-output raw` for detailed timestep diagnostics or custom postprocessing. Expansion-cost materialization now works from compact summary rows for both synthetic and real SWF runs.
 - Use `materialize_powerflow_summary.py` only when raw time series already exist and compact notebook summaries are missing or stale.
 - Use `grid_expansion.py` manually only when you need to re-materialize or rename expansion-cost estimates; the normal summary pipeline does this automatically from compact summary rows.

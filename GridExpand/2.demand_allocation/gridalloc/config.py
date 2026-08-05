@@ -25,21 +25,10 @@ class Config:
     #--------------------------------------------------------------#
     #---------------- Solar Generator Constants -------------------#
     #--------------------------------------------------------------#
-    ### Statistics
-    # Roof type distribution
-    PROB_FLAT_ROOF = 0.15               # Source: https://www.researchgate.net/publication/317686603_A_Decision_Support_System_for_Photovoltaic_Potential_Estimation
-    PROB_GABLED_ROOF = 0.64 + 0.21      # Assuming other roof types similar to gabled
-    
-    # How much of roof useable for PV
-    FLAT_ROOF_UTILIZATION = 0.27        # Source: https://www.sciencedirect.com/science/article/pii/S0038092X14002114, Table 2
-    SLANTED_ROOF_UTILIZATION = 0.58
-
-    # Roof tilt distribution
-    ROOF_TILT_DIST = pd.read_csv(f"{DATA_STAT_DIR}/general/tilt_distribution.csv", skiprows=1)
+    # Roof geometry, utilization, profile bins, and sizing live in scenario YAML.
 
     ### Generator
     ALBEDO = 0.2                        # Ground reflectance. 0 refers to 0% and 1 refers to 100%, default value: https://pvwatts.nrel.gov/downloads/pvwattsv5.pdf
-    PV_AREA_FACTOR = 0.202              # kW/m^2 roof area, typical capacity for mono-SI under standard test conditions STC, https://publica.fraunhofer.de/entities/publication/f6b3dc37-454c-4d29-9040-76ce1b8454da
 
     MODULE_PARAMETERS = {
         'pdc0': 1000,                   # set to 1kW reference cap, will later be multiplied by (sys_cap_kWh/m^2)*roof_area

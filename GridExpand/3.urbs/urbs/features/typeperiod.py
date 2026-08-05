@@ -68,7 +68,8 @@ def _calculate_demand_duration_rmse(data, cluster_order, cluster_center_indices,
 
 
 ### Apply timeseries aggregation
-def run_tsam(data, noTypicalPeriods, hoursPerPeriod, extremePeriodMethod="replace_cluster_center"):
+def run_tsam(data, noTypicalPeriods, hoursPerPeriod, extremePeriodMethod="replace_cluster_center",
+             method_settings=None):
     """ Included time series for period selection:
     - Demand: water_heat, space_heat, mobilities, electricity, electricity-reactive
     - SupIm: solar
@@ -80,7 +81,8 @@ def run_tsam(data, noTypicalPeriods, hoursPerPeriod, extremePeriodMethod="replac
     ### Extract all relevant columns for type period selection
     filtered_dfs = []                                   # container list for tsam input columns
     extract_from = [data["weather"]]                    # List of data sheets from which columns are extracted for tsam input
-    extract_if_startwith = ["Tamb", "Irradiation"]      # List of column names to extract
+    method_settings = method_settings or {}
+    extract_if_startwith = list(method_settings.get("feature_weights", {"Tamb": 1.0, "Irradiation": 1.0}))
     for df in extract_from:
         if isinstance(df.columns, pd.MultiIndex) and df.columns.nlevels >= 2:
             mask = df.columns.get_level_values(1).str.startswith(tuple(extract_if_startwith))
@@ -96,26 +98,35 @@ def run_tsam(data, noTypicalPeriods, hoursPerPeriod, extremePeriodMethod="replac
 
     ### Generate weights for each time series
     # normalize weights for seasonal time series to their occurence in nodes:
-    weights={}
-    for col in time_series_data.columns:
-        if col[1] == 'Tamb':
-            weights[col] = 1.
-        if col[1] == 'Irradiation': 
-            weights[col] = 1.
+    configured_weights = method_settings.get("feature_weights", {"Tamb": 1.0, "Irradiation": 1.0})
+    weights = {
+        col: float(configured_weights[col[1]]) for col in time_series_data.columns
+    }
 
     ################### TSAM settings: extreme periods and clustering method #########################
     ### Add extreme periods
-    addMeanMin_cols = None  # forms the mean of the regarded typeperiod (e.g. temperature for each week), then takes period with minimum mean
-    addMeanMax_cols = None  # forms the max of the regarded typeperiod (e.g. temperature for each week), then takes period with minimum mean
-    addMeanMin_cols = [col for col in time_series_data.columns if col[1] == 'Tamb']
-    addMeanMax_cols = [col for col in time_series_data.columns if col[1] == 'Irradiation']
+    extreme_features = set(method_settings.get(
+        "extreme_features",
+        ["minimum_mean_temperature", "maximum_mean_irradiation"],
+    ))
+    addMeanMin_cols = (
+        [col for col in time_series_data.columns if col[1] == "Tamb"]
+        if "minimum_mean_temperature" in extreme_features else None
+    )
+    addMeanMax_cols = (
+        [col for col in time_series_data.columns if col[1] == "Irradiation"]
+        if "maximum_mean_irradiation" in extreme_features else None
+    )
 
 
     ### Clustering settings
-    clusterMethod = 'hierarchical'                    # good, because deterministic
-    representationMethod = "medoidRepresentation"     # final cluster representatives are chosen from actual typeperiod members (alternative: cluster mean representation)
-    segmentation = False                              # No segmentation of final typeperiods into representative segments
-    rescaleClusterPeriods = False                     # No rescaling of cluster data, as we will extract typeperiods manually from input data
+    clusterMethod = method_settings.get("clustering_method", "hierarchical")
+    representation_value = method_settings.get("cluster_representation", "medoid")
+    representationMethod = {"medoid": "medoidRepresentation", "mean": "meanRepresentation"}.get(representation_value)
+    if representationMethod is None:
+        raise ValueError(f"Unsupported TSAM cluster representation: {representation_value!r}")
+    segmentation = bool(method_settings.get("segmentation", False))
+    rescaleClusterPeriods = bool(method_settings.get("rescale_cluster_periods", False))
     if extremePeriodMethod=="new_cluster_center":     # Reduce number of typical periods by how many extreme periods will be added (s.t. final typical weeks still same)
         noTypicalPeriods -= sum([len(addMeanMin_cols) if addMeanMin_cols is not None else 0, len(addMeanMax_cols) if addMeanMax_cols is not None else 0])
         if noTypicalPeriods < 1: raise ValueError("Number extreme periods cannot be higher than number of typical periods")

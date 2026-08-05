@@ -179,6 +179,7 @@ def run_lvds_opt(input_path,        # path to input file
             global_settings["noTypicalPeriods"],
             global_settings["hoursPerPeriod"],
             global_settings.get("tsamExtremePeriodMethod", "replace_cluster_center"),
+            global_settings.get("tsamMethodSettings"),
         )
         end_time = time.time()  # Timer for measuring tsam duration
         if mode["tsam"]: print(f"TSAM took {(end_time-start_time)/60:.2f} minutes to run!\n") 

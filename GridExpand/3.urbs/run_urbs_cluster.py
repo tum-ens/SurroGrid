@@ -4,7 +4,19 @@ import os
 import shutil
 import time
 import argparse
+import sys
+from pathlib import Path
 from urbs.resource_report import resource_report
+
+GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
+if str(GRIDEXPAND_DIR) not in sys.path:
+    sys.path.insert(0, str(GRIDEXPAND_DIR))
+DEFAULT_SCENARIO_CONFIG = (
+    GRIDEXPAND_DIR / "scenario_pipeline" / "configurations" / "scenarios"
+    / "forchheim_2045.yaml"
+)
+
+from scenario_pipeline.configuration.loader import load_scenario_config
 
 # Note - this urbs version is deviating in the following ways from urbs-lvds (04 Feb 2025):
 # :: removed grid optimization, 14a/bui-react, uhp, coordination, curtailment
@@ -24,13 +36,14 @@ if __name__ == '__main__':
         parser = argparse.ArgumentParser(description="Low voltage grid DER allocation.")
         parser.add_argument("inputfile_id", help="Input file name (no path)")
         parser.add_argument("--n_cpu", default=1, help="Number of CPUs available for parallel generation")
-        parser.add_argument("--tsam", action="store_true", help="Enable TSAM type-week aggregation.")
-        parser.add_argument("--tsam-periods", type=int, default=6, help="Number of TSAM type weeks.")
-        parser.add_argument("--tsam-hours-per-period", type=int, default=168, help="Hours per TSAM period.")
+        parser.add_argument("--tsam", action="store_true", help="Optional enable override; scenario YAML is the default.")
+        parser.add_argument("--tsam-periods", type=int, default=None, help="Optional run override for TSAM type weeks.")
+        parser.add_argument("--tsam-hours-per-period", type=int, default=None, help="Optional run override for hours per period.")
+        parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
         parser.add_argument(
             "--tsam-extreme-method",
             choices=["append", "new_cluster_center", "replace_cluster_center"],
-            default="replace_cluster_center",
+            default=None,
             help="How TSAM should include cold and solar extreme weeks.",
         )
         parser.add_argument(
@@ -39,8 +52,11 @@ if __name__ == '__main__':
             help="Run preprocessing and TSAM reduction, write reduced_data/tsam outputs, and skip the URBS optimization solve.",
         )
         args = parser.parse_args()
-        if args.reduce_only and not args.tsam:
-            parser.error("--reduce-only is intended for TSAM preprocessing and requires --tsam.")
+        scenario, scenario_hash = load_scenario_config(args.scenario_config)
+        time_aggregation = scenario.time_aggregation
+        tsam_enabled = bool(args.tsam or time_aggregation.enabled)
+        if args.reduce_only and not tsam_enabled:
+            parser.error("--reduce-only requires time_aggregation.enabled in the scenario YAML.")
 
         ### Obtain relevant input_files
         # list all .h5 files in your directory
@@ -58,14 +74,30 @@ if __name__ == '__main__':
 
 
         ### Give global run settings
+        tsam_periods = args.tsam_periods or time_aggregation.number_of_typical_periods
+        tsam_hours = args.tsam_hours_per_period or time_aggregation.hours_per_period
+        tsam_extreme_method = (
+            args.tsam_extreme_method or time_aggregation.extreme_period_method
+        )
+        tsam_method_settings = {
+            "clustering_method": time_aggregation.clustering_method,
+            "cluster_representation": time_aggregation.cluster_representation,
+            "segmentation": time_aggregation.segmentation,
+            "rescale_cluster_periods": time_aggregation.rescale_cluster_periods,
+            "feature_weights": time_aggregation.feature_weights,
+            "extreme_features": list(time_aggregation.extreme_features),
+        }
         global_settings = {
             "input_file": input_file,
             # "input_file": 'N2775500E4431500_86154_1_-6.h5',    # input file name in dir "Input" 
             # "input_file": 'N2827500E4503500_93426_5_41.h5',    # input file name in dir "Input"
-            "tsam": args.tsam,                     # apply time series aggregation ("True", "False")
-            "noTypicalPeriods": args.tsam_periods, # tsam: number of aggregated typical periods (int, max 52)
-            "hoursPerPeriod": args.tsam_hours_per_period,  # tsam: length of typical period (int)
-            "tsamExtremePeriodMethod": args.tsam_extreme_method,
+            "tsam": tsam_enabled,
+            "noTypicalPeriods": tsam_periods,
+            "hoursPerPeriod": tsam_hours,
+            "tsamExtremePeriodMethod": tsam_extreme_method,
+            "tsamMethodSettings": tsam_method_settings,
+            "scenario_id": scenario.scenario_id,
+            "scenario_hash": scenario_hash,
             "reduce_only": args.reduce_only,
 
             # Electrification
@@ -79,7 +111,7 @@ if __name__ == '__main__':
 
         print("Following global settings are applied:")
         for key, value in global_settings.items():
-            print(f"{key:<16} {value:>1}")
+            print(f"{key:<24} {value}")
         print("\n")
 
 

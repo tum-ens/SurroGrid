@@ -38,11 +38,27 @@ def empty_timeseries(hours: int) -> pd.DataFrame:
     return frame
 
 
-def buy_sell_price(hours: int, electricity_module) -> pd.DataFrame:
+def buy_sell_price(
+    hours: int,
+    electricity_module,
+    *,
+    import_price_eur_per_kwh: float | None = None,
+    pv_feed_in_tariff_eur_per_kwh: float | None = None,
+) -> pd.DataFrame:
+    import_price = (
+        electricity_module.config.BSP_IMPORT
+        if import_price_eur_per_kwh is None
+        else float(import_price_eur_per_kwh)
+    )
+    feed_in_tariff = (
+        electricity_module.config.BSP_FEED_IN
+        if pv_feed_in_tariff_eur_per_kwh is None
+        else float(pv_feed_in_tariff_eur_per_kwh)
+    )
     return pd.DataFrame(
         {
-            "electricity_import": [electricity_module.config.BSP_IMPORT] * hours,
-            "electricity_feed_in": [electricity_module.config.BSP_FEED_IN] * hours,
+            "electricity_import": [import_price] * hours,
+            "electricity_feed_in": [feed_in_tariff] * hours,
         },
         index=pd.RangeIndex(hours, name="t"),
     )

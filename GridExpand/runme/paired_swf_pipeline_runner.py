@@ -2,9 +2,9 @@
 """Run the publication-oriented paired SWF scenario on both grid models.
 
 The runner uses one stable scenario-unit profile contract for real and
-synthetic targets. With ``--tsam``, representative periods are selected only
-from ambient temperature and irradiation. A canonical mapping is recorded once
-and every real and synthetic result must reproduce it before power flow starts.
+synthetic targets. TSAM methodology comes from the scenario YAML. A canonical
+mapping is recorded once and every real and synthetic result must reproduce it
+before power flow starts.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import shutil
+import sys
 import time
 from typing import Any
 
@@ -40,6 +41,13 @@ DEFAULT_PAIRED_DIR = (
     / "scenario_calibration"
     / "swf_2045_paired_v5_91301_station_hybrid_v2"
 )
+DEFAULT_SCENARIO_CONFIG = (
+    GRIDEXPAND_DIR / "scenario_pipeline" / "configurations" / "scenarios"
+    / "forchheim_2045.yaml"
+)
+if str(GRIDEXPAND_DIR) not in sys.path:
+    sys.path.insert(0, str(GRIDEXPAND_DIR))
+from scenario_pipeline.configuration.loader import load_scenario_config
 TARGET_CHOICES = ("real_swf", "synthetic", "both")
 
 
@@ -119,6 +127,10 @@ def _materialize_command(job: dict[str, Any], args: argparse.Namespace) -> list[
         str(args.seed),
         "--weather-source-hdf",
         str(args.weather_source_hdf),
+        "--model-case",
+        args.model_case,
+        "--scenario-config",
+        str(args.scenario_config),
     ]
     if args.heat_profile_library is not None:
         command.extend(["--heat-profile-library", str(args.heat_profile_library)])
@@ -130,17 +142,7 @@ def _materialize_command(job: dict[str, Any], args: argparse.Namespace) -> list[
 def _tsam_arguments(
     args: argparse.Namespace, *, reduce_only: bool = False
 ) -> list[str]:
-    if not args.tsam:
-        return []
-    arguments = [
-        "--tsam",
-        "--tsam-periods",
-        str(args.tsam_periods),
-        "--tsam-hours-per-period",
-        str(args.tsam_hours_per_period),
-        "--tsam-extreme-method",
-        args.tsam_extreme_method,
-    ]
+    arguments = ["--scenario-config", str(args.scenario_config)]
     if reduce_only:
         arguments.append("--reduce-only")
     return arguments
@@ -510,26 +512,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weather-source-hdf", type=Path, required=True)
     parser.add_argument("--heat-profile-library", type=Path)
     parser.add_argument("--scenario-label", default="swf_2045_paired_full_local")
+    parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
+    parser.add_argument(
+        "--model-case",
+        choices=(
+            "post-inflex-heuristic", "post-hems-optimized", "post-hems-heuristic",
+        ),
+        default="post-hems-heuristic",
+    )
     parser.add_argument("--run-name-prefix", default="paired_swf_2045_full_local")
     parser.add_argument("--seed", type=int, default=91301)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--step3-cpus", type=int, default=8)
     parser.add_argument("--step3-cluster-concurrency", type=int, default=1)
-    parser.add_argument(
-        "--tsam",
-        action="store_true",
-        help=(
-            "Use one shared representative-period selection based only on "
-            "ambient temperature and irradiation for both grid models."
-        ),
-    )
-    parser.add_argument("--tsam-periods", type=int, default=6)
-    parser.add_argument("--tsam-hours-per-period", type=int, default=168)
-    parser.add_argument(
-        "--tsam-extreme-method",
-        choices=("append", "new_cluster_center", "replace_cluster_center"),
-        default="replace_cluster_center",
-    )
     parser.add_argument("--step4-cpus", type=int, default=1)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--resume", action="store_true")
@@ -549,6 +544,19 @@ def main() -> None:
     args = parse_args()
     load_dotenv(ENV_PATH, override=True)
     repo_root = args.repo_root.resolve()
+    args.scenario_config = args.scenario_config.resolve()
+    scenario, scenario_hash = load_scenario_config(args.scenario_config)
+    if args.model_case not in scenario.model_cases:
+        raise ValueError(
+            f"Model case {args.model_case!r} is not enabled by {scenario.scenario_id!r}."
+        )
+    # Scientific TSAM choices come exclusively from the scenario YAML.
+    args.tsam = scenario.time_aggregation.enabled
+    args.tsam_periods = scenario.time_aggregation.number_of_typical_periods
+    args.tsam_hours_per_period = scenario.time_aggregation.hours_per_period
+    args.tsam_extreme_method = scenario.time_aggregation.extreme_period_method
+    args.scenario_label = f"{scenario.scenario_id}_{args.model_case}"
+    args.scenario_hash = scenario_hash
     args.paired_dir = args.paired_dir.resolve()
     if args.grid_data_path is not None:
         args.grid_data_path = args.grid_data_path.resolve()

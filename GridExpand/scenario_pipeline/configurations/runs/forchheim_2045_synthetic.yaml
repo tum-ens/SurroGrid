@@ -1,0 +1,23 @@
+# Execution and resource selection for one ordinary (non-paired) scenario run.
+run:
+  id: forchheim_2045_synthetic
+  scenario: ../scenarios/forchheim_2045.yaml
+  pipeline: scenario
+
+resources:
+  # AGS, bridge filename prefix, or DB-resolvable grid identifier.
+  inputfile_id: "91301"
+  storage: db
+  # Null keeps the standard Step-2 results directory.
+  output_directory: null
+  target_network: null
+  target_grid_id: null
+  paired_directory: null
+  weather_source_hdf: null
+
+execution:
+  # Machine-specific concurrency belongs in the run configuration.
+  n_cpu: 1
+  mobility_source: pool
+  demand_scope: all
+  timeframe_mode: full_year

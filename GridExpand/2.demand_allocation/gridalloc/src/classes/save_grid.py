@@ -23,6 +23,7 @@ class SaveFile:
         self.storage = storage
         allocation_settings = allocation_settings or {}
         self.timeseries_storage = allocation_settings.get("timeseries_storage", "db")
+        self.output_directory = allocation_settings.get("output_directory")
         self.persist_allocated_timeseries = self.timeseries_storage in {"db", "both"}
         self.db = SurroGridDatabase() if self.storage == "db" else None
         self.grid_ref = grid_ref
@@ -46,6 +47,12 @@ class SaveFile:
             )
         self.input_filename = allocation_settings.get("grid_filename", filename)
         self.filename = output_filename_for_timeframe(filename, self.timeframe_mode)
+        if allocation_settings.get("case_qualified_output"):
+            model_case = str(allocation_settings["model_case"])
+            output = Path(self.filename)
+            self.filename = (
+                f"{output.stem}_{model_case}{output.suffix}"
+            )
         self.input_path = self._get_readpath()
         self.output_path = self._generate_savepath()
 
@@ -61,7 +68,7 @@ class SaveFile:
         return os.path.join(directory, self.input_filename)
 
     def _generate_savepath(self):
-        directory = config.STORAGE_DIR
+        directory = self.output_directory or config.STORAGE_DIR
         os.makedirs(directory, exist_ok=True)
         return os.path.join(directory, self.filename)
 

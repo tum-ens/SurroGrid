@@ -14,13 +14,10 @@ import numpy as np
 import pandas as pd
 
 from ..paths import GRIDALLOC_DIR, GRIDEXPAND_DIR
+from ...assets.pv.labels import profile_label
 
 
 DEFAULT_PROFILE_LIBRARY_NAME = "paired_pv_profile_library.h5"
-
-
-def profile_label(tilt: float, azimuth: float) -> str:
-    return f"solar_{float(tilt):g}_{float(azimuth):g}"
 
 
 def required_profile_angles(
@@ -139,8 +136,11 @@ def _metadata_matches(path: Path, expected: dict[str, object]) -> bool:
 
 
 def _load_solar_module():
-    """Load the original Elias pvlib implementation with its local config."""
-    return _load_gridalloc_function_module("solar")
+    """Load the shared pvlib implementation with its local config."""
+    from ...assets.pv import profiles as module
+
+    module._calculate_pv_power = module.calculate_pv_power
+    return module
 
 
 def _load_weather_and_location(
@@ -192,7 +192,7 @@ def _load_weather_and_location(
     return weather, float(row["lat"]), float(row["lon"]), float(altitude)
 
 
-def _load_gridalloc_function_module(name: str):
+def _load_gridalloc_function_module(name: str, relative_dir: str = "functions"):
     demand_dir = GRIDALLOC_DIR.resolve()
     old_cwd = Path.cwd()
     sys.path.insert(0, str(demand_dir))
@@ -201,7 +201,7 @@ def _load_gridalloc_function_module(name: str):
         os.chdir(demand_dir)
         spec = importlib.util.spec_from_file_location(
             f"gridalloc_{name}",
-            demand_dir / "src" / "functions" / f"{name}.py",
+            demand_dir / "src" / relative_dir / f"{name}.py",
         )
         if spec is None or spec.loader is None:
             raise ImportError(f"Could not load gridalloc {name} module.")

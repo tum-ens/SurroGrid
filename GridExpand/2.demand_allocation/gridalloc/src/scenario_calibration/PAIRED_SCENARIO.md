@@ -51,7 +51,7 @@ For external communication, the 2045 electrification assumptions are summarized 
 | Electrification assumption | 2045 scenario |
 |---|---|
 | Heat pump | 47% of buildings; heat-pump and auxiliary-heater capacities are optimized |
-| PV and stationary battery | SWF-location mode retains the 2045 PV building locations; available PV capacity and production profiles come from LoD2 roof surfaces; mean installed battery capacity is 29.1 kWh |
+| PV and stationary battery | SWF rows retain predefined locations; PV potential comes from LoD2 roofs; battery capacity follows the shared HTW rule |
 | EV charging | 76% of buildings; 11 kW per charging point |
 
 The SWF inventory provides heat-pump locations but no positive heat-pump capacities, so URBS selects the heat-pump and auxiliary-heater capacities. SWF PV capacity is not used as an installation limit. The SWF pandapower file is cumulative: existing and future PV rows with different `Baujahr` values coexist in the final network and are `in_service`. In `swf` location mode, any PV row with `Baujahr <= 2045` establishes building/location eligibility; legacy rows without a usable year are retained as existing assets. Repeated rows at the same connection collapse to one eligibility record. In `all_buildings` mode, every retained physical building is eligible. Charging-station capacities are fixed; a building can carry more than one 11 kW charging point.
@@ -75,31 +75,23 @@ an invalid orientation are excluded and audited. Only when a building has no
 usable LoD2 section is one 14.5 kW fallback section at 45°/180° created.
 
 Capacity always uses the exact surface area. Generation profiles use deterministic
-1° tilt and 5° azimuth bins so equal orientations share a normalized annual
+5° tilt and 15° azimuth bins so similar orientations share a normalized annual
 pvlib profile. The paired runner builds `paired_pv_profile_library.h5` once from
 the selected weather source before starting parallel real/synthetic grid jobs.
 For DB-mode result files without embedded raw weather, it resolves the source
 grid coordinates from PostgreSQL and obtains the same PVGIS SARAH3 TMY once
 during cache construction. Subsequent runs reuse the library while its weather
 source and required angle set are unchanged.
-Within a scenario unit, roof sections in the same angle bin are aggregated into
-one URBS process. The optimized PV dimension remains bounded by the summed LoD2
-section `cap-up`, and post-no-flex reuses the post-flex optimized capacity.
+For `post-hems-optimized`, roof sections in the same angle bin are aggregated
+into one URBS process and the optimized dimension remains bounded by their
+summed LoD2 `cap-up`. Both heuristic cases instead use the same per-building
+capacity from the annual base-electricity rule and a capacity-weighted roof
+profile. INFLEX therefore no longer obtains PV capacity from a prior HEMS solve.
 
-Stationary batteries are fixed to the deduplicated SWF 2045 inventory in both post scenarios. SWF provides battery energy capacity but no separate inverter-power field. The model therefore assumes a two-hour battery and sets charge and discharge power to half its energy capacity. Post-flex dispatch is optimized by URBS. Post-no-flex uses causal local self-consumption control without forecasts: PV first supplies simultaneous demand, surplus PV charges the battery, and stored electricity later covers local residual demand. Grid charging and battery export are excluded. Each TSAM representative week uses a cyclic state-of-charge boundary so unrelated representative weeks cannot exchange energy.
 
-| Electrification combination | Buildings | Share of buildings |
-|---|---:|---:|
-| PV + battery only | 430 | 5.6% |
-| PV + battery + heat pump | 407 | 5.3% |
-| PV + battery + EV | 1,472 | 19.3% |
-| PV + battery + heat pump + EV | 1,345 | 17.6% |
-| Heat pump + EV | 1,332 | 17.4% |
-| Heat pump only | 498 | 6.5% |
-| EV only | 1,688 | 22.1% |
-| None | 475 | 6.2% |
+SWF stationary-battery rows are used as location evidence, not as capacity inputs. At those locations, heuristic cases apply the shared extrapolated HTW rule to base electricity and the heuristically installed PV system. The optimized HEMS case chooses battery capacity endogenously below the HTW bound computed from base electricity and LoD2 PV potential. A two-hour E/P ratio sets charge and discharge power to half the usable energy capacity. INFLEX uses causal local self-consumption control without forecasts: PV first supplies simultaneous demand, surplus charges the battery, and stored electricity later covers residual demand. Grid charging and battery export are excluded. Each TSAM representative week uses a cyclic state-of-charge boundary so unrelated representative weeks cannot exchange energy.
 
-The seven electrified combinations cover 93.8% of retained buildings. The remaining 475 buildings (6.2%) carry none of the three modeled electrification dimensions.
+Previous electrification-combination counts reflected SWF battery capacities and are intentionally omitted. They must be regenerated from the new battery asset-plan audit before publication.
 
 ## GHD and Mixed-Use Calibration
 
@@ -179,11 +171,9 @@ uv run --project GridExpand/2.demand_allocation \
   --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \
   --weather-source-hdf GridExpand/2.demand_allocation/gridalloc/results/9474126-00_91301_1_2.h5 \
   --heat-profile-library GridExpand/2.demand_allocation/gridalloc/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5 \
+  --scenario-config GridExpand/scenario_pipeline/configurations/scenarios/forchheim_2045.yaml \
+  --model-case post-hems-heuristic \
   --target both \
-  --tsam \
-  --tsam-periods 6 \
-  --tsam-hours-per-period 168 \
-  --tsam-extreme-method replace_cluster_center \
   --workers 4 \
   --step3-cpus 4 \
   --step3-cluster-concurrency 1 \

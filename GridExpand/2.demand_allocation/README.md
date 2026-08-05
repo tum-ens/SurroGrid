@@ -128,8 +128,8 @@ a 14.5 kW fallback at 45°/180°.
 
 The paired runner automatically creates or reuses
 `paired_pv_profile_library.h5` before parallel grid jobs start. The library uses
-the exact LoD2 surface area for capacity, bins profile tilt to 1° and azimuth to
-5°, and runs the existing pvlib model once per required angle bin. Real and
+the exact LoD2 surface area for capacity, bins profile tilt to 5° and azimuth to
+15°, and runs the existing pvlib model once per required angle bin. Real and
 synthetic grids therefore use identical normalized PV profiles.
 If the selected DB-mode result HDF does not contain `raw_data/weather`, the
 builder resolves that grid's database coordinates and requests the same PVGIS
@@ -226,7 +226,7 @@ If present, the run can be executed fully offline (recommended on HPC). If missi
 
 Minimum columns used by this step:
 
-- `time(inst)` (datetime-like): used as the PV model time index in `src/functions/solar.py`
+- `time(inst)` (datetime-like): used by the shared LoD2 pvlib profile generator in `src/assets/pv/profiles.py`
 - `ghi`, `dni`, `dhi` (float): irradiance components (W/m²)
 - `temp_air` (float): ambient temperature (°C)
 - `relative_humidity` (float): % (0–100)

@@ -1,0 +1,58 @@
+# Configuration reference
+
+The pipeline uses two YAML files.
+
+- A **scenario YAML** contains assumptions that change scientific results and
+  is fingerprinted as `scenario_hash`.
+- A **run YAML** selects grids, storage, paths, and execution resources and is
+  fingerprinted as `run_hash`.
+
+Unknown keys, incorrect types, invalid ranges, unsupported case names, and
+missing required fields fail during loading. This validation prevents a typo
+from silently falling back to a different assumption.
+
+## Scenario YAML
+
+- `scenario.id`: stable scenario identifier.
+- `scenario.milestone_year`: modeled milestone year.
+- `scenario.model_cases`: subset of the four documented model cases.
+- `economics.electricity.import_price_eur_per_kwh`: grid purchase price.
+- `economics.electricity.pv_feed_in_tariff_eur_per_kwh`: PV export revenue;
+  zero disables remuneration without removing physical exports.
+- `asset_sizing.pv.heuristic_method`: upstream sizing rule.
+- `asset_sizing.pv.optimized_method`: endogenous urbs sizing mode.
+- `asset_sizing.pv.location_mode`: predefined source locations or all buildings.
+- `asset_sizing.pv.demand_multiplier`: multiplier in the PV sizing equation.
+- `asset_sizing.pv.fallback_capacity_kwp`: missing-LoD2 fallback.
+- `asset_sizing.pv.maximum_fallback_share`: accepted fallback fraction, 0--1.
+- `asset_sizing.pv.module_capacity_kw_per_m2`: module peak density.
+- `asset_sizing.pv.*_roof_utilization`: usable surface fraction, 0--1.
+- `asset_sizing.pv.*_bin_degrees`: shared pvlib profile resolution.
+- `asset_sizing.battery.*_method`: heuristic and optimized sizing modes.
+- `asset_sizing.battery.location_mode`: all PV buildings are candidates.
+- `asset_sizing.battery.predefined_locations_when_available`: use source
+  inventory rows as location evidence when supplied.
+- `asset_sizing.battery.minimum_pv_kwp_per_annual_mwh`: HTW surplus threshold.
+- `asset_sizing.battery.maximum_usable_*`: the two HTW usable-energy bounds.
+- `asset_sizing.battery.energy_to_power_hours`: fixed E/P ratio in hours.
+- `asset_sizing.heat_pump.method`: temporary adapter pending the HP rule.
+- `time_aggregation.*`: complete TSAM methodology; see comments in the example.
+
+## Run YAML
+
+- `run.id`: execution identifier.
+- `run.scenario`: scenario YAML path, relative to the run YAML.
+- `run.pipeline`: `scenario` or `paired_validation`.
+- `resources.inputfile_id`: DB/grid/HDF identifier.
+- `resources.storage`: `db` or `h5`.
+- `resources.output_directory`: optional output override.
+- `resources.target_*`, `paired_directory`, `weather_source_hdf`: paired-only
+  resources; null for a normal scenario run.
+- `execution.n_cpu`: machine concurrency.
+- `execution.mobility_source`: current mobility generator/pool selection.
+- `execution.demand_scope`: current building demand scope.
+- `execution.timeframe_mode`: full year or supported operational slice.
+
+Implementation constants such as database schema names, API endpoints, and
+static dataset paths remain in the existing Python config. They are not
+scenario choices.

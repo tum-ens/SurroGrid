@@ -245,7 +245,7 @@ if __name__ == '__main__':
         # GRD.df_buildings = GRD.df_buildings.iloc[0:5].reset_index(drop=True)
 
         ### Data and Demand Generation
-        # Order is important: Weather -> base electricity -> PV -> battery -> Heat -> Mobility.
+        # Order is important: Weather -> base electricity -> PV -> Heat -> Mobility.
         if settings["is_status_quo"]:
             with resource_report(include_children=True, name="Electricity Generation") as rr:
                 GRD.generate_electricity()

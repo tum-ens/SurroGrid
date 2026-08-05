@@ -8,6 +8,10 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from ...assets.battery.materialization import materialize_battery_urbs_inputs
+from ...assets.battery.sizing import build_battery_asset_plan
+from ...assets.pv.materialization import materialize_pv_urbs_inputs
+from ...assets.pv.sizing import build_pv_asset_plan
 
 from .profile_contract import (
     assert_energy_conserved,
@@ -43,7 +47,7 @@ from .real_swf_sector_profiles import (
 from ..paths import SYNTHETIC_INPUT_DIR
 from .heat_profile_source import load_physical_heat_profile
 from .physical_heat_profile_library import PhysicalHeatProfileLibrary
-from .pv_profile_library import profile_label, read_pv_profile_library
+from .pv_profile_library import read_pv_profile_library
 
 
 @dataclass(frozen=True)
@@ -265,6 +269,14 @@ def build_paired_sector_urbs_inputs(
     weather_source_hdf: Path,
     roof_catalog: pd.DataFrame,
     pv_profile_library: Path,
+    pv_sizing_method: str = "optimization",
+    pv_demand_multiplier: float = 2.5,
+    battery_sizing_method: str = "htw_2025_upper_bound",
+    battery_minimum_pv_kwp_per_annual_mwh: float = 0.5,
+    battery_maximum_usable_kwh_per_pv_kwp: float = 1.5,
+    battery_maximum_usable_kwh_per_annual_mwh: float = 1.5,
+    battery_energy_to_power_hours: float = 2.0,
+    battery_predefined_locations_when_available: bool = True,
     synthetic_input_dir: Path = SYNTHETIC_INPUT_DIR,
     heat_profile_catalog: pd.DataFrame | None = None,
     heat_profile_library: Path | None = None,
@@ -276,8 +288,29 @@ def build_paired_sector_urbs_inputs(
         roof_catalog=roof_catalog,
         hours=hours,
         profile_library=pv_profile_library,
+        sizing_method=pv_sizing_method,
+        demand_multiplier=pv_demand_multiplier,
     )
-    battery = _build_paired_battery(allocation)
+    if pv is None:
+        battery = None
+    else:
+        pv_asset_plan = pv.audit[
+            pv.audit["audit_record_type"].eq("asset_plan")
+        ].copy()
+        battery = _build_paired_battery(
+            allocation,
+            pv_asset_plan=pv_asset_plan,
+            sizing_method=battery_sizing_method,
+            minimum_pv_kwp_per_annual_mwh=battery_minimum_pv_kwp_per_annual_mwh,
+            maximum_usable_kwh_per_pv_kwp=battery_maximum_usable_kwh_per_pv_kwp,
+            maximum_usable_kwh_per_annual_mwh=(
+                battery_maximum_usable_kwh_per_annual_mwh
+            ),
+            energy_to_power_hours=battery_energy_to_power_hours,
+            predefined_locations_when_available=(
+                battery_predefined_locations_when_available
+            ),
+        )
     mobility = _build_paired_mobility(allocation, hours=hours, seed=seed)
     heat = _build_paired_heat(
         allocation,
@@ -365,6 +398,8 @@ def _build_paired_pv(
     roof_catalog: pd.DataFrame,
     hours: int,
     profile_library: Path,
+    sizing_method: str = "optimization",
+    demand_multiplier: float = 2.5,
 ) -> _PvInputs | None:
     if "pv_roof_eligible" not in allocation:
         raise ValueError(
@@ -378,181 +413,120 @@ def _build_paired_pv(
     eligible["_profile_site_id"] = eligible.get(
         "_profile_site_id", eligible["allocation_bus"]
     ).astype(int)
-    roofs = roof_catalog[roof_catalog["profile_usable"].astype(bool)].copy()
-    roofs["building_objectid"] = roofs["building_objectid"].astype(str)
-    sections = eligible[["building_objectid", "_profile_site_id"]].merge(
-        roofs,
-        on="building_objectid",
-        how="left",
-        validate="one_to_many",
-    )
-    if sections["available_pv_kw"].isna().any():
-        missing = sections.loc[
-            sections["available_pv_kw"].isna(), "building_objectid"
-        ].unique()[:10]
-        raise ValueError(f"Eligible buildings lack roof profiles: {missing.tolist()}")
-    grouped = (
-        sections.groupby(
-            ["_profile_site_id", "profile_tilt_deg", "profile_azimuth_deg"],
-            dropna=False,
-        )
-        .agg(
-            available_pv_kw=("available_pv_kw", "sum"),
-            roof_sections=("roof_surface_id", "count"),
-            building_objectid=("building_objectid", "first"),
-            fallback_used=(
-                "quality_flag",
-                lambda values: values.eq("fallback_14_5_kw").any(),
-            ),
-        )
-        .reset_index()
-        .rename(columns={"_profile_site_id": "Site"})
-    )
     profiles = read_pv_profile_library(profile_library).iloc[:hours].reset_index(drop=True)
     if len(profiles) != hours:
         raise ValueError(
             f"PV profile library has {len(profiles)} rows, expected {hours}."
         )
-    profile_columns = []
-    for row in grouped.itertuples(index=False):
-        label = profile_label(row.profile_tilt_deg, row.profile_azimuth_deg)
-        if label not in profiles:
-            raise ValueError(f"PV profile library is missing {label!r}.")
-        profile_columns.append(
-            profiles[label].rename((int(row.Site), label))
-        )
-    supim = pd.concat(profile_columns, axis=1)
-    supim.columns = pd.MultiIndex.from_tuples(supim.columns)
-    supim.index.name = "t"
-    process = pd.DataFrame(
-        [
-            {
-                "Site": int(row.Site),
-                "Process": profile_label(
-                    row.profile_tilt_deg, row.profile_azimuth_deg
-                ).replace("solar", "Rooftop PV", 1),
-                "inst-cap": 0,
-                "cap-up": float(row.available_pv_kw),
-                "inv-cost-fix": 6565,
-                "inv-cost": 533.7,
-                "fix-cost": 0,
-                "var-cost": 0,
-                "wacc": 0.022,
-                "depreciation": 15,
-                "pf-min": np.nan,
-            }
-            for row in grouped.itertuples(index=False)
-        ]
+    buildings = eligible.assign(
+        Site=eligible["_profile_site_id"],
+        annual_electricity_kwh=_sum_numeric_columns(
+            eligible, ("residential_equivalent_hh_annual_kwh", "calibrated_annual_ghd_kwh")
+        ),
     )
-    commodity = pd.DataFrame(
-        [
-            {
-                "Site": int(row.Site),
-                "Commodity": profile_label(
-                    row.profile_tilt_deg, row.profile_azimuth_deg
-                ),
-                "Type": "SupIm",
-                "price": np.nan,
-            }
-            for row in grouped.itertuples(index=False)
-        ]
+    asset_plan, selected_sections = build_pv_asset_plan(
+        buildings,
+        roof_catalog,
+        profiles,
+        sizing_method=sizing_method,
+        demand_multiplier=demand_multiplier,
     )
-    labels = sorted(
-        {
-            profile_label(row.profile_tilt_deg, row.profile_azimuth_deg)
-            for row in grouped.itertuples(index=False)
-        }
+    shared = materialize_pv_urbs_inputs(
+        asset_plan,
+        selected_sections,
+        profiles,
+        sizing_method=sizing_method,
     )
-    process_commodity = pd.DataFrame(
-        [
-            row
-            for label in labels
-            for row in (
-                {
-                    "Process": label.replace("solar", "Rooftop PV", 1),
-                    "Commodity": label,
-                    "Direction": "In",
-                    "ratio": 1,
-                },
-                {
-                    "Process": label.replace("solar", "Rooftop PV", 1),
-                    "Commodity": "electricity",
-                    "Direction": "Out",
-                    "ratio": 1,
-                },
-            )
-        ]
-    )
-    audit = grouped.rename(columns={"available_pv_kw": "capacity_kw"})
+    audit = shared.audit.copy()
     audit["sector"] = "pv"
     audit["profile_method"] = "lod2_roof_angles_pvlib"
-    return _PvInputs(
-        supim=supim,
-        process=process,
-        commodity=commodity,
-        process_commodity=process_commodity,
-        audit=audit,
+    audit["audit_record_type"] = "pv_materialization"
+    plan_audit = asset_plan.copy()
+    plan_audit["sector"] = "pv"
+    plan_audit["profile_method"] = "lod2_roof_angles_pvlib"
+    plan_audit["audit_record_type"] = "asset_plan"
+    audit = pd.concat(
+        [plan_audit, audit],
+        ignore_index=True,
+        sort=False,
     )
+    return _PvInputs(
+        shared.supim,
+        shared.process,
+        shared.commodity,
+        shared.process_commodity,
+        audit,
+    )
+
 
 
 def _build_paired_battery(
     allocation: pd.DataFrame,
+    *,
+    pv_asset_plan: pd.DataFrame,
+    sizing_method: str,
+    minimum_pv_kwp_per_annual_mwh: float,
+    maximum_usable_kwh_per_pv_kwp: float,
+    maximum_usable_kwh_per_annual_mwh: float,
+    energy_to_power_hours: float,
+    predefined_locations_when_available: bool,
 ) -> _BatteryInputs | None:
-    """Create the fixed SWF stationary-battery inventory at scenario-unit sites."""
-    capacity = _sum_numeric_columns(
-        allocation,
-        ("residential_battery_kwh", "ghd_battery_kwh"),
+    """Size batteries consistently while using SWF rows only as location evidence."""
+    inventory_capacity = _sum_numeric_columns(
+        allocation, ("residential_battery_kwh", "ghd_battery_kwh")
     )
-    profile_sites = allocation.get(
-        "_profile_site_id", allocation["allocation_bus"]
-    ).astype(int)
-    capacity_by_site = capacity.groupby(profile_sites).sum()
-    capacity_by_site = capacity_by_site[capacity_by_site.gt(0.0)]
-    if capacity_by_site.empty:
-        return None
+    inventory = allocation.assign(_battery_inventory_kwh=inventory_capacity)
+    inventory = _sorted_allocation(
+        inventory[inventory["_battery_inventory_kwh"].gt(0.0)]
+    )
+    use_inventory = predefined_locations_when_available and not inventory.empty
+    if use_inventory:
+        eligible_buildings = set(inventory["building_objectid"].astype(str))
+        site_by_building = (
+            inventory.assign(
+                _battery_site=inventory.get(
+                    "_profile_site_id", inventory["allocation_bus"]
+                ).astype(int)
+            )
+            .drop_duplicates("building_objectid")
+            .set_index(inventory["building_objectid"].astype(str))["_battery_site"]
+            .to_dict()
+        )
+        location_source = "predefined_swf_battery_locations"
+    else:
+        eligible_buildings = None
+        site_by_building = None
+        location_source = "all_pv_buildings"
 
-    electricity = load_electricity_module()
-    config = electricity.config
-    rows = []
-    audit_rows = []
-    for site, energy_kwh in capacity_by_site.items():
-        power_kw = float(energy_kwh) / 2.0
-        rows.append(
-            {
-                "Site": int(site),
-                "Storage": "battery_private",
-                "Commodity": "electricity",
-                "inst-cap-c": float(energy_kwh),
-                "cap-up-c": float(energy_kwh),
-                "inst-cap-p": power_kw,
-                "cap-up-p": power_kw,
-                "eff-in": config.BS_EFF_IN,
-                "eff-out": config.BS_EFF_OUT,
-                "discharge": config.BS_DISCHARGE,
-                "ep-ratio": 2.0,
-                "inv-cost-p": 0.0,
-                "inv-cost-c": 0.0,
-                "fix-cost-p": 0.0,
-                "fix-cost-c": 0.0,
-                "var-cost-p": config.BS_VAR_COST_P,
-                "wacc": config.BS_WACC,
-                "depreciation": config.BS_DEPRECIATION,
-            }
-        )
-        audit_rows.append(
-            {
-                "sector": "stationary_battery",
-                "allocation_bus": int(site),
-                "energy_capacity_kwh": float(energy_kwh),
-                "power_capacity_kw": power_kw,
-                "energy_to_power_hours": 2.0,
-                "capacity_source": "deduplicated_swf_2045_inventory",
-            }
-        )
-    return _BatteryInputs(
-        storage=pd.DataFrame(rows),
-        audit=pd.DataFrame(audit_rows),
+    plan = build_battery_asset_plan(
+        pv_asset_plan,
+        sizing_method=sizing_method,
+        minimum_pv_kwp_per_annual_mwh=minimum_pv_kwp_per_annual_mwh,
+        maximum_usable_kwh_per_pv_kwp=maximum_usable_kwh_per_pv_kwp,
+        maximum_usable_kwh_per_annual_mwh=maximum_usable_kwh_per_annual_mwh,
+        eligible_buildings=eligible_buildings,
+        site_by_building=site_by_building,
+        location_source=location_source,
     )
+    electricity = load_electricity_module()
+    materialized = materialize_battery_urbs_inputs(
+        plan,
+        sizing_method=sizing_method,
+        energy_to_power_hours=energy_to_power_hours,
+        technical_parameters=electricity.config,
+    )
+    if materialized.storage.empty:
+        return None
+    plan_audit = plan.copy()
+    plan_audit["sector"] = "stationary_battery"
+    plan_audit["audit_record_type"] = "battery_asset_plan"
+    return _BatteryInputs(
+        storage=materialized.storage,
+        audit=pd.concat(
+            [plan_audit, materialized.audit], ignore_index=True, sort=False
+        ),
+    )
+
 
 def _build_paired_mobility(
     allocation: pd.DataFrame,

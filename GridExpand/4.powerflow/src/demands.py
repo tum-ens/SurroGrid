@@ -485,7 +485,7 @@ def _pv_generation(df_supim, df_process, cap_pro):
         return _empty_electricity_frame(df_supim.index)
 
     process = df_process.reset_index()
-    required = {"Site", "Process", "cap-up"}
+    required = {"Site", "Process", "inst-cap", "cap-up"}
     if not required.issubset(process.columns):
         return _empty_electricity_frame(df_supim.index)
 
@@ -499,12 +499,19 @@ def _pv_generation(df_supim, df_process, cap_pro):
         column = (row["Site"], commodity)
         if column not in df_supim.columns:
             continue
-        optimized_capacity_kw = float(
-            _capacity_by_bus(cap_pro, process_name, [row["Site"]]).iloc[0]
-        )
+        installed_capacity_kw = float(row["inst-cap"])
+        capacity_upper_kw = float(row["cap-up"])
+        if np.isclose(installed_capacity_kw, capacity_upper_kw):
+            # Heuristic asset plans are fixed upstream and independent of HEMS.
+            pv_capacity_kw = installed_capacity_kw
+        else:
+            # Endogenous HEMS sizing still uses the solved process capacity.
+            pv_capacity_kw = float(
+                _capacity_by_bus(cap_pro, process_name, [row["Site"]]).iloc[0]
+            )
         parts.append(
             pd.to_numeric(df_supim[column], errors="coerce").fillna(0.0)
-            * optimized_capacity_kw
+            * pv_capacity_kw
         )
         labels.append((row["Site"], commodity))
 

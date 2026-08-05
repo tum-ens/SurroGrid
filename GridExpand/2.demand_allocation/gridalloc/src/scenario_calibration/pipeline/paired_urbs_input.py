@@ -17,12 +17,18 @@ DEFAULT_PAIRED_DIR = (
     / "swf_2045_paired_v5_91301_station_hybrid_v2"
 )
 DEFAULT_OUTPUT_DIR = GRIDEXPAND_DIR / "3.urbs" / "Input"
+DEFAULT_SCENARIO_CONFIG = (
+    GRIDEXPAND_DIR / "scenario_pipeline" / "configurations" / "scenarios"
+    / "forchheim_2045.yaml"
+)
 
 for path in (GRIDEXPAND_DIR, GRIDALLOC_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 from common.timeframe import build_full_year_metadata, write_hdf_metadata  # noqa: E402
+from scenario_pipeline.configuration.loader import load_scenario_config  # noqa: E402
+from src.assets.pv.roof_catalog import assert_fallback_share  # noqa: E402
 from src.scenario_calibration.profiles.paired_profiles import (  # noqa: E402
     build_paired_base_electric_demand,
     build_paired_sector_urbs_inputs,
@@ -115,8 +121,19 @@ def materialize_paired_urbs_input(
     weather_source_hdf: Path,
     heat_profile_library: Path | None,
     allow_diagnostic_heat_fallback: bool,
+    model_case: str = "post-hems-heuristic",
+    scenario_config_path: Path = DEFAULT_SCENARIO_CONFIG,
 ) -> Path:
     """Write one paired full-year Step-3 input HDF."""
+    scenario, scenario_hash = load_scenario_config(scenario_config_path)
+    if model_case not in scenario.model_cases:
+        raise ValueError(
+            f"Model case {model_case!r} is not enabled in scenario {scenario.scenario_id!r}."
+        )
+    pv_sizing_method = scenario.pv_sizing_method(model_case)
+    battery_sizing_method = scenario.battery_sizing_method(model_case)
+    if pv_sizing_method == "none":
+        raise ValueError("The pre case is materialized by the electricity-only pipeline.")
     paired_dir = paired_dir.resolve()
     allocation = _target_plan(
         paired_dir,
@@ -145,6 +162,11 @@ def materialize_paired_urbs_input(
             "Build the shared PV profile library before materialization: "
             f"{pv_profile_library}"
         )
+    assert_fallback_share(
+        roof_catalog,
+        allocation.loc[allocation["pv_roof_eligible"].astype(bool), "building_objectid"],
+        scenario.pv.maximum_fallback_share,
+    )
     library_sources = (
         heat_catalog.get("profile_source_kind", pd.Series(dtype=str))
         .astype(str)
@@ -182,6 +204,16 @@ def materialize_paired_urbs_input(
         weather_source_hdf=weather_source_hdf.resolve(),
         roof_catalog=roof_catalog,
         pv_profile_library=pv_profile_library,
+        pv_sizing_method=pv_sizing_method,
+        battery_sizing_method=battery_sizing_method,
+        battery_minimum_pv_kwp_per_annual_mwh=scenario.battery.minimum_pv_kwp_per_annual_mwh,
+        battery_maximum_usable_kwh_per_pv_kwp=scenario.battery.maximum_usable_kwh_per_pv_kwp,
+        battery_maximum_usable_kwh_per_annual_mwh=scenario.battery.maximum_usable_kwh_per_annual_mwh,
+        battery_energy_to_power_hours=scenario.battery.energy_to_power_hours,
+        battery_predefined_locations_when_available=(
+            scenario.battery.predefined_locations_when_available
+        ),
+        pv_demand_multiplier=scenario.pv.demand_multiplier,
         heat_profile_catalog=heat_catalog,
         heat_profile_library=heat_profile_library,
         allow_diagnostic_heat_fallback=allow_diagnostic_heat_fallback,
@@ -213,6 +245,12 @@ def materialize_paired_urbs_input(
     heat_audit = sector_inputs.audit[
         sector_inputs.audit.get("sector", pd.Series(dtype=str)).eq("heat")
     ]
+    asset_plan = sector_inputs.audit[
+        sector_inputs.audit.get(
+            "audit_record_type",
+            pd.Series(index=sector_inputs.audit.index, dtype=str),
+        ).isin(["asset_plan", "battery_asset_plan"])
+    ].copy()
     metadata = {
         **build_full_year_metadata(),
         "source": "paired_swf_2045",
@@ -224,6 +262,16 @@ def materialize_paired_urbs_input(
         "optimization_space": "scenario_unit",
         "paired_dir": str(paired_dir),
         "profile_seed": int(seed),
+        "scenario_id": scenario.scenario_id,
+        "scenario_hash": scenario_hash,
+        "model_case": model_case,
+        "pv_sizing_method": pv_sizing_method,
+        "pv_feed_in_tariff_eur_per_kwh": scenario.economics.pv_feed_in_tariff_eur_per_kwh,
+        "battery_sizing_method": battery_sizing_method,
+        "battery_energy_to_power_hours": scenario.battery.energy_to_power_hours,
+        "battery_predefined_locations_when_available": scenario.battery.predefined_locations_when_available,
+        "heat_pump_sizing_method": scenario.heat_pump.method,
+        "temporary_asset_sizing_placeholders": ["heat_pump"],
         "physical_buildings": int(allocation["building_objectid"].nunique()),
         "hh_rows": float(allocation["residential_equivalent_hh_rows"].sum()),
         "hh_annual_kwh": float(
@@ -257,6 +305,7 @@ def materialize_paired_urbs_input(
         complevel=9,
     ) as store:
         store.put("raw_data/allocation_plan", allocation.reset_index(drop=True))
+        store.put("raw_data/asset_plan", asset_plan.reset_index(drop=True))
         store.put(
             "raw_data/demand_profile_audit",
             demand_audit.reset_index(drop=True),
@@ -270,7 +319,12 @@ def materialize_paired_urbs_input(
         store.put("urbs_in/eff_factor", sector_inputs.eff_factor)
         store.put(
             "urbs_in/buy_sell_price",
-            buy_sell_price(len(demand), electricity_module),
+            buy_sell_price(
+                len(demand),
+                electricity_module,
+                import_price_eur_per_kwh=scenario.economics.import_price_eur_per_kwh,
+                pv_feed_in_tariff_eur_per_kwh=scenario.economics.pv_feed_in_tariff_eur_per_kwh,
+            ),
         )
         store.put(
             "urbs_in/weather",
@@ -302,6 +356,15 @@ def main() -> None:
     parser.add_argument("--weather-source-hdf", type=Path, required=True)
     parser.add_argument("--heat-profile-library", type=Path)
     parser.add_argument(
+        "--model-case",
+        choices=[
+            "post-inflex-heuristic", "post-hems-optimized",
+            "post-hems-heuristic",
+        ],
+        default="post-hems-heuristic",
+    )
+    parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
+    parser.add_argument(
         "--allow-diagnostic-heat-fallback",
         action="store_true",
         help=(
@@ -325,6 +388,8 @@ def main() -> None:
             else None
         ),
         allow_diagnostic_heat_fallback=(args.allow_diagnostic_heat_fallback),
+        model_case=args.model_case,
+        scenario_config_path=args.scenario_config,
     )
     print(output)
 

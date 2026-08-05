@@ -40,6 +40,12 @@ from common.timeframe import (  # noqa: E402
     read_hdf_metadata,
     scenario_key_for_timeframe,
 )
+from scenario_pipeline.configuration.loader import load_scenario_config  # noqa: E402
+
+DEFAULT_SCENARIO_CONFIG = (
+    GRIDEXPAND_DIR / "scenario_pipeline" / "configurations" / "scenarios"
+    / "forchheim_2045.yaml"
+)
 
 
 EXPECTED_POWERFLOW_TABLES = {
@@ -88,26 +94,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step3-target-columns", type=int, default=35)
     parser.add_argument("--step3-cluster-concurrency", type=int, default=1)
     parser.add_argument("--step4-cpus", type=int, default=4)
-    parser.add_argument(
-        "--tsam",
-        action="store_true",
-        help="Enable TSAM type-week aggregation in Step 3.",
-    )
-    parser.add_argument(
-        "--tsam-periods",
-        type=int,
-        default=6,
-        help="Number of TSAM type weeks for Step 3.",
-    )
-    parser.add_argument(
-        "--tsam-hours-per-period", type=int, default=168, help="Hours per TSAM period."
-    )
-    parser.add_argument(
-        "--tsam-extreme-method",
-        choices=["append", "new_cluster_center", "replace_cluster_center"],
-        default="replace_cluster_center",
-        help="How TSAM should include cold and solar extreme weeks.",
-    )
+    parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
     parser.add_argument(
         "--powerflow-output",
         choices=POWERFLOW_OUTPUT_CHOICES,
@@ -202,10 +189,12 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     args = parser.parse_args()
-    if args.profiles == "status_quo" and args.tsam:
-        parser.error(
-            "--profiles status_quo runs pre-only power flow directly after Step 2 and cannot use --tsam."
-        )
+    args.scenario_config = args.scenario_config.resolve()
+    scenario, args.scenario_hash = load_scenario_config(args.scenario_config)
+    args.tsam = scenario.time_aggregation.enabled
+    args.tsam_periods = scenario.time_aggregation.number_of_typical_periods
+    args.tsam_hours_per_period = scenario.time_aggregation.hours_per_period
+    args.tsam_extreme_method = scenario.time_aggregation.extreme_period_method
     if args.include_no_flex_powerflow and args.profiles == "status_quo":
         parser.error(
             "--include-no-flex-powerflow requires post-electrification profiles, not status_quo."
@@ -1119,6 +1108,10 @@ def run_candidate(
                 args.step2_timeseries_storage,
                 "--timeframe-mode",
                 args.timeframe_mode,
+                "--model-case",
+                "pre" if args.profiles == "status_quo" else "post-hems-optimized",
+                "--scenario-config",
+                str(args.scenario_config),
                 "--n_cpu",
                 str(args.step2_cpus),
             ],
@@ -1287,18 +1280,7 @@ def run_candidate(
                 "--n_cpu",
                 str(step3_cpus),
             ]
-            if args.tsam:
-                step3_cmd.extend(
-                    [
-                        "--tsam",
-                        "--tsam-periods",
-                        str(args.tsam_periods),
-                        "--tsam-hours-per-period",
-                        str(args.tsam_hours_per_period),
-                        "--tsam-extreme-method",
-                        args.tsam_extreme_method,
-                    ]
-                )
+            step3_cmd.extend(["--scenario-config", str(args.scenario_config)])
             run_command(
                 cmd=step3_cmd,
                 cwd=step3_dir,
@@ -1450,18 +1432,7 @@ def run_candidate(
             "--n_cpu",
             str(step3_cpus),
         ]
-        if args.tsam:
-            step3_cmd.extend(
-                [
-                    "--tsam",
-                    "--tsam-periods",
-                    str(args.tsam_periods),
-                    "--tsam-hours-per-period",
-                    str(args.tsam_hours_per_period),
-                    "--tsam-extreme-method",
-                    args.tsam_extreme_method,
-                ]
-            )
+        step3_cmd.extend(["--scenario-config", str(args.scenario_config)])
         run_command(
             cmd=step3_cmd,
             cwd=step3_dir,
