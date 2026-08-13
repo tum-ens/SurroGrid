@@ -81,6 +81,7 @@ GridExpand/
 
   common/                          # Shared DB/schema/timeframe helpers used across steps
     database.py
+    orchestration.py               # Shared runner logging and process execution
     timeframe.py
     surrogrid_schema.sql
 
@@ -90,16 +91,15 @@ GridExpand/
       runs/
     docs/                          # Central assumptions and option reference
     run_scenario.py                # Standalone scenario entry point
+    synthetic_ags_runner.py        # Synthetic AGS Step 2-4 orchestrator
 
   paired_validation/              # Real/synthetic projection and equivalence layer
-    runner.py                      # Temporary paired-runner compatibility wrapper
+    runner.py                      # Paired real/SWF and synthetic comparison runner
+    comparison.py                  # Network-independent equivalence checks
+    sources/                       # SWF and paired-synthetic target adapters
 
-  runme/                           # Runnable orchestration and maintenance CLIs
-    synthetic_ags_pipeline_runner.py # synthetic AGS Step 2-4 pipeline runner
-    paired_swf_pipeline_runner.py    # paired real/synthetic publication runner
-    pipeline_support.py              # shared runner process helpers
-    delete_scenario_data.py          # targeted DB/file cleanup
-    legacy/                          # superseded diagnostic wrappers
+  maintenance/                    # Explicit destructive administration commands
+    delete_scenario_data.py       # Targeted DB/file cleanup (dry-run by default)
 
   5.postprocessing/                # Step 5: result analysis + plotting
     pyproject.toml                 # uv environment for plotting notebooks
@@ -112,7 +112,7 @@ GridExpand/
 
 Shared implementation helpers live in `common/`; scientific assumptions and normal
 orchestration live in `scenario_pipeline/`; paired real/synthetic projection lives in
-`paired_validation/`; operational and legacy-compatible CLIs remain in `runme/`.
+`paired_validation/`; destructive administration commands live in `maintenance/`.
 
 Each step folder has its own `README.md` with more detail:
 
@@ -289,7 +289,7 @@ uv run python run_pwrflw.py <inputfile_id> --n_cpu <N>
 The AGS runner can add a post-no-flex power-flow result after the normal post-flex Step 3 optimization. Use `--include-no-flex-powerflow` to run both post-flex and post-no-flex for each candidate in one pass. No-flex is intentionally dependent on the post-flex result: Step 4 reads `urbs_out/MILP/cap_pro` and uses the optimized `heatpump_air` and `heatpump_booster` capacities to translate fixed heat demand into heat-pump and auxiliary electric demand. Mobility profiles are reused from Step 2 and emobpy is not rerun.
 
 ```bash
-uv run python GridExpand/runme/synthetic_ags_pipeline_runner.py \
+uv run python GridExpand/scenario_pipeline/synthetic_ags_runner.py \
   --repo-root /path/to/SurroGrid \
   --ags <AGS> \
   --profiles all \
@@ -312,7 +312,7 @@ The DB-backed summary pipeline only needs the HDF5 hand-off files while a candid
 Failed-candidate files are kept for debugging. For an interrupted run that already contains completed candidates, use the same pipeline arguments and run directory with `--cleanup-completed-only`; this removes intermediates for candidates marked done in `status.tsv` or `events.jsonl` and exits without starting new work.
 
 ```bash
-uv run --project GridExpand/2.demand_allocation python GridExpand/runme/synthetic_ags_pipeline_runner.py \
+uv run --project GridExpand/2.demand_allocation python GridExpand/scenario_pipeline/synthetic_ags_runner.py \
   --repo-root /path/to/SurroGrid \
   --ags <AGS> \
   --profiles all \
@@ -326,7 +326,7 @@ uv run --project GridExpand/2.demand_allocation python GridExpand/runme/syntheti
 
 ### Paired SWF real/synthetic scenario
 
-`paired_swf_pipeline_runner.py` is the comparison runner for the calibrated SWF 2045 scenario. It uses stable scenario units, reuses a network-independent physical-building heat-profile library, projects the same profiles onto real and synthetic buses, and runs pre electricity-only, post-flex, and post-no-flex summaries. Representative-period settings come from the Scenario YAML. The runner records one canonical mapping in `shared_tsam_reference.json` and verifies every real and synthetic URBS result against it before power flow starts. See `2.demand_allocation/gridalloc/src/scenario_calibration/PAIRED_SCENARIO.md` for the publication gate and command.
+`paired_validation/runner.py` is the comparison runner for the calibrated SWF 2045 scenario. It uses stable scenario units, reuses a network-independent physical-building heat-profile library, projects the same profiles onto real and synthetic buses, and runs pre electricity-only, post-flex, and post-no-flex summaries. Representative-period settings come from the Scenario YAML. The runner records one canonical mapping in `shared_tsam_reference.json` and verifies every real and synthetic URBS result against it before power flow starts. See `2.demand_allocation/gridalloc/src/scenario_calibration/PAIRED_SCENARIO.md` for the publication gate and command.
 
 ### Step 5: Postprocessing and plotting
 

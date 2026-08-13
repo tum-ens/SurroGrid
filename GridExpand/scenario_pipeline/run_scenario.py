@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -13,8 +14,12 @@ if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
 from scenario_pipeline.config_loader import load_run_config, load_scenario_config
-from scenario_pipeline.manifest import write_manifest
 from scenario_pipeline.model_cases import MODEL_CASES, get_model_case
+
+
+def _write_manifest(path: Path, values: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(values, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def build_command(run, scenario, model_case: str) -> tuple[list[str], Path]:
@@ -75,7 +80,7 @@ def main() -> None:
     scenario, scenario_hash = load_scenario_config(run.scenario_path)
     command, workdir = build_command(run, scenario, args.model_case)
     manifest_dir = run.output_directory or (GRIDEXPAND_DIR / "run_logs" / "scenario_manifests")
-    write_manifest(
+    _write_manifest(
         manifest_dir / f"{run.run_id}_{args.model_case}.json",
         {
             "run_id": run.run_id,

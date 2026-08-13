@@ -56,8 +56,8 @@ Key columns:
 Scenario-specific run and result tables are linked with cascading foreign keys. The cleanup CLI starts with a dry-run and also deletes Step 3 URBS HDF5/log artifacts whose filenames match the selected `scenario_key` or the DB-recorded Step 2/Step 4 bridge filenames for that scenario.
 
 ```bash
-uv run --project GridExpand/5.postprocessing python GridExpand/executables/delete_scenario_data.py <scenario_key>
-uv run --project GridExpand/5.postprocessing python GridExpand/executables/delete_scenario_data.py <scenario_key> --execute
+uv run --project GridExpand/5.postprocessing python GridExpand/maintenance/delete_scenario_data.py <scenario_key>
+uv run --project GridExpand/5.postprocessing python GridExpand/maintenance/delete_scenario_data.py <scenario_key> --execute
 ```
 
 By default, `--execute` deletes the `surrogrid.scenario` row and cascades all dependent DB rows for that scenario. Use `--keep-demands` to keep the scenario, pipeline, and Step 2 demand-allocation rows (`allocated_demand`, `allocated_eff_factor`, and `allocated_vehicle`) while deleting downstream Step 3 files, Step 4 power-flow rows, and Step 5 expansion rows.

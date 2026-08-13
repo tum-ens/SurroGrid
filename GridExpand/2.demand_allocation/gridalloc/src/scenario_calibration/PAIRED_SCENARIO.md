@@ -164,7 +164,7 @@ The paired runner produces pre electricity-only, post-flex, and post-no-flex pow
 ```bash
 cd /home/breveron/git/github/SurroGrid
 uv run --project GridExpand/2.demand_allocation \
-  python GridExpand/runme/paired_swf_pipeline_runner.py \
+  python GridExpand/paired_validation/runner.py \
   --repo-root /home/breveron/git/github/SurroGrid \
   --plz 91301 \
   --paired-dir GridExpand/2.demand_allocation/gridalloc/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \

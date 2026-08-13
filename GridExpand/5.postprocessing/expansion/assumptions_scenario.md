@@ -5,7 +5,7 @@ This document is the concise source of truth for GridExpand scenario runs. It re
 Detailed methodology remains in:
 
 - [Paired SWF scenario contract](../../2.demand_allocation/gridalloc/src/scenario_calibration/PAIRED_SCENARIO.md)
-- [Pipeline runner documentation](../../runme/README.md)
+- [Pipeline runner documentation](../../README.md)
 - [Power-flow methodology](../../4.powerflow/README.md)
 - [Postprocessing and expansion analysis](../README.md)
 - [Expansion cost assumptions](assumptions_costs.md)
@@ -136,7 +136,7 @@ Run from the repository root after the paired allocation and heat-profile readin
 
 ```bash
 uv run --project GridExpand/2.demand_allocation \
-  python GridExpand/runme/paired_swf_pipeline_runner.py \
+  python GridExpand/paired_validation/runner.py \
   --repo-root /home/breveron/git/github/SurroGrid \
   --plz 91301 \
   --paired-dir GridExpand/2.demand_allocation/gridalloc/outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2 \

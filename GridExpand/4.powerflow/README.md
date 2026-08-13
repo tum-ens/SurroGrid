@@ -78,7 +78,7 @@ uv run python run_pwrflw.py <inputfile_id> --storage db --pre-only
 
 ### Paired real/synthetic scenario power flow
 
-The active paired pipeline materializes the same physical-building scenario for both network models and calls `run_real_swf_scenario_powerflow.py` for the real target and `run_pwrflw.py` for the synthetic target. Use `GridExpand/runme/paired_swf_pipeline_runner.py` rather than invoking the old one-sided materializer.
+The active paired pipeline materializes the same physical-building scenario for both network models and calls `run_real_swf_scenario_powerflow.py` for the real target and `run_pwrflw.py` for the synthetic target. Use `GridExpand/paired_validation/runner.py` rather than invoking the old one-sided materializer.
 
 Paired HDFs use `optimization_space=scenario_unit`. Step 3 therefore optimizes stable `(source LV, source connection bus, physical building)` units rather than network buses. Both Step-4 paths read `raw_data/allocation_plan` and aggregate these profiles onto the selected target buses immediately before power flow. This projection conserves active and reactive demand and prevents network partitioning from changing optimization resolution.
 

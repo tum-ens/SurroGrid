@@ -77,7 +77,7 @@ The entire `output/` tree is generated and ignored by Git. Durable conclusions a
 Run the full AGS pipeline and store raw pre/post power-flow time series:
 
 ```bash
-uv run --project GridExpand/4.powerflow python GridExpand/runme/synthetic_ags_pipeline_runner.py \
+uv run --project GridExpand/4.powerflow python GridExpand/scenario_pipeline/synthetic_ags_runner.py \
   --repo-root /path/to/SurroGrid \
   --ags <AGS> \
   --profiles electricity_heat \
@@ -89,7 +89,7 @@ uv run --project GridExpand/4.powerflow python GridExpand/runme/synthetic_ags_pi
 Run the pipeline but store only compact summaries, not raw time series:
 
 ```bash
-uv run --project GridExpand/4.powerflow python GridExpand/runme/synthetic_ags_pipeline_runner.py \
+uv run --project GridExpand/4.powerflow python GridExpand/scenario_pipeline/synthetic_ags_runner.py \
   --repo-root /path/to/SurroGrid \
   --ags <AGS> \
   --profiles electricity_heat \
@@ -101,7 +101,7 @@ uv run --project GridExpand/4.powerflow python GridExpand/runme/synthetic_ags_pi
 Run a full-year all-assets scenario with TSAM typical weeks and compact post/pre power-flow summaries:
 
 ```bash
-uv run --project GridExpand/4.powerflow python GridExpand/runme/synthetic_ags_pipeline_runner.py \
+uv run --project GridExpand/4.powerflow python GridExpand/scenario_pipeline/synthetic_ags_runner.py \
   --repo-root . \
   --ags <AGS> \
   --profiles all \
