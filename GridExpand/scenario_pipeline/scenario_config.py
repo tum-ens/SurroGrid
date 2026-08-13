@@ -6,12 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-MODEL_CASES = (
-    "pre",
-    "post-inflex-heuristic",
-    "post-hems-optimized",
-    "post-hems-heuristic",
-)
+from .model_cases import MODEL_CASES
 PV_LOCATION_MODES = ("predefined", "all_buildings")
 PV_SIZING_METHODS = ("annual_electricity_rule", "optimization")
 
@@ -36,6 +31,14 @@ def _positive(value: Any, label: str, *, allow_zero: bool = False) -> float:
         qualifier = "non-negative" if allow_zero else "positive"
         raise ValueError(f"{label} must be {qualifier}.")
     return result
+
+
+def _number_or_none(value: Any, label: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{label} must be numeric or null.")
+    return float(value)
 
 
 @dataclass(frozen=True)
@@ -181,6 +184,113 @@ class BatterySizingConfig:
 
 
 @dataclass(frozen=True)
+class MobilityConfig:
+    commuting_probability: float
+    emobpy_timestep_hours: float
+    reference_year: int
+    passenger_mass_kg: float
+    passenger_sensible_heat_w: float
+    passengers_per_vehicle: float
+    cabin_heat_transfer_coefficient: float
+    cabin_air_flow_m3_per_s: float
+    driving_cycle_type: str
+    road_type: int
+    road_slope: float
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "MobilityConfig":
+        raw = _mapping(raw, "mobility")
+        allowed = {
+            "commuting_probability", "emobpy_timestep_hours", "reference_year",
+            "passenger_mass_kg", "passenger_sensible_heat_w",
+            "passengers_per_vehicle", "cabin_heat_transfer_coefficient",
+            "cabin_air_flow_m3_per_s", "driving_cycle_type", "road_type",
+            "road_slope",
+        }
+        _only(raw, allowed, "mobility")
+        probability = _positive(raw["commuting_probability"], "mobility.commuting_probability", allow_zero=True)
+        if probability > 1:
+            raise ValueError("mobility.commuting_probability must be <= 1.")
+        cycle = str(raw["driving_cycle_type"])
+        if cycle not in {"WLTC", "EPA"}:
+            raise ValueError("mobility.driving_cycle_type must be WLTC or EPA.")
+        return cls(
+            commuting_probability=probability,
+            emobpy_timestep_hours=_positive(raw["emobpy_timestep_hours"], "mobility.emobpy_timestep_hours"),
+            reference_year=int(_positive(raw["reference_year"], "mobility.reference_year")),
+            passenger_mass_kg=_positive(raw["passenger_mass_kg"], "mobility.passenger_mass_kg"),
+            passenger_sensible_heat_w=_positive(raw["passenger_sensible_heat_w"], "mobility.passenger_sensible_heat_w", allow_zero=True),
+            passengers_per_vehicle=_positive(raw["passengers_per_vehicle"], "mobility.passengers_per_vehicle"),
+            cabin_heat_transfer_coefficient=_positive(raw["cabin_heat_transfer_coefficient"], "mobility.cabin_heat_transfer_coefficient"),
+            cabin_air_flow_m3_per_s=_positive(raw["cabin_air_flow_m3_per_s"], "mobility.cabin_air_flow_m3_per_s", allow_zero=True),
+            driving_cycle_type=cycle,
+            road_type=int(_positive(raw["road_type"], "mobility.road_type", allow_zero=True)),
+            road_slope=float(_number_or_none(raw["road_slope"], "mobility.road_slope")),
+        )
+
+
+PROCESS_PARAMETER_NAMES = {
+    "installed_capacity_kw", "capacity_upper_kw", "fixed_investment_cost_eur",
+    "investment_cost_eur_per_kw", "fixed_cost_eur_per_hour",
+    "variable_cost_eur_per_kwh", "wacc", "depreciation_years",
+    "minimum_power_factor",
+}
+STORAGE_PARAMETER_NAMES = {
+    "installed_energy_kwh", "capacity_upper_kwh", "installed_power_kw",
+    "power_upper_kw", "energy_to_power_hours",
+    "charge_efficiency", "discharge_efficiency", "self_discharge_per_timestep",
+    "investment_cost_eur_per_kw", "investment_cost_eur_per_kwh",
+    "fixed_investment_cost_power_eur", "fixed_investment_cost_energy_eur",
+    "variable_cost_eur_per_kwh", "wacc", "depreciation_years",
+}
+
+
+@dataclass(frozen=True)
+class TechnologyParameters:
+    processes: dict[str, dict[str, float | None]]
+    storages: dict[str, dict[str, float | None]]
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "TechnologyParameters":
+        raw = _mapping(raw, "technologies")
+        _only(raw, {"processes", "storages"}, "technologies")
+        processes = _mapping(raw["processes"], "technologies.processes")
+        storages = _mapping(raw["storages"], "technologies.storages")
+        required_processes = {
+            "rooftop_pv", "heatpump_air", "heatpump_booster", "heat_dummy",
+            "home_charger", "grid_connection",
+        }
+        required_storages = {
+            "stationary_battery", "thermal_storage", "mobility_storage",
+        }
+        if set(processes) != required_processes:
+            raise ValueError(f"technologies.processes must define {sorted(required_processes)}.")
+        if set(storages) != required_storages:
+            raise ValueError(f"technologies.storages must define {sorted(required_storages)}.")
+        parsed_processes = {}
+        for name, values in processes.items():
+            values = _mapping(values, f"technologies.processes.{name}")
+            _only(values, PROCESS_PARAMETER_NAMES, f"technologies.processes.{name}")
+            if set(values) != PROCESS_PARAMETER_NAMES:
+                raise ValueError(f"technologies.processes.{name} is incomplete.")
+            parsed_processes[name] = {
+                key: _number_or_none(value, f"technologies.processes.{name}.{key}")
+                for key, value in values.items()
+            }
+        parsed_storages = {}
+        for name, values in storages.items():
+            values = _mapping(values, f"technologies.storages.{name}")
+            _only(values, STORAGE_PARAMETER_NAMES, f"technologies.storages.{name}")
+            if set(values) != STORAGE_PARAMETER_NAMES:
+                raise ValueError(f"technologies.storages.{name} is incomplete.")
+            parsed_storages[name] = {
+                key: _number_or_none(value, f"technologies.storages.{name}.{key}")
+                for key, value in values.items()
+            }
+        return cls(processes=parsed_processes, storages=parsed_storages)
+
+
+@dataclass(frozen=True)
 class TimeAggregationConfig:
     enabled: bool
     number_of_typical_periods: int
@@ -237,12 +347,14 @@ class ScenarioConfig:
     pv: PvSizingConfig
     battery: BatterySizingConfig
     heat_pump: PlaceholderSizingConfig
+    mobility: MobilityConfig
+    technologies: TechnologyParameters
     time_aggregation: TimeAggregationConfig
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "ScenarioConfig":
         raw = _mapping(raw, "scenario configuration")
-        _only(raw, {"scenario", "economics", "asset_sizing", "time_aggregation"}, "top-level scenario")
+        _only(raw, {"scenario", "economics", "asset_sizing", "mobility", "technologies", "time_aggregation"}, "top-level scenario")
         scenario = _mapping(raw["scenario"], "scenario")
         _only(scenario, {"id", "milestone_year", "model_cases"}, "scenario")
         cases = tuple(str(case) for case in scenario["model_cases"])
@@ -263,6 +375,8 @@ class ScenarioConfig:
             pv=PvSizingConfig.from_dict(assets["pv"]),
             battery=BatterySizingConfig.from_dict(assets["battery"]),
             heat_pump=PlaceholderSizingConfig.from_dict(assets["heat_pump"], "asset_sizing.heat_pump"),
+            mobility=MobilityConfig.from_dict(raw["mobility"]),
+            technologies=TechnologyParameters.from_dict(raw["technologies"]),
             time_aggregation=TimeAggregationConfig.from_dict(raw["time_aggregation"]),
         )
 

@@ -18,6 +18,10 @@ DEFAULT_ALLOCATION_PLAN = (
     / "swf_2045_full_local_demand_bus_allocation_plan.csv"
 )
 DEFAULT_OUTPUT_DIR = GRIDEXPAND_DIR / "3.urbs" / "Input"
+DEFAULT_SCENARIO_CONFIG = (
+    GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
+    / "forchheim_2045.yaml"
+)
 DEFAULT_SCOPE = "full_local_demand_recommended"
 DEFAULT_SCENARIO_LABEL = "real_swf_2045_full_local_base_electricity"
 
@@ -25,6 +29,8 @@ for path in (GRIDEXPAND_DIR, GRIDALLOC_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from config import config  # noqa: E402
+from scenario_pipeline.config_loader import load_scenario_config  # noqa: E402
 from common.timeframe import build_full_year_metadata, write_hdf_metadata  # noqa: E402
 from src.scenario_calibration.profiles.real_swf_electricity_profiles import (  # noqa: E402
     DEFAULT_MEASURED_PROFILE_BAND_PCT,
@@ -109,7 +115,10 @@ def materialize_one_real_swf_hdf(
     measured_profile_band_pct: float,
     measured_profile_min_candidates: int,
     include_sector_assets: bool = False,
+    scenario_config_path: Path = DEFAULT_SCENARIO_CONFIG,
 ) -> Path:
+    scenario, _scenario_hash = load_scenario_config(scenario_config_path)
+    config.apply_scenario(scenario)
     plan = read_allocation_plan(allocation_plan_path, scope=None)
     allocation = plan[plan["lv_id"].astype(int).eq(int(lv_id))].copy()
     if scope and "scenario_scope" in allocation.columns:
@@ -132,6 +141,7 @@ def materialize_one_real_swf_hdf(
     demand.index.name = "t"
     hours = len(demand)
     electricity_module = load_electricity_module()
+    electricity_module.config.apply_scenario(scenario)
     weather_source_hdf = weather_source_hdf or _default_weather_source(
         plz, require_supim=include_sector_assets
     )
@@ -235,6 +245,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--lv-id", type=int, required=True)
     parser.add_argument("--plz", type=int, default=91301)
+    parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
     parser.add_argument("--scenario-label", default=DEFAULT_SCENARIO_LABEL)
     parser.add_argument("--scope", default=DEFAULT_SCOPE)
     parser.add_argument("--seed", type=int, default=91301)
@@ -272,6 +283,7 @@ def main() -> None:
         weather_source_hdf=args.weather_source_hdf,
         measured_profile_selection=args.measured_profile_selection,
         measured_profile_band_pct=args.measured_profile_band_pct,
+        scenario_config_path=args.scenario_config,
         measured_profile_min_candidates=args.measured_profile_min_candidates,
         include_sector_assets=args.include_sector_assets,
     )

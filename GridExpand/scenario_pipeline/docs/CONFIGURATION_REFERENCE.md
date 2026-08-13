@@ -36,6 +36,16 @@ from silently falling back to a different assumption.
 - `asset_sizing.battery.maximum_usable_*`: the two HTW usable-energy bounds.
 - `asset_sizing.battery.energy_to_power_hours`: fixed E/P ratio in hours.
 - `asset_sizing.heat_pump.method`: temporary adapter pending the HP rule.
+- `mobility.commuting_probability`: commuter-schedule probability.
+- `mobility.emobpy_timestep_hours` and `reference_year`: emobpy temporal basis.
+- `mobility.passenger_*`, `cabin_*`, `driving_cycle_type`, `road_type`, and
+  `road_slope`: vehicle-energy-model assumptions.
+- `technologies.processes.*`: capacities, costs, WACC, lifetime, and power
+  factor written to urbs process rows. Asset plans replace generic PV
+  capacity, while source inventory may replace paired charger capacity.
+- `technologies.storages.*`: capacities, E/P ratio, efficiencies, costs, WACC,
+  and lifetime written to urbs storage rows. `null` capacity fields mean that
+  capacity comes from a PV/battery asset plan or an individual EV profile.
 - `time_aggregation.*`: complete TSAM methodology; see comments in the example.
 
 ## Run YAML
@@ -53,6 +63,7 @@ from silently falling back to a different assumption.
 - `execution.demand_scope`: current building demand scope.
 - `execution.timeframe_mode`: full year or supported operational slice.
 
-Implementation constants such as database schema names, API endpoints, and
-static dataset paths remain in the existing Python config. They are not
-scenario choices.
+Implementation references such as database schema names, API endpoints, and
+static dataset paths remain in the Python config. Scientific mobility and urbs
+numbers do not: `config.py` only maps validated scenario values onto legacy
+helper attribute names where those helpers have not yet been refactored.

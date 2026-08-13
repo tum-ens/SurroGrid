@@ -23,6 +23,13 @@ adapter. It documents the incomplete method without inventing fixed physical
 capacity. PV and stationary-battery sizing are implemented in both heuristic
 and optimized modes.
 
+## Configuration ownership
+
+The scenario YAML is the single source of truth for mobility behavior and all
+parameters written into urbs process and storage tables. This applies equally
+to ordinary scenario runs and paired validation. Python configuration retains
+only implementation references such as data locations and API endpoints.
+
 ## Rooftop PV potential
 
 All active pipelines use CityDB LoD2 roof sections joined through the pylovo

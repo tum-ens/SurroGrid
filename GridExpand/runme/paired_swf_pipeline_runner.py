@@ -42,12 +42,12 @@ DEFAULT_PAIRED_DIR = (
     / "swf_2045_paired_v5_91301_station_hybrid_v2"
 )
 DEFAULT_SCENARIO_CONFIG = (
-    GRIDEXPAND_DIR / "scenario_pipeline" / "configurations" / "scenarios"
+    GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
     / "forchheim_2045.yaml"
 )
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
-from scenario_pipeline.configuration.loader import load_scenario_config
+from scenario_pipeline.config_loader import load_scenario_config
 TARGET_CHOICES = ("real_swf", "synthetic", "both")
 
 

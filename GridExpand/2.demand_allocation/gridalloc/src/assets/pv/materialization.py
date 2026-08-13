@@ -19,19 +19,19 @@ class PvUrbsInputs:
     audit: pd.DataFrame
 
 
-def _process_row(site, process, installed, upper, *, fixed):
+def _process_row(site, process, installed, upper, *, fixed, parameters):
     return {
         "Site": int(site),
         "Process": process,
         "inst-cap": float(installed),
         "cap-up": float(upper),
-        "inv-cost-fix": 0.0 if fixed else 6565.0,
-        "inv-cost": 0.0 if fixed else 533.7,
-        "fix-cost": 0.0,
-        "var-cost": 0.0,
-        "wacc": 0.022,
-        "depreciation": 15,
-        "pf-min": np.nan,
+        "inv-cost-fix": 0.0 if fixed else parameters["fixed_investment_cost_eur"],
+        "inv-cost": 0.0 if fixed else parameters["investment_cost_eur_per_kw"],
+        "fix-cost": parameters["fixed_cost_eur_per_hour"],
+        "var-cost": parameters["variable_cost_eur_per_kwh"],
+        "wacc": parameters["wacc"],
+        "depreciation": parameters["depreciation_years"],
+        "pf-min": parameters["minimum_power_factor"],
     }
 
 
@@ -58,6 +58,7 @@ def materialize_pv_urbs_inputs(
     profile_library: pd.DataFrame,
     *,
     sizing_method: str,
+    technical_parameters: dict,
 ) -> PvUrbsInputs:
     """Create angle-resolved optimized or building-weighted fixed PV inputs."""
     active_plan = asset_plan[asset_plan["pv_max_kwp"].gt(0.0)].copy()
@@ -81,7 +82,7 @@ def materialize_pv_urbs_inputs(
             process_name = commodity.replace("solar", "Rooftop PV", 1)
             records.append({
                 "site": int(row.Site), "commodity": commodity, "process_name": process_name,
-                "process": _process_row(row.Site, process_name, 0.0, row.capacity_kw, fixed=False),
+                "process": _process_row(row.Site, process_name, 0.0, row.capacity_kw, fixed=False, parameters=technical_parameters),
                 "capacity_kw": float(row.capacity_kw), "fallback_used": bool(row.fallback_used),
             })
             columns.append(profile_library[commodity].rename((int(row.Site), commodity)))
@@ -101,7 +102,7 @@ def materialize_pv_urbs_inputs(
             columns.append(weighted.rename((site, commodity)))
             records.append({
                 "site": site, "commodity": commodity, "process_name": process_name,
-                "process": _process_row(site, process_name, capacity, capacity, fixed=True),
+                "process": _process_row(site, process_name, capacity, capacity, fixed=True, parameters=technical_parameters),
                 "capacity_kw": capacity,
                 "fallback_used": bool(group["quality_flag"].eq("fallback_14_5_kw").any()),
                 "building_objectid": str(building_id),

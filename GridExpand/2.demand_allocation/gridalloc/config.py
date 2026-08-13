@@ -15,7 +15,7 @@ class Config:
     #--------------------------------------------------------------#
     # PVGIS API
     PVGIS_URL = "https://re.jrc.ec.europa.eu/api/tmy"               # URL from which to fetch typical meterological year weather data
-    REF_YEAR = 2009                                                 # Reference year on which whole simulation is based (in terms of holidays!, 2009 is choosen as the real electricity data matches its holidays)
+    # Reference year and scientific mobility/urbs parameters are loaded from scenario YAML.
     TIME_ZONE = 1   # Currently only implemented for UTC+1!!!       # Shift between the location's time and GMT in hours. CET would be 1.
 
     # OpenMeteo API
@@ -131,159 +131,67 @@ class Config:
     CAR_MODEL_DISTRIBUTION = pd.read_csv(f"{DATA_STAT_DIR}/general/cars_by_model.csv", 
                                     dtype={"model": str, "probability": float},
                                     skiprows=1)
-    PROB_COMMUTING = 0.62              # Probability of a car having commuter profile, source: https://www.nature.com/articles/s41597-021-00932-9
-
-    # Emobpy data
-    MBL_TIME_STEP_LENGTH = 0.5
-    MBL_REF_DATE = f"01/01/{REF_YEAR}"
     TOTAL_HOURS = 8760
 
-    PASSENGER_MASS = 75                # kg
-    PASSENGER_HEAT = 70                # W
-    PASSENGER_NR = 1.5                 # Passengers per vehicle including driver
-    CABIN_HEAT_TRANSFER_COEF = 10      # W/(m2K). Interior walls
-    AIR_FLOW = 0.01                    # m3/s. Ventilation
-    DRIVIG_CYCLE_TYPE ='WLTC'          # Two options "WLTC" or "EPA"
-    ROAD_TYPE = 0                      # For rolling resistance, Zero represents a new road.
-    ROAD_SLOPE = 0
 
-    CAPACITY_HOME_CHARGING = 11        # kW
-    
-    #--------------------------------------------------------------#
-    #------------------ Urbs Input Constants ----------------------#
-    #--------------------------------------------------------------#
-    ###### Buy-Sell Price constants ######
-    BSP_IMPORT = 0.398        # €/kWh buy price
-    BSP_FEED_IN = 0.0         # €/kWh sell price
 
-    ########## Demand Constants ##########
-    # ELEC_REACT_PF = 0.9
+    def apply_scenario(self, scenario):
+        """Populate legacy helper attributes from the validated scenario YAML."""
+        mobility = scenario.mobility
+        self.BSP_IMPORT = scenario.economics.import_price_eur_per_kwh
+        self.BSP_FEED_IN = scenario.economics.pv_feed_in_tariff_eur_per_kwh
+        self.REF_YEAR = mobility.reference_year
+        self.PROB_COMMUTING = mobility.commuting_probability
+        self.MBL_TIME_STEP_LENGTH = mobility.emobpy_timestep_hours
+        self.MBL_REF_DATE = f"01/01/{mobility.reference_year}"
+        self.PASSENGER_MASS = mobility.passenger_mass_kg
+        self.PASSENGER_HEAT = mobility.passenger_sensible_heat_w
+        self.PASSENGER_NR = mobility.passengers_per_vehicle
+        self.CABIN_HEAT_TRANSFER_COEF = mobility.cabin_heat_transfer_coefficient
+        self.AIR_FLOW = mobility.cabin_air_flow_m3_per_s
+        self.DRIVIG_CYCLE_TYPE = mobility.driving_cycle_type
+        self.ROAD_TYPE = mobility.road_type
+        self.ROAD_SLOPE = mobility.road_slope
+        self.CAPACITY_HOME_CHARGING = scenario.technologies.processes["home_charger"]["installed_capacity_kw"]
 
-    ######### Process constants ##########
-    # PV solar constants
-    PV_INST_CAP = 0           # kW power capacity installed already
-    PV_INV_COST_FIX = 6565    # €/installation decision
-    PV_INV_COST = 533.7       # €/kW newly installed capacity
-    PV_FIX_COST = 0           # €/h (if operating)
-    PV_VAR_COST = 0           # €/kWh process flux (operation) 
-    PV_WACC = 0.022           # decimal not %
-    PV_DEPRECIATION = 15      # years
-    PV_PF_MIN = np.nan
-    # PV_PF_MIN = 0.95          # tan(phi_min), powerfactor for reactive power
-    
-    # HP + booster constants
-    HP_AIR_INST_CAP = 0           # kW power capacity installed already
-    HP_AIR_CAP_UP = 2000          # kW arbitrary upper capacity
-    HP_AIR_INV_COST_FIX = 6600    # €/installation decision
-    HP_AIR_INV_COST = 750         # €/kW newly installed capacity
-    HP_AIR_FIX_COST = 0           # €/h (if operating)
-    HP_AIR_VAR_COST = 0           # €/kWh process flux (operation) 
-    HP_AIR_WACC = 0.0216          # decimal not %
-    HP_AIR_DEPRECIATION = 20      # years
-    HP_AIR_PF_MIN = np.nan        # no power factor as handled differently
-    # HP_AIR_Q_IN_RATIO = 0.292     # 1/HP_Q_IN_RATIO is amount of Q taken in relative to P
+        process_aliases = {
+            "rooftop_pv": "PV", "heatpump_air": "HP_AIR",
+            "heatpump_booster": "HP_BST", "heat_dummy": "HDM",
+            "home_charger": "CS", "grid_connection": "IMP",
+        }
+        process_fields = {
+            "INST_CAP": "installed_capacity_kw", "CAP_UP": "capacity_upper_kw",
+            "INV_COST_FIX": "fixed_investment_cost_eur",
+            "INV_COST": "investment_cost_eur_per_kw",
+            "FIX_COST": "fixed_cost_eur_per_hour",
+            "VAR_COST": "variable_cost_eur_per_kwh", "WACC": "wacc",
+            "DEPRECIATION": "depreciation_years", "PF_MIN": "minimum_power_factor",
+        }
+        for name, prefix in process_aliases.items():
+            values = scenario.technologies.processes[name]
+            for suffix, yaml_name in process_fields.items():
+                setattr(self, f"{prefix}_{suffix}", values[yaml_name])
 
-    # HP_GRD_INST_CAP = 0           # kW power capacity installed already
-    # HP_GRD_CAP_UP = 2000          # kW arbitrary upper capacity
-    # HP_GRD_INV_COST_FIX = 26200   # €/installation decision
-    # HP_GRD_INV_COST = 466.7       # €/kW newly installed capacity
-    # HP_GRD_FIX_COST = 0           #€/h (if operating)
-    # HP_GRD_VAR_COST = 0           # €/kWh process flux (operation) 
-    # HP_GRD_WACC = 0.0017          # decimal not %
-    # HP_GRD_DEPRECIATION = 27      # years
-    # HP_GRD_PF_MIN = np.nan        # no power factor as handled differently
-    # HP_GRD_Q_IN_RATIO = 0.292     # 1/HP_Q_IN_RATIO is amount of Q taken in relative to P
-
-    HP_BST_INST_CAP = 0        # kW power capacity installed already
-    HP_BST_CAP_UP = 2000       # kW arbitrary upper capacity
-    HP_BST_INV_COST_FIX = 100  # €/installation decision
-    HP_BST_INV_COST = 83.3     # €/kW newly installed capacity
-    HP_BST_FIX_COST = 0        # €/h (if operating)
-    HP_BST_VAR_COST = 0        # €/kWh process flux (operation) 
-    HP_BST_WACC = 0.0216       # decimal not %
-    HP_BST_DEPRECIATION = 20   # years
-    HP_BST_PF_MIN = np.nan     # no power factor as handled differently
-
-    # Heating dummy (space/water)
-    HDM_INST_CAP = 2000       # kW power capacity installed already
-    HDM_CAP_UP = 2000         # kW arbitrary upper capacity
-    HDM_INV_COST_FIX = np.nan # €/installation decision
-    HDM_INV_COST = 0          # €/kW newly installed capacity
-    HDM_FIX_COST = 0          # €/h (if operating)
-    HDM_VAR_COST = 0          # €/kWh process flux (operation) 
-    HDM_WACC = 0.07           # decimal not %
-    HDM_DEPRECIATION = 1      # years
-    HDM_PF_MIN = np.nan       # no power factor as handled differently
-
-    # Charging station constants
-    CS_INST_CAP = 11          # kW power capacity installed already
-    CS_CAP_UP = 11            # kW arbitrary upper capacity
-    CS_INV_COST_FIX = np.nan  # €/installation decision
-    CS_INV_COST = 0           # €/kW newly installed capacity
-    CS_FIX_COST = 0           # €/h (if operating)
-    CS_VAR_COST = 0           # €/kWh process flux (operation) 
-    CS_WACC = 0.07            # decimal not %
-    CS_DEPRECIATION = 1       # years
-    CS_PF_MIN = np.nan        # no power factor as handled differently
-
-    # Import/Feed-In/Q_feeder_central
-    IMP_INST_CAP = 2000        # kW power capacity installed already
-    IMP_CAP_UP = 2000          # kW arbitrary upper capacity
-    IMP_INV_COST_FIX = np.nan  # €/installation decision
-    IMP_INV_COST = 0           # €/kW newly installed capacity
-    IMP_FIX_COST = 0           # €/h (if operating)
-    IMP_VAR_COST = 0           # €/kWh process flux (operation) 
-    IMP_WACC = 0.07            # decimal not %
-    IMP_DEPRECIATION = 30      # years
-    IMP_PF_MIN = np.nan        # no power factor as handled differently
-
-    ######### Storage constants ##########
-    # Thermal storage:
-    TS_INST_CAP_C = 0         # kWh storage capacity installed already
-    TS_CAP_UP_C = 10000       # kWh storage arbitrary upper capacity
-    TS_INST_CAP_P = 0         # kW power capacity installed already
-    TS_CAP_UP_P = 1500        # kW power arbitrary upper capacity
-    TS_EFF_IN = 0.932         # charging efficiency (decimal not percent)
-    TS_EFF_OUT = 1            # discharge efficiency (decimal not percent)
-    TS_DISCHARGE = 0          # self-discharge per timestep (decimal not percent)
-    TS_EP_RATIO = 0.15        # energy to power storage ratio 
-    TS_INV_COST_P = 0         # €/kW variable investment cost
-    TS_INV_COST_C = 58        # €/kWh variable investment cost
-    TS_FIX_COST_P = 0         # €/installation decision
-    TS_FIX_COST_C = 0         # €/installation decision
-    TS_VAR_COST_P = 0.001     # €/kWh small cost for charging/discharging to prevent useless storage cycling
-    TS_WACC = 0.0216          # decimal not %
-    TS_DEPRECIATION = 20      # years
-
-    # Battery storage:
-    BS_INST_CAP_C = 0         # kWh storage capacity installed already
-    BS_CAP_UP_C = 6000        # kWh storage arbitrary upper capacity
-    BS_INST_CAP_P = 0         # kW power capacity installed already
-    BS_CAP_UP_P = 2000        # kW power arbitrary upper capacity
-    BS_EFF_IN = 0.961         # charging efficiency (decimal not percent)
-    BS_EFF_OUT = 1            # discharge efficiency (decimal not percent)
-    BS_DISCHARGE = 0          # self-discharge per timestep (decimal not percent)
-    BS_EP_RATIO = 1.58        # energy to power storage ratio 
-    BS_INV_COST_P = 0         # €/kW variable investment cost
-    BS_INV_COST_C = 976       # €/kWh variable investment cost
-    BS_FIX_COST_P = 0         # €/installation decision
-    BS_FIX_COST_C = 0         # €/installation decision
-    BS_VAR_COST_P = 0.001     # €/kWh small cost for charging/discharging to prevent useless storage cycling
-    BS_WACC = 0.022           # decimal not %
-    BS_DEPRECIATION = 15      # years
-
-    # Mobility storage:
-    MS_EFF_IN = 1             # charging efficiency (decimal not percent)
-    MS_EFF_OUT = 1            # discharge efficiency (decimal not percent)
-    MS_DISCHARGE = 0          # self-discharge per timestep (decimal not percent)
-    MS_EP_RATIO = np.nan      # energy to power storage ratio 
-    MS_INV_COST_P = 0         # €/kW variable investment cost
-    MS_INV_COST_C = 0         # €/kWh variable investment cost
-    MS_FIX_COST_P = 0         # €/installation decision
-    MS_FIX_COST_C = 0         # €/installation decision
-    MS_VAR_COST_P = 0.001     # €/kWh small cost for charging/discharging to prevent useless storage cycling
-    MS_WACC = 0.07            # decimal not %
-    MS_DEPRECIATION = 20      # years
+        storage_aliases = {
+            "stationary_battery": "BS", "thermal_storage": "TS",
+            "mobility_storage": "MS",
+        }
+        storage_fields = {
+            "INST_CAP_C": "installed_energy_kwh", "CAP_UP_C": "capacity_upper_kwh",
+            "INST_CAP_P": "installed_power_kw", "CAP_UP_P": "power_upper_kw",
+            "EP_RATIO": "energy_to_power_hours", "EFF_IN": "charge_efficiency",
+            "EFF_OUT": "discharge_efficiency", "DISCHARGE": "self_discharge_per_timestep",
+            "INV_COST_P": "investment_cost_eur_per_kw",
+            "INV_COST_C": "investment_cost_eur_per_kwh",
+            "FIX_COST_P": "fixed_investment_cost_power_eur",
+            "FIX_COST_C": "fixed_investment_cost_energy_eur",
+            "VAR_COST_P": "variable_cost_eur_per_kwh", "WACC": "wacc",
+            "DEPRECIATION": "depreciation_years",
+        }
+        for name, prefix in storage_aliases.items():
+            values = scenario.technologies.storages[name]
+            for suffix, yaml_name in storage_fields.items():
+                setattr(self, f"{prefix}_{suffix}", values[yaml_name])
 
 
 config = Config()

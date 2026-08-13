@@ -337,7 +337,9 @@ This section documents the first-party code in `gridalloc/src`. Vendored third-p
 Top-level (this step):
 
 - `gridalloc/main.py` – CLI entrypoint, selects input file and runs the pipeline
-- `gridalloc/config.py` – all constants and file paths; instantiates `config = Config()`
+- `gridalloc/config.py` – implementation paths, static datasets, and a legacy
+  attribute adapter; mobility and urbs assumptions come from the validated
+  scenario YAML.
 - `gridalloc/run_cluster_serialstd.sh` – SLURM job script (single grid per job)
 - `gridalloc/start_batch_jobs_serialstd.sh` – submits multiple SLURM jobs over an index range
 

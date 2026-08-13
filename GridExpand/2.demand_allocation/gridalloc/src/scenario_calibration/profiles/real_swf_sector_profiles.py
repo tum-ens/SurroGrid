@@ -9,7 +9,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-
 from ..paths import GRIDALLOC_DIR
 
 MOBILITY_POOL_DIR = (
@@ -446,6 +445,7 @@ def _source_heat_buses(
 
 
 def _create_pro_heat(consumer_list):
+    from config import config
     rows = []
     for bus in consumer_list:
         for (
@@ -459,10 +459,22 @@ def _create_pro_heat(consumer_list):
             wacc,
             depreciation,
         ) in [
-            ("heatpump_air", 0, 2000, 6600, 750, 0, 0, 0.0216, 20),
-            ("heatpump_booster", 0, 2000, 100, 83.3, 0, 0, 0.0216, 20),
-            ("Heat_dummy_space", 2000, 2000, np.nan, 0, 0, 0, 0.07, 1),
-            ("Heat_dummy_water", 2000, 2000, np.nan, 0, 0, 0, 0.07, 1),
+            ("heatpump_air", config.HP_AIR_INST_CAP, config.HP_AIR_CAP_UP,
+             config.HP_AIR_INV_COST_FIX, config.HP_AIR_INV_COST,
+             config.HP_AIR_FIX_COST, config.HP_AIR_VAR_COST,
+             config.HP_AIR_WACC, config.HP_AIR_DEPRECIATION),
+            ("heatpump_booster", config.HP_BST_INST_CAP, config.HP_BST_CAP_UP,
+             config.HP_BST_INV_COST_FIX, config.HP_BST_INV_COST,
+             config.HP_BST_FIX_COST, config.HP_BST_VAR_COST,
+             config.HP_BST_WACC, config.HP_BST_DEPRECIATION),
+            ("Heat_dummy_space", config.HDM_INST_CAP, config.HDM_CAP_UP,
+             config.HDM_INV_COST_FIX, config.HDM_INV_COST,
+             config.HDM_FIX_COST, config.HDM_VAR_COST,
+             config.HDM_WACC, config.HDM_DEPRECIATION),
+            ("Heat_dummy_water", config.HDM_INST_CAP, config.HDM_CAP_UP,
+             config.HDM_INV_COST_FIX, config.HDM_INV_COST,
+             config.HDM_FIX_COST, config.HDM_VAR_COST,
+             config.HDM_WACC, config.HDM_DEPRECIATION),
         ]:
             rows.append(
                 {
@@ -540,6 +552,7 @@ def _create_pro_com_heat():
 
 
 def _create_sto_heat(consumer_list):
+    from config import config
     rows = []
     for bus in consumer_list:
         rows.append(
@@ -547,21 +560,21 @@ def _create_sto_heat(consumer_list):
                 "Site": bus,
                 "Storage": "heat_storage",
                 "Commodity": "common_heat",
-                "inst-cap-c": 0,
-                "cap-up-c": 10000,
-                "inst-cap-p": 0,
-                "cap-up-p": 1500,
-                "eff-in": 0.932,
-                "eff-out": 1,
-                "discharge": 0,
-                "ep-ratio": 0.15,
-                "inv-cost-p": 0,
-                "inv-cost-c": 58,
-                "fix-cost-p": 0,
-                "fix-cost-c": 0,
-                "var-cost-p": 0.001,
-                "wacc": 0.0216,
-                "depreciation": 20,
+                "inst-cap-c": config.TS_INST_CAP_C,
+                "cap-up-c": config.TS_CAP_UP_C,
+                "inst-cap-p": config.TS_INST_CAP_P,
+                "cap-up-p": config.TS_CAP_UP_P,
+                "eff-in": config.TS_EFF_IN,
+                "eff-out": config.TS_EFF_OUT,
+                "discharge": config.TS_DISCHARGE,
+                "ep-ratio": config.TS_EP_RATIO,
+                "inv-cost-p": config.TS_INV_COST_P,
+                "inv-cost-c": config.TS_INV_COST_C,
+                "fix-cost-p": config.TS_FIX_COST_P,
+                "fix-cost-c": config.TS_FIX_COST_C,
+                "var-cost-p": config.TS_VAR_COST_P,
+                "wacc": config.TS_WACC,
+                "depreciation": config.TS_DEPRECIATION,
             }
         )
     return pd.DataFrame(rows)

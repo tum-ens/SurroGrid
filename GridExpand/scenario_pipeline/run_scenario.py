@@ -9,13 +9,12 @@ import sys
 from pathlib import Path
 
 GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
-REPOSITORY_DIR = GRIDEXPAND_DIR.parent
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
-from scenario_pipeline.configuration.loader import load_run_config, load_scenario_config
-from scenario_pipeline.core.manifest import write_manifest
-from scenario_pipeline.core.model_cases import get_model_case
+from scenario_pipeline.config_loader import load_run_config, load_scenario_config
+from scenario_pipeline.manifest import write_manifest
+from scenario_pipeline.model_cases import MODEL_CASES, get_model_case
 
 
 def build_command(run, scenario, model_case: str) -> tuple[list[str], Path]:
@@ -23,10 +22,10 @@ def build_command(run, scenario, model_case: str) -> tuple[list[str], Path]:
     if model_case not in scenario.model_cases:
         raise ValueError(f"Model case {model_case!r} is not enabled by {scenario.scenario_id!r}.")
     if run.pipeline == "scenario":
-        workdir = GRIDEXPAND_DIR / "2.demand_allocation"
+        workdir = GRIDEXPAND_DIR / "2.demand_allocation" / "gridalloc"
         profiles = "status_quo" if case.name == "pre" else "all"
         command = [
-            "uv", "run", "python", "gridalloc/main.py", run.inputfile_id,
+            "uv", "run", "--project", "..", "python", "main.py", run.inputfile_id,
             "--storage", run.storage,
             "--n_cpu", str(run.n_cpu),
             "--profiles", profiles,
@@ -66,10 +65,7 @@ def main() -> None:
     parser.add_argument("--run-config", type=Path, required=True)
     parser.add_argument(
         "--model-case",
-        choices=[
-            "pre", "post-inflex-heuristic", "post-hems-optimized",
-            "post-hems-heuristic",
-        ],
+        choices=tuple(MODEL_CASES),
         default="post-hems-heuristic",
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -78,7 +74,7 @@ def main() -> None:
     run, run_hash = load_run_config(args.run_config)
     scenario, scenario_hash = load_scenario_config(run.scenario_path)
     command, workdir = build_command(run, scenario, args.model_case)
-    manifest_dir = run.output_directory or (GRIDEXPAND_DIR / "scenario_pipeline" / "manifests")
+    manifest_dir = run.output_directory or (GRIDEXPAND_DIR / "run_logs" / "scenario_manifests")
     write_manifest(
         manifest_dir / f"{run.run_id}_{args.model_case}.json",
         {

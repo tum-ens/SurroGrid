@@ -230,6 +230,7 @@ class Grid:
         pv = materialize_pv_urbs_inputs(
             self.df_pv_asset_plan, self.df_pv_selected_sections,
             profile_library, sizing_method=sizing_method,
+            technical_parameters=scenario.technologies.processes["rooftop_pv"],
         )
         self.df_supim_solar = pv.supim
         self.df_pv_process = pv.process
@@ -254,7 +255,7 @@ class Grid:
             self.df_battery_asset_plan,
             sizing_method=sizing_method,
             energy_to_power_hours=battery.energy_to_power_hours,
-            technical_parameters=config,
+            technical_parameters=scenario.technologies.storages["stationary_battery"],
         )
         self.df_battery_storage = materialized.storage
         plan_audit = self.df_battery_asset_plan.copy()

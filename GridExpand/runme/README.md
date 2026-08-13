@@ -52,7 +52,7 @@ GridExpand/
     environment_HPC.yml
     gridalloc/
       main.py                     # entrypoint
-      config.py                   # paths + constants
+      config.py                   # paths, datasets + scenario adapter
       data/
         grids/                    # input .h5 files (copied from Step 1)
         statistics/               # included statistical inputs
@@ -84,6 +84,16 @@ GridExpand/
     timeframe.py
     surrogrid_schema.sql
 
+  scenario_pipeline/              # Network-independent scientific scenario logic
+    config/                        # Commented scenario and run YAML files
+      scenarios/
+      runs/
+    docs/                          # Central assumptions and option reference
+    run_scenario.py                # Standalone scenario entry point
+
+  paired_validation/              # Real/synthetic projection and equivalence layer
+    runner.py                      # Temporary paired-runner compatibility wrapper
+
   runme/                           # Runnable orchestration and maintenance CLIs
     synthetic_ags_pipeline_runner.py # synthetic AGS Step 2-4 pipeline runner
     paired_swf_pipeline_runner.py    # paired real/synthetic publication runner
@@ -100,7 +110,9 @@ GridExpand/
     expansion/                     # expansion materialization and summaries
 ```
 
-Shared helpers live in `common/`; runnable orchestration and maintenance scripts live in `runme/`.
+Shared implementation helpers live in `common/`; scientific assumptions and normal
+orchestration live in `scenario_pipeline/`; paired real/synthetic projection lives in
+`paired_validation/`; operational and legacy-compatible CLIs remain in `runme/`.
 
 Each step folder has its own `README.md` with more detail:
 
@@ -282,7 +294,7 @@ uv run python GridExpand/runme/synthetic_ags_pipeline_runner.py \
   --ags <AGS> \
   --profiles all \
   --powerflow-output summary \
-  --scenario-config GridExpand/scenario_pipeline/configurations/scenarios/forchheim_2045.yaml \
+  --scenario-config GridExpand/scenario_pipeline/config/scenarios/forchheim_2045.yaml \
   --include-no-flex-powerflow \
   --run-dir GridExpand/run_logs/<RUN_NAME>
 ```
@@ -306,7 +318,7 @@ uv run --project GridExpand/2.demand_allocation python GridExpand/runme/syntheti
   --profiles all \
   --demand-scope residential \
   --powerflow-output summary \
-  --scenario-config GridExpand/scenario_pipeline/configurations/scenarios/forchheim_2045.yaml \
+  --scenario-config GridExpand/scenario_pipeline/config/scenarios/forchheim_2045.yaml \
   --include-no-flex-powerflow \
   --cleanup-completed-only \
   --run-dir GridExpand/run_logs/<EXISTING_RUN_DIR>

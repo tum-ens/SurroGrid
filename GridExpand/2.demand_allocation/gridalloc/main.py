@@ -10,12 +10,13 @@ if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
 DEFAULT_SCENARIO_CONFIG = (
-    GRIDEXPAND_DIR / "scenario_pipeline" / "configurations" / "scenarios"
+    GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
     / "forchheim_2045.yaml"
 )
 
+from config import config
 from common.database import SurroGridDatabase
-from scenario_pipeline.configuration.loader import load_scenario_config
+from scenario_pipeline.config_loader import load_scenario_config
 from common.timeframe import (
     TIMEFRAME_MODES,
     build_initial_metadata,
@@ -163,6 +164,7 @@ if __name__ == '__main__':
         scenario_config, scenario_hash = load_scenario_config(args.scenario_config)
         if args.model_case not in scenario_config.model_cases:
             parser.error(f"Model case {args.model_case!r} is not enabled by the scenario YAML.")
+        config.apply_scenario(scenario_config)
 
         timeframe_metadata = build_initial_metadata(args.timeframe_mode)
         scenario_key = scenario_key_for_timeframe(

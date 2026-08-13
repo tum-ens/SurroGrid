@@ -12,11 +12,11 @@ GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 DEFAULT_SCENARIO_CONFIG = (
-    GRIDEXPAND_DIR / "scenario_pipeline" / "configurations" / "scenarios"
+    GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
     / "forchheim_2045.yaml"
 )
 
-from scenario_pipeline.configuration.loader import load_scenario_config
+from scenario_pipeline.config_loader import load_scenario_config
 
 # Note - this urbs version is deviating in the following ways from urbs-lvds (04 Feb 2025):
 # :: removed grid optimization, 14a/bui-react, uhp, coordination, curtailment

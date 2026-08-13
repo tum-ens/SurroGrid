@@ -143,7 +143,7 @@ uv run --project GridExpand/2.demand_allocation \
   --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \
   --weather-source-hdf GridExpand/2.demand_allocation/gridalloc/results/9474126-00_91301_1_2.h5 \
   --target both \
-  --scenario-config GridExpand/scenario_pipeline/configurations/scenarios/forchheim_2045.yaml \
+  --scenario-config GridExpand/scenario_pipeline/config/scenarios/forchheim_2045.yaml \
   --model-case post-hems-heuristic \
   --workers 4 \
   --step3-cpus 4 \

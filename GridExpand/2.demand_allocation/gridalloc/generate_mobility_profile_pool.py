@@ -13,9 +13,16 @@ from pathlib import Path
 import pandas as pd
 
 GRIDALLOC_DIR = Path(__file__).resolve().parent
+GRIDEXPAND_DIR = GRIDALLOC_DIR.parents[1]
 os.chdir(GRIDALLOC_DIR)
 if str(GRIDALLOC_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDALLOC_DIR))
+if str(GRIDEXPAND_DIR) not in sys.path:
+    sys.path.insert(0, str(GRIDEXPAND_DIR))
+
+from scenario_pipeline.config_loader import load_scenario_config
+
+DEFAULT_SCENARIO_CONFIG = GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios" / "forchheim_2045.yaml"
 
 from config import config
 import src.functions.mobility as mbl
@@ -223,6 +230,7 @@ def generate_pool(args: argparse.Namespace) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate pregenerated emobpy mobility profile CSV pool.")
     parser.add_argument("--profiles-per-stratum", type=int, default=1)
+    parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
     parser.add_argument("--market-share-threshold", type=float, default=0.80)
     parser.add_argument("--n_cpu", type=int, default=1)
     parser.add_argument("--append", action="store_true", help="Generate missing sample indexes up to the target count.")
@@ -245,4 +253,7 @@ def parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
-    generate_pool(parse_args())
+    arguments = parse_args()
+    scenario, _scenario_hash = load_scenario_config(arguments.scenario_config)
+    config.apply_scenario(scenario)
+    generate_pool(arguments)

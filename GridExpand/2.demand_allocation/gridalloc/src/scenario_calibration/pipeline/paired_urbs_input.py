@@ -18,7 +18,7 @@ DEFAULT_PAIRED_DIR = (
 )
 DEFAULT_OUTPUT_DIR = GRIDEXPAND_DIR / "3.urbs" / "Input"
 DEFAULT_SCENARIO_CONFIG = (
-    GRIDEXPAND_DIR / "scenario_pipeline" / "configurations" / "scenarios"
+    GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
     / "forchheim_2045.yaml"
 )
 
@@ -26,8 +26,9 @@ for path in (GRIDEXPAND_DIR, GRIDALLOC_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from config import config  # noqa: E402
 from common.timeframe import build_full_year_metadata, write_hdf_metadata  # noqa: E402
-from scenario_pipeline.configuration.loader import load_scenario_config  # noqa: E402
+from scenario_pipeline.config_loader import load_scenario_config  # noqa: E402
 from src.assets.pv.roof_catalog import assert_fallback_share  # noqa: E402
 from src.scenario_calibration.profiles.paired_profiles import (  # noqa: E402
     build_paired_base_electric_demand,
@@ -126,6 +127,7 @@ def materialize_paired_urbs_input(
 ) -> Path:
     """Write one paired full-year Step-3 input HDF."""
     scenario, scenario_hash = load_scenario_config(scenario_config_path)
+    config.apply_scenario(scenario)
     if model_case not in scenario.model_cases:
         raise ValueError(
             f"Model case {model_case!r} is not enabled in scenario {scenario.scenario_id!r}."
@@ -213,6 +215,7 @@ def materialize_paired_urbs_input(
         battery_predefined_locations_when_available=(
             scenario.battery.predefined_locations_when_available
         ),
+        technology_parameters=scenario.technologies,
         pv_demand_multiplier=scenario.pv.demand_multiplier,
         heat_profile_catalog=heat_catalog,
         heat_profile_library=heat_profile_library,
@@ -227,6 +230,7 @@ def materialize_paired_urbs_input(
         int(bus) for bus in demand.columns.get_level_values(0).unique()
     )
     electricity_module = load_electricity_module()
+    electricity_module.config.apply_scenario(scenario)
     static_tables = _combine_static_tables(
         active_buses,
         sector_inputs,

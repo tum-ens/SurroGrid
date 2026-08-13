@@ -278,6 +278,7 @@ def build_paired_sector_urbs_inputs(
     battery_energy_to_power_hours: float = 2.0,
     battery_predefined_locations_when_available: bool = True,
     synthetic_input_dir: Path = SYNTHETIC_INPUT_DIR,
+    technology_parameters=None,
     heat_profile_catalog: pd.DataFrame | None = None,
     heat_profile_library: Path | None = None,
     allow_diagnostic_heat_fallback: bool = False,
@@ -290,6 +291,7 @@ def build_paired_sector_urbs_inputs(
         profile_library=pv_profile_library,
         sizing_method=pv_sizing_method,
         demand_multiplier=pv_demand_multiplier,
+        technical_parameters=technology_parameters.processes["rooftop_pv"],
     )
     if pv is None:
         battery = None
@@ -310,8 +312,15 @@ def build_paired_sector_urbs_inputs(
             predefined_locations_when_available=(
                 battery_predefined_locations_when_available
             ),
+            technical_parameters=technology_parameters.storages["stationary_battery"],
         )
-    mobility = _build_paired_mobility(allocation, hours=hours, seed=seed)
+    mobility = _build_paired_mobility(
+        allocation,
+        hours=hours,
+        seed=seed,
+        process_parameters=technology_parameters.processes["home_charger"],
+        storage_parameters=technology_parameters.storages["mobility_storage"],
+    )
     heat = _build_paired_heat(
         allocation,
         heat_profile_catalog=heat_profile_catalog,
@@ -400,6 +409,7 @@ def _build_paired_pv(
     profile_library: Path,
     sizing_method: str = "optimization",
     demand_multiplier: float = 2.5,
+    technical_parameters=None,
 ) -> _PvInputs | None:
     if "pv_roof_eligible" not in allocation:
         raise ValueError(
@@ -436,6 +446,7 @@ def _build_paired_pv(
         selected_sections,
         profiles,
         sizing_method=sizing_method,
+        technical_parameters=technical_parameters,
     )
     audit = shared.audit.copy()
     audit["sector"] = "pv"
@@ -470,6 +481,7 @@ def _build_paired_battery(
     maximum_usable_kwh_per_annual_mwh: float,
     energy_to_power_hours: float,
     predefined_locations_when_available: bool,
+    technical_parameters: dict,
 ) -> _BatteryInputs | None:
     """Size batteries consistently while using SWF rows only as location evidence."""
     inventory_capacity = _sum_numeric_columns(
@@ -508,12 +520,11 @@ def _build_paired_battery(
         site_by_building=site_by_building,
         location_source=location_source,
     )
-    electricity = load_electricity_module()
     materialized = materialize_battery_urbs_inputs(
         plan,
         sizing_method=sizing_method,
         energy_to_power_hours=energy_to_power_hours,
-        technical_parameters=electricity.config,
+        technical_parameters=technical_parameters,
     )
     if materialized.storage.empty:
         return None
@@ -531,6 +542,8 @@ def _build_paired_battery(
 def _build_paired_mobility(
     allocation: pd.DataFrame,
     *,
+    process_parameters: dict,
+    storage_parameters: dict,
     hours: int,
     seed: int,
 ) -> _MobilityInputs | None:
@@ -629,13 +642,13 @@ def _build_paired_mobility(
                 "Process": charger,
                 "inst-cap": record["charger_kw"],
                 "cap-up": record["charger_kw"],
-                "inv-cost-fix": np.nan,
-                "inv-cost": 0,
-                "fix-cost": 0,
-                "var-cost": 0,
-                "wacc": 0.07,
-                "depreciation": 1,
-                "pf-min": np.nan,
+                "inv-cost-fix": process_parameters["fixed_investment_cost_eur"],
+                "inv-cost": process_parameters["investment_cost_eur_per_kw"],
+                "fix-cost": process_parameters["fixed_cost_eur_per_hour"],
+                "var-cost": process_parameters["variable_cost_eur_per_kwh"],
+                "wacc": process_parameters["wacc"],
+                "depreciation": process_parameters["depreciation_years"],
+                "pf-min": process_parameters["minimum_power_factor"],
             }
         )
         commodity_rows.append(
@@ -671,17 +684,17 @@ def _build_paired_mobility(
                 "cap-up-c": record["battery_cap_kwh"],
                 "inst-cap-p": record["battery_cap_kwh"],
                 "cap-up-p": record["battery_cap_kwh"],
-                "eff-in": 1,
-                "eff-out": 1,
-                "discharge": 0,
-                "ep-ratio": np.nan,
-                "inv-cost-p": 0,
-                "inv-cost-c": 0,
-                "fix-cost-p": 0,
-                "fix-cost-c": 0,
-                "var-cost-p": 0.001,
-                "wacc": 0.07,
-                "depreciation": 20,
+                "eff-in": storage_parameters["charge_efficiency"],
+                "eff-out": storage_parameters["discharge_efficiency"],
+                "discharge": storage_parameters["self_discharge_per_timestep"],
+                "ep-ratio": storage_parameters["energy_to_power_hours"],
+                "inv-cost-p": storage_parameters["investment_cost_eur_per_kw"],
+                "inv-cost-c": storage_parameters["investment_cost_eur_per_kwh"],
+                "fix-cost-p": storage_parameters["fixed_investment_cost_power_eur"],
+                "fix-cost-c": storage_parameters["fixed_investment_cost_energy_eur"],
+                "var-cost-p": storage_parameters["variable_cost_eur_per_kwh"],
+                "wacc": storage_parameters["wacc"],
+                "depreciation": storage_parameters["depreciation_years"],
             }
         )
         audit_rows.append(

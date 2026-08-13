@@ -40,10 +40,10 @@ from common.timeframe import (  # noqa: E402
     read_hdf_metadata,
     scenario_key_for_timeframe,
 )
-from scenario_pipeline.configuration.loader import load_scenario_config  # noqa: E402
+from scenario_pipeline.config_loader import load_scenario_config  # noqa: E402
 
 DEFAULT_SCENARIO_CONFIG = (
-    GRIDEXPAND_DIR / "scenario_pipeline" / "configurations" / "scenarios"
+    GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
     / "forchheim_2045.yaml"
 )
 

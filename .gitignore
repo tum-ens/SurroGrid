@@ -6,6 +6,8 @@ GridExpand/run_logs/*
 swf_usage.md
 pylovo_paper.tex
 paper_draft_pylovo-validation/*
+__pycache__/
+*.py[cod]
 *.png
 *.pdf
 *.svg
