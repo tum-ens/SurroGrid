@@ -154,10 +154,8 @@ class SaveFile:
     def get_no_flex_inputs(self):
         """Read no-flex inputs from a post-flex Step 3 result file.
 
-        No-flex demand reconstruction intentionally depends on the optimized
-        post-flex capacities. Heat demand is dispatched without URBS temporal
-        flexibility, but uses ``cap_pro`` to split heat-pump and auxiliary
-        electric heating in the same technology sizing context.
+        Heat demand is dispatched without temporal flexibility using the fixed
+        heat-pump and auxiliary capacities in the scenario input process table.
         """
         if not self.has_urbs_results():
             raise KeyError(

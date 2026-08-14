@@ -134,6 +134,7 @@ def materialize_paired_urbs_input(
         )
     pv_sizing_method = scenario.pv_sizing_method(model_case)
     battery_sizing_method = scenario.battery_sizing_method(model_case)
+    heat_sizing_method = scenario.heat_sizing_method(model_case)
     if pv_sizing_method == "none":
         raise ValueError("The pre case is materialized by the electricity-only pipeline.")
     paired_dir = paired_dir.resolve()
@@ -216,6 +217,8 @@ def materialize_paired_urbs_input(
             scenario.battery.predefined_locations_when_available
         ),
         technology_parameters=scenario.technologies,
+        heat_sizing_method=heat_sizing_method,
+        heat_config=scenario.heat,
         pv_demand_multiplier=scenario.pv.demand_multiplier,
         heat_profile_catalog=heat_catalog,
         heat_profile_library=heat_profile_library,
@@ -249,11 +252,17 @@ def materialize_paired_urbs_input(
     heat_audit = sector_inputs.audit[
         sector_inputs.audit.get("sector", pd.Series(dtype=str)).eq("heat")
     ]
+    heat_profile_audit = heat_audit[
+        heat_audit.get(
+            "audit_record_type",
+            pd.Series(index=heat_audit.index, dtype=str),
+        ).eq("heat_profile")
+    ]
     asset_plan = sector_inputs.audit[
         sector_inputs.audit.get(
             "audit_record_type",
             pd.Series(index=sector_inputs.audit.index, dtype=str),
-        ).isin(["asset_plan", "battery_asset_plan"])
+        ).isin(["asset_plan", "battery_asset_plan", "heat_asset_plan"])
     ].copy()
     metadata = {
         **build_full_year_metadata(),
@@ -274,8 +283,8 @@ def materialize_paired_urbs_input(
         "battery_sizing_method": battery_sizing_method,
         "battery_energy_to_power_hours": scenario.battery.energy_to_power_hours,
         "battery_predefined_locations_when_available": scenario.battery.predefined_locations_when_available,
-        "heat_pump_sizing_method": scenario.heat_pump.method,
-        "temporary_asset_sizing_placeholders": ["heat_pump"],
+        "heat_sizing_method": heat_sizing_method,
+        "heat_scope": "residential_buildings",
         "physical_buildings": int(allocation["building_objectid"].nunique()),
         "hh_rows": float(allocation["residential_equivalent_hh_rows"].sum()),
         "hh_annual_kwh": float(
@@ -283,16 +292,16 @@ def materialize_paired_urbs_input(
         ),
         "ghd_annual_kwh": float(allocation["calibrated_annual_ghd_kwh"].sum()),
         "heat_profile_fallback_buildings": int(
-            heat_audit.loc[
-                heat_audit.get("profile_method", "").ne("exact_physical_building"),
+            heat_profile_audit.loc[
+                heat_profile_audit.get("profile_method", "").ne("exact_physical_building"),
                 "building_objectid",
             ].nunique()
         )
-        if not heat_audit.empty
+        if not heat_profile_audit.empty
         else 0,
         "publication_ready": bool(
-            heat_audit.empty
-            or heat_audit.get(
+            heat_profile_audit.empty
+            or heat_profile_audit.get(
                 "profile_method",
                 pd.Series(dtype=str),
             )

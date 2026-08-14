@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from ...assets.battery.materialization import materialize_battery_urbs_inputs
 from ...assets.battery.sizing import build_battery_asset_plan
+from ...assets.heat.materialization import materialize_heat_urbs_inputs
+from ...assets.heat.sizing import build_heat_asset_plan, smooth_daily_dhw
+from ...functions.heat import get_norm_outside_temperature
 from ...assets.pv.materialization import materialize_pv_urbs_inputs
 from ...assets.pv.sizing import build_pv_asset_plan
 
@@ -36,10 +40,6 @@ from .real_swf_sector_profiles import (
     _choose_source_pv_profile,
     _concat_static,
     _concat_timeseries,
-    _create_com_heat,
-    _create_pro_com_heat,
-    _create_pro_heat,
-    _create_sto_heat,
     _empty_timeseries,
     _read_pool_timeseries,
 )
@@ -279,6 +279,8 @@ def build_paired_sector_urbs_inputs(
     battery_predefined_locations_when_available: bool = True,
     synthetic_input_dir: Path = SYNTHETIC_INPUT_DIR,
     technology_parameters=None,
+    heat_sizing_method: str = "full_load_hours_rule",
+    heat_config=None,
     heat_profile_catalog: pd.DataFrame | None = None,
     heat_profile_library: Path | None = None,
     allow_diagnostic_heat_fallback: bool = False,
@@ -328,6 +330,10 @@ def build_paired_sector_urbs_inputs(
         allow_diagnostic_fallback=allow_diagnostic_heat_fallback,
         hours=hours,
         synthetic_input_dir=synthetic_input_dir,
+        weather_source_hdf=weather_source_hdf,
+        sizing_method=heat_sizing_method,
+        heat_config=heat_config,
+        technology_parameters=technology_parameters,
     )
 
     parts = [part for part in (pv, mobility, heat) if part is not None]
@@ -381,8 +387,8 @@ def build_paired_sector_urbs_inputs(
                 "synthetic URBS input"
             ),
             "stationary_battery_model": (
-                "fixed SWF energy capacity; fixed charge/discharge power equal "
-                "to half the energy capacity; optimized post-flex dispatch"
+                "SWF rows provide location evidence; capacity follows the shared "
+                "HTW bound and the selected heuristic or optimization sizing mode"
             ),
         },
     )
@@ -727,6 +733,28 @@ def _build_paired_mobility(
     )
 
 
+def _weather_and_postcode(weather_source_hdf: Path, hours: int):
+    try:
+        raw = pd.read_hdf(weather_source_hdf, key="raw_data/weather")
+        ambient = pd.to_numeric(raw["temp_air"], errors="coerce")
+    except (KeyError, FileNotFoundError):
+        weather = pd.read_hdf(weather_source_hdf, key="urbs_in/weather")
+        key = ("ambient", "Tamb") if ("ambient", "Tamb") in weather.columns else "Tamb"
+        ambient = pd.to_numeric(weather[key], errors="coerce")
+    ambient = ambient.iloc[:hours].reset_index(drop=True)
+    try:
+        region = pd.read_hdf(weather_source_hdf, key="raw_data/region")
+        postcode = str(region.iloc[0]["plz"]).zfill(5)
+    except KeyError:
+        match = re.search(r"_(\d{5})_", weather_source_hdf.name)
+        if match is None:
+            raise ValueError(
+                "Paired heat sizing requires postcode metadata or a postcode-qualified weather filename."
+            )
+        postcode = match.group(1)
+    return ambient, postcode
+
+
 def _build_paired_heat(
     allocation: pd.DataFrame,
     *,
@@ -735,63 +763,40 @@ def _build_paired_heat(
     heat_profile_catalog: pd.DataFrame | None,
     heat_profile_library: Path | None,
     allow_diagnostic_fallback: bool,
+    weather_source_hdf: Path,
+    sizing_method: str,
+    heat_config,
+    technology_parameters,
 ) -> _HeatInputs | None:
-    wp_count = _sum_numeric_columns(
-        allocation,
-        ("residential_wp_rows", "ghd_wp_rows"),
-    )
+    # The first heat heuristic is residential only. Commercial HP rows remain
+    # outside scope until a separate commercial sizing method is documented.
+    wp_count = _sum_numeric_columns(allocation, ("residential_wp_rows",))
     selected = allocation.assign(_wp_count=wp_count)
     selected = selected[selected["_wp_count"].gt(0.0)].copy()
     if selected.empty:
         return None
-
-    required = {
-        "building_objectid",
-        "synthetic_bridge_filename",
-        "synthetic_bus",
-    }
+    required = {"building_objectid", "synthetic_bridge_filename", "synthetic_bus"}
     missing = required.difference(selected.columns)
     if missing:
         raise ValueError(
             "Paired heat allocation requires physical synthetic source mapping: "
             f"{sorted(missing)}"
         )
+    if heat_config is None:
+        raise ValueError("Paired heat materialization requires scenario heat configuration.")
 
-    library = (
-        PhysicalHeatProfileLibrary(heat_profile_library)
-        if heat_profile_library is not None
-        else None
-    )
-
-    source_cache: dict[
-        str,
-        tuple[pd.DataFrame, pd.DataFrame],
-    ] = {}
+    library = PhysicalHeatProfileLibrary(heat_profile_library) if heat_profile_library is not None else None
+    source_cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
     demand_entries: list[tuple[tuple[int, str], pd.Series]] = []
     heat_by_target: dict[int, list[tuple[pd.Series, pd.Series]]] = {}
-    audit_rows: list[dict[str, Any]] = []
+    profile_audit = []
+    building_rows = []
     catalog_by_building = {}
     if heat_profile_catalog is not None and not heat_profile_catalog.empty:
-        catalog_by_building = (
-            heat_profile_catalog.drop_duplicates("building_objectid")
-            .set_index("building_objectid")
-            .to_dict("index")
-        )
+        catalog_by_building = heat_profile_catalog.drop_duplicates("building_objectid").set_index("building_objectid").to_dict("index")
 
-    for building_id, group in selected.groupby(
-        "building_objectid",
-        sort=True,
-        observed=True,
-    ):
-        (
-            space,
-            water,
-            cop,
-            source_name,
-            source_bus,
-            profile_method,
-            profile_scale,
-        ) = load_physical_heat_profile(
+    for building_id, group in selected.groupby("building_objectid", sort=True, observed=True):
+        space, water, cop, source_name, source_bus, profile_method, profile_scale = load_physical_heat_profile(
             building_objectid=building_id,
             group=group,
             hours=hours,
@@ -801,38 +806,33 @@ def _build_paired_heat(
             source_cache=source_cache,
             allow_diagnostic_fallback=allow_diagnostic_fallback,
         )
-        total_weight = float(group["_wp_count"].sum())
-        for row in group.to_dict("records"):
-            share = float(row["_wp_count"]) / total_weight
-            target_bus = _target_bus(row)
-            allocated_space = space * share
-            allocated_water = water * share
-            demand_entries.extend(
-                [
-                    ((target_bus, "space_heat"), allocated_space),
-                    ((target_bus, "water_heat"), allocated_water),
-                ]
-            )
-            heat = allocated_space + allocated_water
-            heat_by_target.setdefault(target_bus, []).append((heat, heat * cop))
-            audit_rows.append(
-                {
-                    "sector": "heat",
-                    "allocation_bus": target_bus,
-                    "building_objectid": building_id,
-                    "asset_rows": float(row["_wp_count"]),
-                    "building_profile_share": share,
-                    "source_hdf": source_name,
-                    "profile_method": profile_method,
-                    "profile_scale": profile_scale,
-                    "source_bus": source_bus,
-                    "annual_space_heat_kwh": float(allocated_space.sum()),
-                    "annual_water_heat_kwh": float(allocated_water.sum()),
-                    "heat_weighted_mean_cop": float((heat * cop).sum() / heat.sum())
-                    if float(heat.sum()) > 0.0
-                    else 1.0,
-                }
-            )
+        water_frame = pd.DataFrame({"water": water.reset_index(drop=True)})
+        water = smooth_daily_dhw(water_frame)["water"]
+        primary = group.sort_values("_profile_site_id").iloc[0]
+        target_bus = _target_bus(primary)
+        space = space.reset_index(drop=True)
+        cop = cop.reset_index(drop=True).clip(lower=0.1)
+        demand_entries.extend([
+            ((target_bus, "space_heat"), space),
+            ((target_bus, "water_heat"), water),
+        ])
+        heat = space + water
+        heat_by_target.setdefault(target_bus, []).append((heat, heat * cop))
+        building_rows.append({
+            "building_objectid": str(building_id),
+            "Site": target_bus,
+            "building_type": primary.get("building_type"),
+            "building_use": primary.get("building_use"),
+        })
+        profile_audit.append({
+            "sector": "heat", "audit_record_type": "heat_profile",
+            "allocation_bus": target_bus, "building_objectid": str(building_id),
+            "source_hdf": source_name, "profile_method": profile_method,
+            "profile_scale": profile_scale, "source_bus": source_bus,
+            "annual_space_heat_kwh": float(space.sum()),
+            "annual_water_heat_kwh": float(water.sum()),
+            "heat_weighted_mean_cop": float((heat * cop).sum() / heat.sum()) if float(heat.sum()) > 0.0 else 1.0,
+        })
 
     demand = sum_series_by_key(demand_entries)
     demand.columns = pd.MultiIndex.from_tuples(demand.columns)
@@ -841,18 +841,31 @@ def _build_paired_heat(
     for bus, parts in sorted(heat_by_target.items()):
         heat = sum(part[0] for part in parts)
         weighted = sum(part[1] for part in parts)
-        cop = (weighted / heat.replace(0.0, np.nan)).fillna(1.0)
-        cop_parts.append(cop.rename((bus, "heatpump_air")))
+        cop_parts.append((weighted / heat.replace(0.0, np.nan)).fillna(1.0).rename((bus, "heatpump_air")))
     eff_factor = pd.concat(cop_parts, axis=1)
     eff_factor.columns = pd.MultiIndex.from_tuples(eff_factor.columns)
     eff_factor.index.name = "t"
-    buses = sorted(demand.columns.get_level_values(0).unique())
+    ambient, postcode = _weather_and_postcode(weather_source_hdf, hours)
+    plan, _climate = build_heat_asset_plan(
+        pd.DataFrame(building_rows), demand.loc[:, pd.IndexSlice[:, ["space_heat"]]],
+        demand.loc[:, pd.IndexSlice[:, ["water_heat"]]], eff_factor, ambient,
+        sizing_method=sizing_method,
+        norm_outside_temperature_c=get_norm_outside_temperature(postcode),
+        indoor_design_temperature_c=heat_config.indoor_design_temperature_c,
+        heating_limit_temperature_c=heat_config.heating_limit_temperature_c,
+        heat_pump_design_share=heat_config.heat_pump_design_share,
+        buffer_volume_l_per_kw_th=heat_config.buffer_volume_l_per_kw_th,
+        buffer_usable_temperature_spread_k=heat_config.buffer_usable_temperature_spread_k,
+    )
+    materialized = materialize_heat_urbs_inputs(
+        plan, sizing_method=sizing_method,
+        process_parameters=technology_parameters.processes,
+        storage_parameters=technology_parameters.storages["thermal_storage"],
+    )
+    audit = pd.concat([pd.DataFrame(profile_audit), materialized.audit], ignore_index=True, sort=False)
     return _HeatInputs(
-        demand=demand,
-        eff_factor=eff_factor,
-        process=_create_pro_heat(buses),
-        commodity=_create_com_heat(buses),
-        process_commodity=_create_pro_com_heat(),
-        storage=_create_sto_heat(buses),
-        audit=pd.DataFrame(audit_rows),
+        demand=demand, eff_factor=eff_factor,
+        process=materialized.process, commodity=materialized.commodity,
+        process_commodity=materialized.process_commodity,
+        storage=materialized.storage, audit=audit,
     )

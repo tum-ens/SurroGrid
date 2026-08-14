@@ -54,9 +54,17 @@ asset_sizing:
     # E/P = 2 h means maximum charge/discharge power equals energy / 2.
     energy_to_power_hours: 2.0
 
-  heat_pump:
-    # Structural adapter only; replace after the heat-pump sizing rule is supplied.
-    method: temporary_placeholder
+  heat:
+    # Degree-day reference temperatures used to derive regional full-load hours.
+    indoor_design_temperature_c: 20.0
+    # DWD/VDI 20/15 convention for the existing residential building stock.
+    heating_limit_temperature_c: 15.0
+    # Thermal HP output at norm outdoor temperature as share of design heat load.
+    heat_pump_design_share: 0.65
+    # Space-heating buffer only; the DHW tank is represented implicitly.
+    buffer_volume_l_per_kw_th: 20.0
+    # Usable temperature range for converting buffer litres to kWhth.
+    buffer_usable_temperature_spread_k: 5.0
 
 # Mobility behavior and emobpy vehicle-model assumptions.
 mobility:

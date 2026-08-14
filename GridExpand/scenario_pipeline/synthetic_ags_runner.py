@@ -93,6 +93,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step4-cpus", type=int, default=4)
     parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
     parser.add_argument(
+        "--model-case",
+        choices=("post-inflex-heuristic", "post-hems-optimized", "post-hems-heuristic"),
+        default="post-hems-optimized",
+        help="Scenario case controlling upstream asset sizing and downstream dispatch.",
+    )
+    parser.add_argument(
         "--powerflow-output",
         choices=POWERFLOW_OUTPUT_CHOICES,
         default="raw",
@@ -204,6 +210,8 @@ def parse_args() -> argparse.Namespace:
         parser.error(
             "Use either --no-flex-only or --include-no-flex-powerflow, not both."
         )
+    if (args.include_no_flex_powerflow or args.no_flex_only) and args.model_case == "post-hems-optimized":
+        parser.error("No-flex dispatch requires a heuristic model case with fixed asset capacities.")
     if args.no_flex_ev_charger_kw is not None and not (
         args.include_no_flex_powerflow or args.no_flex_only
     ):
@@ -931,7 +939,7 @@ def run_candidate(
                 "--timeframe-mode",
                 args.timeframe_mode,
                 "--model-case",
-                "pre" if args.profiles == "status_quo" else "post-hems-optimized",
+                "pre" if args.profiles == "status_quo" else args.model_case,
                 "--scenario-config",
                 str(args.scenario_config),
                 "--n_cpu",

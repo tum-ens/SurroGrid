@@ -155,6 +155,8 @@ By default this step writes (or overwrites) the following keys using `pandas.HDF
 
 - `raw_data/weather` (written even if it existed)
 - `raw_data/buildings` (written with additional sampled fields)
+- `raw_data/heat_asset_plan` (building-level HP, auxiliary, and buffer sizing)
+- `raw_data/heat_asset_audit` (climate, load, capacity, and representation audit fields)
 
 #### URBS inputs (new group)
 
@@ -320,8 +322,8 @@ This section documents the first-party code in `gridalloc/src`. Vendored third-p
 
 - `heat.py`
   - Uses the vendored districtgenerator interface (`Datahandler`) to generate hourly space-heating and DHW demand for residential buildings.
-  - Adds non-residential DHW using GHD DHW profiles and generates heat pump COP time series (air-source, with radiator/floor sink temperature assumptions).
-  - Creates URBS processes/commodities/storages for heat supply.
+  - Generates air-source heat-pump COP time series using radiator/floor sink-temperature assumptions.
+  - The scenario pipeline currently materializes central heat assets only for residential buildings; commercial heat needs a separate method.
 
 - `mobility.py`
   - Samples number of cars per household and assigns vehicle models + commuter/non-commuter schedules.

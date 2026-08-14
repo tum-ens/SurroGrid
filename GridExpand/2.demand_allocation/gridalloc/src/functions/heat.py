@@ -70,6 +70,21 @@ def _get_cop(hp_type, heating_type, df_heat_space, df_heat_water, air_temp, soil
 ##############################################################
 ############## Generation, Publicly Callable #################
 ##############################################################
+def get_norm_outside_temperature(zip_code):
+    """Return the exact postcode-specific norm outside temperature."""
+    postcode = str(zip_code).zfill(5)
+    site_data = pd.read_csv(
+        f"{config.DISTGEN_DATA_PATH}/site_data.txt",
+        delimiter="\t",
+        dtype={"Zip": str},
+    )
+    match = site_data[site_data["Zip"].eq(postcode)]
+    if len(match) != 1:
+        raise ValueError(
+            f"Expected one exact postcode climate entry for {postcode}, found {len(match)}."
+        )
+    return float(match.iloc[0]["T_ne"])
+
 def sample_statistics(df_buildings):
     # Sample ages for non-residential buildings:
     df_buildings.loc[df_buildings["construction_year"].isna(), ["construction_year"]] = np.random.choice(
@@ -109,11 +124,10 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip):
     zip_code = str(zip)
     site_data = pd.read_csv(f"{config.DISTGEN_DATA_PATH}/site_data.txt", delimiter='\t', dtype={'Zip': str})
     if zip_code not in set(site_data["Zip"]):
-        site_data = site_data.copy()
-        nearest_idx = (site_data["Zip"].astype(int) - int(zip_code)).abs().idxmin()
-        fallback = site_data.loc[nearest_idx].copy()
-        fallback["Zip"] = zip_code
-        site_data = pd.concat([site_data, fallback.to_frame().T], ignore_index=True)
+        raise ValueError(
+            f"No exact postcode climate entry for {zip_code}. Numeric postcode "
+            "proximity is not a geographic climate fallback."
+        )
     # print(site_data)
     # Simulate heating
     heat_data = Datahandler(scenario, scenario_name = "example", zip_code = zip_code)
@@ -143,12 +157,11 @@ def generate_hp_cop(df_buildings, df_heat_space, df_heat_water, df_weather):
     for _, row in df_buildings.iterrows():
         hp_type = "ASHP"
         bus = row["bus"]
-        # hp_type = row["hp_type"]
+        if (bus, "space_heat") not in df_heat_space.columns:
+            continue
         heating_type = row["heating_type"]
-        
         space_heat = pd.DataFrame(df_heat_space[bus, "space_heat"])
         water_heat = pd.DataFrame(df_heat_water[bus, "water_heat"])
-
         cop_dict[bus] = _get_cop(hp_type, heating_type, space_heat, water_heat, air_temp, soil_temp)
     cops_air = pd.concat([cop for _,cop in cop_dict.items()], axis=1)
     cops_air.columns = pd.MultiIndex.from_tuples([(col, "heatpump_air") for col in cop_dict.keys()])
@@ -170,72 +183,3 @@ def generate_hp_cop(df_buildings, df_heat_space, df_heat_water, df_weather):
     # cops = pd.concat([cops_air, cops_grd], axis=1)
     cops = cops_air
     return cops
-
-def create_pro_heat(consumer_list):
-    # Heatpump AIR
-    df_pro_base = pd.DataFrame(consumer_list, columns=['Site'])
-    df_pro_base[["Process","inst-cap","cap-up","inv-cost-fix","inv-cost","fix-cost","var-cost","wacc","depreciation","pf-min"]] = (
-        "heatpump_air", config.HP_AIR_INST_CAP, config.HP_AIR_CAP_UP, config.HP_AIR_INV_COST_FIX, config.HP_AIR_INV_COST, 
-            config.HP_AIR_FIX_COST, config.HP_AIR_VAR_COST, config.HP_AIR_WACC, config.HP_AIR_DEPRECIATION, config.HP_AIR_PF_MIN
-    )
-    # # Heatpump GROUND
-    # df_pro_grd = df_pro_base.copy()
-    # df_pro_grd[["Process","inst-cap","cap-up","inv-cost-fix","inv-cost","fix-cost","var-cost","wacc","depreciation","pf-min"]] = (
-    #     "heatpump_grd", config.HP_GRD_INST_CAP, config.HP_GRD_CAP_UP, config.HP_GRD_INV_COST_FIX, config.HP_GRD_INV_COST, 
-    #         config.HP_GRD_FIX_COST, config.HP_GRD_VAR_COST, config.HP_GRD_WACC, config.HP_GRD_DEPRECIATION, config.HP_GRD_PF_MIN
-    # )
-    # Heatpump booster
-    df_pro_bst = df_pro_base.copy()
-    df_pro_bst[["Process","inst-cap","cap-up","inv-cost-fix","inv-cost","fix-cost","var-cost","wacc","depreciation","pf-min"]] = (
-        "heatpump_booster", config.HP_BST_INST_CAP, config.HP_BST_CAP_UP, config.HP_BST_INV_COST_FIX, config.HP_BST_INV_COST, 
-            config.HP_BST_FIX_COST, config.HP_BST_VAR_COST, config.HP_BST_WACC, config.HP_BST_DEPRECIATION, config.HP_BST_PF_MIN)
-    # Heat dummy space
-    df_pro_dmys = df_pro_base.copy()
-    df_pro_dmys[["Process","inst-cap","cap-up","inv-cost-fix","inv-cost","fix-cost","var-cost","wacc","depreciation","pf-min"]] = (
-        "Heat_dummy_space", config.HDM_INST_CAP, config.HDM_CAP_UP, config.HDM_INV_COST_FIX, config.HDM_INV_COST, 
-            config.HDM_FIX_COST, config.HDM_VAR_COST, config.HDM_WACC, config.HDM_DEPRECIATION, config.HDM_PF_MIN)
-    # Heat dummy water
-    df_pro_dmyw = df_pro_dmys.copy()
-    df_pro_dmyw["Process"] = "Heat_dummy_water"
-
-    # df_pro = pd.concat([df_pro_base, df_pro_grd, df_pro_bst, df_pro_dmys, df_pro_dmyw], axis=0)
-    df_pro = pd.concat([df_pro_base, df_pro_bst, df_pro_dmys, df_pro_dmyw], axis=0)
-    return df_pro.reset_index(drop=True)
-
-def create_com_heat(consumer_list):
-    df_com_base = pd.DataFrame(consumer_list, columns=['Site'])
-    df_com_base[["Commodity","Type","price"]] = ("common_heat", "Stock", np.nan)
-
-    df_com_sh = df_com_base.copy()
-    df_com_sh[["Commodity","Type"]] = ("space_heat", "Demand")
-
-    df_com_wh = df_com_base.copy()
-    df_com_wh[["Commodity","Type"]] = ("water_heat", "Demand")
-
-    df_com = pd.concat([df_com_base, df_com_sh, df_com_wh], axis=0)
-    return df_com.reset_index(drop=True)
-
-def create_pro_com_heat():
-    # df_pro_com = pd.DataFrame({
-    #     'Process':   ["Heat_dummy_space", "Heat_dummy_space", "Heat_dummy_water", "Heat_dummy_water", "heatpump_air", "heatpump_air", "heatpump_air","heatpump_grd", "heatpump_grd", "heatpump_grd", "heatpump_booster", "heatpump_booster"],
-    #     'Commodity': ["common_heat", "space_heat", "common_heat", "water_heat", "electricity-reactive", "electricity", "common_heat", "electricity-reactive", "electricity", "common_heat", "electricity", "common_heat"],
-    #     'Direction': ["In", "Out", "In", "Out", "In", "In", "Out",  "In", "In", "Out",  "In", "Out"],
-    #     'ratio':     [1, 1, 1, 1, config.HP_AIR_Q_IN_RATIO, 1, 1, config.HP_GRD_Q_IN_RATIO, 1, 1, 1, 1]
-    # })
-    df_pro_com = pd.DataFrame({
-        'Process':   ["Heat_dummy_space", "Heat_dummy_space", "Heat_dummy_water", "Heat_dummy_water", "heatpump_air", "heatpump_air", "heatpump_booster", "heatpump_booster"],
-        'Commodity': ["common_heat",      "space_heat",       "common_heat",      "water_heat",       "electricity",  "common_heat",  "electricity",      "common_heat"],
-        'Direction': ["In",               "Out",              "In",               "Out",              "In",           "Out",          "In",               "Out"],
-        'ratio':     [1,                   1,                  1,                  1,                  1,             1,               1,                  1]
-    })
-    return df_pro_com.reset_index(drop=True)
-
-def create_sto_heat(consumer_list):
-    df_sto = pd.DataFrame(consumer_list, columns=['Site'])
-    df_sto[["Storage","Commodity","inst-cap-c","cap-up-c","inst-cap-p","cap-up-p","eff-in","eff-out","discharge","ep-ratio",
-            "inv-cost-p","inv-cost-c","fix-cost-p","fix-cost-c","var-cost-p","wacc","depreciation"]] = (
-            "heat_storage", "common_heat", config.TS_INST_CAP_C, config.TS_CAP_UP_C, config.TS_INST_CAP_P, 
-            config.TS_CAP_UP_P, config.TS_EFF_IN, config.TS_EFF_OUT, config.TS_DISCHARGE, config.TS_EP_RATIO,
-            config.TS_INV_COST_P, config.TS_INV_COST_C, config.TS_FIX_COST_P, config.TS_FIX_COST_C,
-            config.TS_VAR_COST_P, config.TS_WACC, config.TS_DEPRECIATION)
-    return df_sto.reset_index(drop=True)

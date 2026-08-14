@@ -50,11 +50,11 @@ For external communication, the 2045 electrification assumptions are summarized 
 
 | Electrification assumption | 2045 scenario |
 |---|---|
-| Heat pump | 47% of buildings; heat-pump and auxiliary-heater capacities are optimized |
+| Heat pump | 47% of buildings; residential locations follow the SWF inventory, while capacities follow the selected shared scenario sizing mode |
 | PV and stationary battery | SWF rows retain predefined locations; PV potential comes from LoD2 roofs; battery capacity follows the shared HTW rule |
 | EV charging | 76% of buildings; 11 kW per charging point |
 
-The SWF inventory provides heat-pump locations but no positive heat-pump capacities, so URBS selects the heat-pump and auxiliary-heater capacities. SWF PV capacity is not used as an installation limit. The SWF pandapower file is cumulative: existing and future PV rows with different `Baujahr` values coexist in the final network and are `in_service`. In `swf` location mode, any PV row with `Baujahr <= 2045` establishes building/location eligibility; legacy rows without a usable year are retained as existing assets. Repeated rows at the same connection collapse to one eligibility record. In `all_buildings` mode, every retained physical building is eligible. Charging-station capacities are fixed; a building can carry more than one 11 kW charging point.
+The SWF inventory provides heat-pump locations but no positive heat-pump capacities. It is therefore location evidence only. Both heuristic cases use the shared building-level full-load-hour HP/auxiliary/buffer plan; `post-hems-optimized` instead uses its calculated monovalent values as finite optimization bounds. SWF PV capacity is not used as an installation limit. The SWF pandapower file is cumulative: existing and future PV rows with different `Baujahr` values coexist in the final network and are `in_service`. In `swf` location mode, any PV row with `Baujahr <= 2045` establishes building/location eligibility; legacy rows without a usable year are retained as existing assets. Repeated rows at the same connection collapse to one eligibility record. In `all_buildings` mode, every retained physical building is eligible. Charging-station capacities are fixed; a building can carry more than one 11 kW charging point.
 
 ### LoD2 PV roof potential and profiles
 
@@ -113,6 +113,8 @@ The revised pylovo-version-5 paired scope contains 3,580 physical heat-profile b
 The validated physical heat and COP time series are generated once and stored in a network-independent regional HDF5 library keyed by `building_objectid`. A library represents one explicit physical-profile assumption set, so topology changes can reuse it while refurbishment or weather changes require a new profile-set identifier. The current `forchheim_2045_physical_heat_v1` library contains 3,582 buildings and 8,760 hours in approximately 196 MB. It is a slight superset of the 3,580 profiles required by the version-5 paired scope.
 
 Paired readiness checks building coverage against this library, and URBS input generation reads the same building profile before projecting it to the current real or synthetic target bus. Changing the pylovo grid version therefore requires a new paired allocation but no repeated heat-profile generation when the physical profile assumptions are unchanged. The legacy per-grid HDF workflow remains available only for constructing a new library or explicitly diagnostic fallbacks.
+
+The paired materializer then applies the same residential heat-asset method documented in [SCENARIO_METHOD.md](../../../scenario_pipeline/docs/SCENARIO_METHOD.md): DHW energy is spread uniformly within each day, one central system is assigned per physical building, and the resulting fixed capacities or optimization bounds are projected through scenario-unit sites. The real and synthetic targets consume the same physical profiles and sizing assumptions.
 
 ## Diagnostic Pilot: LV113
 

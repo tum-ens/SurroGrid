@@ -181,6 +181,8 @@ if __name__ == '__main__':
             ),
             "battery_sizing_method": scenario_config.battery_sizing_method(args.model_case),
             "battery_energy_to_power_hours": scenario_config.battery.energy_to_power_hours,
+            "heat_sizing_method": scenario_config.heat_sizing_method(args.model_case),
+            "heat_scope": "residential_buildings",
         })
 
         #### Obtain relevant input file ####

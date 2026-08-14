@@ -128,16 +128,38 @@ class PvSizingConfig:
 
 
 @dataclass(frozen=True)
-class PlaceholderSizingConfig:
-    method: str
+class HeatSizingConfig:
+    indoor_design_temperature_c: float
+    heating_limit_temperature_c: float
+    heat_pump_design_share: float
+    buffer_volume_l_per_kw_th: float
+    buffer_usable_temperature_spread_k: float
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any], label: str) -> "PlaceholderSizingConfig":
-        raw = _mapping(raw, label)
-        _only(raw, {"method"}, label)
-        if raw.get("method") != "temporary_placeholder":
-            raise ValueError(f"{label}.method must currently be temporary_placeholder.")
-        return cls(method="temporary_placeholder")
+    def from_dict(cls, raw: dict[str, Any]) -> "HeatSizingConfig":
+        raw = _mapping(raw, "asset_sizing.heat")
+        allowed = {
+            "indoor_design_temperature_c", "heating_limit_temperature_c",
+            "heat_pump_design_share", "buffer_volume_l_per_kw_th",
+            "buffer_usable_temperature_spread_k",
+        }
+        _only(raw, allowed, "asset_sizing.heat")
+        if set(raw) != allowed:
+            raise ValueError("asset_sizing.heat is incomplete.")
+        inside = _positive(raw["indoor_design_temperature_c"], "asset_sizing.heat.indoor_design_temperature_c")
+        limit = _positive(raw["heating_limit_temperature_c"], "asset_sizing.heat.heating_limit_temperature_c")
+        if limit >= inside:
+            raise ValueError("asset_sizing.heat.heating_limit_temperature_c must be below indoor_design_temperature_c.")
+        share = _positive(raw["heat_pump_design_share"], "asset_sizing.heat.heat_pump_design_share")
+        if share > 1.0:
+            raise ValueError("asset_sizing.heat.heat_pump_design_share must be <= 1.")
+        return cls(
+            indoor_design_temperature_c=inside,
+            heating_limit_temperature_c=limit,
+            heat_pump_design_share=share,
+            buffer_volume_l_per_kw_th=_positive(raw["buffer_volume_l_per_kw_th"], "asset_sizing.heat.buffer_volume_l_per_kw_th"),
+            buffer_usable_temperature_spread_k=_positive(raw["buffer_usable_temperature_spread_k"], "asset_sizing.heat.buffer_usable_temperature_spread_k"),
+        )
 
 
 @dataclass(frozen=True)
@@ -346,7 +368,7 @@ class ScenarioConfig:
     economics: EconomicsConfig
     pv: PvSizingConfig
     battery: BatterySizingConfig
-    heat_pump: PlaceholderSizingConfig
+    heat: HeatSizingConfig
     mobility: MobilityConfig
     technologies: TechnologyParameters
     time_aggregation: TimeAggregationConfig
@@ -366,7 +388,7 @@ class ScenarioConfig:
         economics = _mapping(raw["economics"], "economics")
         _only(economics, {"electricity"}, "economics")
         assets = _mapping(raw["asset_sizing"], "asset_sizing")
-        _only(assets, {"pv", "battery", "heat_pump"}, "asset_sizing")
+        _only(assets, {"pv", "battery", "heat"}, "asset_sizing")
         return cls(
             scenario_id=str(scenario["id"]),
             milestone_year=int(_positive(scenario["milestone_year"], "scenario.milestone_year")),
@@ -374,7 +396,7 @@ class ScenarioConfig:
             economics=EconomicsConfig.from_dict(economics["electricity"]),
             pv=PvSizingConfig.from_dict(assets["pv"]),
             battery=BatterySizingConfig.from_dict(assets["battery"]),
-            heat_pump=PlaceholderSizingConfig.from_dict(assets["heat_pump"], "asset_sizing.heat_pump"),
+            heat=HeatSizingConfig.from_dict(assets["heat"]),
             mobility=MobilityConfig.from_dict(raw["mobility"]),
             technologies=TechnologyParameters.from_dict(raw["technologies"]),
             time_aggregation=TimeAggregationConfig.from_dict(raw["time_aggregation"]),
@@ -397,3 +419,12 @@ class ScenarioConfig:
         if model_case == "pre":
             return "none"
         return self.battery.heuristic_method
+
+    def heat_sizing_method(self, model_case: str) -> str:
+        if model_case not in MODEL_CASES:
+            raise ValueError(f"Unknown model case {model_case!r}.")
+        if model_case == "post-hems-optimized":
+            return "optimization"
+        if model_case == "pre":
+            return "none"
+        return "full_load_hours_rule"

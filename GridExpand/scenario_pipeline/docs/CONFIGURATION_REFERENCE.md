@@ -35,7 +35,11 @@ from silently falling back to a different assumption.
 - `asset_sizing.battery.minimum_pv_kwp_per_annual_mwh`: HTW surplus threshold.
 - `asset_sizing.battery.maximum_usable_*`: the two HTW usable-energy bounds.
 - `asset_sizing.battery.energy_to_power_hours`: fixed E/P ratio in hours.
-- `asset_sizing.heat_pump.method`: temporary adapter pending the HP rule.
+- `asset_sizing.heat.indoor_design_temperature_c`: indoor reference for degree-day normalization.
+- `asset_sizing.heat.heating_limit_temperature_c`: daily-mean threshold selecting heating days.
+- `asset_sizing.heat.heat_pump_design_share`: HP thermal output at norm outside temperature as a fraction of calculated design load.
+- `asset_sizing.heat.buffer_volume_l_per_kw_th`: space-heating buffer volume per thermal HP kW.
+- `asset_sizing.heat.buffer_usable_temperature_spread_k`: usable buffer temperature range used to convert litres to kWhth.
 - `mobility.commuting_probability`: commuter-schedule probability.
 - `mobility.emobpy_timestep_hours` and `reference_year`: emobpy temporal basis.
 - `mobility.passenger_*`, `cabin_*`, `driving_cycle_type`, `road_type`, and

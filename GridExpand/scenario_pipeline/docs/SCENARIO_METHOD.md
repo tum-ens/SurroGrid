@@ -18,10 +18,10 @@ The comparison of flexibility strategies is
 must be identical. Paired validation may project a compiled scenario onto real
 and synthetic buses, but it may not redefine scenario assumptions.
 
-Heat-pump sizing currently exposes an explicit `temporary_placeholder`
-adapter. It documents the incomplete method without inventing fixed physical
-capacity. PV and stationary-battery sizing are implemented in both heuristic
-and optimized modes.
+PV, stationary-battery, and residential heat sizing are implemented in both
+heuristic and optimized modes. The heat method compiles one central system per
+physical residential building. Commercial heat-pump sizing is deliberately
+outside the present method and is not assigned the residential rule.
 
 ## Configuration ownership
 
@@ -89,6 +89,132 @@ installed capacity and uses the same result only as its endogenous sizing
 upper bound. A configurable energy-to-power ratio of 2 h sets maximum charge
 and discharge power to usable energy divided by two. Fixed heuristic assets
 carry no investment cost because sizing occurs upstream.
+
+## Residential heat assets
+
+### Scope and demand representation
+
+The first heat-asset method applies to `SFH`, `TH`, `MFH`, and `AB` buildings.
+It represents one central heat system per physical building. Ordinary scenario
+runs retain non-residential electricity but do not add commercial heat demand
+or heat pumps. Paired validation likewise uses residential heat-pump inventory
+rows only. A separate commercial sizing method is required before that scope is
+extended.
+
+Space heat continues to use the DistrictGenerator/TEASER-derived building
+profiles. No additional blanket heated-floor-area factor (such as 0.8) is
+applied downstream: that would rescale an already generated thermal demand
+without building-specific evidence. Floor area is retained only for the
+specific-design-load audit. The TEASER envelope design load is not used to size
+the HP; annual space-heat energy and regional full-load hours provide the
+explicit sizing rule below. Residential domestic-hot-water energy continues to
+originate from OpenDHW. The hourly draw-off peaks are not treated as direct
+generator peaks:
+each day's DHW energy is spread uniformly over its 24 hours. This represents a
+physical DHW tank implicitly while exposing neither its state of charge nor its
+load-shifting potential to urbs. Daily and annual DHW energy are conserved.
+
+The explicit urbs `heat_storage` is therefore a space-heating buffer only. It
+stores the `space_heat` commodity and cannot serve or shift `water_heat`.
+
+### Climate inputs and full-load hours
+
+`T_NAT` is the postcode-specific norm outside temperature `T_ne` in
+`site_data.txt`; postcode 91301 currently resolves to -12.6 degrees C. It is a
+design condition, not the minimum of the TMY. Only an exact postcode entry is
+accepted. Numeric proximity between postcodes is not a geographic fallback.
+The inherited table must eventually be replaced or annotated with a directly
+traceable DIN/TS 12831-1 source.
+
+The heating-limit temperature is a separate building-operation assumption.
+For the existing residential stock, the scenario uses the DWD/VDI 20/15
+convention: 20 degrees C indoors and a 15 degrees C heating limit. Full-load
+hours are calculated once per complete regional weather year, before timeframe
+selection and TSAM. Daily mean ambient temperature selects heating days:
+
+```text
+GTZ = sum_d(20 - mean(T_out,d))  for mean(T_out,d) < T_HG
+h_FLH = 24 * GTZ / (T_inside - T_NAT)
+```
+
+For the audited Forchheim pilot weather year this gives approximately 2,619 h/a.
+
+### Heat-pump and auxiliary sizing
+
+For each building:
+
+```text
+P_space,design,th = E_space,annual / h_FLH
+P_DHW,allowance,th = E_DHW,annual / hours_in_year
+P_design,th = P_space,design,th + P_DHW,allowance,th
+P_HP,heuristic,th = heat_pump_design_share * P_design,th
+P_HP,heuristic,el = P_HP,heuristic,th / COP(T_NAT)
+```
+
+The design COP is the building COP at the full-year weather step closest to
+`T_NAT`, preserving the existing radiator/floor-heating sink-temperature
+assumption. The Forchheim share is 0.65. This lies within the 50--80% range for an
+air-source bivalent system in the [BWP heat-pump dimensioning guide](https://www.waermepumpe.de/fileadmin/user_upload/waermepumpe/07_Publikationen/BWP_LF_WPDimensionierung.pdf);
+peak load is intentionally supplied by direct electric auxiliary heating.
+This transparent scenario rule is informed by the practical guide, but it is
+not asserted to be a complete DIN EN 15450 or VDI 4645 compliance calculation.
+
+The fixed auxiliary capacity is the largest full-year positive residual:
+
+```text
+P_aux,el = max_t[Q_space(t) + Q_DHW(t) - COP(t) * P_HP,el]^+
+```
+
+Thus HP output is always capacity-limited. The auxiliary heater supplies every
+remaining peak in both heuristic cases; no code path may let the HP operate
+beyond its installed electrical capacity.
+
+Heuristic cases write equal installed and upper capacities and zero investment
+costs. `post-hems-optimized` retains zero installed capacities and active costs,
+but replaces generic 2,000 kW bounds with building-specific bounds: monovalent
+calculated HP design capacity, the observed heat peak for auxiliary heating,
+and the physical buffer bound.
+
+### Space-heating buffer
+
+The building buffer volume is:
+
+```text
+V_buffer [l] = 20 l/kWth * P_HP,reference [kWth]
+C_buffer [kWhth] = V_buffer * 1.163 Wh/(l K) * delta_T_usable / 1000
+```
+
+Forchheim uses a 5 K usable temperature spread. The 20 l/kWth value follows the
+VDI 4645 headline rule discussed for the scenario; the temperature spread is an
+explicit modeling assumption needed to convert volume into usable energy.
+Charge and discharge power equal the reference thermal HP capacity, so the E/P
+ratio is derived rather than independently configured.
+
+`post-inflex-heuristic` and `post-hems-heuristic` consume the identical fixed
+heat asset plan. INFLEX dispatch ignores buffer flexibility, limits HP heat to
+`COP(t) * P_HP,el`, and supplies the residual with the fixed auxiliary heater.
+`post-hems-heuristic` optimizes dispatch of the same capacities.
+
+The production audit tables record annual heat energies, climate inputs,
+full-load hours, design COP, thermal and electrical capacity, auxiliary bound,
+buffer litres and kWhth, and the representation choices. Database-backed Step
+2 handoffs retain these compact tables even though bulky raw inputs remain in
+the database.
+
+One implemented full-year realization on Forchheim grid
+`9474126-07_91301_1_12` (`post-hems-heuristic`, residential scope) produced 20
+central systems and 477.098 MWhth/a of useful heat. Its checks found 2,619.23
+full-load hours, 39.748 kWel of fixed HP capacity, 147.192 kWel of fixed
+auxiliary capacity, 1,902.8 litres (11.065 kWhth) of explicit space-heating
+buffer, an exact 20 l/kWth ratio, zero within-day DHW variation after
+implicit-tank smoothing, and zero uncovered heat in INFLEX dispatch. The
+auxiliary heater supplied 8.23% of annual useful heat. Building design-load
+intensities ranged from 12.4 to 110.2 W/m2 (median 53.3 W/m2), which is retained
+in the audit for outlier review rather than silently clipped. Stochastic input
+profile realizations can shift these aggregate pilot values; the sizing and
+coverage invariants are the acceptance criteria. The optimized-mode check wrote
+zero installed capacity, positive costs, and finite building-specific bounds
+for HP, auxiliary heater, and buffer.
 
 ## Prices and temporal aggregation
 

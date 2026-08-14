@@ -116,7 +116,18 @@ class SaveFile:
             write_hdf_metadata(self.output_path, self.timeframe_metadata)
 
     def save_df(self, df, dir):
-        if self.storage == "db" and dir.startswith("raw_data/"):
+        # Database-backed runs intentionally omit the bulky copied raw inputs from
+        # their HDF handoff. Keep the compact heat sizing records, however: they
+        # are the auditable link between the scenario rule and fixed urbs assets.
+        db_handoff_raw_keys = {
+            "raw_data/heat_asset_plan",
+            "raw_data/heat_asset_audit",
+        }
+        if (
+            self.storage == "db"
+            and dir.startswith("raw_data/")
+            and dir not in db_handoff_raw_keys
+        ):
             return
         if self.storage == "db" and self.persist_allocated_timeseries:
             clean_dir = dir.strip("/")

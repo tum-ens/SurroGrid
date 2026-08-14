@@ -340,47 +340,54 @@ def _capacity_by_bus(cap_pro, process, buses):
     return pd.Series([by_site_lookup.get(str(bus), 0.0) for bus in buses], index=buses, dtype=float)
 
 
-def _no_flex_heat_electricity(df_raw_demand, df_eff_factor, cap_pro):
+def _input_capacity_by_bus(process, process_name, buses):
+    """Read fixed installed process capacities from an urbs input table."""
+    if process is None or process.empty:
+        raise ValueError("No-flex heat dispatch requires urbs process inputs.")
+    frame = process.reset_index() if isinstance(process.index, pd.MultiIndex) else process.copy()
+    site_column = "Site" if "Site" in frame else "sit"
+    process_column = "Process" if "Process" in frame else "pro"
+    capacity_column = "inst-cap" if "inst-cap" in frame else "inst_cap"
+    required = {site_column, process_column, capacity_column}
+    if not required.issubset(frame.columns):
+        raise ValueError("No-flex heat dispatch cannot identify Site, Process, and inst-cap columns.")
+    selected = frame[frame[process_column].astype(str).eq(process_name)].copy()
+    selected[capacity_column] = pd.to_numeric(selected[capacity_column], errors="coerce").fillna(0.0)
+    by_site = selected.groupby(site_column)[capacity_column].sum()
+    lookup = {str(site): float(value) for site, value in by_site.items()}
+    return pd.Series([lookup.get(str(bus), 0.0) for bus in buses], index=buses, dtype=float)
+
+
+def _no_flex_heat_electricity(df_raw_demand, df_eff_factor, process):
     heat_by_bus, cop_by_bus = _heat_and_cop_by_bus(df_raw_demand, df_eff_factor)
     if heat_by_bus.empty:
         empty = _empty_electricity_frame(df_raw_demand.index)
         return empty, empty, empty
 
     buses = list(heat_by_bus.columns)
-    hp_capacity_el = _capacity_by_bus(cap_pro, "heatpump_air", buses)
-    booster_capacity_el = _capacity_by_bus(cap_pro, "heatpump_booster", buses)
-
+    hp_capacity_el = _input_capacity_by_bus(process, "heatpump_air", buses)
+    booster_capacity_el = _input_capacity_by_bus(process, "heatpump_booster", buses)
     cop_safe = cop_by_bus.replace(0, np.nan)
     hp_thermal_limit = cop_safe.multiply(hp_capacity_el, axis=1).fillna(0.0)
-
-    heat_values = heat_by_bus.astype(float).to_numpy()
-    hp_limit_values = hp_thermal_limit.to_numpy(dtype=float)
-    uses_auxiliary = (booster_capacity_el.to_numpy(dtype=float) > 1e-9)[None, :]
-
-    # If the optimized flex case installed auxiliary capacity at a bus, the
-    # no-flex reconstruction lets the heat pump serve demand up to its optimized
-    # electric capacity and assigns the high-demand residual to direct auxiliary
-    # electric heating. Buses without optimized auxiliary capacity remain
-    # heat-pump-only to preserve the post-flex technology choice.
-    hp_heat_values = np.where(uses_auxiliary, np.minimum(heat_values, hp_limit_values), heat_values)
-    hp_heat = pd.DataFrame(hp_heat_values, index=heat_by_bus.index, columns=heat_by_bus.columns)
+    hp_heat = heat_by_bus.where(heat_by_bus.le(hp_thermal_limit), hp_thermal_limit)
     auxiliary_heat = (heat_by_bus - hp_heat).clip(lower=0.0)
-
+    excess = auxiliary_heat.subtract(booster_capacity_el, axis=1).clip(lower=0.0)
+    maximum_excess = float(excess.max().max()) if not excess.empty else 0.0
+    if maximum_excess > 1e-6:
+        raise ValueError(
+            "Fixed no-flex HP and auxiliary capacities cannot cover heat demand; "
+            f"maximum residual is {maximum_excess:.6f} kW."
+        )
     hp_electricity = hp_heat.divide(cop_safe).fillna(0.0)
     auxiliary_electricity = auxiliary_heat
     total_electricity = hp_electricity.add(auxiliary_electricity, fill_value=0.0)
-
     for frame in (total_electricity, hp_electricity, auxiliary_electricity):
         frame.columns = pd.MultiIndex.from_tuples([(bus, "electricity") for bus in frame.columns])
-
-    auxiliary_peak = float(auxiliary_electricity.sum(axis=1).max()) if not auxiliary_electricity.empty else 0.0
-    auxiliary_energy = float(auxiliary_electricity.sum().sum()) if not auxiliary_electricity.empty else 0.0
-    hp_energy = float(hp_electricity.sum().sum()) if not hp_electricity.empty else 0.0
     print(
-        "No-flex heat split from post-flex capacities: "
-        f"heat-pump electricity={hp_energy:.1f} kWh, "
-        f"auxiliary electricity={auxiliary_energy:.1f} kWh, "
-        f"auxiliary peak={auxiliary_peak:.3f} kW.",
+        "No-flex heat split from fixed scenario inputs: "
+        f"heat-pump electricity={float(hp_electricity.sum().sum()):.1f} kWh, "
+        f"auxiliary electricity={float(auxiliary_electricity.sum().sum()):.1f} kWh, "
+        f"auxiliary peak={float(auxiliary_electricity.sum(axis=1).max()):.3f} kW.",
         flush=True,
     )
     return total_electricity, hp_electricity, auxiliary_electricity
@@ -715,7 +722,7 @@ def _process_no_flex_demands(no_flex_inputs, df_pre_demand_elec, df_pre_demand_r
     df_heat_elec, df_heat_hp_elec, _df_heat_auxiliary_elec = _no_flex_heat_electricity(
         df_raw_demand,
         df_eff_factor,
-        no_flex_inputs["cap_pro"],
+        no_flex_inputs["process"],
     )
     df_ev_elec = _mobility_electricity(df_raw_demand, df_eff_factor, ev_charger_kw)
     df_pv_elec = _pv_generation(
