@@ -13,7 +13,7 @@ import src.functions.mobility as mbl
 from src.assets.battery.materialization import materialize_battery_urbs_inputs
 from src.assets.battery.sizing import build_battery_asset_plan
 from src.assets.heat.materialization import materialize_heat_urbs_inputs
-from src.assets.heat.sizing import build_heat_asset_plan, smooth_daily_dhw
+from src.assets.heat.sizing import build_heat_asset_plan
 from src.assets.pv.materialization import materialize_pv_urbs_inputs
 from src.assets.pv.profiles import generate_profile_library
 from src.assets.pv.roof_catalog import (
@@ -355,8 +355,6 @@ class Grid:
             self.df_demand_heat_water
         )
 
-        # The physical DHW tank is implicit: preserve daily energy but remove draw-off peaks.
-        self.df_demand_heat_water = smooth_daily_dhw(self.df_demand_heat_water)
         self.df_tve_hpcop = heat.generate_hp_cop(
             residential,
             self.df_demand_heat_space,

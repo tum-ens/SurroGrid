@@ -40,7 +40,7 @@ asset_sizing:
   battery:
     # INFLEX and heuristic-asset HEMS use the extrapolated HTW 2025 upper bound.
     heuristic_method: htw_2025_upper_bound
-    # The optimized HEMS case chooses capacity endogenously below the same bound.
+    # Optimized HEMS reuses the HTW equation with LoD2 PV maximum, not fixed PV.
     optimized_method: optimization
     # Every building with positive PV potential is a battery candidate.
     location_mode: all_pv_buildings
@@ -61,7 +61,7 @@ asset_sizing:
     heating_limit_temperature_c: 15.0
     # Thermal HP output at norm outdoor temperature as share of design heat load.
     heat_pump_design_share: 0.65
-    # Space-heating buffer only; the DHW tank is represented implicitly.
+    # Explicit storage is space-heating-only; hourly OpenDHW demand is direct.
     buffer_volume_l_per_kw_th: 20.0
     # Usable temperature range for converting buffer litres to kWhth.
     buffer_usable_temperature_spread_k: 5.0

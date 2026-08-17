@@ -12,7 +12,7 @@ import pandas as pd
 from ...assets.battery.materialization import materialize_battery_urbs_inputs
 from ...assets.battery.sizing import build_battery_asset_plan
 from ...assets.heat.materialization import materialize_heat_urbs_inputs
-from ...assets.heat.sizing import build_heat_asset_plan, smooth_daily_dhw
+from ...assets.heat.sizing import build_heat_asset_plan
 from ...functions.heat import get_norm_outside_temperature
 from ...assets.pv.materialization import materialize_pv_urbs_inputs
 from ...assets.pv.sizing import build_pv_asset_plan
@@ -806,8 +806,7 @@ def _build_paired_heat(
             source_cache=source_cache,
             allow_diagnostic_fallback=allow_diagnostic_fallback,
         )
-        water_frame = pd.DataFrame({"water": water.reset_index(drop=True)})
-        water = smooth_daily_dhw(water_frame)["water"]
+        water = water.reset_index(drop=True)
         primary = group.sort_values("_profile_site_id").iloc[0]
         target_bus = _target_bus(primary)
         space = space.reset_index(drop=True)

@@ -8,20 +8,6 @@ import pandas as pd
 WATER_HEAT_CAPACITY_WH_PER_L_K = 1.163
 
 
-def smooth_daily_dhw(demand: pd.DataFrame) -> pd.DataFrame:
-    """Spread each day's DHW energy uniformly over its 24 hourly steps."""
-    if demand.empty:
-        return demand.copy()
-    if len(demand) % 24:
-        raise ValueError("Daily DHW recharge requires a whole number of 24-hour days.")
-    values = demand.apply(pd.to_numeric, errors="coerce").fillna(0.0)
-    day = np.arange(len(values)) // 24
-    smoothed = values.groupby(day).transform("mean")
-    smoothed.index = demand.index
-    smoothed.columns = demand.columns
-    return smoothed
-
-
 def calculate_full_load_hours(
     ambient_temperature_c,
     *,
@@ -160,7 +146,7 @@ def build_heat_asset_plan(
                 maximum_hp_kw_el * float(cop.max()) + maximum_aux_kw_el,
             ),
             "heat_sizing_method": sizing_method,
-            "dhw_representation": "daily_uniform_implicit_tank",
+            "dhw_representation": "opendhw_hourly_direct_demand",
             "buffer_representation": "space_heat_only",
         })
     climate = {

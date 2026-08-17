@@ -6,12 +6,12 @@ the scenario YAML; the reasoning and cross-stage contracts live here.
 
 ## Model cases
 
-| Case | Asset sizing | Operation |
-| --- | --- | --- |
-| `pre` | Reference assets | Reference electricity demand |
-| `post-inflex-heuristic` | Shared heuristic asset plan | Rule-based dispatch |
-| `post-hems-optimized` | Endogenous urbs sizing | Optimized dispatch |
-| `post-hems-heuristic` | Shared heuristic asset plan | Optimized dispatch |
+| Case                      | Asset sizing                | Operation                    |
+| ------------------------- | --------------------------- | ---------------------------- |
+| `pre`                   | Reference assets            | Reference electricity demand |
+| `post-inflex-heuristic` | Shared heuristic asset plan | Rule-based dispatch          |
+| `post-hems-optimized`   | Endogenous urbs sizing      | Optimized dispatch           |
+| `post-hems-heuristic`   | Shared heuristic asset plan | Optimized dispatch           |
 
 The comparison of flexibility strategies is
 `post-inflex-heuristic` versus `post-hems-heuristic`: their asset capacities
@@ -77,18 +77,25 @@ evidence; their reported capacities do not determine the scenario capacity.
 With annual base electricity `E` in MWh/a and the relevant PV capacity `P_PV`
 in kWp, the extrapolated HTW 2025 rule is:
 
-```text
+```Python
 C_battery,use [kWh] = 0,                              if P_PV <= 0.5 * E
 C_battery,use [kWh] = min(1.5 * P_PV, 1.5 * E),       otherwise
 ```
 
 The rule is applied to every building type as an explicit extrapolation from
-HTW's single-family-home recommendation. Heuristic cases fix usable energy
-with equal `inst-cap-c` and `cap-up-c`. `post-hems-optimized` retains zero
-installed capacity and uses the same result only as its endogenous sizing
-upper bound. A configurable energy-to-power ratio of 2 h sets maximum charge
-and discharge power to usable energy divided by two. Fixed heuristic assets
-carry no investment cost because sizing occurs upstream.
+HTW's single-family-home recommendation. In both heuristic cases, `P_PV` is
+the fixed heuristic PV capacity; the resulting usable battery energy is fixed
+with equal `inst-cap-c` and `cap-up-c`. In `post-hems-optimized`, `P_PV` is
+instead the building's LoD2 maximum PV potential (`pv_max_kwp`), because the
+PV capacity selected by urbs is not known during input preparation. The HTW
+equation therefore provides a potential-based battery `cap-up-c`, while
+`inst-cap-c` remains zero and urbs chooses the installed battery capacity
+endogenously. It does not imply that heuristic and optimized cases have the
+same numerical battery bound, nor does it couple optimized battery capacity to
+the PV capacity ultimately selected by urbs. A configurable energy-to-power
+ratio of 2 h sets maximum charge and discharge power to usable energy divided
+by two. Fixed heuristic assets carry no investment cost because sizing occurs
+upstream.
 
 ## Residential heat assets
 
@@ -107,12 +114,19 @@ applied downstream: that would rescale an already generated thermal demand
 without building-specific evidence. Floor area is retained only for the
 specific-design-load audit. The TEASER envelope design load is not used to size
 the HP; annual space-heat energy and regional full-load hours provide the
-explicit sizing rule below. Residential domestic-hot-water energy continues to
-originate from OpenDHW. The hourly draw-off peaks are not treated as direct
-generator peaks:
-each day's DHW energy is spread uniformly over its 24 hours. This represents a
-physical DHW tank implicitly while exposing neither its state of charge nor its
-load-shifting potential to urbs. Daily and annual DHW energy are conserved.
+explicit sizing rule below. Residential domestic-hot-water demand continues
+to originate from OpenDHW. OpenDHW generates stochastic tapping events,
+which DistrictGenerator resamples to the hourly model resolution and converts
+to thermal demand using the
+seasonally varying cold- and mixed-water temperatures. This hourly profile is
+retained unchanged as direct `water_heat` demand.
+
+No DHW tank is modeled, either explicitly or implicitly. Consequently, the HP
+and auxiliary heater must supply the hourly OpenDHW demand in its corresponding
+time step, and urbs cannot shift DHW production. This preserves the realistic
+timing produced by OpenDHW but can overestimate generator peak power compared
+with a real thermostatically controlled DHW tank; a tank state-of-charge and
+reheating controller would be required to resolve that effect physically.
 
 The explicit urbs `heat_storage` is therefore a space-heating buffer only. It
 stores the `space_heat` commodity and cannot serve or shift `water_heat`.
@@ -203,16 +217,18 @@ the database.
 
 One implemented full-year realization on Forchheim grid
 `9474126-07_91301_1_12` (`post-hems-heuristic`, residential scope) produced 20
-central systems and 477.098 MWhth/a of useful heat. Its checks found 2,619.23
-full-load hours, 39.748 kWel of fixed HP capacity, 147.192 kWel of fixed
-auxiliary capacity, 1,902.8 litres (11.065 kWhth) of explicit space-heating
-buffer, an exact 20 l/kWth ratio, zero within-day DHW variation after
-implicit-tank smoothing, and zero uncovered heat in INFLEX dispatch. The
-auxiliary heater supplied 8.23% of annual useful heat. Building design-load
-intensities ranged from 12.4 to 110.2 W/m2 (median 53.3 W/m2), which is retained
-in the audit for outlier review rather than silently clipped. Stochastic input
-profile realizations can shift these aggregate pilot values; the sizing and
-coverage invariants are the acceptance criteria. The optimized-mode check wrote
+central systems and 477.874 MWhth/a of useful heat. Its checks found 2,619.23
+full-load hours, 39.221 kWel of fixed HP capacity, 258.182 kWel of fixed
+auxiliary capacity, 1,906.4 litres (11.086 kWhth) of explicit space-heating
+buffer, an exact 20 l/kWth ratio, retained within-day OpenDHW variation, and
+zero uncovered heat in INFLEX dispatch. The coincident auxiliary peak was
+216.587 kW and the auxiliary heater supplied 10.54% of annual useful heat. The
+high auxiliary peak is consistent with the documented absence of DHW-tank
+buffering. Building design-load intensities
+ranged from 13.7 to 109.6 W/m2 (median 53.1 W/m2), which is retained in the
+audit for outlier review rather than silently clipped. Stochastic input profile
+realizations can shift these aggregate pilot values; the sizing and coverage
+invariants are the acceptance criteria. The optimized-mode check wrote
 zero installed capacity, positive costs, and finite building-specific bounds
 for HP, auxiliary heater, and buffer.
 

@@ -114,7 +114,7 @@ The validated physical heat and COP time series are generated once and stored in
 
 Paired readiness checks building coverage against this library, and URBS input generation reads the same building profile before projecting it to the current real or synthetic target bus. Changing the pylovo grid version therefore requires a new paired allocation but no repeated heat-profile generation when the physical profile assumptions are unchanged. The legacy per-grid HDF workflow remains available only for constructing a new library or explicitly diagnostic fallbacks.
 
-The paired materializer then applies the same residential heat-asset method documented in [SCENARIO_METHOD.md](../../../scenario_pipeline/docs/SCENARIO_METHOD.md): DHW energy is spread uniformly within each day, one central system is assigned per physical building, and the resulting fixed capacities or optimization bounds are projected through scenario-unit sites. The real and synthetic targets consume the same physical profiles and sizing assumptions.
+The paired materializer then applies the same residential heat-asset method documented in [SCENARIO_METHOD.md](../../../scenario_pipeline/docs/SCENARIO_METHOD.md): the original hourly OpenDHW demand and its matching COP are retained, one central system is assigned per physical building, and the resulting fixed capacities or optimization bounds are projected through scenario-unit sites. The real and synthetic targets consume the same physical profiles and sizing assumptions.
 
 ## Diagnostic Pilot: LV113
 
