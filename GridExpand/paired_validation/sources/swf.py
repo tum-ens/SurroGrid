@@ -60,12 +60,19 @@ def run_powerflows(
     ]
     if args.grid_data_path is not None:
         common.extend(["--grid-data-path", str(args.grid_data_path)])
-    for mode, suffix, label in (
+    post_cases = (
+        (("flexible", "post-hems-optimized", "optimized HEMS"),)
+        if args.model_case == "post-hems-optimized"
+        else (
+            ("flexible", "post-hems-heuristic", "heuristic-assets HEMS"),
+            ("no-flex", "post-inflex-heuristic", "heuristic-assets INFLEX"),
+        )
+    )
+    for mode, case_name, label in (
         ("pre-only", "pre", "pre electricity-only"),
-        ("flexible", "flex", "post-flex"),
-        ("no-flex", "no_flex", "post-no-flex"),
+        *post_cases,
     ):
-        run_name = f"{args.run_name_prefix}_{TARGET_NETWORK}_{suffix}"
+        run_name = f"{args.run_name_prefix}_{TARGET_NETWORK}_{case_name}"
         command = common + [
             "--post-demand-mode",
             mode,
@@ -82,5 +89,5 @@ def run_powerflows(
             log_path=log_path,
             status=status,
             candidate_index=job_index,
-            stage=f"step4_{TARGET_NETWORK}_{suffix}",
+            stage=f"step4_{TARGET_NETWORK}_{case_name}",
         )

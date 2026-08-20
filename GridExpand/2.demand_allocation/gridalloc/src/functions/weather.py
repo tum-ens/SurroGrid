@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 
-def get_pvgis_tmy_sarah3_dataframe(latitude, longitude):
+def get_pvgis_tmy_sarah3_dataframe(latitude, longitude, reference_year=None):
     """
     Retrieve TMY data from PVGIS using the SARAH3 satellite dataset and return as a pandas DataFrame
     
@@ -77,7 +77,12 @@ def get_pvgis_tmy_sarah3_dataframe(latitude, longitude):
         # Handle time column - check if it exists
         if 'time(UTC)' in df.columns:
             df['time(UTC)'] = pd.to_datetime(df['time(UTC)'], format="%Y%m%d:%H%M")
-            df['time(UTC)'] = df['time(UTC)'].apply(lambda x: x.replace(year=config.REF_YEAR))
+            year = int(
+                reference_year
+                if reference_year is not None
+                else config.REF_YEAR
+            )
+            df['time(UTC)'] = df['time(UTC)'].apply(lambda x: x.replace(year=year))
 
             # Define a fixed UTC+1 timezone (constant 1 hour ahead)
             df['time(UTC)'] = df['time(UTC)'].dt.tz_localize(timezone.utc)

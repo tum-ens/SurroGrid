@@ -60,9 +60,17 @@ from silently falling back to a different assumption.
 - `resources.inputfile_id`: DB/grid/HDF identifier.
 - `resources.storage`: `db` or `h5`.
 - `resources.output_directory`: optional output override.
-- `resources.target_*`, `paired_directory`, `weather_source_hdf`: paired-only
-  resources; null for a normal scenario run.
-- `execution.n_cpu`: machine concurrency.
+- `resources.target_*`, `paired_directory`, `weather_source_hdf`,
+  `heat_profile_library`, `grid_data_path`, and `run_directory`:
+  paired-only resources; null for a normal scenario run.
+- `execution.model_case`: default case selected by the compact runner. Either
+  heuristic case makes paired validation materialize their common asset plan
+  once and emit both dispatch cases; optimized HEMS emits only flexible dispatch.
+- `execution.workers`, `step3_cpus`, `step3_cluster_concurrency`, and
+  `step4_cpus`: paired machine concurrency.
+- `execution.seed`, `cleanup_intermediates`, and `resume`: paired
+  reproducibility and lifecycle controls.
+- `execution.n_cpu`: ordinary-pipeline machine concurrency.
 - `execution.mobility_source`: current mobility generator/pool selection.
 - `execution.demand_scope`: current building demand scope.
 - `execution.timeframe_mode`: full year or supported operational slice.

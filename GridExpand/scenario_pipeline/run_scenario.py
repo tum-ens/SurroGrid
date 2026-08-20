@@ -46,22 +46,38 @@ def build_command(run, scenario, model_case: str) -> tuple[list[str], Path]:
         return command, workdir
     if run.paired_directory is None or run.weather_source_hdf is None:
         raise ValueError("Paired validation requires paired_directory and weather_source_hdf.")
-    if run.target_network is None or run.target_grid_id is None:
-        raise ValueError("Paired validation requires target_network and target_grid_id.")
-    workdir = GRIDEXPAND_DIR / "2.demand_allocation"
+    if run.run_directory is None:
+        raise ValueError("Paired validation requires resources.run_directory.")
+    workdir = GRIDEXPAND_DIR.parent
     command = [
-        "uv", "run", "python", "-m",
-        "gridalloc.src.scenario_calibration.pipeline.paired_urbs_input",
+        "uv", "run", "--project", "GridExpand/2.demand_allocation",
+        "python", "GridExpand/paired_validation/runner.py",
+        "--repo-root", str(workdir),
+        "--plz", run.inputfile_id,
         "--paired-dir", str(run.paired_directory),
-        "--target-network", str(run.target_network),
-        "--target-grid-id", str(run.target_grid_id),
         "--weather-source-hdf", str(run.weather_source_hdf),
-        "--model-case", model_case,
         "--scenario-config", str(run.scenario_path),
-        "--scenario-label", f"{scenario.scenario_id}_{model_case}",
+        "--model-case", model_case,
+        "--target", str(run.target_network or "both"),
+        "--workers", str(run.workers),
+        "--step3-cpus", str(run.step3_cpus),
+        "--step3-cluster-concurrency", str(run.step3_cluster_concurrency),
+        "--step4-cpus", str(run.step4_cpus),
+        "--seed", str(run.seed),
+        "--scenario-label", run.run_id,
+        "--run-name-prefix", run.run_id,
+        "--run-dir", str(run.run_directory / model_case),
     ]
-    if run.output_directory is not None:
-        command.extend(["--output-dir", str(run.output_directory)])
+    if run.target_grid_id is not None:
+        command.extend(["--target-grid-id", str(run.target_grid_id)])
+    if run.grid_data_path is not None:
+        command.extend(["--grid-data-path", str(run.grid_data_path)])
+    if run.heat_profile_library is not None:
+        command.extend(["--heat-profile-library", str(run.heat_profile_library)])
+    if run.cleanup_intermediates:
+        command.append("--cleanup-intermediates")
+    if run.resume:
+        command.append("--resume")
     return command, workdir
 
 
@@ -71,23 +87,28 @@ def main() -> None:
     parser.add_argument(
         "--model-case",
         choices=tuple(MODEL_CASES),
-        default="post-hems-heuristic",
+        default=None,
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     run, run_hash = load_run_config(args.run_config)
     scenario, scenario_hash = load_scenario_config(run.scenario_path)
-    command, workdir = build_command(run, scenario, args.model_case)
-    manifest_dir = run.output_directory or (GRIDEXPAND_DIR / "run_logs" / "scenario_manifests")
+    model_case = args.model_case or run.model_case or "post-hems-heuristic"
+    command, workdir = build_command(run, scenario, model_case)
+    manifest_dir = (
+        run.run_directory
+        or run.output_directory
+        or (GRIDEXPAND_DIR / "run_logs" / "scenario_manifests")
+    )
     _write_manifest(
-        manifest_dir / f"{run.run_id}_{args.model_case}.json",
+        manifest_dir / f"{run.run_id}_{model_case}.json",
         {
             "run_id": run.run_id,
             "run_hash": run_hash,
             "scenario_id": scenario.scenario_id,
             "scenario_hash": scenario_hash,
-            "model_case": args.model_case,
+            "model_case": model_case,
             "command": command,
             "working_directory": str(workdir),
             "dry_run": bool(args.dry_run),

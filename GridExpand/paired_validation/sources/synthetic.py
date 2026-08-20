@@ -94,12 +94,20 @@ def run_powerflows(
         candidate_index=job_index,
         stage=f"step4_{TARGET_NETWORK}_pre",
     )
-    for mode, suffix in (("flexible", "flex"), ("no-flex", "no_flex")):
+    post_cases = (
+        (("flexible", "post-hems-optimized"),)
+        if args.model_case == "post-hems-optimized"
+        else (
+            ("flexible", "post-hems-heuristic"),
+            ("no-flex", "post-inflex-heuristic"),
+        )
+    )
+    for mode, case_name in post_cases:
         command = common + [
             "--post-demand-mode",
             mode,
             "--run-name",
-            f"{args.run_name_prefix}_{TARGET_NETWORK}_{suffix}",
+            f"{args.run_name_prefix}_{TARGET_NETWORK}_{case_name}",
         ]
         run_command(
             cmd=command,
@@ -107,7 +115,7 @@ def run_powerflows(
             log_path=log_path,
             status=status,
             candidate_index=job_index,
-            stage=f"step4_{TARGET_NETWORK}_{suffix}",
+            stage=f"step4_{TARGET_NETWORK}_{case_name}",
         )
     if args.cleanup_intermediates:
         step4_input.unlink(missing_ok=True)

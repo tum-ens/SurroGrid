@@ -9,7 +9,10 @@ validation to that shared layer.
 and `synthetic` targets. It owns only paired projection, shared temporal
 mapping checks, and equivalent execution across the two network models.
 Scenario assumptions and asset sizing remain in `scenario_pipeline` and the
-shared Step-2 asset modules.
+shared Step-2 asset modules. The paired runner is launched through the paired
+run YAML in `scenario_pipeline/config/runs`. Either heuristic case reuses one
+asset-plan solve for separately named HEMS and INFLEX dispatches, while
+optimized HEMS never attempts an INFLEX reconstruction.
 
 ## Dependencies
 

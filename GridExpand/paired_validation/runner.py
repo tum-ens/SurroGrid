@@ -224,6 +224,8 @@ def _prepare_shared_pv_profiles(
             str(args.weather_source_hdf),
             "--output",
             str(output),
+            "--reference-year",
+            str(args.reference_year),
         ],
         cwd=gridalloc_dir,
         log_path=args.run_dir / "logs" / "shared_pv_profile_library.log",
@@ -369,7 +371,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-grid-id", type=int, default=None)
     parser.add_argument("--weather-source-hdf", type=Path, required=True)
     parser.add_argument("--heat-profile-library", type=Path)
-    parser.add_argument("--scenario-label", default="swf_2045_paired_full_local")
+    parser.add_argument("--scenario-label", default=None)
     parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
     parser.add_argument(
         "--model-case",
@@ -408,12 +410,20 @@ def main() -> None:
         raise ValueError(
             f"Model case {args.model_case!r} is not enabled by {scenario.scenario_id!r}."
         )
+    args.requested_model_case = args.model_case
+    # Both heuristic cases share one asset plan. Materialize and solve it once;
+    # the target adapters emit the HEMS and INFLEX dispatches with distinct,
+    # accurate model-case result names.
+    if args.model_case in {"post-inflex-heuristic", "post-hems-heuristic"}:
+        args.model_case = "post-hems-heuristic"
     # Scientific TSAM choices come exclusively from the scenario YAML.
     args.tsam = scenario.time_aggregation.enabled
     args.tsam_periods = scenario.time_aggregation.number_of_typical_periods
     args.tsam_hours_per_period = scenario.time_aggregation.hours_per_period
     args.tsam_extreme_method = scenario.time_aggregation.extreme_period_method
-    args.scenario_label = f"{scenario.scenario_id}_{args.model_case}"
+    args.reference_year = scenario.mobility.reference_year
+    scenario_label_base = args.scenario_label or scenario.scenario_id
+    args.scenario_label = f"{scenario_label_base}_{args.model_case}"
     args.scenario_hash = scenario_hash
     args.paired_dir = args.paired_dir.resolve()
     if args.grid_data_path is not None:

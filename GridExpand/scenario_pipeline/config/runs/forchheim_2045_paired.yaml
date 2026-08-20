@@ -1,0 +1,43 @@
+# Machine/run settings for the full Forchheim real-versus-synthetic comparison.
+# Scientific assumptions and enabled model cases remain in the scenario YAML.
+run:
+  id: forchheim_2045_paired
+  scenario: ../scenarios/forchheim_2045.yaml
+  pipeline: paired_validation
+
+resources:
+  # Postal code used to resolve the Forchheim source region.
+  inputfile_id: "91301"
+  storage: db
+  # Ordinary-pipeline output override; unused by paired validation.
+  output_directory: null
+  # "both" launches the real SWF and paired synthetic target adapters.
+  target_network: both
+  # Null selects the complete prepared target set. Set an adapter-specific ID
+  # only for a diagnostic run with target_network set to one adapter.
+  target_grid_id: null
+  paired_directory: ../../../2.demand_allocation/gridalloc/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2
+  weather_source_hdf: ../../../2.demand_allocation/gridalloc/results/9474126-00_91301_1_2.h5
+  heat_profile_library: ../../../2.demand_allocation/gridalloc/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5
+  # External SWF split-grid inventory; this is a machine-specific data path.
+  grid_data_path: /home/breveron/data/swf_split_station_hybrid_v2
+  # Base directory; the compact runner adds one subdirectory per model case.
+  # Resume only an unchanged case directory.
+  run_directory: ../../../run_logs/forchheim_2045_paired
+
+execution:
+  # Retained for the ordinary runner interface; paired stages use the settings below.
+  n_cpu: 1
+  mobility_source: pool
+  demand_scope: all
+  timeframe_mode: full_year
+  # Either heuristic name launches their shared asset plan once and emits both
+  # post-hems-heuristic and post-inflex-heuristic dispatch results.
+  model_case: post-hems-heuristic
+  workers: 4
+  step3_cpus: 4
+  step3_cluster_concurrency: 1
+  step4_cpus: 2
+  seed: 91301
+  cleanup_intermediates: true
+  resume: false

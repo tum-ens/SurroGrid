@@ -164,26 +164,23 @@ uv run --project .. python -m src.scenario_calibration.profiles.paired_profile_r
 The paired runner produces pre electricity-only, post-flex, and post-no-flex power-flow summaries for every selected target. The publication run uses six representative weeks selected only from ambient temperature and irradiation. One canonical mapping is stored in the run directory and every real and synthetic optimization result must reproduce it before its power flows are accepted.
 
 ```bash
-cd /home/breveron/git/github/SurroGrid
+cd <repository-root>
 uv run --project GridExpand/2.demand_allocation \
-  python GridExpand/paired_validation/runner.py \
-  --repo-root /home/breveron/git/github/SurroGrid \
-  --plz 91301 \
-  --paired-dir GridExpand/2.demand_allocation/gridalloc/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
-  --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \
-  --weather-source-hdf GridExpand/2.demand_allocation/gridalloc/results/9474126-00_91301_1_2.h5 \
-  --heat-profile-library GridExpand/2.demand_allocation/gridalloc/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5 \
-  --scenario-config GridExpand/scenario_pipeline/config/scenarios/forchheim_2045.yaml \
-  --model-case post-hems-heuristic \
-  --target both \
-  --workers 4 \
-  --step3-cpus 4 \
-  --step3-cluster-concurrency 1 \
-  --step4-cpus 2 \
-  --cleanup-intermediates \
-  --scenario-label forchheim_paired_v5_tsam \
-  --run-name-prefix forchheim_paired_v5_tsam \
-  --run-dir GridExpand/run_logs/forchheim_paired_v5_tsam_$(date -u +%Y%m%dT%H%M%SZ)
+  python GridExpand/scenario_pipeline/run_scenario.py \
+  --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired.yaml
+```
+
+The paired run YAML is the authoritative resource and concurrency definition.
+Its default heuristic selection materializes the shared asset plan once and
+emits correctly named pre, post-hems-heuristic, and post-inflex-heuristic
+results. Run optimized HEMS separately; the compact runner automatically uses a
+different model-case run directory:
+
+```bash
+uv run --project GridExpand/2.demand_allocation \
+  python GridExpand/scenario_pipeline/run_scenario.py \
+  --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired.yaml \
+  --model-case post-hems-optimized
 ```
 
 Omit `--allow-diagnostic-heat-fallback` for the publication run. The strict runner blocks before computation if any paired heat profile is not publication-ready. Use `--resume` only with the same run directory and unchanged TSAM settings; the runner validates those settings against the saved reference.

@@ -83,6 +83,14 @@ def build_pv_asset_plan(
     plan = source.groupby(
         "building_objectid", sort=True, as_index=False
     ).agg(**aggregation)
+    # A regional LoD2 catalog can contain roofs from many target grids. Keep
+    # this asset plan strictly local before validating profile coverage or
+    # allocating capacity. This also prevents optimized sections from being
+    # assigned to buildings that have no Site in the current plan.
+    plan_buildings = set(plan["building_objectid"])
+    roof_catalog = roof_catalog[
+        roof_catalog["building_objectid"].astype(str).isin(plan_buildings)
+    ].copy()
     capacities = building_roof_capacity(roof_catalog)
     capacities.index = capacities.index.astype(str)
     plan["pv_max_kwp"] = plan["building_objectid"].map(capacities).fillna(0.0)
@@ -98,8 +106,6 @@ def build_pv_asset_plan(
     else:
         raise ValueError(f"Unknown PV sizing method {sizing_method!r}.")
     selected = allocate_capacity_best_yield_first(roof_catalog, targets, profile_library)
-    if sizing_method == "optimization":
-        selected["selected_pv_kw"] = selected["available_pv_kw"]
     selected["pv_sizing_method"] = sizing_method
     plan["pv_sizing_method"] = sizing_method
     plan["pv_fallback_used"] = plan["building_objectid"].isin(

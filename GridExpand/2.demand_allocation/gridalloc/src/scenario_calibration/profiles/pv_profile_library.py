@@ -49,6 +49,7 @@ def build_pv_profile_library(
     allocation_path: Path,
     weather_source_hdf: Path,
     output_path: Path,
+    reference_year: int,
 ) -> Path:
     """Create or reuse normalized annual profiles for all eligible angle bins."""
     roof_catalog = pd.read_csv(roof_catalog_path)
@@ -61,7 +62,7 @@ def build_pv_profile_library(
         return output_path
 
     weather, latitude, longitude, altitude = _load_weather_and_location(
-        weather_source_hdf
+        weather_source_hdf, reference_year=reference_year
     )
     solar = _load_solar_module()
     values = np.empty((len(weather), len(angles)), dtype=np.float32)
@@ -145,6 +146,8 @@ def _load_solar_module():
 
 def _load_weather_and_location(
     weather_source_hdf: Path,
+    *,
+    reference_year: int,
 ) -> tuple[pd.DataFrame, float, float, float]:
     """Read cached raw weather or reproduce it for the source grid location."""
     try:
@@ -183,6 +186,7 @@ def _load_weather_and_location(
     weather_result = weather_module.get_pvgis_tmy_sarah3_dataframe(
         float(row["lat"]),
         float(row["lon"]),
+        reference_year=int(reference_year),
     )
     if weather_result is None:
         raise RuntimeError(
@@ -224,12 +228,14 @@ def main() -> None:
     parser.add_argument("--allocation-plan", type=Path, required=True)
     parser.add_argument("--weather-source-hdf", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--reference-year", type=int, required=True)
     args = parser.parse_args()
     output = build_pv_profile_library(
         roof_catalog_path=args.roof_catalog.resolve(),
         allocation_path=args.allocation_plan.resolve(),
         weather_source_hdf=args.weather_source_hdf.resolve(),
         output_path=args.output.resolve(),
+        reference_year=args.reference_year,
     )
     profiles = read_pv_profile_library(output)
     print(f"PV profile library ready: {output} ({len(profiles.columns)} profiles)")
