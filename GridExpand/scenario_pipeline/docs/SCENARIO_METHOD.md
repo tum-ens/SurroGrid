@@ -114,12 +114,13 @@ rows only. A separate commercial sizing method is required before that scope is
 extended.
 
 Space heat continues to use the DistrictGenerator/TEASER-derived building
-profiles. No additional blanket heated-floor-area factor (such as 0.8) is
-applied downstream: that would rescale an already generated thermal demand
-without building-specific evidence. Floor area is retained only for the
-specific-design-load audit. The TEASER envelope design load is not used to size
-the HP; annual space-heat energy and regional full-load hours provide the
-explicit sizing rule below. Residential domestic-hot-water demand continues
+profiles. The pylovo `floor_area` is the LoD2 building footprint; before TEASER
+it is multiplied by `floor_number` because TEASER's `net_leased_area` input
+means total building area rather than footprint. No additional blanket heated-
+area factor (such as 0.8) is applied: all above-ground floor area is currently
+assumed heated. The TEASER envelope design load is not used to size the HP;
+annual space-heat energy and regional full-load hours provide the explicit
+sizing rule below. Residential domestic-hot-water demand continues
 to originate from OpenDHW. OpenDHW generates stochastic tapping events,
 which DistrictGenerator resamples to the hourly model resolution and converts
 to thermal demand using the

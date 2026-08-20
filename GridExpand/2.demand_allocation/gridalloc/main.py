@@ -28,6 +28,7 @@ from src.classes.resource_report import resource_report
 
 PROFILE_CHOICES = [
     "status_quo",
+    "heat_library",
     "electricity_heat",
     "electricity_mobility",
     "electricity_heat_mobility",
@@ -39,7 +40,10 @@ DEMAND_SCOPE_CHOICES = ["all", "residential"]
 def profile_flags(profile):
     return {
         "is_status_quo": profile == "status_quo",
-        "include_heat": profile in {"electricity_heat", "electricity_heat_mobility", "all"},
+        "is_heat_library": profile == "heat_library",
+        "include_heat": profile in {
+            "heat_library", "electricity_heat", "electricity_heat_mobility", "all"
+        },
         "include_mobility": profile in {"electricity_mobility", "electricity_heat_mobility", "all"},
     }
 
@@ -101,7 +105,8 @@ if __name__ == '__main__':
             default="all",
             help=(
                 "Demand profile scope to generate. Use status_quo for electricity-only "
-                "pre-expansion powerflow; 'all' is an alias for electricity_heat_mobility."
+                "pre-expansion powerflow; heat_library regenerates physical heat and COP "
+                "profiles without PV/battery assets; 'all' aliases electricity_heat_mobility."
             ),
         )
         parser.add_argument(
@@ -264,6 +269,30 @@ if __name__ == '__main__':
                 GRD.SF.save_df(GRD.df_weather_raw, "raw_data/weather")
             GRD.SF.save_df(GRD.df_demand, "urbs_in/demand")
             print("Status-quo profile generation complete. Run Step 4 with --pre-only.")
+        elif settings["is_heat_library"]:
+            # A physical heat library needs weather, base electricity, heat demand,
+            # and COP only. PV and batteries are independent physical assumptions
+            # and must not block heat-profile regeneration.
+            GRD.retrieve_weather()
+            GRD.select_timeframe_from_weather()
+            with resource_report(include_children=True, name="Electricity Generation") as rr:
+                GRD.generate_electricity()
+            GRD.select_timeframe_after_electricity()
+            with resource_report(include_children=True, name="Heat Generation") as rr:
+                GRD.generate_heat()
+            GRD.apply_timeframe_slice()
+            GRD.create_demand()
+            GRD.create_tve()
+
+            GRD.SF.copy_save_file()
+            GRD.SF.save_timeframe_metadata()
+            GRD.SF.save_df(GRD.df_buildings, "raw_data/buildings")
+            GRD.SF.save_df(GRD.df_weather_raw, "raw_data/weather")
+            GRD.SF.save_df(GRD.df_heat_asset_plan, "raw_data/heat_asset_plan")
+            GRD.SF.save_df(GRD.df_heat_audit, "raw_data/heat_asset_audit")
+            GRD.SF.save_df(GRD.df_demand, "urbs_in/demand")
+            GRD.SF.save_df(GRD.df_tve, "urbs_in/eff_factor")
+            print("Physical heat-library profile generation complete.")
         else:
             GRD.retrieve_weather()          # Weather
             GRD.select_timeframe_from_weather()

@@ -38,11 +38,24 @@ def pending_sources(catalog: pd.DataFrame) -> list[str]:
     return sorted(pending.astype(str).unique())
 
 
-def required_buses(catalog: pd.DataFrame, source_name: str) -> list[int]:
-    rows = catalog[
-        catalog["exact_source_hdf"].astype(str).eq(str(source_name))
-        & ~catalog["publication_ready"].astype(bool)
-    ]
+def all_sources(catalog: pd.DataFrame) -> list[str]:
+    """Return every unique exact source HDF in a paired catalog."""
+    if "exact_source_hdf" not in catalog.columns:
+        raise ValueError("Heat profile catalog misses column: exact_source_hdf")
+    sources = catalog["exact_source_hdf"].dropna()
+    return sorted(sources.astype(str).unique())
+
+
+def required_buses(
+    catalog: pd.DataFrame,
+    source_name: str,
+    *,
+    include_ready: bool = False,
+) -> list[int]:
+    source_rows = catalog["exact_source_hdf"].astype(str).eq(str(source_name))
+    if not include_ready:
+        source_rows &= ~catalog["publication_ready"].astype(bool)
+    rows = catalog[source_rows]
     return sorted(
         pd.to_numeric(rows["exact_source_bus"], errors="raise")
         .astype(int)
@@ -133,7 +146,7 @@ def _regenerate_one(
         "--pylovo-version-id",
         str(pylovo_version_id),
         "--profiles",
-        "electricity_heat",
+        "heat_library",
         "--demand-scope",
         "all",
         "--mobility-source",
@@ -192,6 +205,15 @@ def main() -> None:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument(
+        "--force-all",
+        action="store_true",
+        help=(
+            "Regenerate every exact source HDF, including profiles already "
+            "marked publication-ready. Use this after changing physical heat "
+            "profile assumptions."
+        ),
+    )
+    parser.add_argument(
         "--synthetic-library",
         type=Path,
         default=DEFAULT_SYNTHETIC_LIBRARY,
@@ -203,7 +225,7 @@ def main() -> None:
 
     paired_dir = args.paired_dir.resolve()
     catalog = pd.read_csv(paired_dir / "paired_heat_profile_catalog.csv")
-    sources = pending_sources(catalog)
+    sources = all_sources(catalog) if args.force_all else pending_sources(catalog)
     status = _StatusWriter(paired_dir / "paired_heat_profile_regeneration_status.csv")
     if args.resume:
         sources = [source for source in sources if source not in status.completed()]
@@ -235,7 +257,11 @@ def main() -> None:
             future = pool.submit(
                 _regenerate_one,
                 source_name=source_name,
-                buses=required_buses(catalog, source_name),
+                buses=required_buses(
+                    catalog,
+                    source_name,
+                    include_ready=args.force_all,
+                ),
                 pylovo_version_id=pylovo_version_id,
                 n_cpu=args.n_cpu,
                 result_dir=result_dir,

@@ -161,6 +161,42 @@ uv run --project .. python -m src.scenario_calibration.profiles.paired_profile_r
   --heat-profile-library outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5
 ```
 
+
+### Rebuild physical heat profiles after a method change
+
+A change to TEASER inputs or another physical heat-profile assumption requires
+regenerating every exact source grid, even when the existing catalog marks its
+profiles ready. Keep the previous library until the replacement passes the
+readiness audit, and use a new profile-set version so results remain traceable.
+From `GridExpand/2.demand_allocation/gridalloc` run:
+
+```bash
+uv run --project .. python -m src.scenario_calibration.profiles.paired_heat_profile_regeneration \
+  --paired-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
+  --force-all \
+  --workers 4 \
+  --n-cpu 1
+
+uv run --project .. python -m src.scenario_calibration.profiles.physical_heat_profile_library \
+  --source-catalog outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
+  --source-hdf-dir ../../3.urbs/Input \
+  --source-mode exact \
+  --output outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v2.h5 \
+  --profile-set-id forchheim_2045_physical_heat_v2
+
+uv run --project .. python -m src.scenario_calibration.profiles.paired_profile_readiness \
+  --paired-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
+  --heat-profile-library outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v2.h5
+```
+
+The regeneration helper uses Step 2's dedicated `heat_library` profile mode:
+weather and base electricity are retained as heat-model inputs, while unrelated
+PV and battery generation is skipped. `--workers` controls concurrently
+regenerated source grids. `--n-cpu` controls heat-generation processes inside
+each grid job; avoid multiplying both values without checking available RAM.
+If a regional batch is interrupted,
+repeat the first command with `--resume` in addition to `--force-all`.
+
 The paired runner produces pre electricity-only, post-flex, and post-no-flex power-flow summaries for every selected target. The publication run uses six representative weeks selected only from ambient temperature and irradiation. One canonical mapping is stored in the run directory and every real and synthetic optimization result must reproduce it before its power flows are accepted.
 
 ```bash

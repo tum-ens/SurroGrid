@@ -92,14 +92,26 @@ def create_physical_heat_profile_library(
     source_hdf_dir: Path,
     output: Path,
     profile_set_id: str,
+    source_mode: str = "profile",
 ) -> Path:
     """Extract exact profiles from network-specific HDFs into one library."""
+    source_columns = {
+        "profile": ("profile_source_hdf", "profile_source_bus"),
+        "exact": ("exact_source_hdf", "exact_source_bus"),
+    }
+    try:
+        source_hdf_column, source_bus_column = source_columns[source_mode]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unsupported source mode {source_mode!r}; choose from "
+            f"{sorted(source_columns)}."
+        ) from exc
     catalog = pd.read_csv(source_catalog)
     required = {
         "building_objectid",
         "publication_ready",
-        "profile_source_hdf",
-        "profile_source_bus",
+        source_hdf_column,
+        source_bus_column,
     }
     missing = required.difference(catalog.columns)
     if missing:
@@ -115,7 +127,7 @@ def create_physical_heat_profile_library(
         raise ValueError("Source heat catalog contains no publication-ready profiles.")
 
     first = catalog.iloc[0]
-    first_hdf = source_hdf_dir / str(first["profile_source_hdf"])
+    first_hdf = source_hdf_dir / str(first[source_hdf_column])
     first_demand = pd.read_hdf(first_hdf, key="urbs_in/demand")
     hours = len(first_demand)
     if hours <= 0:
@@ -136,6 +148,7 @@ def create_physical_heat_profile_library(
             timespec="seconds"
         )
         store.attrs["source_catalog"] = str(source_catalog.resolve())
+        store.attrs["source_mode"] = source_mode
         store.create_dataset(
             "building_objectid",
             data=catalog["building_objectid"].to_numpy(dtype=object),
@@ -151,13 +164,13 @@ def create_physical_heat_profile_library(
         )
         store.create_dataset(
             "source_hdf",
-            data=catalog["profile_source_hdf"].map(_text).to_numpy(dtype=object),
+            data=catalog[source_hdf_column].map(_text).to_numpy(dtype=object),
             dtype=string_dtype,
         )
         store.create_dataset(
             "source_bus",
             data=pd.to_numeric(
-                catalog["profile_source_bus"],
+                catalog[source_bus_column],
                 errors="raise",
             ).astype(int),
         )
@@ -175,7 +188,7 @@ def create_physical_heat_profile_library(
         }
 
         for source_name, rows in catalog.groupby(
-            "profile_source_hdf",
+            source_hdf_column,
             sort=True,
             observed=True,
         ):
@@ -189,7 +202,7 @@ def create_physical_heat_profile_library(
                     f"expected={hours}."
                 )
             for index, row in rows.iterrows():
-                bus = int(row["profile_source_bus"])
+                bus = int(row[source_bus_column])
                 columns = {
                     "space_heat": (bus, "space_heat"),
                     "water_heat": (bus, "water_heat"),
@@ -223,12 +236,22 @@ def main() -> None:
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--profile-set-id", required=True)
+    parser.add_argument(
+        "--source-mode",
+        choices=("profile", "exact"),
+        default="profile",
+        help=(
+            "Read legacy validated profile_source_* mappings or current "
+            "exact_source_* mappings from the catalog."
+        ),
+    )
     args = parser.parse_args()
     output = create_physical_heat_profile_library(
         source_catalog=args.source_catalog.resolve(),
         source_hdf_dir=args.source_hdf_dir.resolve(),
         output=args.output,
         profile_set_id=args.profile_set_id,
+        source_mode=args.source_mode,
     )
     library = PhysicalHeatProfileLibrary(output)
     print(
