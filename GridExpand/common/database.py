@@ -989,10 +989,13 @@ class SurroGridDatabase:
             df_buildings["bus"] = df_buildings["bus"].fillna(df_buildings["connection_point"])
             df_buildings.drop(columns=["connection_point"], inplace=True)
 
-        if "occupants" in df_buildings.columns:
-            fallback_occ = df_buildings["households"].fillna(1)
+        if {"occupants", "households", "building_use"}.issubset(df_buildings.columns):
+            residential_mask = df_buildings["building_use"].eq("Residential")
+            fallback_occ = df_buildings.loc[residential_mask, "households"].fillna(1)
             fallback_occ = fallback_occ.clip(lower=1) * 2
-            df_buildings["occupants"] = df_buildings["occupants"].fillna(fallback_occ)
+            df_buildings.loc[residential_mask, "occupants"] = (
+                df_buildings.loc[residential_mask, "occupants"].fillna(fallback_occ)
+            )
 
         cols = df_buildings.columns.tolist()
         cols.insert(0, cols.pop(cols.index("bus")))
