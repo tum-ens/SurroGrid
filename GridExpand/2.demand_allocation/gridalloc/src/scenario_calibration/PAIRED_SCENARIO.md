@@ -170,18 +170,12 @@ uv run --project GridExpand/2.demand_allocation \
   --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired.yaml
 ```
 
-The paired run YAML is the authoritative resource and concurrency definition.
-Its default heuristic selection materializes the shared asset plan once and
-emits correctly named pre, post-hems-heuristic, and post-inflex-heuristic
-results. Run optimized HEMS separately; the compact runner automatically uses a
-different model-case run directory:
-
-```bash
-uv run --project GridExpand/2.demand_allocation \
-  python GridExpand/scenario_pipeline/run_scenario.py \
-  --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired.yaml \
-  --model-case post-hems-optimized
-```
+The paired run YAML is the authoritative dataset, model-case, and
+concurrency definition. Its model-case list materializes the shared heuristic
+asset plan once for post-hems-heuristic and post-inflex-heuristic, then runs the
+separate endogenous post-hems-optimized solve. Output directories are derived
+from the run ID. A single-case CLI override remains available for diagnostics,
+but it is not required for the configured complete comparison.
 
 Omit `--allow-diagnostic-heat-fallback` for the publication run. The strict runner blocks before computation if any paired heat profile is not publication-ready. Use `--resume` only with the same run directory and unchanged TSAM settings; the runner validates those settings against the saved reference.
 
