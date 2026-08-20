@@ -117,6 +117,9 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip):
     scenario.rename(inplace=True, columns={"index": "id", "building_type": "building", "households": "nb_flat", "occ_list": "nb_occ", "construction_year": "year", "floor_area": "area", "floor_number": "floors"})
     scenario["NWG"] = scenario["building"].apply(lambda x: 1 if x not in ["SFH","MFH","TH","AB"] else 0)
     scenario["year"] = scenario["year"].str.extract(r'(\d+)(?!.*\d)').astype(int)
+    # pylovo floor_area is the LoD2 footprint, whereas TEASER expects total
+    # net leased area rather than footprint area.
+    scenario["area"] = scenario["area"] * scenario["floors"]
     scenario["nb_occ"] = scenario["nb_occ"].apply(lambda x: [int(round(y,0)) for y in x])
     scenario["retrofit"] = 0
 
