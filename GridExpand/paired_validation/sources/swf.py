@@ -60,18 +60,21 @@ def run_powerflows(
     ]
     if args.grid_data_path is not None:
         common.extend(["--grid-data-path", str(args.grid_data_path)])
-    post_cases = (
-        (("flexible", "post-hems-optimized", "optimized HEMS"),)
-        if args.model_case == "post-hems-optimized"
-        else (
-            ("flexible", "post-hems-heuristic", "heuristic-assets HEMS"),
-            ("no-flex", "post-inflex-heuristic", "heuristic-assets INFLEX"),
-        )
+    definitions = {
+        "post-hems-optimized": ("flexible", "optimized HEMS"),
+        "post-hems-heuristic": ("flexible", "heuristic-assets HEMS"),
+        "post-inflex-heuristic": ("no-flex", "heuristic-assets INFLEX"),
+    }
+    post_cases = tuple(
+        (definitions[case_name][0], case_name, definitions[case_name][1])
+        for case_name in args.result_cases
     )
-    for mode, case_name, label in (
-        ("pre-only", "pre", "pre electricity-only"),
-        *post_cases,
-    ):
+    emitted_cases = (
+        post_cases
+        if args.skip_pre
+        else (("pre-only", "pre", "pre electricity-only"), *post_cases)
+    )
+    for mode, case_name, label in emitted_cases:
         run_name = f"{args.run_name_prefix}_{TARGET_NETWORK}_{case_name}"
         command = common + [
             "--post-demand-mode",

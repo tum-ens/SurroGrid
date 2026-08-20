@@ -36,6 +36,7 @@ from paired_validation.comparison import (  # noqa: E402
     read_tsam_signature,
     validate_shared_tsam,
 )
+from paired_validation.datasets import resolve_paired_dataset  # noqa: E402
 from paired_validation.sources import (  # noqa: E402
     TARGET_ADAPTERS,
     adapters_for_scope,
@@ -47,14 +48,6 @@ from scenario_pipeline.config_loader import load_scenario_config  # noqa: E402
 
 ENV_PATH = GRIDEXPAND_DIR / ".env"
 REPO_ROOT_DEFAULT = GRIDEXPAND_DIR.parent
-DEFAULT_PAIRED_DIR = (
-    GRIDEXPAND_DIR
-    / "2.demand_allocation"
-    / "gridalloc"
-    / "outputs"
-    / "scenario_calibration"
-    / "swf_2045_paired_v5_91301_station_hybrid_v2"
-)
 DEFAULT_SCENARIO_CONFIG = (
     GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
     / "forchheim_2045.yaml"
@@ -364,12 +357,16 @@ def _run_one(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=REPO_ROOT_DEFAULT)
-    parser.add_argument("--plz", type=int, default=91301)
-    parser.add_argument("--paired-dir", type=Path, default=DEFAULT_PAIRED_DIR)
+    parser.add_argument(
+        "--paired-dataset-id",
+        help="Resolve paired artifacts by repository-local dataset convention.",
+    )
+    parser.add_argument("--plz", type=int, default=None)
+    parser.add_argument("--paired-dir", type=Path, default=None)
     parser.add_argument("--grid-data-path", type=Path, default=None)
     parser.add_argument("--target", choices=TARGET_CHOICES, default="both")
     parser.add_argument("--target-grid-id", type=int, default=None)
-    parser.add_argument("--weather-source-hdf", type=Path, required=True)
+    parser.add_argument("--weather-source-hdf", type=Path)
     parser.add_argument("--heat-profile-library", type=Path)
     parser.add_argument("--scenario-label", default=None)
     parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
@@ -380,6 +377,16 @@ def parse_args() -> argparse.Namespace:
         ),
         default="post-hems-heuristic",
     )
+    parser.add_argument(
+        "--result-cases",
+        nargs="+",
+        choices=(
+            "post-inflex-heuristic", "post-hems-optimized", "post-hems-heuristic",
+        ),
+        default=None,
+        help="Power-flow cases emitted from this materialized asset plan.",
+    )
+    parser.add_argument("--skip-pre", action="store_true")
     parser.add_argument("--run-name-prefix", default="paired_swf_2045_full_local")
     parser.add_argument("--seed", type=int, default=91301)
     parser.add_argument("--workers", type=int, default=1)
@@ -404,18 +411,53 @@ def main() -> None:
     args = parse_args()
     load_dotenv(ENV_PATH, override=True)
     repo_root = args.repo_root.resolve()
+    if args.paired_dataset_id is not None:
+        dataset = resolve_paired_dataset(args.paired_dataset_id)
+        args.plz = args.plz if args.plz is not None else dataset.plz
+        args.paired_dir = args.paired_dir or dataset.paired_dir
+        args.weather_source_hdf = (
+            args.weather_source_hdf or dataset.weather_source_hdf
+        )
+        args.heat_profile_library = (
+            args.heat_profile_library or dataset.heat_profile_library
+        )
+    missing = [
+        name for name in ("plz", "paired_dir", "weather_source_hdf")
+        if getattr(args, name) is None
+    ]
+    if missing:
+        raise ValueError(
+            "Provide --paired-dataset-id or the explicit paired inputs; "
+            f"missing: {', '.join(missing)}."
+        )
     args.scenario_config = args.scenario_config.resolve()
     scenario, scenario_hash = load_scenario_config(args.scenario_config)
+    requested_model_case = args.model_case
+    result_cases = args.result_cases or [requested_model_case]
+    if len(result_cases) != len(set(result_cases)):
+        raise ValueError("--result-cases contains duplicates.")
+    for result_case in result_cases:
+        if result_case not in scenario.model_cases:
+            raise ValueError(
+                f"Model case {result_case!r} is not enabled by {scenario.scenario_id!r}."
+            )
+    if requested_model_case in {"post-inflex-heuristic", "post-hems-heuristic"}:
+        allowed_results = {"post-inflex-heuristic", "post-hems-heuristic"}
+        args.model_case = "post-hems-heuristic"
+    else:
+        allowed_results = {"post-hems-optimized"}
     if args.model_case not in scenario.model_cases:
         raise ValueError(
-            f"Model case {args.model_case!r} is not enabled by {scenario.scenario_id!r}."
+            f"Materialization case {args.model_case!r} is not enabled by "
+            f"{scenario.scenario_id!r}."
         )
-    args.requested_model_case = args.model_case
-    # Both heuristic cases share one asset plan. Materialize and solve it once;
-    # the target adapters emit the HEMS and INFLEX dispatches with distinct,
-    # accurate model-case result names.
-    if args.model_case in {"post-inflex-heuristic", "post-hems-heuristic"}:
-        args.model_case = "post-hems-heuristic"
+    incompatible = set(result_cases).difference(allowed_results)
+    if incompatible:
+        raise ValueError(
+            f"Result cases {sorted(incompatible)} are incompatible with the "
+            f"{requested_model_case!r} asset plan."
+        )
+    args.result_cases = tuple(result_cases)
     # Scientific TSAM choices come exclusively from the scenario YAML.
     args.tsam = scenario.time_aggregation.enabled
     args.tsam_periods = scenario.time_aggregation.number_of_typical_periods
@@ -509,6 +551,10 @@ def main() -> None:
         grid_data_path=(str(args.grid_data_path) if args.grid_data_path else None),
         diagnostic_heat_profiles=diagnostic_profiles,
         publication_ready=diagnostic_profiles == 0,
+        paired_dataset_id=args.paired_dataset_id,
+        materialization_case=args.model_case,
+        result_cases=list(args.result_cases),
+        pre_case_emitted=not args.skip_pre,
     )
     started = time.monotonic()
     results = []

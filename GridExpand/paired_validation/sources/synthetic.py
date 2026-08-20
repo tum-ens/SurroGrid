@@ -81,26 +81,27 @@ def run_powerflows(
         "--n_cpu",
         str(args.step4_cpus),
     ]
-    run_command(
-        cmd=common
-        + [
-            "--pre-only",
-            "--run-name",
-            f"{args.run_name_prefix}_{TARGET_NETWORK}_pre",
-        ],
-        cwd=step4_dir,
-        log_path=log_path,
-        status=status,
-        candidate_index=job_index,
-        stage=f"step4_{TARGET_NETWORK}_pre",
-    )
-    post_cases = (
-        (("flexible", "post-hems-optimized"),)
-        if args.model_case == "post-hems-optimized"
-        else (
-            ("flexible", "post-hems-heuristic"),
-            ("no-flex", "post-inflex-heuristic"),
+    if not args.skip_pre:
+        run_command(
+            cmd=common
+            + [
+                "--pre-only",
+                "--run-name",
+                f"{args.run_name_prefix}_{TARGET_NETWORK}_pre",
+            ],
+            cwd=step4_dir,
+            log_path=log_path,
+            status=status,
+            candidate_index=job_index,
+            stage=f"step4_{TARGET_NETWORK}_pre",
         )
+    definitions = {
+        "post-hems-optimized": "flexible",
+        "post-hems-heuristic": "flexible",
+        "post-inflex-heuristic": "no-flex",
+    }
+    post_cases = tuple(
+        (definitions[case_name], case_name) for case_name in args.result_cases
     )
     for mode, case_name in post_cases:
         command = common + [

@@ -13,10 +13,15 @@ the scenario YAML; the reasoning and cross-stage contracts live here.
 | `post-hems-optimized`   | Endogenous urbs sizing      | Optimized dispatch           |
 | `post-hems-heuristic`   | Shared heuristic asset plan | Optimized dispatch           |
 
-The comparison of flexibility strategies is
-`post-inflex-heuristic` versus `post-hems-heuristic`: their asset capacities
-must be identical. Paired validation may project a compiled scenario onto real
-and synthetic buses, but it may not redefine scenario assumptions.
+The controlled comparison of flexibility strategies is
+`post-inflex-heuristic` versus `post-hems-heuristic`. In paired validation,
+both dispatches are reconstructed from the same materialized heuristic asset
+plan, so their PV, battery, heat-pump, auxiliary-heater, and buffer capacities
+are exactly identical; only operation differs. Independently launched ordinary
+scenario runs use the same sizing equations but are comparable only when they
+also reuse the same input realization and seed. Paired validation may project a
+compiled scenario onto real and synthetic buses, but it may not redefine
+scenario assumptions.
 
 PV, stationary-battery, and residential heat sizing are implemented in both
 heuristic and optimized modes. The heat method compiles one central system per

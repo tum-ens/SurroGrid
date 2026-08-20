@@ -1,4 +1,4 @@
-# Execution and resource selection for one ordinary (non-paired) scenario run.
+# Execution and resource selection for one ordinary synthetic scenario run.
 run:
   id: forchheim_2045_synthetic
   scenario: ../scenarios/forchheim_2045.yaml
@@ -10,13 +10,9 @@ resources:
   storage: db
   # Null keeps the standard Step-2 results directory.
   output_directory: null
-  target_network: null
-  target_grid_id: null
-  paired_directory: null
-  weather_source_hdf: null
 
 execution:
-  # Machine-specific concurrency belongs in the run configuration.
+  # Machine-specific execution choices; scientific assumptions stay in the scenario YAML.
   n_cpu: 1
   mobility_source: pool
   demand_scope: all

@@ -1,81 +1,77 @@
 # Configuration reference
 
-The pipeline uses two YAML files.
+The pipeline uses two YAML files with separate responsibilities.
 
-- A **scenario YAML** contains assumptions that change scientific results and
-  is fingerprinted as `scenario_hash`.
-- A **run YAML** selects grids, storage, paths, and execution resources and is
-  fingerprinted as `run_hash`.
+- A **scenario YAML** contains scientific and policy assumptions that may change
+  results. It is fingerprinted as scenario_hash.
+- A **run YAML** identifies the input dataset and selects execution resources.
+  It is fingerprinted as run_hash.
 
 Unknown keys, incorrect types, invalid ranges, unsupported case names, and
-missing required fields fail during loading. This validation prevents a typo
-from silently falling back to a different assumption.
+missing required fields fail during loading. This prevents misspelled options
+from silently selecting another assumption.
 
 ## Scenario YAML
 
-- `scenario.id`: stable scenario identifier.
-- `scenario.milestone_year`: modeled milestone year.
-- `scenario.model_cases`: subset of the four documented model cases.
-- `economics.electricity.import_price_eur_per_kwh`: grid purchase price.
-- `economics.electricity.pv_feed_in_tariff_eur_per_kwh`: PV export revenue;
-  zero disables remuneration without removing physical exports.
-- `asset_sizing.pv.heuristic_method`: upstream sizing rule.
-- `asset_sizing.pv.optimized_method`: endogenous urbs sizing mode.
-- `asset_sizing.pv.location_mode`: predefined source locations or all buildings.
-- `asset_sizing.pv.demand_multiplier`: multiplier in the PV sizing equation.
-- `asset_sizing.pv.fallback_capacity_kwp`: missing-LoD2 fallback.
-- `asset_sizing.pv.maximum_fallback_share`: accepted fallback fraction, 0--1.
-- `asset_sizing.pv.module_capacity_kw_per_m2`: module peak density.
-- `asset_sizing.pv.*_roof_utilization`: usable surface fraction, 0--1.
-- `asset_sizing.pv.*_bin_degrees`: shared pvlib profile resolution.
-- `asset_sizing.battery.*_method`: heuristic and optimized sizing modes.
-- `asset_sizing.battery.location_mode`: all PV buildings are candidates.
-- `asset_sizing.battery.predefined_locations_when_available`: use source
-  inventory rows as location evidence when supplied.
-- `asset_sizing.battery.minimum_pv_kwp_per_annual_mwh`: HTW surplus threshold.
-- `asset_sizing.battery.maximum_usable_*`: the two HTW usable-energy bounds.
-- `asset_sizing.battery.energy_to_power_hours`: fixed E/P ratio in hours.
-- `asset_sizing.heat.indoor_design_temperature_c`: indoor reference for degree-day normalization.
-- `asset_sizing.heat.heating_limit_temperature_c`: daily-mean threshold selecting heating days.
-- `asset_sizing.heat.heat_pump_design_share`: HP thermal output at norm outside temperature as a fraction of calculated design load.
-- `asset_sizing.heat.buffer_volume_l_per_kw_th`: space-heating buffer volume per thermal HP kW.
-- `asset_sizing.heat.buffer_usable_temperature_spread_k`: usable buffer temperature range used to convert litres to kWhth.
-- `mobility.commuting_probability`: commuter-schedule probability.
-- `mobility.emobpy_timestep_hours` and `reference_year`: emobpy temporal basis.
-- `mobility.passenger_*`, `cabin_*`, `driving_cycle_type`, `road_type`, and
-  `road_slope`: vehicle-energy-model assumptions.
-- `technologies.processes.*`: capacities, costs, WACC, lifetime, and power
-  factor written to urbs process rows. Asset plans replace generic PV
-  capacity, while source inventory may replace paired charger capacity.
-- `technologies.storages.*`: capacities, E/P ratio, efficiencies, costs, WACC,
-  and lifetime written to urbs storage rows. `null` capacity fields mean that
-  capacity comes from a PV/battery asset plan or an individual EV profile.
-- `time_aggregation.*`: complete TSAM methodology; see comments in the example.
+- scenario.id: stable scenario identifier.
+- scenario.milestone_year: modeled milestone year.
+- scenario.model_cases: model cases permitted for this scenario.
+- economics.electricity: import price and configurable PV feed-in tariff; a
+  zero tariff retains physical export without remuneration.
+- asset_sizing.pv: LoD2 potential, heuristic demand multiplier, fallback, roof
+  utilization, and pvlib angle-bin choices.
+- asset_sizing.battery: HTW sizing coefficients, adoption/location policy, and
+  energy-to-power ratio.
+- asset_sizing.heat: regional heat-pump, auxiliary-heater, and space-heating
+  buffer sizing parameters.
+- mobility: emobpy temporal, behavioral, and vehicle-energy assumptions.
+- technologies.processes and technologies.storages: values written into urbs.
+- time_aggregation: complete TSAM method, including typical/extreme periods.
 
-## Run YAML
+The example scenario YAML comments describe each adjustable value. The
+scientific reasoning and equations are centralized in SCENARIO_METHOD.md.
 
-- `run.id`: execution identifier.
-- `run.scenario`: scenario YAML path, relative to the run YAML.
-- `run.pipeline`: `scenario` or `paired_validation`.
-- `resources.inputfile_id`: DB/grid/HDF identifier.
-- `resources.storage`: `db` or `h5`.
-- `resources.output_directory`: optional output override.
-- `resources.target_*`, `paired_directory`, `weather_source_hdf`,
-  `heat_profile_library`, `grid_data_path`, and `run_directory`:
-  paired-only resources; null for a normal scenario run.
-- `execution.model_case`: default case selected by the compact runner. Either
-  heuristic case makes paired validation materialize their common asset plan
-  once and emit both dispatch cases; optimized HEMS emits only flexible dispatch.
-- `execution.workers`, `step3_cpus`, `step3_cluster_concurrency`, and
-  `step4_cpus`: paired machine concurrency.
-- `execution.seed`, `cleanup_intermediates`, and `resume`: paired
-  reproducibility and lifecycle controls.
-- `execution.n_cpu`: ordinary-pipeline machine concurrency.
-- `execution.mobility_source`: current mobility generator/pool selection.
-- `execution.demand_scope`: current building demand scope.
-- `execution.timeframe_mode`: full year or supported operational slice.
+## Ordinary scenario run YAML
 
-Implementation references such as database schema names, API endpoints, and
-static dataset paths remain in the Python config. Scientific mobility and urbs
-numbers do not: `config.py` only maps validated scenario values onto legacy
-helper attribute names where those helpers have not yet been refactored.
+For run.pipeline: scenario:
+
+- resources.inputfile_id: AGS, bridge prefix, or DB/HDF grid identifier.
+- resources.storage: db or h5.
+- resources.output_directory: optional output override.
+- execution.n_cpu, mobility_source, demand_scope, and timeframe_mode:
+  machine/runtime choices that do not define scientific assumptions.
+
+One model case is selected with the launcher's optional --model-case; it
+defaults to post-hems-heuristic.
+
+## Paired-validation run YAML
+
+For run.pipeline: paired_validation:
+
+- resources.paired_dataset_id: prepared paired artifact-directory name. The
+  runner resolves postcode, allocation plans, weather, physical heat library,
+  and PV library from repository conventions and artifact metadata.
+- resources.target_network: both, real_swf, or synthetic.
+- resources.target_grid_id: optional adapter-local grid filter.
+- execution.model_cases: requested post-cases. Heuristic HEMS and INFLEX share
+  one capacity-plan solve; optimized HEMS is solved separately.
+- execution workers/CPU values: concurrency limits.
+- execution.seed, cleanup_intermediates, and resume: reproducibility and
+  lifecycle controls.
+
+Internal directories are deliberately absent from this YAML. Outputs follow:
+
+    GridExpand/run_logs/<run.id>/
+    ├── run_manifest.json
+    ├── heuristic-assets/
+    └── post-hems-optimized/
+
+Only requested groups are created. When both groups run, pre is emitted by the
+first group only. The external SWF export root remains an environment/deployment
+setting (GRID_DATA_PATH in GridExpand/.env), because it describes where data is
+installed rather than a scenario or run choice.
+
+Implementation references such as database schemas, API endpoints, and stable
+repository artifact conventions remain in Python. Adjustable scientific values
+belong in the scenario YAML; dataset identity and runtime resources belong in
+the run YAML.
