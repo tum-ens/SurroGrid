@@ -23,6 +23,91 @@ from ..paths import (
 )
 
 DEFAULT_SYNTHETIC_LIBRARY = SYNTHETIC_INPUT_DIR
+RESIDENTIAL_BUILDING_TYPES = {"AB", "MFH", "SFH", "TH"}
+
+
+def build_regeneration_catalog(paired_dir: Path) -> pd.DataFrame:
+    # Create fresh exact-source requirements from the current paired plan.
+    allocation = pd.read_csv(paired_dir / "paired_real_bus_allocation_plan.csv")
+    buildings = pd.read_csv(paired_dir / "paired_building_scenario_plan.csv")
+    required = {
+        "building_objectid",
+        "residential_wp_rows",
+        "synthetic_bridge_filename",
+        "synthetic_bus",
+    }
+    missing = required.difference(allocation.columns)
+    if missing:
+        raise ValueError(f"Paired allocation misses heat columns: {sorted(missing)}")
+    selected = allocation.loc[
+        pd.to_numeric(allocation["residential_wp_rows"], errors="coerce")
+        .fillna(0.0)
+        .gt(0.0)
+    ].copy()
+    if selected.empty:
+        raise ValueError("Paired allocation contains no residential heat-pump rows.")
+    source_counts = selected.groupby("building_objectid").agg(
+        source_hdfs=("synthetic_bridge_filename", "nunique"),
+        source_buses=("synthetic_bus", "nunique"),
+    )
+    ambiguous = source_counts[
+        source_counts["source_hdfs"].ne(1) | source_counts["source_buses"].ne(1)
+    ]
+    if not ambiguous.empty:
+        raise ValueError(
+            "Paired heat buildings have ambiguous synthetic sources: "
+            f"{ambiguous.index.astype(str).tolist()[:10]}"
+        )
+    selected = selected.sort_values("scenario_unit_id").drop_duplicates(
+        "building_objectid"
+    )
+    attributes = buildings[
+        [
+            "building_objectid",
+            "building_use",
+            "building_type",
+            "building_floor_area",
+        ]
+    ].drop_duplicates("building_objectid")
+    selected = selected.merge(
+        attributes,
+        on="building_objectid",
+        how="left",
+        suffixes=("", "_building"),
+    )
+    for column in ("building_use", "building_type"):
+        building_column = f"{column}_building"
+        if building_column in selected:
+            selected[column] = selected[column].fillna(selected[building_column])
+    residential_flag = selected.get(
+        "building_is_residential",
+        pd.Series(False, index=selected.index),
+    ).astype("boolean").fillna(False).astype(bool)
+    residential = (
+        residential_flag
+        | selected["building_use"].astype(str).str.lower().eq("residential")
+        | selected["building_type"].astype(str).str.upper().isin(
+            RESIDENTIAL_BUILDING_TYPES
+        )
+    )
+    return pd.DataFrame(
+        {
+            "building_objectid": selected["building_objectid"].astype(str),
+            "building_use": selected["building_use"],
+            "building_type": selected["building_type"],
+            "building_floor_area": pd.to_numeric(
+                selected["building_floor_area"], errors="coerce"
+            ),
+            "exact_source_hdf": selected["synthetic_bridge_filename"].astype(str),
+            "exact_source_bus": pd.to_numeric(
+                selected["synthetic_bus"], errors="raise"
+            ).astype(int),
+            "exact_profile_expected": residential,
+            "exact_profile_available": False,
+            "exact_profile_source": "missing",
+            "publication_ready": False,
+        }
+    ).sort_values("building_objectid").reset_index(drop=True)
 
 
 def pending_sources(catalog: pd.DataFrame) -> list[str]:
@@ -31,10 +116,10 @@ def pending_sources(catalog: pd.DataFrame) -> list[str]:
     missing = required.difference(catalog.columns)
     if missing:
         raise ValueError(f"Heat profile catalog misses columns: {sorted(missing)}")
-    pending = catalog.loc[
-        ~catalog["publication_ready"].astype(bool),
-        "exact_source_hdf",
-    ].dropna()
+    selected = ~catalog["publication_ready"].astype(bool)
+    if "exact_profile_expected" in catalog:
+        selected &= catalog["exact_profile_expected"].astype(bool)
+    pending = catalog.loc[selected, "exact_source_hdf"].dropna()
     return sorted(pending.astype(str).unique())
 
 
@@ -42,7 +127,10 @@ def all_sources(catalog: pd.DataFrame) -> list[str]:
     """Return every unique exact source HDF in a paired catalog."""
     if "exact_source_hdf" not in catalog.columns:
         raise ValueError("Heat profile catalog misses column: exact_source_hdf")
-    sources = catalog["exact_source_hdf"].dropna()
+    selected = pd.Series(True, index=catalog.index)
+    if "exact_profile_expected" in catalog:
+        selected &= catalog["exact_profile_expected"].astype(bool)
+    sources = catalog.loc[selected, "exact_source_hdf"].dropna()
     return sorted(sources.astype(str).unique())
 
 
@@ -53,6 +141,8 @@ def required_buses(
     include_ready: bool = False,
 ) -> list[int]:
     source_rows = catalog["exact_source_hdf"].astype(str).eq(str(source_name))
+    if "exact_profile_expected" in catalog:
+        source_rows &= catalog["exact_profile_expected"].astype(bool)
     if not include_ready:
         source_rows &= ~catalog["publication_ready"].astype(bool)
     rows = catalog[source_rows]
@@ -205,6 +295,14 @@ def main() -> None:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument(
+        "--refresh-catalog",
+        action="store_true",
+        help=(
+            "Rebuild paired_heat_profile_catalog.csv from the current paired "
+            "allocation before regeneration."
+        ),
+    )
+    parser.add_argument(
         "--force-all",
         action="store_true",
         help=(
@@ -224,7 +322,12 @@ def main() -> None:
     pylovo_version_id = configured_pylovo_version_id()
 
     paired_dir = args.paired_dir.resolve()
-    catalog = pd.read_csv(paired_dir / "paired_heat_profile_catalog.csv")
+    catalog_path = paired_dir / "paired_heat_profile_catalog.csv"
+    if args.refresh_catalog:
+        catalog = build_regeneration_catalog(paired_dir)
+        catalog.to_csv(catalog_path, index=False)
+    else:
+        catalog = pd.read_csv(catalog_path)
     sources = all_sources(catalog) if args.force_all else pending_sources(catalog)
     status = _StatusWriter(paired_dir / "paired_heat_profile_regeneration_status.csv")
     if args.resume:

@@ -89,6 +89,49 @@ def _validate_and_normalize_series(group: pd.DataFrame) -> tuple[pd.Series, bool
     return normalized / 1000.0, used_fallback, int(timestamps.iloc[0].year)
 
 
+def _total_floor_area(row: pd.Series | dict[str, object]) -> float:
+    area = pd.to_numeric(pd.Series([row.get("floor_area")]), errors="coerce").iloc[0]
+    floors = pd.to_numeric(
+        pd.Series([row.get("floor_number", 1.0)]), errors="coerce"
+    ).iloc[0]
+    if pd.isna(area) or float(area) <= 0.0:
+        return math.nan
+    if pd.isna(floors) or float(floors) <= 0.0:
+        floors = 1.0
+    return float(area) * float(floors)
+
+
+def _nearest_heat_source(
+    target: pd.Series,
+    candidates: pd.DataFrame,
+) -> tuple[pd.Series, str, float]:
+    """Choose the closest available regional building, broadening if needed."""
+    building_type = str(target.get("building_type", "")).strip().upper()
+    same_type = candidates["building_type"].astype(str).str.upper().eq(building_type)
+    typed = candidates.loc[same_type]
+    if not typed.empty:
+        candidates = typed
+        scope = "same_building_type"
+    else:
+        scope = "regional"
+
+    target_area = _total_floor_area(target)
+    positive_area = candidates["total_floor_area"].gt(0.0)
+    if np.isfinite(target_area) and target_area > 0.0 and positive_area.any():
+        candidates = candidates.loc[positive_area]
+        distance = (
+            np.log(candidates["total_floor_area"].astype(float))
+            - np.log(target_area)
+        ).abs()
+        source = candidates.loc[distance.idxmin()]
+        scale = target_area / float(source["total_floor_area"])
+    else:
+        source = candidates.sort_values("objectid").iloc[0]
+        scale = 1.0
+        scope = f"{scope}_missing_target_area"
+    return source, scope, scale
+
+
 def load_space_heat(
     buildings: pd.DataFrame,
     *,
@@ -97,8 +140,9 @@ def load_space_heat(
     """Load one hourly kWh space-heat series per physical building.
 
     The temporary source fallback duplicates the last available 24-hour day
-    only for the current 8,736-hour ro_heat export. It is recorded in the
-    returned audit metadata and must not be treated as a publication artifact.
+    only for the current 8,736-hour ro_heat export. Missing individual
+    buildings borrow the nearest-area profile of the same building type; if
+    necessary, matching broadens to the complete regional profile pool.
     """
     if buildings.empty:
         return pd.DataFrame(), {
@@ -113,12 +157,24 @@ def load_space_heat(
 
     metadata_query = text(
         """
-        SELECT id, objectid, name, unit, type, source, changelog
-        FROM ro_heat.entise_ts_metadata
-        WHERE name = :series_name
-          AND objectid IN :building_ids
+        SELECT
+            m.id,
+            m.objectid,
+            m.name,
+            m.unit,
+            m.type,
+            m.source,
+            m.changelog,
+            b.floor_area,
+            b.floor_number,
+            b.building_type
+        FROM ro_heat.entise_ts_metadata m
+        LEFT JOIN ro_heat.buildings_refurbished_status b
+          ON b.building_objectid = m.objectid
+        WHERE m.name = :series_name
+        ORDER BY m.objectid, m.id DESC
         """
-    ).bindparams(bindparam("building_ids", expanding=True))
+    )
     data_query = text(
         """
         SELECT m.objectid, d.time, d.value
@@ -130,72 +186,141 @@ def load_space_heat(
     ).bindparams(bindparam("metadata_ids", expanding=True))
     db_engine = engine or _database_engine()
     with db_engine.connect() as connection:
-        metadata = pd.read_sql_query(
+        candidates = pd.read_sql_query(
             metadata_query,
             connection,
-            params={"series_name": RO_HEAT_SERIES_NAME, "building_ids": source_ids.tolist()},
+            params={"series_name": RO_HEAT_SERIES_NAME},
         )
-        if metadata.empty:
-            raise ValueError("No ro_heat heating-load series match the selected buildings.")
-        metadata["objectid"] = metadata["objectid"].astype(str)
-        if metadata["objectid"].duplicated().any():
-            raise ValueError("ro_heat has duplicate heating series for a building.")
-        missing = sorted(set(source_ids) - set(metadata["objectid"]))
-        if missing:
-            raise ValueError(
-                f"ro_heat is missing {len(missing)} selected building(s), examples={missing[:5]}"
-            )
-        if set(metadata["unit"].dropna().astype(str)) != {RO_HEAT_UNIT}:
+        if candidates.empty:
+            raise ValueError("ro_heat contains no heating-load series.")
+        candidates["objectid"] = candidates["objectid"].astype(str)
+        candidates = candidates.drop_duplicates("id", keep="first")
+        if set(candidates["unit"].dropna().astype(str)) != {RO_HEAT_UNIT}:
             raise ValueError("ro_heat heating-load units are ambiguous or unsupported.")
-        if metadata["changelog"].nunique(dropna=False) != 1:
-            raise ValueError("ro_heat has multiple changelog/model runs without a selector.")
+
+        exact = candidates[candidates["objectid"].isin(source_ids)].copy()
+        if exact["changelog"].nunique(dropna=False) > 1:
+            raise ValueError(
+                "Selected exact ro_heat profiles span multiple changelog/model runs."
+            )
+        if exact.empty:
+            changelog = (
+                candidates.groupby("changelog", dropna=False)
+                .size()
+                .sort_values(ascending=False)
+                .index[0]
+            )
+        else:
+            changelog = exact["changelog"].iloc[0]
+        if pd.isna(changelog):
+            candidates = candidates[candidates["changelog"].isna()].copy()
+        else:
+            candidates = candidates[candidates["changelog"].eq(changelog)].copy()
+        candidates = candidates.sort_values(
+            ["objectid", "id"], ascending=[True, False]
+        ).drop_duplicates("objectid", keep="first")
+        candidates["total_floor_area"] = (
+            pd.to_numeric(candidates["floor_area"], errors="coerce")
+            * pd.to_numeric(candidates["floor_number"], errors="coerce").fillna(1.0)
+        )
+
+        source_by_target: dict[str, str] = {}
+        scale_by_target: dict[str, float] = {}
+        scope_by_target: dict[str, str] = {}
+        candidate_by_id = candidates.set_index("objectid", drop=False)
+        buildings_by_id = buildings.assign(
+            _building_objectid=source_ids.to_numpy()
+        ).set_index("_building_objectid", drop=False)
+        for building_id, building in buildings_by_id.iterrows():
+            if building_id in candidate_by_id.index:
+                source_by_target[str(building_id)] = str(building_id)
+                scale_by_target[str(building_id)] = 1.0
+                scope_by_target[str(building_id)] = "exact"
+                continue
+            source, scope, scale = _nearest_heat_source(building, candidates)
+            source_by_target[str(building_id)] = str(source["objectid"])
+            scale_by_target[str(building_id)] = float(scale)
+            scope_by_target[str(building_id)] = scope
+
+        metadata_ids = (
+            candidate_by_id.loc[
+                sorted(set(source_by_target.values())),
+                "id",
+            ]
+            .astype(int)
+            .tolist()
+        )
         data = pd.read_sql_query(
             data_query,
             connection,
-            params={"metadata_ids": metadata["id"].astype(int).tolist()},
+            params={"metadata_ids": metadata_ids},
         )
 
     normalized: dict[str, pd.Series] = {}
+    used_day_fallback: dict[str, bool] = {}
     years: set[int] = set()
-    fallback_buildings = 0
     for building_id, group in data.groupby("objectid", sort=True):
         series, used_fallback, source_year = _validate_and_normalize_series(group)
         normalized[str(building_id)] = series
+        used_day_fallback[str(building_id)] = used_fallback
         years.add(source_year)
-        fallback_buildings += int(used_fallback)
-    if set(source_ids) != set(normalized):
-        missing_data = sorted(set(source_ids) - set(normalized))
+    missing_sources = sorted(set(source_by_target.values()) - set(normalized))
+    if missing_sources:
         raise ValueError(
-            f"ro_heat has no complete data rows for {len(missing_data)} building(s), "
-            f"examples={missing_data[:5]}"
+            "ro_heat has no complete data rows for selected fallback source(s), "
+            f"examples={missing_sources[:5]}"
         )
     if len(years) != 1:
         raise ValueError(f"ro_heat source years are ambiguous: {sorted(years)}")
 
     by_bus: dict[int, list[pd.Series]] = {}
     for _, building in buildings.iterrows():
-        bus = int(building["bus"])
-        by_bus.setdefault(bus, []).append(normalized[str(building[id_column])])
+        target_id = str(building[id_column])
+        source_id = source_by_target[target_id]
+        scaled = normalized[source_id] * scale_by_target[target_id]
+        by_bus.setdefault(int(building["bus"]), []).append(scaled)
     result = pd.DataFrame(
         {bus: sum(series_list) for bus, series_list in by_bus.items()}
     )
     result.columns = pd.MultiIndex.from_tuples(
         [(bus, "space_heat") for bus in result.columns]
     )
+
+    similar_targets = [
+        target for target, scope in scope_by_target.items() if scope != "exact"
+    ]
+    duplicated_targets = [
+        target
+        for target, source in source_by_target.items()
+        if used_day_fallback[source]
+    ]
+    fallback_methods = []
+    if duplicated_targets:
+        fallback_methods.append(PRELIMINARY_SOURCE_FALLBACK)
+    if similar_targets:
+        fallback_methods.append("nearest_building_area_scaled")
     audit = {
         "space_heat_source": "infdb_ro_heat",
         "space_heat_source_schema": "ro_heat",
         "space_heat_source_series": RO_HEAT_SERIES_NAME,
         "space_heat_source_unit": RO_HEAT_UNIT,
         "space_heat_source_value_kind": "hourly_power_converted_to_kwh",
-        "space_heat_source_changelog": str(metadata["changelog"].iloc[0]),
+        "space_heat_source_changelog": str(changelog),
         "space_heat_source_year": min(years),
         "space_heat_source_hours": EXPECTED_HOURS,
-        "space_heat_source_buildings": int(len(normalized)),
+        "space_heat_source_buildings": int(len(source_ids)),
         "space_heat_source_fallback": (
-            PRELIMINARY_SOURCE_FALLBACK if fallback_buildings else None
+            "+".join(fallback_methods) if fallback_methods else None
         ),
-        "space_heat_source_fallback_buildings": fallback_buildings,
+        "space_heat_source_fallback_buildings": len(
+            set(duplicated_targets) | set(similar_targets)
+        ),
+        "space_heat_last_day_fallback_buildings": len(duplicated_targets),
+        "space_heat_similar_building_fallback_buildings": len(similar_targets),
+        "space_heat_similar_building_fallback_scopes": {
+            scope: list(scope_by_target.values()).count(scope)
+            for scope in sorted(set(scope_by_target.values()) - {"exact"})
+        },
     }
     return result, audit
 

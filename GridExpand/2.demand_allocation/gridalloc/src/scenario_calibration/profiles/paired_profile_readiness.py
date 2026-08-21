@@ -32,17 +32,22 @@ def build_heat_profile_catalog(
         if heat_profile_library is not None
         else None
     )
+    # Paired heat materialization currently models residential_wp_rows only.
     wp_count = pd.to_numeric(
         allocation.get("residential_wp_rows", 0.0),
-        errors="coerce",
-    ).fillna(0.0) + pd.to_numeric(
-        allocation.get("ghd_wp_rows", 0.0),
         errors="coerce",
     ).fillna(0.0)
     selected = allocation.loc[wp_count.gt(0.0)].copy()
     selected = selected.drop_duplicates("building_objectid")
     attributes = (
-        building_plan[["building_objectid", "building_use", "building_floor_area"]]
+        building_plan[
+            [
+                "building_objectid",
+                "building_use",
+                "building_type",
+                "building_floor_area",
+            ]
+        ]
         .drop_duplicates("building_objectid")
         .copy()
     )
@@ -64,6 +69,9 @@ def build_heat_profile_catalog(
         source_name = str(row["synthetic_bridge_filename"])
         source_bus = int(row["synthetic_bus"])
         library_exact = library is not None and building_id in library
+        library_metadata = (
+            library.profile_metadata(building_id) if library_exact else None
+        )
         exact = False
         if not library_exact:
             source_path = synthetic_input_dir / source_name
@@ -98,6 +106,7 @@ def build_heat_profile_catalog(
             {
                 "building_objectid": building_id,
                 "building_use": row.get("building_use"),
+                "building_type": row.get("building_type"),
                 "building_floor_area": float(row.get("building_floor_area") or np.nan),
                 "exact_source_hdf": source_name,
                 "exact_source_bus": source_bus,
@@ -108,6 +117,26 @@ def build_heat_profile_catalog(
                     else "legacy_grid_hdf"
                     if exact
                     else "missing"
+                ),
+                "library_profile_method": (
+                    library_metadata["profile_method"]
+                    if library_metadata is not None
+                    else None
+                ),
+                "library_profile_source_building_objectid": (
+                    library_metadata["profile_source_building_objectid"]
+                    if library_metadata is not None
+                    else None
+                ),
+                "library_profile_scale": (
+                    library_metadata["profile_scale"]
+                    if library_metadata is not None
+                    else None
+                ),
+                "library_fallback_match_scope": (
+                    library_metadata["fallback_match_scope"]
+                    if library_metadata is not None
+                    else None
                 ),
             }
         )
@@ -125,26 +154,59 @@ def build_heat_profile_catalog(
     for row in catalog.to_dict("records"):
         if row["exact_profile_available"]:
             source = row
-            method = "exact_physical_building"
+            library_method = row.get("library_profile_method")
+            method = (
+                str(library_method)
+                if pd.notna(library_method) and str(library_method)
+                else "exact_physical_building"
+            )
+            fallback_scope = row.get("library_fallback_match_scope")
         else:
             area = float(row["building_floor_area"])
-            if not np.isfinite(area) or area <= 0.0:
-                raise ValueError(
-                    "Area-matched heat fallback requires a positive floor area "
-                    f"for {row['building_objectid']}."
-                )
-            distances = (
-                np.log(available["building_floor_area"].astype(float)) - np.log(area)
-            ).abs()
-            source = available.loc[distances.idxmin()].to_dict()
-            method = "nearest_floor_area_scaled_diagnostic"
+            same_source = available["exact_source_hdf"].astype(str).eq(
+                str(row["exact_source_hdf"])
+            )
+            same_type = available["building_type"].astype(str).eq(
+                str(row.get("building_type"))
+            )
+            same_use = available["building_use"].astype(str).eq(
+                str(row.get("building_use"))
+            )
+            tiers = (
+                ("same_grid_and_type", same_source & same_type),
+                ("same_grid_and_use", same_source & same_use),
+                ("same_grid", same_source),
+                ("same_type", same_type),
+                ("same_use", same_use),
+                ("regional", pd.Series(True, index=available.index)),
+            )
+            for fallback_scope, mask in tiers:
+                candidates = available.loc[mask]
+                if not candidates.empty:
+                    break
+            if np.isfinite(area) and area > 0.0:
+                distances = (
+                    np.log(candidates["building_floor_area"].astype(float))
+                    - np.log(area)
+                ).abs()
+                source = candidates.loc[distances.idxmin()].to_dict()
+            else:
+                source = candidates.sort_values("building_objectid").iloc[0].to_dict()
+                fallback_scope = f"{fallback_scope}_missing_target_area"
+            method = "nearest_floor_area_scaled_approved"
         source_area = float(source["building_floor_area"])
         target_area = float(row["building_floor_area"])
         output.append(
             {
                 **row,
                 "profile_method": method,
-                "profile_source_building_objectid": source["building_objectid"],
+                "profile_source_building_objectid": (
+                    source.get("library_profile_source_building_objectid")
+                    if pd.notna(
+                        source.get("library_profile_source_building_objectid")
+                    )
+                    else source["building_objectid"]
+                ),
                 "profile_source_kind": source["exact_profile_source"],
                 "profile_source_hdf": (
                     source["exact_source_hdf"]
@@ -170,11 +232,27 @@ def build_heat_profile_catalog(
                 ),
                 "profile_source_floor_area": source_area,
                 "profile_scale": (
-                    target_area / source_area
+                    float(source["library_profile_scale"])
+                    if pd.notna(source.get("library_profile_scale"))
+                    else target_area / source_area
                     if method != "exact_physical_building"
+                    and np.isfinite(target_area)
+                    and target_area > 0.0
                     else 1.0
                 ),
-                "publication_ready": bool(method == "exact_physical_building"),
+                "fallback_match_scope": (
+                    fallback_scope
+                    if method != "exact_physical_building"
+                    and pd.notna(fallback_scope)
+                    else None
+                ),
+                "publication_ready": bool(
+                    method
+                    in {
+                        "exact_physical_building",
+                        "nearest_floor_area_scaled_approved",
+                    }
+                ),
             }
         )
     return pd.DataFrame(output)

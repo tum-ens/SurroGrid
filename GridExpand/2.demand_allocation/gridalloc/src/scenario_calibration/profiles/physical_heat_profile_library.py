@@ -42,10 +42,39 @@ class PhysicalHeatProfileLibrary:
                     f"Unsupported heat-profile library schema {version} in {self.path}."
                 )
             identifiers = store["building_objectid"].asstr()[:]
+            methods = (
+                store["profile_method"].asstr()[:]
+                if "profile_method" in store
+                else np.full(len(identifiers), "exact_physical_building")
+            )
+            source_buildings = (
+                store["profile_source_building_objectid"].asstr()[:]
+                if "profile_source_building_objectid" in store
+                else identifiers
+            )
+            scales = (
+                np.asarray(store["profile_scale"][:], dtype=float)
+                if "profile_scale" in store
+                else np.ones(len(identifiers))
+            )
+            fallback_scopes = (
+                store["fallback_match_scope"].asstr()[:]
+                if "fallback_match_scope" in store
+                else np.full(len(identifiers), "")
+            )
             self.profile_set_id = str(store.attrs["profile_set_id"])
             self.hours = int(store.attrs["hours"])
         self._row_by_building = {
             str(identifier): row for row, identifier in enumerate(identifiers)
+        }
+        self._metadata_by_building = {
+            str(identifier): {
+                "profile_method": str(methods[row]),
+                "profile_source_building_objectid": str(source_buildings[row]),
+                "profile_scale": float(scales[row]),
+                "fallback_match_scope": str(fallback_scopes[row]),
+            }
+            for row, identifier in enumerate(identifiers)
         }
 
     def __contains__(self, building_objectid: object) -> bool:
@@ -54,6 +83,16 @@ class PhysicalHeatProfileLibrary:
     @property
     def building_count(self) -> int:
         return len(self._row_by_building)
+
+    def profile_metadata(self, building_objectid: object) -> dict[str, object]:
+        """Return persisted provenance for one library entry."""
+        building_id = str(building_objectid)
+        try:
+            return dict(self._metadata_by_building[building_id])
+        except KeyError as exc:
+            raise KeyError(
+                f"Building {building_id!r} is absent from {self.path}."
+            ) from exc
 
     def read(
         self,
@@ -93,8 +132,9 @@ def create_physical_heat_profile_library(
     output: Path,
     profile_set_id: str,
     source_mode: str = "profile",
+    include_approved_fallbacks: bool = False,
 ) -> Path:
-    """Extract exact profiles from network-specific HDFs into one library."""
+    """Extract physical or explicitly approved profiles into one library."""
     source_columns = {
         "profile": ("profile_source_hdf", "profile_source_bus"),
         "exact": ("exact_source_hdf", "exact_source_bus"),
@@ -116,7 +156,18 @@ def create_physical_heat_profile_library(
     missing = required.difference(catalog.columns)
     if missing:
         raise ValueError(f"Source heat catalog misses columns: {sorted(missing)}")
-    catalog = catalog[catalog["publication_ready"].astype(bool)].copy()
+    selected = catalog["publication_ready"].astype(bool)
+    if include_approved_fallbacks:
+        if source_mode != "profile":
+            raise ValueError(
+                "Approved fallbacks can only be packaged with --source-mode profile."
+            )
+        selected |= catalog.get(
+            "profile_method",
+            pd.Series("", index=catalog.index),
+        ).astype(str).eq("nearest_floor_area_scaled_approved")
+    catalog = catalog[selected].copy()
+    catalog = catalog.dropna(subset=[source_hdf_column, source_bus_column])
     catalog["building_objectid"] = catalog["building_objectid"].astype(str)
     duplicates = catalog["building_objectid"].duplicated(keep=False)
     if duplicates.any():
@@ -149,6 +200,11 @@ def create_physical_heat_profile_library(
         )
         store.attrs["source_catalog"] = str(source_catalog.resolve())
         store.attrs["source_mode"] = source_mode
+        fallback_mask = catalog.get(
+            "profile_method",
+            pd.Series("", index=catalog.index),
+        ).astype(str).eq("nearest_floor_area_scaled_approved")
+        store.attrs["approved_fallback_buildings"] = int(fallback_mask.sum())
         store.create_dataset(
             "building_objectid",
             data=catalog["building_objectid"].to_numpy(dtype=object),
@@ -173,6 +229,37 @@ def create_physical_heat_profile_library(
                 catalog[source_bus_column],
                 errors="raise",
             ).astype(int),
+        )
+        store.create_dataset(
+            "profile_method",
+            data=catalog.get(
+                "profile_method",
+                pd.Series("exact_physical_building", index=catalog.index),
+            ).map(_text).to_numpy(dtype=object),
+            dtype=string_dtype,
+        )
+        store.create_dataset(
+            "profile_source_building_objectid",
+            data=catalog.get(
+                "profile_source_building_objectid",
+                catalog["building_objectid"],
+            ).map(_text).to_numpy(dtype=object),
+            dtype=string_dtype,
+        )
+        store.create_dataset(
+            "profile_scale",
+            data=pd.to_numeric(
+                catalog.get("profile_scale", pd.Series(1.0, index=catalog.index)),
+                errors="raise",
+            ).astype(float),
+        )
+        store.create_dataset(
+            "fallback_match_scope",
+            data=catalog.get(
+                "fallback_match_scope",
+                pd.Series("", index=catalog.index),
+            ).map(_text).to_numpy(dtype=object),
+            dtype=string_dtype,
         )
         datasets = {
             name: store.create_dataset(
@@ -203,6 +290,12 @@ def create_physical_heat_profile_library(
                 )
             for index, row in rows.iterrows():
                 bus = int(row[source_bus_column])
+                profile_scale = float(row.get("profile_scale", 1.0))
+                if not np.isfinite(profile_scale) or profile_scale <= 0.0:
+                    raise ValueError(
+                        f"Invalid heat-profile scale for {row['building_objectid']}: "
+                        f"{profile_scale}"
+                    )
                 columns = {
                     "space_heat": (bus, "space_heat"),
                     "water_heat": (bus, "water_heat"),
@@ -220,6 +313,8 @@ def create_physical_heat_profile_library(
                     values = values.fillna(fill_value).to_numpy(dtype=np.float32)
                     if name == "heatpump_air_cop":
                         values = np.maximum(values, np.float32(0.1))
+                    else:
+                        values *= np.float32(profile_scale)
                     datasets[name][int(index), :] = values
 
     temporary.replace(output)
@@ -245,6 +340,14 @@ def main() -> None:
             "exact_source_* mappings from the catalog."
         ),
     )
+    parser.add_argument(
+        "--include-approved-fallbacks",
+        action="store_true",
+        help=(
+            "Package approved nearest-building profiles under their target "
+            "building IDs, scaling heat demand by floor area."
+        ),
+    )
     args = parser.parse_args()
     output = create_physical_heat_profile_library(
         source_catalog=args.source_catalog.resolve(),
@@ -252,6 +355,7 @@ def main() -> None:
         output=args.output,
         profile_set_id=args.profile_set_id,
         source_mode=args.source_mode,
+        include_approved_fallbacks=args.include_approved_fallbacks,
     )
     library = PhysicalHeatProfileLibrary(output)
     print(

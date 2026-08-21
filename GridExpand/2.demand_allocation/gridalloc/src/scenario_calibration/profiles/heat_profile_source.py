@@ -29,14 +29,15 @@ def load_physical_heat_profile(
 
     if library is not None and building_id in library:
         space, water, cop = library.read(building_id, hours=hours)
+        metadata = library.profile_metadata(building_id)
         return (
             space,
             water,
             cop,
             str(library.path),
             None,
-            "exact_physical_building",
-            1.0,
+            str(metadata["profile_method"]),
+            float(metadata["profile_scale"]),
         )
 
     if catalog_row is not None and not bool(

@@ -57,7 +57,11 @@ def build_pv_profile_library(
     angles = required_profile_angles(roof_catalog, allocation)
     if not angles:
         raise ValueError("The paired allocation contains no eligible PV roof profiles.")
-    metadata = _expected_metadata(weather_source_hdf, angles)
+    metadata = _expected_metadata(
+        weather_source_hdf,
+        angles,
+        reference_year=reference_year,
+    )
     if output_path.exists() and _metadata_matches(output_path, metadata):
         return output_path
 
@@ -113,6 +117,8 @@ def read_pv_profile_library(path: Path) -> pd.DataFrame:
 def _expected_metadata(
     weather_source_hdf: Path,
     angles: list[tuple[float, float]],
+    *,
+    reference_year: int,
 ) -> dict[str, object]:
     source = weather_source_hdf.resolve()
     stat = source.stat()
@@ -123,6 +129,7 @@ def _expected_metadata(
         "weather_source_mtime_ns": int(stat.st_mtime_ns),
         "angle_hash": hashlib.sha256(angle_payload.encode("utf-8")).hexdigest(),
         "profile_count": len(angles),
+        "reference_year": int(reference_year),
         "normalization": "pvlib_ac_kw_per_1kw_pdc0",
     }
 

@@ -113,19 +113,43 @@ or heat pumps. Paired validation likewise uses residential heat-pump inventory
 rows only. A separate commercial sizing method is required before that scope is
 extended.
 
-Space heat continues to use the DistrictGenerator/TEASER-derived building
-profiles. The pylovo `floor_area` is the LoD2 building footprint; before TEASER
-it is multiplied by `floor_number` because TEASER's `net_leased_area` input
-means total building area rather than footprint. No additional blanket heated-
-area factor (such as 0.8) is applied: all above-ground floor area is currently
-assumed heated. The TEASER envelope design load is not used to size the HP;
-annual space-heat energy and regional full-load hours provide the explicit
-sizing rule below. Residential domestic-hot-water demand continues
-to originate from OpenDHW. OpenDHW generates stochastic tapping events,
-which DistrictGenerator resamples to the hourly model resolution and converts
-to thermal demand using the
-seasonally varying cold- and mixed-water temperatures. This hourly profile is
-retained unchanged as direct `water_heat` demand.
+The space-heat source is selected by `asset_sizing.heat.space_heat_source`.
+For the current Forchheim 2045 scenario it is `infdb_ro_heat`: building-level
+hourly heating-load series from the INFDB `ro_heat` schema, generated with its
+1R1C model. Values stored as W are converted to hourly kWh. The source currently
+contains 8,736 contiguous hours from 1 January through 30 December 2023. As an
+explicit preliminary rule, the last available 24-hour day is duplicated to form
+8,760 hours. The audit records every building affected by this calendar rule;
+the library must be rebuilt when a complete export becomes available.
+
+A missing individual `ro_heat` series must not abort regional preparation.
+The adapter first selects the available building of the same type with nearest
+total floor area and scales its heat demand by the target/source area ratio. If
+that set is empty, it broadens to the nearest-area building in the full regional
+pool. A missing target area uses a deterministic regional source without
+scaling. Paired preparation uses progressively broader tiers: same grid and
+type, same grid and use, same grid, same type, same use, then the full region.
+Because the paired allocation currently carries LoD2 footprint area but not
+floor count, this layer uses that footprint as its nearest-size and scaling
+proxy. The chosen source building, match scope, and scale are stored in the
+catalog and physical library. These are approved pragmatic fallbacks, not
+claims that the borrowed profile is an exact physical-building simulation.
+
+The alternative `teaser` source remains available for a later comparison. For
+that route, pylovo `floor_area` is the LoD2 footprint and is multiplied by
+`floor_number` before being passed as TEASER total net leased area. Neither heat
+source applies an additional blanket heated-area factor such as 0.8. The TEASER
+envelope design load is not used to size the HP; annual space-heat energy and
+regional full-load hours provide the explicit sizing rule below.
+
+Residential domestic-hot-water demand remains separate from either space-heat
+source and originates from OpenDHW. OpenDHW generates stochastic tapping events
+at its native resolution; the pipeline resamples these events hourly and
+converts them to thermal demand using seasonally varying cold- and mixed-water
+temperatures. The hourly result is retained unchanged as direct `water_heat`
+demand. OpenDHW randomness is accepted for the current preliminary library, so
+rebuilding the library is not expected to reproduce DHW exactly until a seed
+contract is introduced.
 
 No DHW tank is modeled, either explicitly or implicitly. Consequently, the HP
 and auxiliary heater must supply the hourly OpenDHW demand in its corresponding
