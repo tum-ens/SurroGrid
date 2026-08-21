@@ -83,6 +83,11 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="AGS identifier for the region to process, e.g. 09162000.",
     )
+    parser.add_argument(
+        "--pylovo-version-id",
+        required=True,
+        help="Exact pylovo topology version; supplied by the run configuration.",
+    )
     parser.add_argument("--min-buildings", type=int, default=5)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--step2-cpus", type=int, default=4)
@@ -94,9 +99,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
     parser.add_argument(
         "--model-case",
-        choices=("post-inflex-heuristic", "post-hems-optimized", "post-hems-heuristic"),
+        choices=("pre", "post-inflex-heuristic", "post-hems-optimized", "post-hems-heuristic"),
         default="post-hems-optimized",
         help="Scenario case controlling upstream asset sizing and downstream dispatch.",
+    )
+    parser.add_argument(
+        "--case-qualified-output",
+        action="store_true",
+        help="Append the model-case name to Step 2--4 HDF5 filenames and power-flow run names.",
     )
     parser.add_argument(
         "--powerflow-output",
@@ -198,6 +208,10 @@ def parse_args() -> argparse.Namespace:
     args.tsam_periods = scenario.time_aggregation.number_of_typical_periods
     args.tsam_hours_per_period = scenario.time_aggregation.hours_per_period
     args.tsam_extreme_method = scenario.time_aggregation.extreme_period_method
+    if args.model_case == "pre" and args.profiles != "status_quo":
+        parser.error("The pre model case requires --profiles status_quo.")
+    if args.model_case != "pre" and args.profiles == "status_quo":
+        parser.error("Post model cases require post-electrification profiles.")
     if args.include_no_flex_powerflow and args.profiles == "status_quo":
         parser.error(
             "--include-no-flex-powerflow requires post-electrification profiles, not status_quo."
@@ -241,12 +255,17 @@ def normalize_ags(value: str) -> int:
 
 
 def get_candidates(
-    repo_root: Path, ags: str, min_buildings: int, demand_scope: str = "all"
+    repo_root: Path,
+    ags: str,
+    min_buildings: int,
+    demand_scope: str = "all",
+    pylovo_version_id: str | None = None,
 ) -> list[dict[str, object]]:
     configure_imports(repo_root)
     from common.database import SurroGridDatabase
 
     db = SurroGridDatabase()
+    db.pylovo_version_id = pylovo_version_id
     count_column = (
         "n_residential_buildings" if demand_scope == "residential" else "n_buildings"
     )
@@ -349,7 +368,15 @@ def pipeline_scenario_key(args: argparse.Namespace) -> str:
 
 
 def powerflow_run_name(args: argparse.Namespace, mode: str) -> str:
-    return f"{pipeline_scenario_key(args)}_{run_name_profile_token(args.profiles)}_{mode}_powerflow"
+    case = f"_{args.model_case}" if args.case_qualified_output else ""
+    return f"{pipeline_scenario_key(args)}_{run_name_profile_token(args.profiles)}{case}_{mode}_powerflow"
+
+
+def case_qualified_filename(filename: str, args: argparse.Namespace) -> str:
+    if not args.case_qualified_output:
+        return filename
+    path = Path(filename)
+    return f"{path.stem}_{args.model_case}{path.suffix}"
 
 
 def expansion_analysis_prefix(args: argparse.Namespace) -> str:
@@ -589,7 +616,13 @@ def validate_powerflow_db(
     scenario_path = (
         repo_root / "GridExpand" / "4.powerflow" / "Input" / scenario_filename
     )
-    expected_horizon = horizon_hours_from_hdf(scenario_path)
+    with pd.HDFStore(scenario_path, mode="r") as store:
+        if "/urbs_out/MILP/tau_pro" in store:
+            tau_pro = store["/urbs_out/MILP/tau_pro"]
+            time_level = "t" if "t" in tau_pro.index.names else 0
+            expected_horizon = tau_pro.index.get_level_values(time_level).nunique()
+        else:
+            expected_horizon = horizon_hours_from_hdf(scenario_path)
     expected_max_t = expected_horizon - 1
     from common.database import SurroGridDatabase
 
@@ -754,8 +787,11 @@ def candidate_intermediate_files(
     repo_root: Path, candidate: dict[str, object], args: argparse.Namespace
 ) -> list[Path]:
     paths = step_paths(repo_root)
-    step2_filename = output_filename_for_timeframe(
-        str(candidate["bridge_filename"]), args.timeframe_mode
+    step2_filename = case_qualified_filename(
+        output_filename_for_timeframe(
+            str(candidate["bridge_filename"]), args.timeframe_mode
+        ),
+        args,
     )
     step2_stem = Path(step2_filename).stem
     files = [
@@ -879,7 +915,9 @@ def run_candidate(
     step4_dir = gridexpand / "4.powerflow"
     candidate_index = int(candidate["candidate_index"])
     bridge_filename = str(candidate["bridge_filename"])
-    step2_filename = output_filename_for_timeframe(bridge_filename, args.timeframe_mode)
+    step2_filename = case_qualified_filename(
+        output_filename_for_timeframe(bridge_filename, args.timeframe_mode), args
+    )
     scenario_filename = ""
     log_file = (
         args.run_dir / "logs" / f"candidate_{candidate_index:03d}_{step2_filename}.log"
@@ -913,8 +951,7 @@ def run_candidate(
 
     try:
         current_stage = "step2_demand_allocation"
-        run_command(
-            cmd=[
+        step2_cmd = [
                 "uv",
                 "run",
                 "--project",
@@ -924,6 +961,8 @@ def run_candidate(
                 ags,
                 "--storage",
                 "db",
+                "--pylovo-version-id",
+                str(args.pylovo_version_id),
                 "--candidate-index",
                 str(candidate_index),
                 "--min-buildings",
@@ -939,12 +978,16 @@ def run_candidate(
                 "--timeframe-mode",
                 args.timeframe_mode,
                 "--model-case",
-                "pre" if args.profiles == "status_quo" else args.model_case,
+                args.model_case,
                 "--scenario-config",
                 str(args.scenario_config),
                 "--n_cpu",
                 str(args.step2_cpus),
-            ],
+            ]
+        if args.case_qualified_output:
+            step2_cmd.append("--case-qualified-output")
+        run_command(
+            cmd=step2_cmd,
             cwd=step2_dir,
             log_path=log_file,
             status=status,
@@ -1550,6 +1593,7 @@ def main() -> int:
         event="batch_start",
         repo_root=str(repo_root),
         ags=args.ags,
+        pylovo_version_id=args.pylovo_version_id,
         min_buildings=args.min_buildings,
         workers=args.workers,
         step2_cpus=args.step2_cpus,
@@ -1573,7 +1617,11 @@ def main() -> int:
     )
 
     candidates = get_candidates(
-        repo_root, args.ags, args.min_buildings, args.demand_scope
+        repo_root,
+        args.ags,
+        args.min_buildings,
+        args.demand_scope,
+        args.pylovo_version_id,
     )
     (run_dir / "candidates.json").write_text(
         json.dumps(candidates, indent=2, sort_keys=True, default=str),
