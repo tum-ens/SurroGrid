@@ -36,6 +36,9 @@ scientific reasoning and equations are centralized in SCENARIO_METHOD.md.
 For run.pipeline: scenario:
 
 - resources.inputfile_id: AGS, bridge prefix, or DB/HDF grid identifier.
+- resources.pylovo_version_id: exact topology version used for DB-backed
+  selection. It is passed explicitly and is never inferred from the process
+  environment by the scenario launcher.
 - resources.storage: db or h5.
 - resources.output_directory: optional output override.
 - execution.n_cpu, mobility_source, demand_scope, and timeframe_mode:
@@ -51,6 +54,8 @@ For run.pipeline: paired_validation:
 - resources.paired_dataset_id: prepared paired artifact-directory name. The
   runner resolves postcode, allocation plans, weather, physical heat library,
   and PV library from repository conventions and artifact metadata.
+- resources.pylovo_version_id: explicit expected topology version. The runner
+  fails before computation if it differs from paired_scenario_metadata.json.
 - resources.target_network: both, real_swf, or synthetic.
 - resources.target_grid_id: optional adapter-local grid filter.
 - execution.model_cases: requested post-cases. Heuristic HEMS and INFLEX share
@@ -70,6 +75,12 @@ Only requested groups are created. When both groups run, pre is emitted by the
 first group only. The external SWF export root remains an environment/deployment
 setting (GRID_DATA_PATH in GridExpand/.env), because it describes where data is
 installed rather than a scenario or run choice.
+
+PYLOVO_VERSION_ID in GridExpand/.env is not authoritative for YAML-launched
+scenario runs. It remains temporarily required by manual preparation entry
+points such as the Step-1 notebooks and paired-allocation command. Prepared
+paired datasets record the selected version, and later regeneration reads that
+metadata rather than the environment.
 
 Implementation references such as database schemas, API endpoints, and stable
 repository artifact conventions remain in Python. Adjustable scientific values

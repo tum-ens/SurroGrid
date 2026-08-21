@@ -21,6 +21,7 @@ class RunConfig:
     run_id: str
     scenario_path: Path
     pipeline: str
+    pylovo_version_id: str
 
     # Ordinary synthetic scenario selection.
     inputfile_id: str | None
@@ -69,10 +70,14 @@ class RunConfig:
             path = Path(str(value))
             return path if path.is_absolute() else (base_dir / path).resolve()
 
+        pylovo_version_id = str(resources.get("pylovo_version_id", "")).strip()
+        if not pylovo_version_id:
+            raise ValueError("resources.pylovo_version_id must be set explicitly.")
+
         if pipeline == "scenario":
             _only(
                 resources,
-                {"inputfile_id", "storage", "output_directory"},
+                {"inputfile_id", "storage", "output_directory", "pylovo_version_id"},
                 "scenario resources",
             )
             _only(
@@ -87,6 +92,7 @@ class RunConfig:
                 run_id=run_id,
                 scenario_path=scenario_path,
                 pipeline=pipeline,
+                pylovo_version_id=pylovo_version_id,
                 inputfile_id=str(resources["inputfile_id"]),
                 storage=storage,
                 output_directory=path_or_none(resources.get("output_directory")),
@@ -109,7 +115,7 @@ class RunConfig:
 
         _only(
             resources,
-            {"paired_dataset_id", "target_network", "target_grid_id"},
+            {"paired_dataset_id", "pylovo_version_id", "target_network", "target_grid_id"},
             "paired-validation resources",
         )
         _only(
@@ -143,6 +149,7 @@ class RunConfig:
             run_id=run_id,
             scenario_path=scenario_path,
             pipeline=pipeline,
+            pylovo_version_id=pylovo_version_id,
             inputfile_id=None,
             storage="db",
             output_directory=None,

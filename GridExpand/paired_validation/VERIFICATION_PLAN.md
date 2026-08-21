@@ -35,8 +35,7 @@ the current zero-fallback policy, and no missing or surplus local PV labels.
 
 Run one small target per adapter with identical scenario YAML, seed, libraries,
 TSAM settings, and run-name stem. Target IDs are adapter-specific; the current
-diagnostics are real SWF 28 and synthetic 11893.
-
+pylovo-V1 diagnostics are real SWF 28 and its mapped synthetic target 151.\n
 The shared heuristic plan must emit:
 
 - post-hems-heuristic: optimized dispatch of fixed heuristic assets;

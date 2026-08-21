@@ -42,6 +42,8 @@ def _scenario_command(run, scenario, model_case: str) -> tuple[list[str], Path]:
         "--scenario-config", str(run.scenario_path),
         "--case-qualified-output",
     ]
+    if run.storage == "db":
+        command.extend(["--pylovo-version-id", run.pylovo_version_id])
     if run.output_directory is not None:
         command.extend(["--output-directory", str(run.output_directory)])
     return command, workdir
@@ -61,6 +63,7 @@ def _paired_command(
         "python", "GridExpand/paired_validation/runner.py",
         "--repo-root", str(workdir),
         "--paired-dataset-id", str(run.paired_dataset_id),
+        "--pylovo-version-id", run.pylovo_version_id,
         "--scenario-config", str(run.scenario_path),
         "--model-case", materialization_case,
         "--result-cases", *result_cases,
@@ -150,6 +153,7 @@ def main() -> None:
             "run_hash": run_hash,
             "scenario_id": scenario.scenario_id,
             "scenario_hash": scenario_hash,
+            "pylovo_version_id": run.pylovo_version_id,
             "model_cases": list(model_cases),
             "commands": [
                 {"command": command, "working_directory": str(workdir)}

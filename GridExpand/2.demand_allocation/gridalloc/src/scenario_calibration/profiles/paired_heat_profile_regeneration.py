@@ -16,14 +16,22 @@ from typing import Any
 import pandas as pd
 
 
-from ..paths import (
-    GRIDALLOC_DIR,
-    SYNTHETIC_INPUT_DIR,
-    configured_pylovo_version_id,
-)
+from ..paths import GRIDALLOC_DIR, SYNTHETIC_INPUT_DIR
 
 DEFAULT_SYNTHETIC_LIBRARY = SYNTHETIC_INPUT_DIR
 RESIDENTIAL_BUILDING_TYPES = {"AB", "MFH", "SFH", "TH"}
+
+
+def paired_pylovo_version_id(paired_dir: Path) -> str:
+    """Read the authoritative topology version from paired dataset metadata."""
+    metadata_path = paired_dir / "paired_scenario_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    version_id = str(metadata.get("pylovo_version_id", "")).strip()
+    if not version_id:
+        raise ValueError(
+            f"Missing pylovo_version_id in paired metadata: {metadata_path}"
+        )
+    return version_id
 
 
 def build_regeneration_catalog(paired_dir: Path) -> pd.DataFrame:
@@ -319,9 +327,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.workers < 1 or args.n_cpu < 1:
         parser.error("--workers and --n-cpu must be positive integers")
-    pylovo_version_id = configured_pylovo_version_id()
-
     paired_dir = args.paired_dir.resolve()
+    pylovo_version_id = paired_pylovo_version_id(paired_dir)
     catalog_path = paired_dir / "paired_heat_profile_catalog.csv"
     if args.refresh_catalog:
         catalog = build_regeneration_catalog(paired_dir)

@@ -94,6 +94,7 @@ def run_powerflows(
             status=status,
             candidate_index=job_index,
             stage=f"step4_{TARGET_NETWORK}_pre",
+            env_extra={"PYLOVO_VERSION_ID": str(args.pylovo_version_id)},
         )
     definitions = {
         "post-hems-optimized": "flexible",
@@ -117,6 +118,7 @@ def run_powerflows(
             status=status,
             candidate_index=job_index,
             stage=f"step4_{TARGET_NETWORK}_{case_name}",
+            env_extra={"PYLOVO_VERSION_ID": str(args.pylovo_version_id)},
         )
     if args.cleanup_intermediates:
         step4_input.unlink(missing_ok=True)

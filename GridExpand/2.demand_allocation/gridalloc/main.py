@@ -89,8 +89,8 @@ if __name__ == '__main__':
         parser.add_argument(
             "--pylovo-version-id",
             help=(
-                "DB mode: explicitly pin the pylovo version for this run. "
-                "Overrides PYLOVO_VERSION_ID from GridExpand/.env."
+                "DB mode: explicitly pin the pylovo topology version. "
+                "Scenario runs receive this value from their run YAML."
             ),
         )
         parser.add_argument(

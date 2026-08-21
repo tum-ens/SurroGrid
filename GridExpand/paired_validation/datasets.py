@@ -24,6 +24,7 @@ class PairedDataset:
     dataset_id: str
     paired_dir: Path
     plz: int
+    pylovo_version_id: str
     weather_source_hdf: Path
     heat_profile_library: Path
 
@@ -62,7 +63,11 @@ def _weather_source(pv_library: Path) -> Path:
     return local_source
 
 
-def resolve_paired_dataset(dataset_id: str) -> PairedDataset:
+def resolve_paired_dataset(
+    dataset_id: str,
+    *,
+    expected_pylovo_version_id: str | None = None,
+) -> PairedDataset:
     if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", dataset_id) is None:
         raise ValueError("paired dataset ID must be one directory-safe name.")
     paired_dir = PAIRED_DATASET_ROOT / dataset_id
@@ -74,6 +79,19 @@ def resolve_paired_dataset(dataset_id: str) -> PairedDataset:
             raise FileNotFoundError(required)
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     plz = int(metadata["plz"])
+    pylovo_version_id = str(metadata.get("pylovo_version_id", "")).strip()
+    if not pylovo_version_id:
+        raise ValueError(
+            f"Missing pylovo_version_id in paired metadata: {metadata_path}"
+        )
+    if (
+        expected_pylovo_version_id is not None
+        and str(expected_pylovo_version_id) != pylovo_version_id
+    ):
+        raise ValueError(
+            "Run pylovo version does not match paired dataset metadata: "
+            f"{expected_pylovo_version_id!r} != {pylovo_version_id!r}."
+        )
     heat_profile_set = _one_profile_set(heat_catalog)
     heat_library = HEAT_LIBRARY_ROOT / f"{heat_profile_set}.h5"
     if not heat_library.exists():
@@ -89,6 +107,7 @@ def resolve_paired_dataset(dataset_id: str) -> PairedDataset:
         dataset_id=dataset_id,
         paired_dir=paired_dir,
         plz=plz,
+        pylovo_version_id=pylovo_version_id,
         weather_source_hdf=_weather_source(pv_library),
         heat_profile_library=heat_library,
     )

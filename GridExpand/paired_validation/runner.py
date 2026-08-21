@@ -156,6 +156,7 @@ def _prepare_shared_tsam_reference(
         log_path=log_path,
         status=status,
         stage="shared_tsam_materialize_reference",
+        env_extra={"PYLOVO_VERSION_ID": str(args.pylovo_version_id)},
     )
     run_batch_command(
         cmd=[
@@ -172,6 +173,7 @@ def _prepare_shared_tsam_reference(
         log_path=log_path,
         status=status,
         stage="shared_tsam_select_periods",
+        env_extra={"PYLOVO_VERSION_ID": str(args.pylovo_version_id)},
     )
     result_hdf = latest_step3_result(step3_dir, input_hdf)
     signature = read_tsam_signature(result_hdf)
@@ -224,6 +226,7 @@ def _prepare_shared_pv_profiles(
         log_path=args.run_dir / "logs" / "shared_pv_profile_library.log",
         status=status,
         stage="shared_pv_profile_library",
+        env_extra={"PYLOVO_VERSION_ID": str(args.pylovo_version_id)},
     )
     return output
 
@@ -281,6 +284,7 @@ def _run_one(
             status=status,
             candidate_index=job_index,
             stage=f"step2_materialize_{target}",
+            env_extra={"PYLOVO_VERSION_ID": str(args.pylovo_version_id)},
         )
         if not input_hdf.exists():
             raise FileNotFoundError(f"Expected paired input {input_hdf}.")
@@ -305,7 +309,10 @@ def _run_one(
                 if args.tsam
                 else f"step3_{target}_full_year"
             ),
-            env_extra={"URBS_CLUSTER_CONCURRENCY": str(args.step3_cluster_concurrency)},
+            env_extra={
+                "URBS_CLUSTER_CONCURRENCY": str(args.step3_cluster_concurrency),
+                "PYLOVO_VERSION_ID": str(args.pylovo_version_id),
+            },
         )
         result_hdf = latest_step3_result(step3_dir, input_hdf)
         validate_shared_tsam(result_hdf, args.shared_tsam_signature)
@@ -361,6 +368,13 @@ def parse_args() -> argparse.Namespace:
         "--paired-dataset-id",
         help="Resolve paired artifacts by repository-local dataset convention.",
     )
+    parser.add_argument(
+        "--pylovo-version-id",
+        help=(
+            "Required topology version. With --paired-dataset-id it must match "
+            "the version recorded in paired_scenario_metadata.json."
+        ),
+    )
     parser.add_argument("--plz", type=int, default=None)
     parser.add_argument("--paired-dir", type=Path, default=None)
     parser.add_argument("--grid-data-path", type=Path, default=None)
@@ -412,7 +426,11 @@ def main() -> None:
     load_dotenv(ENV_PATH, override=True)
     repo_root = args.repo_root.resolve()
     if args.paired_dataset_id is not None:
-        dataset = resolve_paired_dataset(args.paired_dataset_id)
+        dataset = resolve_paired_dataset(
+            args.paired_dataset_id,
+            expected_pylovo_version_id=args.pylovo_version_id,
+        )
+        args.pylovo_version_id = dataset.pylovo_version_id
         args.plz = args.plz if args.plz is not None else dataset.plz
         args.paired_dir = args.paired_dir or dataset.paired_dir
         args.weather_source_hdf = (
@@ -422,7 +440,13 @@ def main() -> None:
             args.heat_profile_library or dataset.heat_profile_library
         )
     missing = [
-        name for name in ("plz", "paired_dir", "weather_source_hdf")
+        name
+        for name in (
+            "plz",
+            "pylovo_version_id",
+            "paired_dir",
+            "weather_source_hdf",
+        )
         if getattr(args, name) is None
     ]
     if missing:
@@ -552,6 +576,7 @@ def main() -> None:
         diagnostic_heat_profiles=diagnostic_profiles,
         publication_ready=diagnostic_profiles == 0,
         paired_dataset_id=args.paired_dataset_id,
+        pylovo_version_id=args.pylovo_version_id,
         materialization_case=args.model_case,
         result_cases=list(args.result_cases),
         pre_case_emitted=not args.skip_pre,

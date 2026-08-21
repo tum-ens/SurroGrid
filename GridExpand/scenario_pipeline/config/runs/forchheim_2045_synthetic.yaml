@@ -5,6 +5,8 @@ run:
   pipeline: scenario
 
 resources:
+  # Exact pylovo topology version; never inferred from the environment.
+  pylovo_version_id: 1
   # AGS, bridge filename prefix, or DB-resolvable grid identifier.
   inputfile_id: "91301"
   storage: db

@@ -32,8 +32,11 @@ outside the present method and is not assigned the residential rule.
 
 The scenario YAML is the single source of truth for mobility behavior and all
 parameters written into urbs process and storage tables. This applies equally
-to ordinary scenario runs and paired validation. Python configuration retains
-only implementation references such as data locations and API endpoints.
+to ordinary scenario runs and paired validation. The run YAML owns the selected
+input topology version and execution resources. For paired datasets, that
+declared version must match the immutable preparation metadata. Python
+configuration retains only implementation references such as data locations
+and API endpoints.
 
 ## Rooftop PV potential
 

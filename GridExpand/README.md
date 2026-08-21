@@ -213,7 +213,11 @@ Location: `1.grid_sampling/gridreadout/`
 
 DB credentials are read from environment variables loaded from the GridExpand-level `.env` file.
 
-For DB-backed synthetic-grid runs, `PYLOVO_VERSION_ID` in `GridExpand/.env` pins the pylovo `grid_result.version_id` used by candidate selection and power-flow input resolution. Leave it empty to keep the previous behavior of selecting the latest available version for each `(plz, kcid, bcid)`.
+YAML-launched DB-backed scenario runs take `pylovo_version_id` from the run
+YAML and pass it explicitly through the pipeline. `PYLOVO_VERSION_ID` in
+`GridExpand/.env` remains only for manual Step-1 notebooks and preparation
+commands that have not yet migrated to a run YAML; it is not authoritative for
+scenario runs.
 
 ### Step 2: Demand allocation (write `/urbs_in/*`)
 
