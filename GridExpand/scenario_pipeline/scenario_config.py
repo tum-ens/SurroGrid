@@ -129,6 +129,7 @@ class PvSizingConfig:
 
 @dataclass(frozen=True)
 class HeatSizingConfig:
+    space_heat_source: str
     indoor_design_temperature_c: float
     heating_limit_temperature_c: float
     heat_pump_design_share: float
@@ -139,6 +140,7 @@ class HeatSizingConfig:
     def from_dict(cls, raw: dict[str, Any]) -> "HeatSizingConfig":
         raw = _mapping(raw, "asset_sizing.heat")
         allowed = {
+            "space_heat_source",
             "indoor_design_temperature_c", "heating_limit_temperature_c",
             "heat_pump_design_share", "buffer_volume_l_per_kw_th",
             "buffer_usable_temperature_spread_k",
@@ -146,6 +148,11 @@ class HeatSizingConfig:
         _only(raw, allowed, "asset_sizing.heat")
         if set(raw) != allowed:
             raise ValueError("asset_sizing.heat is incomplete.")
+        source = str(raw["space_heat_source"])
+        if source not in {"teaser", "infdb_ro_heat"}:
+            raise ValueError(
+                "asset_sizing.heat.space_heat_source must be teaser or infdb_ro_heat."
+            )
         inside = _positive(raw["indoor_design_temperature_c"], "asset_sizing.heat.indoor_design_temperature_c")
         limit = _positive(raw["heating_limit_temperature_c"], "asset_sizing.heat.heating_limit_temperature_c")
         if limit >= inside:
@@ -154,6 +161,7 @@ class HeatSizingConfig:
         if share > 1.0:
             raise ValueError("asset_sizing.heat.heat_pump_design_share must be <= 1.")
         return cls(
+            space_heat_source=source,
             indoor_design_temperature_c=inside,
             heating_limit_temperature_c=limit,
             heat_pump_design_share=share,

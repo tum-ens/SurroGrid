@@ -1,8 +1,9 @@
 from config import config
 import pandas as pd
 import numpy as np
-from src.external.districtgenerator.classes import *
 import warnings
+
+from src.functions.infdb_ro_heat import generate_opendhw, load_space_heat
 
 ##############################################################
 ################## Obtaining GHD + HP COP ####################
@@ -107,6 +108,20 @@ def sample_statistics(df_buildings):
     return df_buildings
 
 def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip):
+    if getattr(config, "SPACE_HEAT_SOURCE", "teaser") == "infdb_ro_heat":
+        space_heat, audit = load_space_heat(df_buildings)
+        if audit["space_heat_source_fallback"]:
+            print(
+                "WARNING: preliminary ro_heat fallback used: "
+                f"{audit['space_heat_source_fallback']} for "
+                f"{audit['space_heat_source_fallback_buildings']} building(s)."
+            )
+        return space_heat, generate_opendhw(df_buildings)
+
+    # Import the legacy generator lazily. The INFDB ro_heat path must not load
+    # TEASER or execute any DistrictGenerator code.
+    from src.external.districtgenerator.classes import Datahandler
+
     # Domestic hot water only for non-residential buildings
     df_dhw_ghd = _get_dhw_demand_ghd(df_buildings)
 

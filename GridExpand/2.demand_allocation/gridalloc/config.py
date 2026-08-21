@@ -138,6 +138,7 @@ class Config:
     def apply_scenario(self, scenario):
         """Populate legacy helper attributes from the validated scenario YAML."""
         mobility = scenario.mobility
+        self.SPACE_HEAT_SOURCE = scenario.heat.space_heat_source
         self.BSP_IMPORT = scenario.economics.import_price_eur_per_kwh
         self.BSP_FEED_IN = scenario.economics.pv_feed_in_tariff_eur_per_kwh
         self.REF_YEAR = mobility.reference_year
