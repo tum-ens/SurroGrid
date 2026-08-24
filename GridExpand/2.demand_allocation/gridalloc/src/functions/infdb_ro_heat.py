@@ -334,7 +334,7 @@ def _temperature_difference(hours: int) -> np.ndarray:
     return np.repeat(mixed - cold, 24)
 
 
-def generate_opendhw(buildings: pd.DataFrame) -> pd.DataFrame:
+def generate_opendhw(buildings: pd.DataFrame, base_seed: int = 0) -> pd.DataFrame:
     """Generate the existing building-level OpenDHW demand without TEASER."""
     result: dict[int, np.ndarray] = {}
     temperature_difference = _temperature_difference(EXPECTED_HOURS)
@@ -345,20 +345,29 @@ def generate_opendhw(buildings: pd.DataFrame) -> pd.DataFrame:
         occupants = building.get("occ_list")
         if not isinstance(occupants, (list, tuple, np.ndarray)):
             raise ValueError("OpenDHW requires an occupant list for every building.")
+        from common.reproducibility import (
+            legacy_random_state,
+            physical_building_id,
+            stable_seed,
+        )
+
+        building_id = physical_building_id(building)
         total_w = np.zeros(EXPECTED_HOURS)
-        for value in occupants:
+        for flat_index, value in enumerate(occupants):
             number_occupants = int(round(float(value)))
             if number_occupants < 0:
                 raise ValueError("OpenDHW occupant counts cannot be negative.")
-            profile = OpenDHW.generate_dhw_profile(
-                s_step=60,
-                categories=1,
-                occupancy=number_occupants,
-                building_type=building_type,
-                weekend_weekday_factor=1.2,
-                holidays=config.HOLIDAYS,
-                mean_drawoff_vol_per_day=40,
-            )
+            dhw_seed = stable_seed(base_seed, building_id, "dhw", flat_index)
+            with legacy_random_state(dhw_seed):
+                profile = OpenDHW.generate_dhw_profile(
+                    s_step=60,
+                    categories=1,
+                    occupancy=number_occupants,
+                    building_type=building_type,
+                    weekend_weekday_factor=1.2,
+                    holidays=config.HOLIDAYS,
+                    mean_drawoff_vol_per_day=40,
+                )
             water = OpenDHW.resample_water_series(profile, 3600)
             heat = OpenDHW.compute_heat(
                 timeseries_df=water,

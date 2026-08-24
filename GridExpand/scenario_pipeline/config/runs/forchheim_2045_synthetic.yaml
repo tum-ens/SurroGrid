@@ -14,6 +14,15 @@ resources:
   output_directory: null
 
 execution:
+  # One seed defines the physical stochastic realization shared by every model case.
+  # Change it only when a deliberately different Monte Carlo realization is wanted.
+  profile_seed: 481527  # Arbitrary fixed value; no geographic or scenario meaning.
+  # Cases listed together use identical controlled demand/profile realizations.
+  model_cases:
+    - pre
+    - post-inflex-heuristic
+    - post-hems-heuristic
+    - post-hems-optimized
   # Machine-specific execution choices; scientific assumptions stay in the scenario YAML.
   n_cpu: 1
   mobility_source: pool

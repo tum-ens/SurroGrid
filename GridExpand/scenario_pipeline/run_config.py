@@ -82,12 +82,25 @@ class RunConfig:
             )
             _only(
                 execution,
-                {"n_cpu", "mobility_source", "demand_scope", "timeframe_mode"},
+                {
+                    "n_cpu", "mobility_source", "demand_scope", "timeframe_mode",
+                    "model_cases", "profile_seed",
+                },
                 "scenario execution",
             )
             storage = str(resources["storage"])
             if storage not in {"db", "h5"}:
                 raise ValueError("resources.storage must be db or h5.")
+            cases = tuple(str(value) for value in execution.get(
+                "model_cases", ("post-hems-heuristic",)
+            ))
+            if not cases:
+                raise ValueError("execution.model_cases cannot be empty.")
+            unknown = set(cases).difference({"pre", *POST_MODEL_CASES})
+            if unknown:
+                raise ValueError(f"Unknown scenario model cases: {sorted(unknown)}")
+            if len(cases) != len(set(cases)):
+                raise ValueError("execution.model_cases contains duplicates.")
             return cls(
                 run_id=run_id,
                 scenario_path=scenario_path,
@@ -103,12 +116,16 @@ class RunConfig:
                 paired_dataset_id=None,
                 target_network=None,
                 target_grid_id=None,
-                model_cases=(),
+                model_cases=cases,
                 workers=1,
                 step3_cpus=1,
                 step3_cluster_concurrency=1,
                 step4_cpus=1,
-                seed=0,
+                seed=int(_positive(
+                    execution.get("profile_seed", 481527),
+                    "execution.profile_seed",
+                    allow_zero=True,
+                )),
                 cleanup_intermediates=False,
                 resume=False,
             )
@@ -122,7 +139,7 @@ class RunConfig:
             execution,
             {
                 "model_cases", "workers", "step3_cpus",
-                "step3_cluster_concurrency", "step4_cpus", "seed",
+                "step3_cluster_concurrency", "step4_cpus", "profile_seed",
                 "cleanup_intermediates", "resume",
             },
             "paired-validation execution",
@@ -171,7 +188,11 @@ class RunConfig:
                 "execution.step3_cluster_concurrency",
             )),
             step4_cpus=int(_positive(execution.get("step4_cpus", 1), "execution.step4_cpus")),
-            seed=int(_positive(execution.get("seed", 91301), "execution.seed", allow_zero=True)),
+            seed=int(_positive(
+                execution.get("profile_seed", 481527),
+                "execution.profile_seed",
+                allow_zero=True,
+            )),
             cleanup_intermediates=bool(execution.get("cleanup_intermediates", False)),
             resume=bool(execution.get("resume", False)),
         )

@@ -21,7 +21,10 @@ if str(GRIDEXPAND_DIR) not in sys.path:
 
 from common.database import SurroGridDatabase  # noqa: E402
 from common.orchestration import command_env, utc_now  # noqa: E402
-from common.timeframe import output_filename_for_timeframe  # noqa: E402
+from common.timeframe import (  # noqa: E402
+    output_filename_for_timeframe,
+    read_hdf_metadata,
+)
 from scenario_pipeline.config_loader import load_run_config  # noqa: E402
 from scenario_pipeline.synthetic_ags_runner import (  # noqa: E402
     case_qualified_filename,
@@ -229,6 +232,87 @@ def archive_case(
     return artifact
 
 
+def audit_controlled_realization(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Fail when model cases do not share their controlled physical inputs."""
+    cases = {
+        str(case["model_case"]): case
+        for case in manifest["cases"]
+        if case.get("status") == "done"
+    }
+    expected = {str(spec["model_case"]) for spec in CASE_SPECS}
+    if set(cases) != expected:
+        raise RuntimeError(
+            f"Realization audit requires completed cases {sorted(expected)}; "
+            f"found {sorted(cases)}."
+        )
+
+    paths = {
+        case: Path(values["urbs_input_h5"])
+        for case, values in cases.items()
+    }
+    metadata = {case: read_hdf_metadata(path) for case, path in paths.items()}
+
+    common_keys = (
+        "profile_seed",
+        "profile_realization_id",
+        "profile_realization_contract",
+        "profile_hash_base_electricity",
+    )
+    post_keys = (
+        "profile_hash_space_heat",
+        "profile_hash_hot_water",
+        "profile_hash_heat_pump_cop",
+        "profile_hash_mobility_demand",
+        "profile_hash_mobility_availability",
+    )
+
+    def require_equal(key: str, selected_cases: tuple[str, ...]) -> str:
+        values = {case: metadata[case].get(key) for case in selected_cases}
+        missing = [case for case, value in values.items() if value in (None, "")]
+        if missing:
+            raise RuntimeError(f"Missing {key} in model cases {missing}.")
+        unique = {str(value) for value in values.values()}
+        if len(unique) != 1:
+            raise RuntimeError(f"Controlled realization mismatch for {key}: {values}")
+        return str(next(iter(values.values())))
+
+    all_cases = tuple(spec["model_case"] for spec in CASE_SPECS)
+    post_cases = tuple(case for case in all_cases if case != "pre")
+    checked = {
+        key: require_equal(key, all_cases)
+        for key in common_keys
+    }
+    checked.update({
+        key: require_equal(key, post_cases)
+        for key in post_keys
+    })
+
+    heuristic_cases = ("post-inflex-heuristic", "post-hems-heuristic")
+    plan_keys = (
+        "raw_data/asset_plan",
+        "raw_data/battery_asset_plan",
+        "raw_data/heat_asset_plan",
+    )
+    plan_hashes: dict[str, str] = {}
+    for key in plan_keys:
+        frames = {case: pd.read_hdf(paths[case], key=key) for case in heuristic_cases}
+        left = frames[heuristic_cases[0]].sort_index(axis=1).reset_index(drop=True)
+        right = frames[heuristic_cases[1]].sort_index(axis=1).reset_index(drop=True)
+        try:
+            pd.testing.assert_frame_equal(left, right, check_dtype=False)
+        except AssertionError as exc:
+            raise RuntimeError(
+                f"Heuristic asset plans differ for {key}: {exc}"
+            ) from exc
+        plan_hashes[key] = str(pd.util.hash_pandas_object(left, index=True).sum())
+
+    return {
+        "status": "passed",
+        "controlled_metadata": checked,
+        "identical_heuristic_asset_plans": plan_hashes,
+    }
+
+
 def main() -> int:
     args = parse_args()
     args.run_config = args.run_config.resolve()
@@ -245,6 +329,11 @@ def main() -> int:
     manifest_path = args.output_dir / "run_manifest.json"
     if args.resume and manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("run_config_hash") != run_hash:
+            raise RuntimeError(
+                "Cannot resume smoke artifacts created from a different run YAML. "
+                "Start without --resume to regenerate all controlled model cases."
+            )
         manifest["status"] = "dry-run" if args.dry_run else "running"
         manifest["finished_at"] = None
     else:
@@ -257,6 +346,7 @@ def main() -> int:
             "run_config_hash": run_hash,
             "scenario_config": str(run_config.scenario_path),
             "pylovo_version_id": run_config.pylovo_version_id,
+            "profile_seed": run_config.seed,
             "selected_grid": {**SELECTED_GRID, **candidate},
             "cases": [],
         }
@@ -292,6 +382,8 @@ def main() -> int:
             model_case,
             "--profiles",
             str(case_spec["profiles"]),
+            "--profile-seed",
+            str(run_config.seed),
             "--demand-scope",
             run_config.demand_scope,
             "--timeframe-mode",
@@ -384,6 +476,8 @@ def main() -> int:
             encoding="utf-8",
         )
 
+    if not args.dry_run:
+        manifest["controlled_realization_audit"] = audit_controlled_realization(manifest)
     manifest["status"] = "dry-run" if args.dry_run else "done"
     manifest["finished_at"] = utc_now()
     manifest_path.write_text(

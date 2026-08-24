@@ -141,6 +141,14 @@ if __name__ == '__main__':
             help="Simulation timeframe. One-week modes produce 168-hour operational stress runs.",
         )
         parser.add_argument(
+            "--profile-seed",
+            type=int,
+            default=481527,
+            help=(
+                "Run-level seed for topology-independent stochastic profile realization."
+            ),
+        )
+        parser.add_argument(
             "--model-case",
             choices=[
                 "pre", "post-inflex-heuristic", "post-hems-optimized",
@@ -181,6 +189,7 @@ if __name__ == '__main__':
             "scenario_id": scenario_config.scenario_id,
             "scenario_hash": scenario_hash,
             "model_case": args.model_case,
+            "profile_seed": args.profile_seed,
             "pv_feed_in_tariff_eur_per_kwh": (
                 scenario_config.economics.pv_feed_in_tariff_eur_per_kwh
             ),
@@ -236,6 +245,7 @@ if __name__ == '__main__':
             "scenario_config": scenario_config,
             "scenario_hash": scenario_hash,
             "model_case": args.model_case,
+            "profile_seed": args.profile_seed,
             "case_qualified_output": args.case_qualified_output,
             "output_directory": args.output_directory,
             **profile_settings,

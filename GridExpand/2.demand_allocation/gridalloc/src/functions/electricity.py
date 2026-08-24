@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 import random
 
+from common.reproducibility import physical_building_id, stable_seed
+
 
 ##############################################################
 ############### Sampling building occupancy ##################
@@ -44,7 +46,7 @@ def _closest_allowed(val, allowed_x):
         """
         return min(allowed_x, key=lambda a: abs(a - val))
 
-def _sample_sequence_with_tolerance(n, s, p, allowed_x, tol=0.99):
+def _sample_sequence_with_tolerance(n, s, p, allowed_x, tol=0.99, rng=None):
     """
     Samples a sequence [x_1, ..., x_n] from the distribution p(x) with the constraint
     that the total sum is approximately s (i.e. within tolerance tol). The first n-1 samples
@@ -81,7 +83,7 @@ def _sample_sequence_with_tolerance(n, s, p, allowed_x, tol=0.99):
         
         # Now randomly sample according to weight
         total_weight = sum(weight for (_, weight) in choices)
-        r = random.uniform(0, total_weight)
+        r = (rng or random).uniform(0, total_weight)
         cumulative = 0.0
         for x, weight in choices:
             cumulative += weight
@@ -101,7 +103,7 @@ def _sample_sequence_with_tolerance(n, s, p, allowed_x, tol=0.99):
     sequence.append(final_value)
     return sequence
 
-def _get_occupancy_distribution(prob:dict, n_hh:int, n_occ:int)->list:
+def _get_occupancy_distribution(prob:dict, n_hh:int, n_occ:int, rng=None)->list:
     """
     Samples a likely occupancy distribution over all households of a building, given that number of occupants adds up to n_occ.
     
@@ -128,31 +130,41 @@ def _get_occupancy_distribution(prob:dict, n_hh:int, n_occ:int)->list:
         else:
             allowed_x = prob.keys()
             try:
-                return _sample_sequence_with_tolerance(n_hh, n_occ, prob, allowed_x, tol=0.95)
+                return _sample_sequence_with_tolerance(
+                    n_hh, n_occ, prob, allowed_x, tol=0.95, rng=rng
+                )
             except: 
                 return [_closest_allowed(allowed_x, n_occ/n_hh)]*n_hh
 
-def _assign_household_occupancy(df_buildings):
+def _assign_household_occupancy(df_buildings, base_seed):
     if len(df_buildings)==0:
         df_buildings["occ_list"]=pd.NA
         return df_buildings
     else:
         df_prob = config.HH_SIZE_DISTRIBUTION
         prob = dict(zip(df_prob["size"], df_prob["probability"]))          # retrieve polynomial encoding household size probabilities
-        df_buildings['occ_list'] = df_buildings.apply(lambda row: _get_occupancy_distribution(prob, row['households'], row['occupants']), axis=1)
+        df_buildings['occ_list'] = df_buildings.apply(
+            lambda row: _get_occupancy_distribution(
+                prob, row['households'], row['occupants'],
+                rng=random.Random(stable_seed(
+                    base_seed, physical_building_id(row), 'electricity', 'occupancy'
+                )),
+            ),
+            axis=1,
+        )
         return df_buildings
     
 
 ##############################################################
 ################ Sampling building demands ###################
 ##############################################################
-def _get_total_demands(cdf, occ_list):
+def _get_total_demands(cdf, occ_list, rng=None):
     if len(occ_list)==0:
         return []
     else:
         demand_list = []
 
-        u = np.random.rand(len(occ_list))
+        u = (rng or np.random.default_rng()).random(len(occ_list))
         columns = cdf.columns.get_level_values(0).unique()
 
         # for hh in cdf.columns.get_level_values(0).unique():
@@ -164,30 +176,46 @@ def _get_total_demands(cdf, occ_list):
             demand_list.append(np.interp(u[i], cdf[columns[n_occ-1], "Y"], cdf[columns[n_occ-1], "X"]))
         return demand_list
 
-def _assign_total_elec_demands(df_buildings):
+def _assign_total_elec_demands(df_buildings, base_seed):
     if len(df_buildings)==0:
         df_buildings["demand_tot_list"]=pd.NA
         return df_buildings
     else:
         df_cdfs = config.ELEC_BY_HHSIZE_CDFS_NOHEAT
-        df_buildings['demand_tot_list'] = df_buildings.apply(lambda row: _get_total_demands(df_cdfs, row['occ_list']), axis=1)
+        df_buildings['demand_tot_list'] = df_buildings.apply(
+            lambda row: _get_total_demands(
+                df_cdfs, row['occ_list'],
+                rng=np.random.default_rng(stable_seed(
+                    base_seed, physical_building_id(row), 'electricity', 'annual_demand'
+                )),
+            ),
+            axis=1,
+        )
         return df_buildings
 
 
 ##############################################################
 ################## Sampling building use #####################
 ##############################################################
-def _get_use_type(dist, building_type, building_use):
+def _get_use_type(dist, building_type, building_use, rng=None):
     if building_use == "Residential":  # Use pre-assigned type
         return building_type
     if building_use == "Public":       # Sample from distribution
-        return np.random.choice(dist["type"], p=dist['public_prob'])
+        return (rng or np.random.default_rng()).choice(dist["type"], p=dist['public_prob'])
     if building_use == "Commercial":   # Sample from distribution
-        return np.random.choice(dist["type"], p=dist['commercial_prob'])
+        return (rng or np.random.default_rng()).choice(dist["type"], p=dist['commercial_prob'])
 
-def _assign_use_type(df_buildings):
+def _assign_use_type(df_buildings, base_seed):
     df_type_dist = config.TYPE_GHD_DISTRIBUTION
-    df_buildings["building_type"] = df_buildings.apply(lambda row: _get_use_type(df_type_dist, row["building_type"], row["building_use"]), axis=1)
+    df_buildings["building_type"] = df_buildings.apply(
+        lambda row: _get_use_type(
+            df_type_dist, row["building_type"], row["building_use"],
+            rng=np.random.default_rng(stable_seed(
+                base_seed, physical_building_id(row), "electricity", "building_use"
+            )),
+        ),
+        axis=1,
+    )
     return df_buildings
 
 def _get_single_building_elec_timeseries_res(yearly_demand_list, df_normalized_lps, lps_total_demands):
@@ -212,10 +240,10 @@ def _get_single_building_elec_timeseries_ghd(building_type, floor_area, df_norma
 ##############################################################
 ############## Generation, Publicly Callable #################
 ##############################################################
-def sample_statistics(df_buildings):
-    df_buildings = _assign_household_occupancy(df_buildings)
-    df_buildings = _assign_total_elec_demands(df_buildings)
-    df_buildings = _assign_use_type(df_buildings)
+def sample_statistics(df_buildings, base_seed=0):
+    df_buildings = _assign_household_occupancy(df_buildings, base_seed)
+    df_buildings = _assign_total_elec_demands(df_buildings, base_seed)
+    df_buildings = _assign_use_type(df_buildings, base_seed)
     return df_buildings
 
 def get_elec_demand(df_buildings):

@@ -40,6 +40,7 @@ def _scenario_command(run, scenario, model_case: str) -> tuple[list[str], Path]:
         "--timeframe-mode", run.timeframe_mode,
         "--model-case", model_case,
         "--scenario-config", str(run.scenario_path),
+        "--profile-seed", str(run.seed),
         "--case-qualified-output",
     ]
     if run.storage == "db":
@@ -72,7 +73,7 @@ def _paired_command(
         "--step3-cpus", str(run.step3_cpus),
         "--step3-cluster-concurrency", str(run.step3_cluster_concurrency),
         "--step4-cpus", str(run.step4_cpus),
-        "--seed", str(run.seed),
+        "--profile-seed", str(run.seed),
         "--scenario-label", run.run_id,
         "--run-name-prefix", run.run_id,
         "--run-dir", str(GRIDEXPAND_DIR / "run_logs" / run.run_id / group_name),
@@ -95,9 +96,7 @@ def build_commands(run, scenario, model_cases: tuple[str, ...]) -> list[tuple[li
                 f"Model case {model_case!r} is not enabled by {scenario.scenario_id!r}."
             )
     if run.pipeline == "scenario":
-        if len(model_cases) != 1:
-            raise ValueError("An ordinary scenario invocation accepts exactly one model case.")
-        return [_scenario_command(run, scenario, model_cases[0])]
+        return [_scenario_command(run, scenario, model_case) for model_case in model_cases]
 
     commands: list[tuple[list[str], Path]] = []
     requested_heuristic = tuple(case for case in HEURISTIC_CASES if case in model_cases)
@@ -140,10 +139,8 @@ def main() -> None:
     scenario, scenario_hash = load_scenario_config(run.scenario_path)
     if args.model_case is not None:
         model_cases = (args.model_case,)
-    elif run.pipeline == "paired_validation":
-        model_cases = run.model_cases
     else:
-        model_cases = ("post-hems-heuristic",)
+        model_cases = run.model_cases
     commands = build_commands(run, scenario, model_cases)
     manifest_dir = GRIDEXPAND_DIR / "run_logs" / run.run_id
     _write_manifest(
@@ -154,6 +151,7 @@ def main() -> None:
             "scenario_id": scenario.scenario_id,
             "scenario_hash": scenario_hash,
             "pylovo_version_id": run.pylovo_version_id,
+            "profile_seed": run.seed,
             "model_cases": list(model_cases),
             "commands": [
                 {"command": command, "working_directory": str(workdir)}

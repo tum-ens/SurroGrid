@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import warnings
 
+from common.reproducibility import physical_building_id, stable_seed
+
 from src.functions.infdb_ro_heat import generate_opendhw, load_space_heat
 
 ##############################################################
@@ -86,12 +88,17 @@ def get_norm_outside_temperature(zip_code):
         )
     return float(match.iloc[0]["T_ne"])
 
-def sample_statistics(df_buildings):
+def sample_statistics(df_buildings, base_seed=0):
     # Sample ages for non-residential buildings:
-    df_buildings.loc[df_buildings["construction_year"].isna(), ["construction_year"]] = np.random.choice(
-        config.AGE_GHD_DISTRIBUTION["age"], 
-        size=len(df_buildings[df_buildings["construction_year"].isna()]["construction_year"]), 
-        p=config.AGE_GHD_DISTRIBUTION["prob"])
+    missing_age = df_buildings["construction_year"].isna()
+    for index, row in df_buildings.loc[missing_age].iterrows():
+        rng = np.random.default_rng(stable_seed(
+            base_seed, physical_building_id(row), "heat", "construction_year"
+        ))
+        df_buildings.at[index, "construction_year"] = rng.choice(
+            config.AGE_GHD_DISTRIBUTION["age"],
+            p=config.AGE_GHD_DISTRIBUTION["prob"],
+        )
     
     # # Sample heat pump type:
     # df_buildings["hp_type"] = np.random.choice(
@@ -100,14 +107,18 @@ def sample_statistics(df_buildings):
     #     p=config.HP_TYPE_DIST["prob"])
 
     # Sample floor heating type:
-    df_buildings["heating_type"] = np.random.choice(
-        ["radiator","floor"], 
-        size=len(df_buildings), 
-        p=[config.PROB_RADIATOR, config.PROB_FLOOR])
+    df_buildings["heating_type"] = df_buildings.apply(
+        lambda row: np.random.default_rng(stable_seed(
+            base_seed, physical_building_id(row), "heat", "heating_type"
+        )).choice(
+            ["radiator", "floor"], p=[config.PROB_RADIATOR, config.PROB_FLOOR]
+        ),
+        axis=1,
+    )
 
     return df_buildings
 
-def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip):
+def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_seed=0):
     if getattr(config, "SPACE_HEAT_SOURCE", "teaser") == "infdb_ro_heat":
         space_heat, audit = load_space_heat(df_buildings)
         if audit["space_heat_source_fallback"]:
@@ -116,7 +127,7 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip):
                 f"{audit['space_heat_source_fallback']} for "
                 f"{audit['space_heat_source_fallback_buildings']} building(s)."
             )
-        return space_heat, generate_opendhw(df_buildings)
+        return space_heat, generate_opendhw(df_buildings, base_seed=base_seed)
 
     # Import the legacy generator lazily. The INFDB ro_heat path must not load
     # TEASER or execute any DistrictGenerator code.

@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Hashable, Iterable
 
 import numpy as np
 import pandas as pd
 
-
-def stable_seed(base_seed: int, *parts: object) -> int:
-    """Return a deterministic NumPy seed independent of row and grid ordering."""
-    payload = "|".join([str(int(base_seed)), *(str(part) for part in parts)])
-    digest = hashlib.blake2b(payload.encode("utf-8"), digest_size=8).digest()
-    return int.from_bytes(digest, "little") % (2**32)
+from common.reproducibility import stable_seed
 
 
 def profile_key(row: pd.Series | dict, *parts: object) -> tuple[object, ...]:

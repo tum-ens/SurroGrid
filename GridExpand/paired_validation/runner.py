@@ -89,8 +89,8 @@ def _materialize_command(job: dict[str, Any], args: argparse.Namespace) -> list[
         str(job["target_grid_id"]),
         "--scenario-label",
         args.scenario_label,
-        "--seed",
-        str(args.seed),
+        "--profile-seed",
+        str(args.profile_seed),
         "--weather-source-hdf",
         str(args.weather_source_hdf),
         "--model-case",
@@ -402,7 +402,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--skip-pre", action="store_true")
     parser.add_argument("--run-name-prefix", default="paired_swf_2045_full_local")
-    parser.add_argument("--seed", type=int, default=91301)
+    parser.add_argument(
+        "--profile-seed",
+        type=int,
+        default=481527,
+        help="Arbitrary fixed seed for reproducible stochastic input profiles.",
+    )
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--step3-cpus", type=int, default=8)
     parser.add_argument("--step3-cluster-concurrency", type=int, default=1)

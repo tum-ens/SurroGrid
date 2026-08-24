@@ -98,6 +98,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step4-cpus", type=int, default=4)
     parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
     parser.add_argument(
+        "--profile-seed",
+        type=int,
+        default=481527,
+        help="Run-level seed for the physical stochastic profile realization.",
+    )
+    parser.add_argument(
         "--model-case",
         choices=("pre", "post-inflex-heuristic", "post-hems-optimized", "post-hems-heuristic"),
         default="post-hems-optimized",
@@ -979,6 +985,8 @@ def run_candidate(
                 args.timeframe_mode,
                 "--model-case",
                 args.model_case,
+                "--profile-seed",
+                str(args.profile_seed),
                 "--scenario-config",
                 str(args.scenario_config),
                 "--n_cpu",

@@ -12,26 +12,42 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from common.reproducibility import physical_building_id, stable_seed
+
 ##############################################################
 #################### Sampling Statistics #####################
 ##############################################################
-def _sample_cars_in_building(occ_list, df_cars_per_household):
+def _sample_cars_in_building(occ_list, df_cars_per_household, rng):
     car_list = []
     for n_occ in occ_list:
         if n_occ>5: n_occ = 5
         subset = df_cars_per_household[df_cars_per_household['hh_size'] == n_occ]
-        car_list.append(np.random.choice(subset['vehicle_count'].values, size=1, p=subset['probability'].values).item())
+        car_list.append(rng.choice(subset['vehicle_count'].values, size=1, p=subset['probability'].values).item())
     return car_list, sum(car_list)
     
-def _sample_model_and_commuting(n_cars, prob_commuter, df_car_model_dist, df_region, bus):
+def _sample_model_and_commuting(n_cars, prob_commuter, df_car_model_dist, bus, base_seed, building_id):
     if n_cars == 0: return {}
     else:
         ### First create all column of the car dataframe
         buses = pd.DataFrame([bus]*n_cars, columns=["bus"])     # bus at which car is placed, always the same
         ids = pd.DataFrame(range(n_cars), columns=["id"])       # id of car at the bus (starting from 0)
-        car_model = pd.DataFrame(np.random.choice(df_car_model_dist["model"].values, size=n_cars, p=df_car_model_dist["probability"].values), columns=["model"])    # sampling a car model based on current sales statistics
-        commuter = pd.DataFrame(np.random.choice(["commuter", "non-commuter"], size=n_cars, p=[prob_commuter, 1-prob_commuter]), columns=["schedule"])              # samling whether car is used mainly for commuting
-        seeds = pd.DataFrame([int("".join(str(i) for i in [df_region["bcid"],df_region["plz"],df_region["kcid"],bus,idx])) for idx in range(n_cars)], columns=["seed"])       # creating a unique seed for running emobpy on the car later
+        rng = np.random.default_rng(stable_seed(
+            base_seed, building_id, "mobility", "inventory"
+        ))
+        car_model = pd.DataFrame(rng.choice(
+            df_car_model_dist["model"].values,
+            size=n_cars,
+            p=df_car_model_dist["probability"].values,
+        ), columns=["model"])
+        commuter = pd.DataFrame(rng.choice(
+            ["commuter", "non-commuter"],
+            size=n_cars,
+            p=[prob_commuter, 1-prob_commuter],
+        ), columns=["schedule"])
+        seeds = pd.DataFrame([
+            stable_seed(base_seed, building_id, "mobility", "vehicle", idx)
+            for idx in range(n_cars)
+        ], columns=["seed"])
 
         # From all columns create a dictionary now
         df_cars = pd.concat([buses, ids, car_model, commuter, seeds], axis=1)
@@ -228,7 +244,7 @@ def _consolidate_home_stretches(df_hourly):
 ##############################################################
 ###################### Publicly callable #####################
 ##############################################################
-def sample_statistics(df_buildings, df_region, allowed_models=None):
+def sample_statistics(df_buildings, df_region, allowed_models=None, base_seed=0):
     if df_region is None or df_region.empty:
         raise ValueError("Missing region metadata for mobility sampling.")
 
@@ -247,8 +263,27 @@ def sample_statistics(df_buildings, df_region, allowed_models=None):
         df_car_model_dist["probability"] = df_car_model_dist["probability"] / df_car_model_dist["probability"].sum()
 
     # Now sample number of owned cars, and their model + driver type
-    df_buildings[["cars_by_flat", "n_cars_tot"]] = df_buildings["occ_list"].apply(lambda x: pd.Series(_sample_cars_in_building(x, df_cars_per_hh)))
-    df_buildings["car_dict"] = df_buildings.apply(lambda x: _sample_model_and_commuting(x["n_cars_tot"], config.PROB_COMMUTING, df_car_model_dist, region_row, x["bus"]), axis=1)
+    df_buildings[["cars_by_flat", "n_cars_tot"]] = df_buildings.apply(
+        lambda row: pd.Series(_sample_cars_in_building(
+            row["occ_list"],
+            df_cars_per_hh,
+            np.random.default_rng(stable_seed(
+                base_seed, physical_building_id(row), "mobility", "car_count"
+            )),
+        )),
+        axis=1,
+    )
+    df_buildings["car_dict"] = df_buildings.apply(
+        lambda row: _sample_model_and_commuting(
+            row["n_cars_tot"],
+            config.PROB_COMMUTING,
+            df_car_model_dist,
+            row["bus"],
+            base_seed,
+            physical_building_id(row),
+        ),
+        axis=1,
+    )
     
     return df_buildings
 

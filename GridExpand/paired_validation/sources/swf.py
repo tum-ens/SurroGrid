@@ -55,6 +55,8 @@ def run_powerflows(
         str(args.plz),
         "--lv-id",
         str(grid_id),
+        "--profile-seed",
+        str(args.profile_seed),
         "--urbs-result-hdf",
         str(result_hdf),
     ]

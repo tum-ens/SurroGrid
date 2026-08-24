@@ -120,6 +120,10 @@ class SaveFile:
         # their HDF handoff. Keep the compact heat sizing records, however: they
         # are the auditable link between the scenario rule and fixed urbs assets.
         db_handoff_raw_keys = {
+            "raw_data/asset_plan",
+            "raw_data/pv_asset_audit",
+            "raw_data/battery_asset_plan",
+            "raw_data/battery_asset_audit",
             "raw_data/heat_asset_plan",
             "raw_data/heat_asset_audit",
         }

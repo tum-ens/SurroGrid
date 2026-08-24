@@ -667,7 +667,12 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--run-name", default=RUN_NAME)
     parser.add_argument("--scenario-key", default=DEFAULT_SCENARIO_KEY)
-    parser.add_argument("--seed", type=int, default=91301)
+    parser.add_argument(
+        "--profile-seed",
+        type=int,
+        default=481527,
+        help="Arbitrary fixed seed for reproducible stochastic input profiles.",
+    )
     parser.add_argument(
         "--annual-demand-mode",
         choices=ANNUAL_DEMAND_MODE_CHOICES,
@@ -743,7 +748,7 @@ def main() -> None:
                     row,
                     args.run_name,
                     args.scenario_key,
-                    args.seed + i,
+                    args.profile_seed + i,
                     args.annual_demand_mode,
                     args.measured_profile_selection,
                     args.measured_profile_band_pct,
@@ -776,7 +781,7 @@ def main() -> None:
                     row,
                     args.run_name,
                     args.scenario_key,
-                    args.seed + i,
+                    args.profile_seed + i,
                     args.annual_demand_mode,
                     args.measured_profile_selection,
                     args.measured_profile_band_pct,

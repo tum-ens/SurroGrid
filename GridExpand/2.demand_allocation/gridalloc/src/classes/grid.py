@@ -22,6 +22,11 @@ from src.assets.pv.roof_catalog import (
     read_lod2_roof_catalog_hdf,
 )
 from src.assets.pv.sizing import build_pv_asset_plan
+from common.reproducibility import (
+    frame_fingerprint,
+    physical_building_id,
+    realization_id,
+)
 from common.timeframe import (
     TIMESLICE_HOURS,
     build_full_year_metadata,
@@ -44,6 +49,14 @@ class Grid:
         ### Basic grid data
         self.df_buildings, self.df_region, self.df_weather_raw = self.SF.get_input_data()
         self._apply_demand_scope()
+        self.profile_seed = int(self.settings.get("profile_seed", 0))
+        building_ids = [physical_building_id(row) for _, row in self.df_buildings.iterrows()]
+        self.profile_realization_id = realization_id(self.profile_seed, building_ids)
+        self.settings["scenario_assumptions"].update({
+            "profile_seed": self.profile_seed,
+            "profile_realization_id": self.profile_realization_id,
+            "profile_realization_contract": "physical-building-component-v1",
+        })
         if self.df_weather_raw is None:
             self.df_weather_raw = pd.DataFrame()
         if self.df_region is None or self.df_region.empty:
@@ -150,7 +163,8 @@ class Grid:
         raise ValueError("Demand scope residential requires building_use, building_type, or type in building data.")
 
     def _scenario_assumptions(self):
-        assumptions = dict(self.timeframe_metadata)
+        assumptions = dict(self.settings.get("scenario_assumptions") or {})
+        assumptions.update(self.timeframe_metadata)
         assumptions["scenario_key"] = self.settings.get("scenario_key")
         assumptions["demand_scope"] = self.settings.get("demand_scope", "all")
         if assumptions["demand_scope"] == "residential":
@@ -158,6 +172,15 @@ class Grid:
         assumptions.update(self.settings.get("demand_scope_stats") or {})
         return assumptions
 
+
+    def _record_profile_fingerprints(self, **frames):
+        values = {
+            f"profile_hash_{name}": frame_fingerprint(frame)
+            for name, frame in frames.items()
+            if frame is not None and not frame.empty
+        }
+        self.settings["scenario_assumptions"].update(values)
+        self.SF.update_timeframe_metadata(self.settings["scenario_assumptions"])
 
     ############################################
     ########### Timeseries Generators ########## 
@@ -275,10 +298,11 @@ class Grid:
 
     def generate_electricity(self):
         # First, assign missing occupation distribution, total demand and use type by statistics
-        self.df_buildings = elc.sample_statistics(self.df_buildings)
+        self.df_buildings = elc.sample_statistics(self.df_buildings, self.profile_seed)
 
         # Now obtain electricity demands
         self.df_buildings, self.df_demand_elec = elc.get_elec_demand(self.df_buildings)
+        self._record_profile_fingerprints(base_electricity=self.df_demand_elec)
         # self.df_demand_elec_react = elc.get_elec_react_demand(self.df_demand_elec)
 
         # Include daylight saving time effect (electricity timeseries are all UTC+1 only, thus include summer time demand shift):
@@ -306,7 +330,7 @@ class Grid:
             print("No residential buildings; skipped heat demand and asset generation.")
             return
 
-        residential = heat.sample_statistics(residential)
+        residential = heat.sample_statistics(residential, self.profile_seed)
         for column in ("construction_year", "heating_type"):
             self.df_buildings.loc[residential.index, column] = residential[column]
 
@@ -328,6 +352,7 @@ class Grid:
                     df_elec_input[column_subsets[index]],
                     [np.array(df_wth_input[column]) for column in ("dni", "dhi", "temp_air")],
                     self.plz,
+                    self.profile_seed,
                 )
                 for index, subset in enumerate(building_subsets)
             ]
@@ -346,6 +371,7 @@ class Grid:
                 df_elec_input[columns],
                 [np.array(df_wth_input[column]) for column in ("dni", "dhi", "temp_air")],
                 self.plz,
+                self.profile_seed,
             )
 
         self.df_demand_heat_space = self._add_output_data_daylight_saving_shift(
@@ -355,12 +381,19 @@ class Grid:
             self.df_demand_heat_water
         )
 
+        self._record_profile_fingerprints(
+            space_heat=self.df_demand_heat_space,
+            hot_water=self.df_demand_heat_water,
+        )
+
         self.df_tve_hpcop = heat.generate_hp_cop(
             residential,
             self.df_demand_heat_space,
             self.df_demand_heat_water,
             self.df_weather_raw,
         )
+
+        self._record_profile_fingerprints(heat_pump_cop=self.df_tve_hpcop)
 
         id_column = next((name for name in ("building_objectid", "objectid") if name in residential), None)
         if id_column is None:
@@ -417,6 +450,7 @@ class Grid:
             self.df_buildings,
             self.df_region,
             allowed_models=allowed_models,
+            base_seed=self.profile_seed,
         )
 
         n_cars = self.df_buildings["n_cars_tot"].sum()
@@ -457,6 +491,10 @@ class Grid:
         
         self.df_demand_mobility = self._add_output_data_daylight_saving_shift(self.df_demand_mobility, mobility_dmd=True)
         self.df_tve_mobility = self._add_output_data_daylight_saving_shift(self.df_tve_mobility)
+        self._record_profile_fingerprints(
+            mobility_demand=self.df_demand_mobility,
+            mobility_availability=self.df_tve_mobility,
+        )
 
     ############################################
     ############# Timeframe Helpers ############

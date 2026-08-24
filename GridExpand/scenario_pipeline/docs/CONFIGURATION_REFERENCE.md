@@ -61,8 +61,10 @@ For run.pipeline: paired_validation:
 - execution.model_cases: requested post-cases. Heuristic HEMS and INFLEX share
   one capacity-plan solve; optimized HEMS is solved separately.
 - execution workers/CPU values: concurrency limits.
-- execution.seed, cleanup_intermediates, and resume: reproducibility and
-  lifecycle controls.
+- execution.profile_seed: arbitrary fixed seed defining the reproducible input
+  realization; it has no geographic or scenario meaning.
+- execution.cleanup_intermediates and execution.resume: artifact lifecycle
+  controls.
 
 Internal directories are deliberately absent from this YAML. Outputs follow:
 

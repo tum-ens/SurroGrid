@@ -365,7 +365,12 @@ def main() -> None:
         "--scenario-label",
         default="swf_2045_paired_full_local",
     )
-    parser.add_argument("--seed", type=int, default=91301)
+    parser.add_argument(
+        "--profile-seed",
+        type=int,
+        default=481527,
+        help="Arbitrary fixed seed for reproducible stochastic input profiles.",
+    )
     parser.add_argument("--weather-source-hdf", type=Path, required=True)
     parser.add_argument("--heat-profile-library", type=Path)
     parser.add_argument(
@@ -393,7 +398,7 @@ def main() -> None:
         target_network=args.target_network,
         target_grid_id=args.target_grid_id,
         scenario_label=args.scenario_label,
-        seed=args.seed,
+        seed=args.profile_seed,
         weather_source_hdf=args.weather_source_hdf,
         heat_profile_library=(
             args.heat_profile_library.resolve()

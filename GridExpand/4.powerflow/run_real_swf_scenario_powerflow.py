@@ -634,7 +634,12 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--run-name", default=DEFAULT_RUN_NAME)
     parser.add_argument("--scenario-key", default=DEFAULT_SCENARIO_KEY)
-    parser.add_argument("--seed", type=int, default=91301)
+    parser.add_argument(
+        "--profile-seed",
+        type=int,
+        default=481527,
+        help="Arbitrary fixed seed for reproducible stochastic input profiles.",
+    )
     parser.add_argument(
         "--measured-profile-selection",
         choices=MEASURED_PROFILE_SELECTION_CHOICES,
@@ -745,7 +750,7 @@ def main() -> None:
                     args.run_name,
                     args.scenario_key,
                     scenario_label,
-                    args.seed + i,
+                    args.profile_seed + i,
                     args.measured_profile_selection,
                     args.measured_profile_band_pct,
                     args.measured_profile_min_candidates,
@@ -777,7 +782,7 @@ def main() -> None:
                     args.run_name,
                     args.scenario_key,
                     scenario_label,
-                    args.seed + i,
+                    args.profile_seed + i,
                     args.measured_profile_selection,
                     args.measured_profile_band_pct,
                     args.measured_profile_min_candidates,

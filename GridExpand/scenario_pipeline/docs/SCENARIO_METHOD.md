@@ -17,11 +17,12 @@ The controlled comparison of flexibility strategies is
 `post-inflex-heuristic` versus `post-hems-heuristic`. In paired validation,
 both dispatches are reconstructed from the same materialized heuristic asset
 plan, so their PV, battery, heat-pump, auxiliary-heater, and buffer capacities
-are exactly identical; only operation differs. Independently launched ordinary
-scenario runs use the same sizing equations but are comparable only when they
-also reuse the same input realization and seed. Paired validation may project a
-compiled scenario onto real and synthetic buses, but it may not redefine
-scenario assumptions.
+are exactly identical; only operation differs. Ordinary scenario runs use the
+same deterministic realization contract: all requested model cases receive the
+same run-YAML `profile_seed`, and stochastic choices are keyed by physical
+building ID, component, and household or vehicle index. Paired validation may
+project a compiled scenario onto real and synthetic buses, but it may not
+redefine scenario assumptions.
 
 PV, stationary-battery, and residential heat sizing are implemented in both
 heuristic and optimized modes. The heat method compiles one central system per
@@ -33,10 +34,32 @@ outside the present method and is not assigned the residential rule.
 The scenario YAML is the single source of truth for mobility behavior and all
 parameters written into urbs process and storage tables. This applies equally
 to ordinary scenario runs and paired validation. The run YAML owns the selected
-input topology version and execution resources. For paired datasets, that
-declared version must match the immutable preparation metadata. Python
+input topology version, selected model cases, profile-realization seed, and
+execution resources. The seed selects a Monte Carlo realization; it does not
+change the scientific distributions defined by the scenario. For paired
+datasets, that declared version must match the immutable preparation metadata. Python
 configuration retains only implementation references such as data locations
 and API endpoints.
+
+
+## Reproducible physical-profile realization
+
+Controlled model-case comparisons separate stochastic input realization from
+asset sizing and dispatch. The ordinary and paired pipelines derive deterministic
+sub-seeds from the run-level seed and topology-independent physical building ID.
+Independent sub-seeds cover household occupancy, annual household electricity,
+non-residential use type, heat-system attributes, each OpenDHW flat, vehicle
+ownership, vehicle model and schedule, and mobility-profile selection. Bus IDs
+and DataFrame row order are deliberately excluded.
+
+Every Step 2 HDF handoff records `profile_seed`, `profile_realization_id`, the
+realization-contract version, and fingerprints for each component generated in
+that run: base electricity and, where selected, space heat, hot water,
+heat-pump COP, mobility demand, and mobility availability.
+The realization ID depends on the seed and physical building inventory, but not
+on model case. Multi-case smoke runs fail before interpretation when controlled
+fingerprints differ. The two heuristic cases additionally require identical PV,
+battery, and heat asset plans; optimized capacities may differ by design.
 
 ## Rooftop PV potential
 
@@ -149,10 +172,11 @@ Residential domestic-hot-water demand remains separate from either space-heat
 source and originates from OpenDHW. OpenDHW generates stochastic tapping events
 at its native resolution; the pipeline resamples these events hourly and
 converts them to thermal demand using seasonally varying cold- and mixed-water
-temperatures. The hourly result is retained unchanged as direct `water_heat`
-demand. OpenDHW randomness is accepted for the current preliminary library, so
-rebuilding the library is not expected to reproduce DHW exactly until a seed
-contract is introduced.
+temperatures. The hourly result is retained unchanged as direct `water_heat` demand. Each
+building-flat OpenDHW call is executed in a locally seeded and restored random
+context. Rebuilding a run with the same physical buildings and `profile_seed`
+therefore reproduces its DHW realization without coupling it to call order or
+parallel worker assignment.
 
 No DHW tank is modeled, either explicitly or implicitly. Consequently, the HP
 and auxiliary heater must supply the hourly OpenDHW demand in its corresponding
@@ -259,8 +283,8 @@ zero uncovered heat in INFLEX dispatch. The coincident auxiliary peak was
 high auxiliary peak is consistent with the documented absence of DHW-tank
 buffering. Building design-load intensities
 ranged from 13.7 to 109.6 W/m2 (median 53.1 W/m2), which is retained in the
-audit for outlier review rather than silently clipped. Stochastic input profile
-realizations can shift these aggregate pilot values; the sizing and coverage
+audit for outlier review rather than silently clipped. Deliberately changing the
+run-level profile seed can shift these aggregate pilot values; the sizing and coverage
 invariants are the acceptance criteria. The optimized-mode check wrote
 zero installed capacity, positive costs, and finite building-specific bounds
 for HP, auxiliary heater, and buffer.

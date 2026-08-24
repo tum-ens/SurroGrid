@@ -26,6 +26,6 @@ execution:
   step3_cpus: 4
   step3_cluster_concurrency: 1
   step4_cpus: 2
-  seed: 91301
+  profile_seed: 481527  # Same arbitrary realization seed as the synthetic run.
   cleanup_intermediates: true
   resume: false
