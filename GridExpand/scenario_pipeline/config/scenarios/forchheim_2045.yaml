@@ -23,8 +23,9 @@ asset_sizing:
     optimized_method: optimization
     # "predefined" uses SWF PV locations when present; use "all_buildings" otherwise.
     location_mode: predefined
+    # Central compromise across public recommendations of roughly 1--2.5 kWp/MWh.
     # P_PV = min(E_annual * demand_multiplier / 1000, P_PV_max).
-    demand_multiplier: 2.5
+    demand_multiplier: 2.0
     # Used only when a selected physical building has no usable LoD2 roof section.
     fallback_capacity_kwp: 14.5
     # Publication-quality runs fail if more than this share uses the fallback.

@@ -68,26 +68,64 @@ building object ID. The required CityDB properties are `Flaeche`,
 `Dachneigung`, and `Dachorientierung`. Random roof-type, tilt, or azimuth
 sampling is not an accepted production data source.
 
-Available section capacity is LoD2 surface area multiplied by the configured
-usable roof fraction and module peak capacity per square metre. Flat and
-slanted roofs use separate usable fractions. A configurable 14.5 kWp fallback
-is allowed only for buildings without a usable LoD2 section; every use is
-reported and checked against `maximum_fallback_share`.
+For roof section \(r\) of building \(i\), available peak capacity is
 
-pvlib profiles are cached by binned tilt and azimuth. The Forchheim defaults of
-5 degrees tilt and 15 degrees azimuth were empirically checked against exact
-LoD2 angles: the maximum observed annual-yield deviation was 9.30% for the
-studied roofs.
+\[
+P_{\mathrm{PV,max},i,r}=A_{i,r}\,u_r\,\rho_{\mathrm{PV}},
+\qquad
+P_{\mathrm{PV,max},i}=\sum_r P_{\mathrm{PV,max},i,r},
+\]
+
+where \(A_{i,r}\) is the LoD2 roof-surface area, \(u_r\) is the usable-area
+fraction, and \(\rho_{\mathrm{PV}}\) is module peak power per roof area. The
+scenario uses \(u_r=0.27\) for flat and \(u_r=0.58\) for sloped roofs, following
+[Mainzer et al. (2014)](https://doi.org/10.1016/j.solener.2014.04.015), and
+\(\rho_{\mathrm{PV}}=0.202\) kWp/m² from the module-performance statistics of
+[Kräling et al. (2022)](https://doi.org/10.4229/WCPEC-82022-3BO.14.1). Because
+\(A_{i,r}\) is already the inclined LoD2 surface, no footprint-to-roof or tilt
+correction is applied.
+
+A configurable 14.5 kWp legacy mean is a study-defined fallback only for
+buildings without any usable LoD2 section; every use is reported and checked
+against `maximum_fallback_share`. The publication scenario requires a zero
+fallback share.
+
+Orientation-dependent profiles are calculated with
+[pvlib](https://doi.org/10.21105/joss.05994) and cached by binned tilt and
+azimuth. The Forchheim defaults of 5° tilt and 15° azimuth were empirically
+checked against exact LoD2 angles: the maximum observed annual-yield deviation
+was 9.30% for the studied roofs.
 
 ## PV sizing
 
 Heuristic PV capacity is calculated per physical building, before heat and
 mobility electrification and before timeframe selection or TSAM:
 
-```text
-P_PV [kWp] = min(E_annual,electricity-only [kWh] * 2.5 / 1000,
-                 P_PV,max [kWp])
-```
+\[
+P_{\mathrm{PV},i}
+=\min\left(
+\alpha_{\mathrm{PV}}\frac{E_{\mathrm{el},i}}{1000},
+P_{\mathrm{PV,max},i}
+\right),
+\qquad \alpha_{\mathrm{PV}}=2.0,
+\]
+
+where \(E_{\mathrm{el},i}\) is annual appliance-and-lighting electricity in
+kWh/a. Public consumer recommendations span different sizing ambitions:
+[Enpal](https://www.enpal.de/photovoltaik) starts from an approximate annual
+yield of 1 MWh per kWp and recommends some oversizing,
+[Vattenfall](https://www.vattenfall.de/infowelt-energie/solar/pv-anlage-dimensionierung)
+recommends 1.5–2 kWp per annual MWh, and
+[1KOMMA5°](https://1komma5.com/de/solaranlage/dimensionierung-pv-anlage/)
+publishes a factor of 2.5. The scenario selects 2.0 kWp/MWh as its central
+compromise: it is the upper end of Vattenfall's range and remains below the
+more expansion-oriented 1KOMMA5° recommendation. These are public consumer
+recommendations rather than normative design rules. Selecting the central
+coefficient, applying it to all chosen building types, using one shared system
+per building, and defining \(E_{\mathrm{el},i}\) as appliance-and-lighting
+demand only are study choices. Heat-pump and mobility demand are excluded so
+that the PV inventory remains independent of the later electrification
+realization. The LoD2 potential supplies the hard physical upper bound.
 
 Roof bins are filled in descending annual specific yield until the target is
 met. One capacity-weighted normalized LoD2 profile represents the resulting
@@ -108,45 +146,77 @@ primary electricity connection for every physical building.
 All buildings with PV are battery candidates. When a source inventory such as
 SWF contains battery rows, paired validation uses those rows only as location
 evidence; their reported capacities do not determine the scenario capacity.
-With annual base electricity `E` in MWh/a and the relevant PV capacity
-`P_PV` in kWp, the central heuristic rule is:
+With annual base electricity \(E_{\mathrm{el},i}^{\mathrm{MWh}}\) in MWh/a and
+PV capacity \(P_{\mathrm{PV},i}\) in kWp, the central heuristic is
 
-```text
-C_battery,use [kWh] = 0,                        if P_PV <= 0.5 * E
-C_battery,use [kWh] = min(1.0 * P_PV, 1.0 * E), otherwise
-```
+\[
+C_{\mathrm{bat},i}^{\mathrm{use}}=
+\begin{cases}
+0,
+&P_{\mathrm{PV},i}\leq 0.5\,E_{\mathrm{el},i}^{\mathrm{MWh}},\\
+\min\left(
+\alpha_{\mathrm{bat,PV}}P_{\mathrm{PV},i},
+\alpha_{\mathrm{bat,E}}E_{\mathrm{el},i}^{\mathrm{MWh}}
+\right),
+&P_{\mathrm{PV},i}>0.5\,E_{\mathrm{el},i}^{\mathrm{MWh}},
+\end{cases}
+\]
 
-HTW 2025 supplies the eligibility threshold and recommends 1.5 kWh/kWp and
-1.5 kWh/MWh as upper limits for usable home-storage capacity. It does not
-recommend a range from 0.75 to 1.5. This study selects 1.0 as a less aggressive
-central building-level heuristic because it extrapolates a single-family-home
-recommendation to all residential building types and does not explicitly model
-future electrified demand in the sizing input. Coefficients of 0.75 and 1.5 are
-study-defined low and high sensitivities; 1.5 is the HTW maximum. The scenario
-uses annual appliance-and-lighting demand only. For multi-household buildings,
-the result represents one shared PV-battery system and is audited both per
-building and per household.
+with \(\alpha_{\mathrm{bat,PV}}=1.0\) kWh/kWp and
+\(\alpha_{\mathrm{bat,E}}=1.0\) kWh/MWh in the central case.
 
-In both heuristic cases, `P_PV` is the fixed heuristic PV capacity and usable
-battery energy is fixed with equal `inst-cap-c` and `cap-up-c`. In
-`post-hems-optimized`, `P_PV` is the building's LoD2 maximum PV potential
-(`pv_max_kwp`) because optimized PV capacity is not known during input
-preparation. The true HTW coefficients of 1.5 then define only the battery
-`cap-up-c`; `inst-cap-c` remains zero and urbs chooses installed capacity.
-The heuristic capacity and optimized upper bound are therefore intentionally
-not the same quantity. A configurable 2 h energy-to-power ratio sets charge and
-discharge power. Fixed heuristic assets carry no investment cost because sizing
-occurs upstream.
+Figure 22 of the
+[HTW Stromspeicher-Inspektion 2025](https://solar.htw-berlin.de/wp-content/uploads/HTW-Stromspeicher-Inspektion-2025.pdf)
+supplies the eligibility threshold and recommends 1.5 kWh/kWp and 1.5 kWh/MWh
+as upper limits for usable home-storage capacity. It does not recommend a
+0.75–1.5 range. This study selects 1.0 as a less aggressive central
+building-level heuristic because it extrapolates a home-storage recommendation
+to all residential building types and uses appliance-and-lighting demand only.
+Coefficients of 0.75 and 1.5 are study-defined low and high sensitivities; 1.5
+is the HTW upper limit. The central coefficient is supported by open sizing
+heuristics, not by a DIN or VDI standard. [HTW Berlin (2014)](https://solar.htw-berlin.de/publikationen/auslegung-pv-speicher-einfamilienhaus/)
+identifies 1 kWh of usable capacity per kWp as sensible for high self-sufficiency,
+while the [Bavarian LfU/C.A.R.M.E.N. guide (2022)](https://www.carmen-ev.de/wp-content/uploads/2022/02/Zukunftsloesungen-fuer-PV-Anlagen.pdf)
+recommends approximately 0.7--1.0 kWh/kWp and at most 1 kWh per MWh of annual
+household demand. Current [Vattenfall practitioner guidance](https://www.vattenfall.de/infowelt-energie/solar/lohnt-sich-pv-anlage)
+also describes 1 kWh per kWp and per MWh as a frequently applied rule. However,
+[HTW Berlin (2022)](https://solar.htw-berlin.de/publikationen/auslegung-von-solarstromspeichern/)
+warns that a PV-only 1:1 rule can overdimension storage and recommends considering
+both PV capacity and annual demand. The implemented minimum of both terms follows
+that two-sided logic and is more restrictive than either isolated 1:1 rule; the
+eligibility threshold can additionally set capacity to zero. For multi-household
+buildings, the result represents one shared PV-battery system and is audited both
+per building and per household.
 
-Elias's thesis used 976 per kWh as a linear battery investment cost. The cited [IRENA 2022 report](https://www.irena.org/-/media/Files/IRENA/Agency/Publication/2022/Mar/IRENA_Tech_Innovation_Indicators_2022_.pdf)
-identifies this value as the 2021 German median installed price in
-2020 USD/kWh, rather than a euro-denominated 2045 projection. The present 2045
-optimized case therefore uses 300 EUR/kWh as its central assumption. Scenario
-variants should use 250 and 365 EUR/kWh as low and high sensitivities. These
-values span the projected 2040 household stationary-system range in the
-[JRC 2018 report](https://op.europa.eu/en/publication-detail/-/publication/e65c072a-f389-11e8-9982-01aa75ed71a1). This remains an
-explicit extrapolation to 2045 and to shared multi-household systems; the
-plausibility audit is required alongside optimized results.
+A study-defined 2 h energy-to-power ratio sets symmetric charge and discharge
+power:
+
+\[
+P_{\mathrm{bat},i}^{\mathrm{ch,max}}
+=P_{\mathrm{bat},i}^{\mathrm{dch,max}}
+=\frac{C_{\mathrm{bat},i}^{\mathrm{use}}}{2\ \mathrm{h}}.
+\]
+
+In both heuristic cases, \(P_{\mathrm{PV},i}\) is the fixed heuristic PV
+capacity and usable battery energy is fixed with equal `inst-cap-c` and
+`cap-up-c`. In `post-hems-optimized`, the building's LoD2 maximum PV potential
+is used when constructing the battery upper bound because optimized PV capacity
+is not known during input preparation. The HTW coefficients of 1.5 then define
+only `cap-up-c`; `inst-cap-c` remains zero and urbs chooses installed capacity.
+The heuristic capacity and optimized upper bound are intentionally not the same
+quantity. Fixed heuristic assets carry no investment cost because sizing occurs
+upstream.
+
+Elias's thesis used 976 per kWh as a linear battery investment cost. The cited
+[IRENA 2022 report](https://www.irena.org/-/media/Files/IRENA/Agency/Publication/2022/Mar/IRENA_Tech_Innovation_Indicators_2022_.pdf)
+identifies this value as the 2021 German median installed price in 2020 USD/kWh,
+rather than a euro-denominated 2045 projection. The present 2045 optimized case
+therefore uses 300 EUR/kWh as its central assumption. Scenario variants should
+use 250 and 365 EUR/kWh as low and high sensitivities. These values span the
+projected 2040 household stationary-system range in the
+[JRC 2018 report](https://op.europa.eu/en/publication-detail/-/publication/e65c072a-f389-11e8-9982-01aa75ed71a1).
+This remains an explicit extrapolation to 2045 and to shared multi-household
+systems; the plausibility audit is required alongside optimized results.
 
 ## Residential heat assets
 
@@ -210,55 +280,117 @@ stores the `space_heat` commodity and cannot serve or shift `water_heat`.
 
 ### Climate inputs and full-load hours
 
-`T_NAT` is the postcode-specific norm outside temperature `T_ne` in
-`site_data.txt`; postcode 91301 currently resolves to -12.6 degrees C. It is a
-design condition, not the minimum of the TMY. Only an exact postcode entry is
-accepted. Numeric proximity between postcodes is not a geographic fallback.
-The inherited table must eventually be replaced or annotated with a directly
-traceable DIN/TS 12831-1 source.
+\(T_{\mathrm{NAT}}\) is the postcode-specific norm outside temperature `T_ne`
+in `site_data.txt`; postcode 91301 currently resolves to \(-12.6\,^\circ\)C.
+It is a design condition, not the minimum of the weather year. Only an exact
+postcode entry is accepted. Numeric proximity between postcodes is not a
+geographic fallback. The inherited table must eventually be replaced or
+annotated with directly traceable DIN/TS 12831-1 climate data; until then,
+\(-12.6\,^\circ\)C is explicitly an inherited input rather than a newly
+derived study result.
 
-The heating-limit temperature is a separate building-operation assumption.
-For the existing residential stock, the scenario uses the DWD/VDI 20/15
-convention: 20 degrees C indoors and a 15 degrees C heating limit. Full-load
-hours are calculated once per complete regional weather year, before timeframe
-selection and TSAM. Daily mean ambient temperature selects heating days:
+The regional full-load-hour proxy uses the DWD/VDI 3807 degree-day convention
+of \(T_{\mathrm{i}}=20\,^\circ\)C and a heating limit
+\(T_{\mathrm{HG}}=15\,^\circ\)C. The
+[German Weather Service](https://opendata.dwd.de/climate_environment/CDC/derived_germany/techn/daily/heating_degreedays/hdd_3807/recent/)
+documents this 20/15 convention for degree-day calculations under VDI 3807.
+Full-load hours are calculated once per complete regional weather year, before
+timeframe selection and TSAM. With daily mean outdoor temperature
+\(\bar T_{\mathrm{out},d}\),
 
-```text
-GTZ = sum_d(20 - mean(T_out,d))  for mean(T_out,d) < T_HG
-h_FLH = 24 * GTZ / (T_inside - T_NAT)
-```
+\[
+\mathrm{GTZ}
+=\sum_{d:\,\bar T_{\mathrm{out},d}<T_{\mathrm{HG}}}
+\left(T_{\mathrm{i}}-\bar T_{\mathrm{out},d}\right),
+\]
 
-For the audited Forchheim pilot weather year this gives approximately 2,619 h/a.
+\[
+h_{\mathrm{FLH}}
+=\frac{24\,\mathrm{GTZ}}
+{T_{\mathrm{i}}-T_{\mathrm{NAT}}}.
+\]
+
+For the audited Forchheim pilot weather year this gives approximately
+2,619 h/a. This is a study-defined conversion of annual simulated energy to a
+design-load proxy; the 20/15 degree-day inputs are sourced, but this
+full-load-hour sizing equation is not a DIN EN 12831 load calculation.
 
 ### Heat-pump and auxiliary sizing
 
-For each building:
+For each residential building \(i\), annual space-heating and domestic-hot-water
+energies are converted to a common design-load proxy:
 
-```text
-P_space,design,th = E_space,annual / h_FLH
-P_DHW,allowance,th = E_DHW,annual / hours_in_year
-P_design,th = P_space,design,th + P_DHW,allowance,th
-P_HP,heuristic,th = heat_pump_design_share * P_design,th
-P_HP,heuristic,el = P_HP,heuristic,th / COP(T_NAT)
-```
+\[
+P_{\mathrm{space,design},i}^{\mathrm{th}}
+=\frac{E_{\mathrm{space},i}^{\mathrm{annual}}}{h_{\mathrm{FLH}}},
+\]
+
+\[
+P_{\mathrm{DHW,allow},i}^{\mathrm{th}}
+=\frac{E_{\mathrm{DHW},i}^{\mathrm{annual}}}{N_h},
+\]
+
+\[
+P_{\mathrm{design},i}^{\mathrm{th}}
+=P_{\mathrm{space,design},i}^{\mathrm{th}}
++P_{\mathrm{DHW,allow},i}^{\mathrm{th}},
+\]
+
+where \(N_h\) is the number of hours in the modeled year. Using mean DHW power
+for capacity sizing is a study-defined simplification; the actual hourly
+OpenDHW series remains in dispatch and therefore still determines auxiliary
+peak capacity.
+
+The bivalent air-source heat pump is then sized as
+
+\[
+P_{\mathrm{HP},i}^{\mathrm{th}}
+=s_{\mathrm{HP}}P_{\mathrm{design},i}^{\mathrm{th}},
+\qquad s_{\mathrm{HP}}=0.65,
+\]
+
+\[
+P_{\mathrm{HP},i}^{\mathrm{el}}
+=\frac{P_{\mathrm{HP},i}^{\mathrm{th}}}
+{\mathrm{COP}_i(T_{\mathrm{NAT}})}.
+\]
 
 The design COP is the building COP at the full-year weather step closest to
-`T_NAT`, preserving the existing radiator/floor-heating sink-temperature
-assumption. The Forchheim share is 0.65. This lies within the 50--80% range for an
-air-source bivalent system in the [BWP heat-pump dimensioning guide](https://www.waermepumpe.de/fileadmin/user_upload/waermepumpe/07_Publikationen/BWP_LF_WPDimensionierung.pdf);
-peak load is intentionally supplied by direct electric auxiliary heating.
-This transparent scenario rule is informed by the practical guide, but it is
-not asserted to be a complete DIN EN 15450 or VDI 4645 compliance calculation.
+\(T_{\mathrm{NAT}}\), preserving the existing radiator/floor-heating
+sink-temperature assumption. The 65% share is the selected central value from
+the 50–80% range recommended for modulating monoenergetic air-to-water systems
+in the
+[BWP heat-pump dimensioning guide (2025)](https://www.waermepumpe.de/fileadmin/user_upload/waermepumpe/07_Publikationen/BWP_LF_WPDimensionierung.pdf).
+That guide calls for a normative heat-load calculation under
+[DIN EN 12831-1](https://www.dinmedia.de/de/norm/din-en-12831-1/261292587).
+Our annual-energy/full-load-hour proxy is study-defined because the pipeline
+does not possess all inputs needed for a complete room-by-room normative
+calculation; it must not be described as DIN EN 12831 compliant. DIN EN
+12831-1 derives room and building design loads from transmission and ventilation
+heat losses under design boundary conditions, with applicable heat-up
+allowances. Dividing annual simulated heat by regional full-load hours cannot
+reconstruct those terms and therefore provides a transparent peak-load proxy,
+not the normative result. The guide addresses modulating air-to-water systems
+in one- and two-family houses; applying the 0.65 share to `MFH` and `AB`
+central systems is an explicit study extrapolation.
 
-The fixed auxiliary capacity is the largest full-year positive residual:
+Direct electric auxiliary heat covers the exact positive full-year residual:
 
-```text
-P_aux,el = max_t[Q_space(t) + Q_DHW(t) - COP(t) * P_HP,el]^+
-```
+\[
+P_{\mathrm{aux},i}^{\mathrm{el}}
+=\max_t
+\left[
+\dot Q_{\mathrm{space},i,t}
++\dot Q_{\mathrm{DHW},i,t}
+-\mathrm{COP}_{i,t}P_{\mathrm{HP},i}^{\mathrm{el}}
+\right]^+.
+\]
 
-Thus HP output is always capacity-limited. The auxiliary heater supplies every
-remaining peak in both heuristic cases; no code path may let the HP operate
-beyond its installed electrical capacity.
+Bivalent peak coverage follows the BWP design principle; using the maximum
+modeled hourly residual as the installed auxiliary capacity is the study's
+implementation rule. Thus HP output is always capacity-limited and the
+auxiliary heater supplies every remaining peak in both heuristic cases; no code
+path may let the HP operate beyond its installed electrical capacity.
 
 Heuristic cases write equal installed and upper capacities and zero investment
 costs. `post-hems-optimized` retains zero installed capacities and active costs,
@@ -268,29 +400,59 @@ and the physical buffer bound.
 
 ### Space-heating buffer
 
-The building buffer volume is:
+The explicit buffer represents only the space-heating circuit. Its volume is
+tied to installed thermal heat-pump output:
 
-```text
-V_buffer [l] = 20 l/kWth * P_HP,reference [kWth]
-C_buffer [kWhth] = V_buffer * 1.163 Wh/(l K) * delta_T_usable / 1000
-```
+\[
+V_{\mathrm{buf},i}
+=v_{\mathrm{buf}}P_{\mathrm{HP},i}^{\mathrm{th}},
+\qquad
+v_{\mathrm{buf}}=20\ \mathrm{L/kW_{th}}.
+\]
 
-Forchheim uses a 5 K usable temperature spread. The 20 l/kWth value follows the
-VDI 4645 headline rule discussed for the scenario; the temperature spread is an
-explicit modeling assumption needed to convert volume into usable energy.
-Charge and discharge power equal the reference thermal HP capacity, so the E/P
-ratio is derived rather than independently configured.
-In heuristic cases the reference is the fixed heat-pump thermal design capacity.
-In the optimized case the buffer is additionally linked by a linear urbs
-constraint to the heat-pump capacity actually installed. Consequently, an
-optimizer that installs only part of the heat-pump bound may install at most
-20 l/kWth (converted with the same 5 K spread) for that smaller heat pump; the
-former independent full-design-load buffer bound is no longer exploitable.
+The 20 L/kWth ratio follows the
+[VDI 4645](https://www.dinmedia.de/de/technische-regel/vdi-4645/364873293)
+recommendation for runtime optimization. An independent review of buffer-sizing
+approaches reports this value and places it within the broader 12–35 L/kW range
+attributed to
+[DIN EN 15450](https://www.dinmedia.de/de/norm/din-en-15450/98862901)
+([Weck-Ponten, 2023, Sec. 3.3.8](https://publications.rwth-aachen.de/record/969286/files/969286.pdf)).
+The standard-inspired ratio is applied here at the building-system level,
+including multi-family buildings; that extrapolation and the assumption of one
+central system per building are study choices.
+
+Usable thermal energy follows from water heat capacity and a study-defined
+usable temperature spread \(\Delta T_{\mathrm{buf}}=5\) K:
+
+\[
+C_{\mathrm{buf},i}
+=\frac{
+V_{\mathrm{buf},i}\,
+1.163\ \mathrm{Wh/(L\,K)}\,
+\Delta T_{\mathrm{buf}}
+}{1000}.
+\]
+
+Charge and discharge power are set to thermal heat-pump capacity,
+
+\[
+P_{\mathrm{buf},i}^{\mathrm{ch,max}}
+=P_{\mathrm{buf},i}^{\mathrm{dch,max}}
+=P_{\mathrm{HP},i}^{\mathrm{th}},
+\]
+
+so the E/P ratio is derived rather than independently configured. In heuristic
+cases the reference is the fixed heat-pump thermal capacity. In the optimized
+case a linear urbs constraint ties maximum buffer energy to the heat-pump
+capacity actually installed. The optimizer therefore cannot exploit the former
+independent full-design-load buffer bound.
 
 `post-inflex-heuristic` and `post-hems-heuristic` consume the identical fixed
 heat asset plan. INFLEX dispatch ignores buffer flexibility, limits HP heat to
-`COP(t) * P_HP,el`, and supplies the residual with the fixed auxiliary heater.
-`post-hems-heuristic` optimizes dispatch of the same capacities.
+\(\mathrm{COP}_{i,t}P_{\mathrm{HP},i}^{\mathrm{el}}\), and supplies the
+residual with the fixed auxiliary heater. `post-hems-heuristic` optimizes
+dispatch of the same capacities. No DHW tank is represented, and the
+space-heating buffer cannot serve DHW.
 
 The production audit tables record annual heat energies, climate inputs,
 full-load hours, design COP, thermal and electrical capacity, auxiliary bound,

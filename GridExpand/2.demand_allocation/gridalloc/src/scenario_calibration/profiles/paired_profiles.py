@@ -270,7 +270,7 @@ def build_paired_sector_urbs_inputs(
     roof_catalog: pd.DataFrame,
     pv_profile_library: Path,
     pv_sizing_method: str = "optimization",
-    pv_demand_multiplier: float = 2.5,
+    pv_demand_multiplier: float = 2.0,
     battery_sizing_method: str = "htw_2025_scaled_rule",
     battery_minimum_pv_kwp_per_annual_mwh: float = 0.5,
     battery_usable_kwh_per_pv_kwp: float = 1.0,
@@ -414,7 +414,7 @@ def _build_paired_pv(
     hours: int,
     profile_library: Path,
     sizing_method: str = "optimization",
-    demand_multiplier: float = 2.5,
+    demand_multiplier: float = 2.0,
     technical_parameters=None,
 ) -> _PvInputs | None:
     if "pv_roof_eligible" not in allocation:

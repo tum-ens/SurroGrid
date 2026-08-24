@@ -9,7 +9,7 @@ from .labels import profile_label
 from .roof_catalog import building_roof_capacity
 
 
-def heuristic_pv_capacity(annual_electricity_kwh, maximum_pv_kwp, demand_multiplier=2.5):
+def heuristic_pv_capacity(annual_electricity_kwh, maximum_pv_kwp, demand_multiplier=2.0):
     annual = np.nan_to_num(np.asarray(annual_electricity_kwh, dtype=float), nan=0.0)
     maximum = np.nan_to_num(np.asarray(maximum_pv_kwp, dtype=float), nan=0.0)
     result = np.minimum(
@@ -53,7 +53,7 @@ def build_pv_asset_plan(
     profile_library: pd.DataFrame,
     *,
     sizing_method: str,
-    demand_multiplier: float = 2.5,
+    demand_multiplier: float = 2.0,
     eligibility_column: str = "pv_roof_eligible",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return one building asset row and selected roof sections."""
