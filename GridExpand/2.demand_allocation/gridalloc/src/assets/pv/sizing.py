@@ -77,7 +77,7 @@ def build_pv_asset_plan(
     }
     # Retain classification as audit context. It does not restrict the sizing
     # rule: the current HTW extrapolation intentionally applies to every type.
-    for column in ("building_use", "building_type"):
+    for column in ("building_use", "building_type", "number_of_households", "floor_area"):
         if column in source:
             aggregation[column] = (column, "first")
     plan = source.groupby(

@@ -313,6 +313,121 @@ def audit_controlled_realization(manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def audit_capacity_plausibility(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Write building-level capacity checks and reject physically inconsistent plans."""
+    summaries: dict[str, Any] = {}
+    for case in manifest["cases"]:
+        model_case = str(case["model_case"])
+        if model_case == "pre" or case.get("status") != "done":
+            continue
+        output_path = Path(case["urbs_output_h5"])
+        battery = pd.read_hdf(output_path, key="raw_data/battery_asset_plan")
+        heat = pd.read_hdf(output_path, key="raw_data/heat_asset_plan")
+        cap_pro = pd.read_hdf(output_path, key="urbs_out/MILP/cap_pro")
+        cap_sto = pd.read_hdf(output_path, key="urbs_out/MILP/cap_sto_c")
+        process_capacity = {
+            (int(site), str(process)): float(value)
+            for (_, site, process), value in cap_pro.items()
+        }
+        storage_capacity = {
+            (int(site), str(storage)): float(value)
+            for (_, site, storage, _), value in cap_sto.items()
+        }
+
+        rows: list[dict[str, Any]] = []
+        battery_violations = 0
+        for _, asset in battery.iterrows():
+            site = int(asset["Site"])
+            installed = storage_capacity.get((site, "battery_private"), 0.0)
+            upper = float(asset["battery_capacity_upper_kwh"])
+            htw_upper = float(asset.get("battery_htw_upper_kwh", upper))
+            households = pd.to_numeric(
+                pd.Series([asset.get("number_of_households")]), errors="coerce"
+            ).iloc[0]
+            valid = installed <= upper + 1e-6 and upper <= htw_upper + 1e-6
+            battery_violations += int(not valid)
+            rows.append({
+                "asset": "battery",
+                "building_objectid": str(asset["building_objectid"]),
+                "site": site,
+                "installed_capacity": installed,
+                "upper_capacity": upper,
+                "reference_capacity": float(asset["battery_reference_pv_kwp"]),
+                "capacity_per_reference": (
+                    installed / float(asset["battery_reference_pv_kwp"])
+                    if float(asset["battery_reference_pv_kwp"]) > 0 else 0.0
+                ),
+                "capacity_per_household": (
+                    installed / float(households)
+                    if pd.notna(households) and float(households) > 0 else None
+                ),
+                "at_upper_bound": abs(installed - upper) <= 1e-6 and upper > 0.0,
+                "valid": valid,
+            })
+
+        buffer_violations = 0
+        coverage_violations = 0
+        for _, asset in heat.iterrows():
+            site = int(asset["Site"])
+            hp_kw_el = process_capacity.get((site, "heatpump_air"), 0.0)
+            auxiliary_kw_el = process_capacity.get((site, "auxiliary_heater"), 0.0)
+            buffer_kwh = storage_capacity.get((site, "heat_storage"), 0.0)
+            hp_kw_th = hp_kw_el * float(asset["design_cop"])
+            upper_kwh = float(asset["buffer_capacity_upper_kwh_th"])
+            upper_litres = float(asset["buffer_volume_l"])
+            kwh_per_litre = upper_kwh / upper_litres if upper_litres > 0.0 else 0.0
+            buffer_litres = buffer_kwh / kwh_per_litre if kwh_per_litre > 0.0 else 0.0
+            litres_per_kw = buffer_litres / hp_kw_th if hp_kw_th > 1e-9 else 0.0
+            buffer_valid = (
+                buffer_kwh <= upper_kwh + 1e-6
+                and (hp_kw_th > 1e-9 or buffer_kwh <= 1e-6)
+                and litres_per_kw <= 20.0 + 1e-6
+            )
+            coverage_valid = bool(asset.get("heat_capacity_peak_coverage_valid", True))
+            buffer_violations += int(not buffer_valid)
+            coverage_violations += int(not coverage_valid)
+            rows.append({
+                "asset": "space_heat_buffer",
+                "building_objectid": str(asset["building_objectid"]),
+                "site": site,
+                "installed_capacity": buffer_kwh,
+                "upper_capacity": upper_kwh,
+                "reference_capacity": hp_kw_th,
+                "capacity_per_reference": litres_per_kw,
+                "capacity_per_household": (
+                    buffer_litres / float(asset["number_of_households"])
+                    if pd.notna(asset.get("number_of_households"))
+                    and float(asset["number_of_households"]) > 0 else None
+                ),
+                "buffer_volume_m3": buffer_litres / 1000.0,
+                "auxiliary_capacity_kw_el": auxiliary_kw_el,
+                "at_upper_bound": abs(buffer_kwh - upper_kwh) <= 1e-6 and upper_kwh > 0.0,
+                "valid": buffer_valid and coverage_valid,
+            })
+
+        audit = pd.DataFrame(rows)
+        audit_path = output_path.parent / "capacity_plausibility_audit.csv"
+        audit.to_csv(audit_path, index=False)
+        summary = {
+            "status": "passed" if not (battery_violations or buffer_violations or coverage_violations) else "failed",
+            "audit_csv": str(audit_path.resolve()),
+            "battery_candidates": int(len(battery)),
+            "battery_positive": int((audit.loc[audit["asset"] == "battery", "installed_capacity"] > 1e-6).sum()),
+            "battery_at_upper_bound": int(audit.loc[audit["asset"] == "battery", "at_upper_bound"].sum()),
+            "battery_violations": battery_violations,
+            "heat_buffer_candidates": int(len(heat)),
+            "heat_buffer_at_upper_bound": int(audit.loc[audit["asset"] == "space_heat_buffer", "at_upper_bound"].sum()),
+            "heat_buffer_violations": buffer_violations,
+            "heat_peak_coverage_violations": coverage_violations,
+            "largest_battery_kwh": float(audit.loc[audit["asset"] == "battery", "installed_capacity"].max()),
+            "largest_buffer_m3": float(audit.get("buffer_volume_m3", pd.Series(dtype=float)).max()),
+        }
+        summaries[model_case] = summary
+        if summary["status"] != "passed":
+            raise RuntimeError(f"Capacity plausibility audit failed for {model_case}: {summary}")
+    return {"status": "passed", "cases": summaries}
+
+
 def main() -> int:
     args = parse_args()
     args.run_config = args.run_config.resolve()
@@ -478,6 +593,7 @@ def main() -> int:
 
     if not args.dry_run:
         manifest["controlled_realization_audit"] = audit_controlled_realization(manifest)
+        manifest["capacity_plausibility_audit"] = audit_capacity_plausibility(manifest)
     manifest["status"] = "dry-run" if args.dry_run else "done"
     manifest["finished_at"] = utc_now()
     manifest_path.write_text(

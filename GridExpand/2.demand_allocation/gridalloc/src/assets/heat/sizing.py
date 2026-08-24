@@ -107,6 +107,13 @@ def build_heat_asset_plan(
             buffer_l * WATER_HEAT_CAPACITY_WH_PER_L_K
             * buffer_usable_temperature_spread_k / 1000.0
         )
+        households = pd.to_numeric(
+            pd.Series([building.get("number_of_households")]), errors="coerce"
+        ).iloc[0]
+        households = float(households) if pd.notna(households) and households > 0.0 else np.nan
+        planned_hp_kw_el = heuristic_hp_kw_el if fixed else maximum_hp_kw_el
+        planned_aux_kw_el = heuristic_aux_kw_el if fixed else maximum_aux_kw_el
+        peak_coverage_margin = cop * planned_hp_kw_el + planned_aux_kw_el - space - water
         hp_installed_kw_el = heuristic_hp_kw_el if fixed else 0.0
         hp_upper_kw_el = heuristic_hp_kw_el if fixed else maximum_hp_kw_el
         aux_installed_kw_el = heuristic_aux_kw_el if fixed else 0.0
@@ -136,7 +143,29 @@ def build_heat_asset_plan(
             "heat_pump_reference_kw_th": reference_hp_kw_th,
             "auxiliary_installed_kw_el": aux_installed_kw_el,
             "auxiliary_capacity_upper_kw_el": aux_upper_kw_el,
+            "number_of_households": households,
+            "heat_pump_reference_kw_th_per_household": (
+                reference_hp_kw_th / households if pd.notna(households) else np.nan
+            ),
+            "auxiliary_reference_kw_el_per_household": (
+                planned_aux_kw_el / households if pd.notna(households) else np.nan
+            ),
             "buffer_volume_l": buffer_l,
+            "buffer_volume_m3": buffer_l / 1000.0,
+            "buffer_l_per_hp_reference_kw_th": (
+                buffer_l / reference_hp_kw_th if reference_hp_kw_th > 0.0 else np.nan
+            ),
+            "buffer_kwh_per_hp_reference_kw_th": (
+                buffer_kwh / reference_hp_kw_th if reference_hp_kw_th > 0.0 else np.nan
+            ),
+            "buffer_l_per_household": (
+                buffer_l / households if pd.notna(households) else np.nan
+            ),
+            "heat_capacity_peak_coverage_margin_kw_th": float(peak_coverage_margin.min()),
+            "heat_capacity_peak_coverage_valid": bool(peak_coverage_margin.min() >= -1e-9),
+            "buffer_rule_valid": bool(
+                abs(buffer_l - buffer_volume_l_per_kw_th * reference_hp_kw_th) <= 1e-9
+            ),
             "buffer_installed_kwh_th": buffer_kwh if fixed else 0.0,
             "buffer_capacity_upper_kwh_th": buffer_kwh,
             "buffer_installed_power_kw_th": reference_hp_kw_th if fixed else 0.0,

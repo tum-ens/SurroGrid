@@ -7,8 +7,6 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .labels import profile_label
-
 
 @dataclass(frozen=True)
 class PvUrbsInputs:
@@ -60,7 +58,7 @@ def materialize_pv_urbs_inputs(
     sizing_method: str,
     technical_parameters: dict,
 ) -> PvUrbsInputs:
-    """Create angle-resolved optimized or building-weighted fixed PV inputs."""
+    """Create one capacity-weighted LoD2 PV process per physical building."""
     active_plan = asset_plan[asset_plan["pv_max_kwp"].gt(0.0)].copy()
     if active_plan.empty:
         empty = pd.DataFrame()
@@ -72,40 +70,36 @@ def materialize_pv_urbs_inputs(
     records = []
     columns = []
 
-    if sizing_method == "optimization":
-        grouped = sections.groupby(["Site", "profile_tilt_deg", "profile_azimuth_deg"], as_index=False).agg(
-            capacity_kw=("selected_pv_kw", "sum"),
-            fallback_used=("quality_flag", lambda values: values.eq("fallback_14_5_kw").any()),
-        )
-        for row in grouped.itertuples(index=False):
-            commodity = profile_label(row.profile_tilt_deg, row.profile_azimuth_deg)
-            process_name = commodity.replace("solar", "Rooftop PV", 1)
-            records.append({
-                "site": int(row.Site), "commodity": commodity, "process_name": process_name,
-                "process": _process_row(row.Site, process_name, 0.0, row.capacity_kw, fixed=False, parameters=technical_parameters),
-                "capacity_kw": float(row.capacity_kw), "fallback_used": bool(row.fallback_used),
-            })
-            columns.append(profile_library[commodity].rename((int(row.Site), commodity)))
-    elif sizing_method == "annual_electricity_rule":
+    if sizing_method in {"optimization", "annual_electricity_rule"}:
         for building_id, group in sections.groupby("building_objectid", sort=True):
             capacity = float(group["selected_pv_kw"].sum())
             if capacity <= 0:
                 continue
             site = int(group["Site"].iloc[0])
             safe_id = "".join(char if char.isalnum() else "_" for char in str(building_id))
-            commodity = f"solar_heuristic_{safe_id}"
-            process_name = f"Rooftop PV_heuristic_{safe_id}"
+            mode = "optimized" if sizing_method == "optimization" else "heuristic"
+            commodity = f"solar_{mode}_{safe_id}"
+            process_name = f"Rooftop PV_{mode}_{safe_id}"
             weighted = sum(
                 profile_library[label] * float(section_capacity)
                 for label, section_capacity in group[["profile_label", "selected_pv_kw"]].itertuples(index=False, name=None)
             ) / capacity
             columns.append(weighted.rename((site, commodity)))
+            fixed = sizing_method == "annual_electricity_rule"
             records.append({
                 "site": site, "commodity": commodity, "process_name": process_name,
-                "process": _process_row(site, process_name, capacity, capacity, fixed=True, parameters=technical_parameters),
+                "process": _process_row(
+                    site,
+                    process_name,
+                    capacity if fixed else 0.0,
+                    capacity,
+                    fixed=fixed,
+                    parameters=technical_parameters,
+                ),
                 "capacity_kw": capacity,
                 "fallback_used": bool(group["quality_flag"].eq("fallback_14_5_kw").any()),
                 "building_objectid": str(building_id),
+                "roof_profile_count": int(group["profile_label"].nunique()),
             })
     else:
         raise ValueError(f"Unknown PV sizing method {sizing_method!r}.")

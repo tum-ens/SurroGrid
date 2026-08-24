@@ -24,7 +24,7 @@ def materialize_battery_urbs_inputs(
     if energy_to_power_hours <= 0.0:
         raise ValueError("Battery energy-to-power ratio must be positive.")
     active = asset_plan[asset_plan["battery_capacity_upper_kwh"].gt(0.0)].copy()
-    fixed = sizing_method == "htw_2025_upper_bound"
+    fixed = sizing_method == "htw_2025_scaled_rule"
     if not fixed and sizing_method != "optimization":
         raise ValueError(f"Unknown battery sizing method {sizing_method!r}.")
     audit_rows = []

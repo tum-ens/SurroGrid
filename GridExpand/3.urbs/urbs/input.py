@@ -709,6 +709,37 @@ def pyomo_model_prep(data, timesteps):
                 
     if m.mode['sto']:
         m.storage_dict = storage.to_dict()
+        m.sto_linked_capacity_dict = {}
+        linked_process_column = 'linked-process'
+        linked_ratio_column = 'max-energy-per-process-capacity'
+        if linked_process_column in storage and linked_ratio_column in storage:
+            linked_rows = storage[
+                storage[linked_process_column].notna()
+                | storage[linked_ratio_column].notna()
+            ]
+            for storage_index, row in linked_rows.iterrows():
+                linked_process = row[linked_process_column]
+                linked_ratio = row[linked_ratio_column]
+                if pd.isna(linked_process) or pd.isna(linked_ratio):
+                    raise ValueError(
+                        'Storage capacity linkage requires both linked-process and '
+                        'max-energy-per-process-capacity.'
+                    )
+                linked_ratio = float(linked_ratio)
+                if linked_ratio <= 0:
+                    raise ValueError(
+                        'max-energy-per-process-capacity must be positive.'
+                    )
+                stf, sit, _, _ = storage_index
+                process_index = (stf, sit, str(linked_process))
+                if process_index not in process.index:
+                    raise ValueError(
+                        f'Storage {storage_index!r} references missing process '
+                        f'{process_index!r}.'
+                    )
+                m.sto_linked_capacity_dict[storage_index] = (
+                    str(linked_process), linked_ratio
+                )
         # sto_decom_cap = storage[storage['decommissionable'] == 1]
         # m.sto_decom_cap_dict = sto_decom_cap['decommissionable'].to_dict()
         # m.sto_decom_saving_p_dict = sto_decom_cap['decom-saving-p'].to_dict()

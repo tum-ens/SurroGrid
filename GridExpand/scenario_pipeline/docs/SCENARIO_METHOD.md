@@ -90,11 +90,14 @@ P_PV [kWp] = min(E_annual,electricity-only [kWh] * 2.5 / 1000,
 ```
 
 Roof bins are filled in descending annual specific yield until the target is
-met. A capacity-weighted normalized profile represents the resulting system.
-In urbs, heuristic capacity is fixed with equal `inst-cap` and `cap-up`; PV
-investment costs are zero because sizing occurred upstream. Optimized sizing
-keeps separate LoD2 angle-bin processes with zero installed capacity and the
-physical maximum as `cap-up`.
+met. One capacity-weighted normalized LoD2 profile represents the resulting
+building-level system. In urbs, heuristic capacity is fixed with equal
+`inst-cap` and `cap-up`; PV investment costs are zero because sizing occurred
+upstream. Optimized sizing also uses one process per physical building, with
+zero installed capacity and the physical maximum as `cap-up`. Consequently,
+the fixed PV investment cost is charged once per building rather than once per
+roof-angle bin. The optimized process scales the building's capacity-weighted
+roof mix proportionally; it does not choose individual roof orientations.
 
 `location_mode: predefined` limits PV to locations found in the source SWF
 model when that inventory is part of the input. `all_buildings` selects one
@@ -105,28 +108,45 @@ primary electricity connection for every physical building.
 All buildings with PV are battery candidates. When a source inventory such as
 SWF contains battery rows, paired validation uses those rows only as location
 evidence; their reported capacities do not determine the scenario capacity.
-With annual base electricity `E` in MWh/a and the relevant PV capacity `P_PV`
-in kWp, the extrapolated HTW 2025 rule is:
+With annual base electricity `E` in MWh/a and the relevant PV capacity
+`P_PV` in kWp, the central heuristic rule is:
 
-```Python
-C_battery,use [kWh] = 0,                              if P_PV <= 0.5 * E
-C_battery,use [kWh] = min(1.5 * P_PV, 1.5 * E),       otherwise
+```text
+C_battery,use [kWh] = 0,                        if P_PV <= 0.5 * E
+C_battery,use [kWh] = min(1.0 * P_PV, 1.0 * E), otherwise
 ```
 
-The rule is applied to every building type as an explicit extrapolation from
-HTW's single-family-home recommendation. In both heuristic cases, `P_PV` is
-the fixed heuristic PV capacity; the resulting usable battery energy is fixed
-with equal `inst-cap-c` and `cap-up-c`. In `post-hems-optimized`, `P_PV` is
-instead the building's LoD2 maximum PV potential (`pv_max_kwp`), because the
-PV capacity selected by urbs is not known during input preparation. The HTW
-equation therefore provides a potential-based battery `cap-up-c`, while
-`inst-cap-c` remains zero and urbs chooses the installed battery capacity
-endogenously. It does not imply that heuristic and optimized cases have the
-same numerical battery bound, nor does it couple optimized battery capacity to
-the PV capacity ultimately selected by urbs. A configurable energy-to-power
-ratio of 2 h sets maximum charge and discharge power to usable energy divided
-by two. Fixed heuristic assets carry no investment cost because sizing occurs
-upstream.
+HTW 2025 supplies the eligibility threshold and recommends 1.5 kWh/kWp and
+1.5 kWh/MWh as upper limits for usable home-storage capacity. It does not
+recommend a range from 0.75 to 1.5. This study selects 1.0 as a less aggressive
+central building-level heuristic because it extrapolates a single-family-home
+recommendation to all residential building types and does not explicitly model
+future electrified demand in the sizing input. Coefficients of 0.75 and 1.5 are
+study-defined low and high sensitivities; 1.5 is the HTW maximum. The scenario
+uses annual appliance-and-lighting demand only. For multi-household buildings,
+the result represents one shared PV-battery system and is audited both per
+building and per household.
+
+In both heuristic cases, `P_PV` is the fixed heuristic PV capacity and usable
+battery energy is fixed with equal `inst-cap-c` and `cap-up-c`. In
+`post-hems-optimized`, `P_PV` is the building's LoD2 maximum PV potential
+(`pv_max_kwp`) because optimized PV capacity is not known during input
+preparation. The true HTW coefficients of 1.5 then define only the battery
+`cap-up-c`; `inst-cap-c` remains zero and urbs chooses installed capacity.
+The heuristic capacity and optimized upper bound are therefore intentionally
+not the same quantity. A configurable 2 h energy-to-power ratio sets charge and
+discharge power. Fixed heuristic assets carry no investment cost because sizing
+occurs upstream.
+
+Elias's thesis used 976 per kWh as a linear battery investment cost. The cited [IRENA 2022 report](https://www.irena.org/-/media/Files/IRENA/Agency/Publication/2022/Mar/IRENA_Tech_Innovation_Indicators_2022_.pdf)
+identifies this value as the 2021 German median installed price in
+2020 USD/kWh, rather than a euro-denominated 2045 projection. The present 2045
+optimized case therefore uses 300 EUR/kWh as its central assumption. Scenario
+variants should use 250 and 365 EUR/kWh as low and high sensitivities. These
+values span the projected 2040 household stationary-system range in the
+[JRC 2018 report](https://op.europa.eu/en/publication-detail/-/publication/e65c072a-f389-11e8-9982-01aa75ed71a1). This remains an
+explicit extrapolation to 2045 and to shared multi-household systems; the
+plausibility audit is required alongside optimized results.
 
 ## Residential heat assets
 
@@ -260,6 +280,12 @@ VDI 4645 headline rule discussed for the scenario; the temperature spread is an
 explicit modeling assumption needed to convert volume into usable energy.
 Charge and discharge power equal the reference thermal HP capacity, so the E/P
 ratio is derived rather than independently configured.
+In heuristic cases the reference is the fixed heat-pump thermal design capacity.
+In the optimized case the buffer is additionally linked by a linear urbs
+constraint to the heat-pump capacity actually installed. Consequently, an
+optimizer that installs only part of the heat-pump bound may install at most
+20 l/kWth (converted with the same 5 K spread) for that smaller heat pump; the
+former independent full-design-load buffer bound is no longer exploitable.
 
 `post-inflex-heuristic` and `post-hems-heuristic` consume the identical fixed
 heat asset plan. INFLEX dispatch ignores buffer flexibility, limits HP heat to
@@ -288,6 +314,18 @@ run-level profile seed can shift these aggregate pilot values; the sizing and co
 invariants are the acceptance criteria. The optimized-mode check wrote
 zero installed capacity, positive costs, and finite building-specific bounds
 for HP, auxiliary heater, and buffer.
+
+## Capacity plausibility audit
+
+The deterministic smoke runner writes one building-level capacity audit for
+each post-electrification case. Battery results report kWh per building, per
+household, per kWp and per annual MWh, plus zero-capacity and upper-bound
+counts. Heat results report installed HP and auxiliary capacity, buffer kWhth
+and m3, litres per installed kWth, and peak-coverage validity. A run fails if a
+battery exceeds its configured or HTW maximum, if the heat generator bounds do
+not cover the input peak, or if a buffer exceeds 20 l per installed kWth. These
+checks assess scenario plausibility transparently; they do not impose an
+undocumented product-size cap on shared systems.
 
 ## Prices and temporal aggregation
 

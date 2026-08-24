@@ -40,6 +40,7 @@ def materialize_heat_urbs_inputs(asset_plan, *, sizing_method, process_parameter
     sums = {
         name: (name, "sum") for name in (
             "heat_pump_installed_kw_el", "heat_pump_capacity_upper_kw_el",
+            "heat_pump_reference_kw_th",
             "auxiliary_installed_kw_el", "auxiliary_capacity_upper_kw_el",
             "buffer_installed_kwh_th", "buffer_capacity_upper_kwh_th",
             "buffer_installed_power_kw_th", "buffer_power_upper_kw_th",
@@ -60,7 +61,7 @@ def materialize_heat_urbs_inputs(asset_plan, *, sizing_method, process_parameter
         energy_upper = float(row["buffer_capacity_upper_kwh_th"])
         power_upper = float(row["buffer_power_upper_kw_th"])
         if energy_upper > 0.0 and power_upper > 0.0:
-            storage_rows.append({
+            storage_row = {
                 "Site": site, "Storage": "heat_storage", "Commodity": "space_heat",
                 "inst-cap-c": float(row["buffer_installed_kwh_th"]),
                 "cap-up-c": energy_upper,
@@ -77,7 +78,18 @@ def materialize_heat_urbs_inputs(asset_plan, *, sizing_method, process_parameter
                 "var-cost-p": storage_parameters["variable_cost_eur_per_kwh"],
                 "wacc": storage_parameters["wacc"],
                 "depreciation": storage_parameters["depreciation_years"],
-            })
+            }
+            if not fixed:
+                hp_upper_kw_el = float(row["heat_pump_capacity_upper_kw_el"])
+                if hp_upper_kw_el <= 0.0:
+                    raise ValueError(
+                        f"Optimized heat storage at site {site} requires a positive HP bound."
+                    )
+                storage_row.update({
+                    "linked-process": "heatpump_air",
+                    "max-energy-per-process-capacity": energy_upper / hp_upper_kw_el,
+                })
+            storage_rows.append(storage_row)
     sites = sorted(int(value) for value in by_site["Site"].unique())
     commodity = pd.DataFrame([
         {"Site": site, "Commodity": commodity, "Type": kind, "price": np.nan}

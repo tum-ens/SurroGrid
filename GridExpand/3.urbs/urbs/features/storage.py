@@ -48,6 +48,11 @@ def add_storage(m):
         initialize=tuple(m.sto_ep_ratio_dict.keys()),
         doc='storages with given energy to power ratio')
 
+    m.sto_linked_capacity_tuples = pyomo.Set(
+        within=m.stf * m.sit * m.sto * m.com,
+        initialize=tuple(m.sto_linked_capacity_dict.keys()),
+        doc='Storages whose energy capacity is linked to a process capacity')
+
     # # storage tuples for storages which are built in blocks
     # m.sto_block_c_tuples = pyomo.Set(
     #     within=m.stf * m.sit * m.sto * m.com,
@@ -159,6 +164,10 @@ def add_storage(m):
         m.sto_ep_ratio_tuples,
         rule=def_storage_energy_power_ratio_rule,
         doc='storage capacity = storage power * storage E/P ratio')
+    m.res_storage_linked_process_capacity = pyomo.Constraint(
+        m.sto_linked_capacity_tuples,
+        rule=res_storage_linked_process_capacity_rule,
+        doc='storage capacity <= linked process capacity * configured ratio')
 
     return m
 
@@ -332,6 +341,16 @@ def res_storage_state_cyclicity_rule(m, stf, sit, sto, com):
 def def_storage_energy_power_ratio_rule(m, stf, sit, sto, com):
     return (m.cap_sto_c[stf, sit, sto, com] == m.cap_sto_p[stf, sit, sto, com] *
             m.storage_dict['ep-ratio'][(stf, sit, sto, com)])
+
+
+def res_storage_linked_process_capacity_rule(m, stf, sit, sto, com):
+    linked_process, max_energy_per_capacity = m.sto_linked_capacity_dict[
+        (stf, sit, sto, com)
+    ]
+    return (
+        m.cap_sto_c[stf, sit, sto, com]
+        <= max_energy_per_capacity * m.cap_pro[stf, sit, linked_process]
+    )
 
 
 # storage balance

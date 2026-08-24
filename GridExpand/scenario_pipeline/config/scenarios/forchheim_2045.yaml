@@ -38,9 +38,9 @@ asset_sizing:
     azimuth_bin_degrees: 15.0
 
   battery:
-    # INFLEX and heuristic-asset HEMS use the extrapolated HTW 2025 upper bound.
-    heuristic_method: htw_2025_upper_bound
-    # Optimized HEMS reuses the HTW equation with LoD2 PV maximum, not fixed PV.
+    # INFLEX and heuristic-asset HEMS use a central value below the HTW maximum.
+    heuristic_method: htw_2025_scaled_rule
+    # Optimized HEMS uses HTW's actual maximum as an endogenous sizing bound.
     optimized_method: optimization
     # Every building with positive PV potential is a battery candidate.
     location_mode: all_pv_buildings
@@ -48,9 +48,13 @@ asset_sizing:
     predefined_locations_when_available: true
     # HTW eligibility: PV [kWp] must exceed this factor times annual demand [MWh].
     minimum_pv_kwp_per_annual_mwh: 0.5
-    # Usable energy is bounded by both PV power and annual base electricity.
-    maximum_usable_kwh_per_pv_kwp: 1.5
-    maximum_usable_kwh_per_annual_mwh: 1.5
+    # Central heuristic: 1.0 kWh per kWp and per MWh/a base demand.
+    # For sensitivity runs use 0.75 (low) or HTW's 1.5 maximum (high).
+    heuristic_usable_kwh_per_pv_kwp: 1.0
+    heuristic_usable_kwh_per_annual_mwh: 1.0
+    # The optimized model may explore the complete HTW-recommended envelope.
+    optimized_upper_kwh_per_pv_kwp: 1.5
+    optimized_upper_kwh_per_annual_mwh: 1.5
     # E/P = 2 h means maximum charge/discharge power equals energy / 2.
     energy_to_power_hours: 2.0
 
@@ -158,7 +162,9 @@ technologies:
       discharge_efficiency: 1.0
       self_discharge_per_timestep: 0.0
       investment_cost_eur_per_kw: 0.0
-      investment_cost_eur_per_kwh: 976.0
+      # 2045 central household-system projection. Sensitivities: 250 / 365 EUR/kWh.
+      # The former 976 was a 2021 German median in 2020 USD/kWh, not a forecast.
+      investment_cost_eur_per_kwh: 300.0
       fixed_investment_cost_power_eur: 0.0
       fixed_investment_cost_energy_eur: 0.0
       variable_cost_eur_per_kwh: 0.001

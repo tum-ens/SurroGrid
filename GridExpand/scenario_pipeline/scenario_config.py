@@ -177,8 +177,10 @@ class BatterySizingConfig:
     location_mode: str
     predefined_locations_when_available: bool
     minimum_pv_kwp_per_annual_mwh: float
-    maximum_usable_kwh_per_pv_kwp: float
-    maximum_usable_kwh_per_annual_mwh: float
+    heuristic_usable_kwh_per_pv_kwp: float
+    heuristic_usable_kwh_per_annual_mwh: float
+    optimized_upper_kwh_per_pv_kwp: float
+    optimized_upper_kwh_per_annual_mwh: float
     energy_to_power_hours: float
 
     @classmethod
@@ -188,27 +190,48 @@ class BatterySizingConfig:
             "heuristic_method", "optimized_method", "location_mode",
             "predefined_locations_when_available",
             "minimum_pv_kwp_per_annual_mwh",
-            "maximum_usable_kwh_per_pv_kwp",
-            "maximum_usable_kwh_per_annual_mwh",
+            "heuristic_usable_kwh_per_pv_kwp",
+            "heuristic_usable_kwh_per_annual_mwh",
+            "optimized_upper_kwh_per_pv_kwp",
+            "optimized_upper_kwh_per_annual_mwh",
             "energy_to_power_hours",
         }
         _only(raw, allowed, "asset_sizing.battery")
-        if raw["heuristic_method"] != "htw_2025_upper_bound":
-            raise ValueError("asset_sizing.battery.heuristic_method must be htw_2025_upper_bound.")
+        if raw["heuristic_method"] != "htw_2025_scaled_rule":
+            raise ValueError("asset_sizing.battery.heuristic_method must be htw_2025_scaled_rule.")
         if raw["optimized_method"] != "optimization":
             raise ValueError("asset_sizing.battery.optimized_method must be optimization.")
         if raw["location_mode"] != "all_pv_buildings":
             raise ValueError("asset_sizing.battery.location_mode must be all_pv_buildings.")
         if not isinstance(raw["predefined_locations_when_available"], bool):
             raise ValueError("asset_sizing.battery.predefined_locations_when_available must be true or false.")
+        coefficients = {
+            name: _positive(raw[name], f"asset_sizing.battery.{name}")
+            for name in (
+                "heuristic_usable_kwh_per_pv_kwp",
+                "heuristic_usable_kwh_per_annual_mwh",
+                "optimized_upper_kwh_per_pv_kwp",
+                "optimized_upper_kwh_per_annual_mwh",
+            )
+        }
+        above_htw = {
+            name: value for name, value in coefficients.items() if value > 1.5
+        }
+        if above_htw:
+            raise ValueError(
+                "Battery sizing coefficients must not exceed the HTW 2025 "
+                f"recommended upper limit of 1.5: {above_htw}"
+            )
         return cls(
-            heuristic_method="htw_2025_upper_bound",
+            heuristic_method="htw_2025_scaled_rule",
             optimized_method="optimization",
             location_mode="all_pv_buildings",
             predefined_locations_when_available=raw["predefined_locations_when_available"],
             minimum_pv_kwp_per_annual_mwh=_positive(raw["minimum_pv_kwp_per_annual_mwh"], "asset_sizing.battery.minimum_pv_kwp_per_annual_mwh"),
-            maximum_usable_kwh_per_pv_kwp=_positive(raw["maximum_usable_kwh_per_pv_kwp"], "asset_sizing.battery.maximum_usable_kwh_per_pv_kwp"),
-            maximum_usable_kwh_per_annual_mwh=_positive(raw["maximum_usable_kwh_per_annual_mwh"], "asset_sizing.battery.maximum_usable_kwh_per_annual_mwh"),
+            heuristic_usable_kwh_per_pv_kwp=coefficients["heuristic_usable_kwh_per_pv_kwp"],
+            heuristic_usable_kwh_per_annual_mwh=coefficients["heuristic_usable_kwh_per_annual_mwh"],
+            optimized_upper_kwh_per_pv_kwp=coefficients["optimized_upper_kwh_per_pv_kwp"],
+            optimized_upper_kwh_per_annual_mwh=coefficients["optimized_upper_kwh_per_annual_mwh"],
             energy_to_power_hours=_positive(raw["energy_to_power_hours"], "asset_sizing.battery.energy_to_power_hours"),
         )
 
@@ -427,6 +450,22 @@ class ScenarioConfig:
         if model_case == "pre":
             return "none"
         return self.battery.heuristic_method
+
+    def battery_capacity_coefficients(self, model_case: str) -> tuple[float, float]:
+        """Return PV- and demand-based battery coefficients for one model case."""
+        if model_case == "post-hems-optimized":
+            return (
+                self.battery.optimized_upper_kwh_per_pv_kwp,
+                self.battery.optimized_upper_kwh_per_annual_mwh,
+            )
+        if model_case == "pre":
+            return (0.0, 0.0)
+        if model_case not in MODEL_CASES:
+            raise ValueError(f"Unknown model case {model_case!r}.")
+        return (
+            self.battery.heuristic_usable_kwh_per_pv_kwp,
+            self.battery.heuristic_usable_kwh_per_annual_mwh,
+        )
 
     def heat_sizing_method(self, model_case: str) -> str:
         if model_case not in MODEL_CASES:

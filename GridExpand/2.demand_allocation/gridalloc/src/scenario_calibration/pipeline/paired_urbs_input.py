@@ -134,6 +134,9 @@ def materialize_paired_urbs_input(
         )
     pv_sizing_method = scenario.pv_sizing_method(model_case)
     battery_sizing_method = scenario.battery_sizing_method(model_case)
+    battery_pv_coefficient, battery_demand_coefficient = (
+        scenario.battery_capacity_coefficients(model_case)
+    )
     heat_sizing_method = scenario.heat_sizing_method(model_case)
     if pv_sizing_method == "none":
         raise ValueError("The pre case is materialized by the electricity-only pipeline.")
@@ -210,8 +213,8 @@ def materialize_paired_urbs_input(
         pv_sizing_method=pv_sizing_method,
         battery_sizing_method=battery_sizing_method,
         battery_minimum_pv_kwp_per_annual_mwh=scenario.battery.minimum_pv_kwp_per_annual_mwh,
-        battery_maximum_usable_kwh_per_pv_kwp=scenario.battery.maximum_usable_kwh_per_pv_kwp,
-        battery_maximum_usable_kwh_per_annual_mwh=scenario.battery.maximum_usable_kwh_per_annual_mwh,
+        battery_usable_kwh_per_pv_kwp=battery_pv_coefficient,
+        battery_usable_kwh_per_annual_mwh=battery_demand_coefficient,
         battery_energy_to_power_hours=scenario.battery.energy_to_power_hours,
         battery_predefined_locations_when_available=(
             scenario.battery.predefined_locations_when_available

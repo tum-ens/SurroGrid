@@ -249,9 +249,11 @@ class Grid:
             "annual_electricity_kwh": annual_electricity,
             "pv_roof_eligible": True,
         })
-        for column in ("building_use", "building_type"):
+        for column in ("building_use", "building_type", "floor_area"):
             if column in self.df_buildings:
                 buildings[column] = self.df_buildings[column]
+        if "households" in self.df_buildings:
+            buildings["number_of_households"] = self.df_buildings["households"]
         sizing_method = scenario.pv_sizing_method(self.settings["model_case"])
         self.df_pv_asset_plan, self.df_pv_selected_sections = build_pv_asset_plan(
             buildings, self.df_pv_roof_catalog, profile_library,
@@ -274,13 +276,15 @@ class Grid:
         """Compile stationary batteries from PV and base electricity only."""
         scenario = self.settings["scenario_config"]
         battery = scenario.battery
-        sizing_method = scenario.battery_sizing_method(self.settings["model_case"])
+        model_case = self.settings["model_case"]
+        sizing_method = scenario.battery_sizing_method(model_case)
+        pv_coefficient, demand_coefficient = scenario.battery_capacity_coefficients(model_case)
         self.df_battery_asset_plan = build_battery_asset_plan(
             self.df_pv_asset_plan,
             sizing_method=sizing_method,
             minimum_pv_kwp_per_annual_mwh=battery.minimum_pv_kwp_per_annual_mwh,
-            maximum_usable_kwh_per_pv_kwp=battery.maximum_usable_kwh_per_pv_kwp,
-            maximum_usable_kwh_per_annual_mwh=battery.maximum_usable_kwh_per_annual_mwh,
+            usable_kwh_per_pv_kwp=pv_coefficient,
+            usable_kwh_per_annual_mwh=demand_coefficient,
         )
         materialized = materialize_battery_urbs_inputs(
             self.df_battery_asset_plan,
@@ -405,6 +409,8 @@ class Grid:
         for column in ("building_type", "building_use", "floor_area"):
             if column in residential:
                 heat_buildings[column] = residential[column].values
+        if "households" in residential:
+            heat_buildings["number_of_households"] = residential["households"].values
         scenario = self.settings["scenario_config"]
         sizing_method = scenario.heat_sizing_method(self.settings["model_case"])
         norm_outside = heat.get_norm_outside_temperature(self.plz)

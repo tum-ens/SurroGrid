@@ -271,10 +271,10 @@ def build_paired_sector_urbs_inputs(
     pv_profile_library: Path,
     pv_sizing_method: str = "optimization",
     pv_demand_multiplier: float = 2.5,
-    battery_sizing_method: str = "htw_2025_upper_bound",
+    battery_sizing_method: str = "htw_2025_scaled_rule",
     battery_minimum_pv_kwp_per_annual_mwh: float = 0.5,
-    battery_maximum_usable_kwh_per_pv_kwp: float = 1.5,
-    battery_maximum_usable_kwh_per_annual_mwh: float = 1.5,
+    battery_usable_kwh_per_pv_kwp: float = 1.0,
+    battery_usable_kwh_per_annual_mwh: float = 1.0,
     battery_energy_to_power_hours: float = 2.0,
     battery_predefined_locations_when_available: bool = True,
     synthetic_input_dir: Path = SYNTHETIC_INPUT_DIR,
@@ -306,9 +306,9 @@ def build_paired_sector_urbs_inputs(
             pv_asset_plan=pv_asset_plan,
             sizing_method=battery_sizing_method,
             minimum_pv_kwp_per_annual_mwh=battery_minimum_pv_kwp_per_annual_mwh,
-            maximum_usable_kwh_per_pv_kwp=battery_maximum_usable_kwh_per_pv_kwp,
-            maximum_usable_kwh_per_annual_mwh=(
-                battery_maximum_usable_kwh_per_annual_mwh
+            usable_kwh_per_pv_kwp=battery_usable_kwh_per_pv_kwp,
+            usable_kwh_per_annual_mwh=(
+                battery_usable_kwh_per_annual_mwh
             ),
             energy_to_power_hours=battery_energy_to_power_hours,
             predefined_locations_when_available=(
@@ -439,6 +439,9 @@ def _build_paired_pv(
         annual_electricity_kwh=_sum_numeric_columns(
             eligible, ("residential_equivalent_hh_annual_kwh", "calibrated_annual_ghd_kwh")
         ),
+        number_of_households=pd.to_numeric(
+            eligible["building_households"], errors="coerce"
+        ).fillna(0.0),
     )
     asset_plan, selected_sections = build_pv_asset_plan(
         buildings,
@@ -483,8 +486,8 @@ def _build_paired_battery(
     pv_asset_plan: pd.DataFrame,
     sizing_method: str,
     minimum_pv_kwp_per_annual_mwh: float,
-    maximum_usable_kwh_per_pv_kwp: float,
-    maximum_usable_kwh_per_annual_mwh: float,
+    usable_kwh_per_pv_kwp: float,
+    usable_kwh_per_annual_mwh: float,
     energy_to_power_hours: float,
     predefined_locations_when_available: bool,
     technical_parameters: dict,
@@ -520,8 +523,8 @@ def _build_paired_battery(
         pv_asset_plan,
         sizing_method=sizing_method,
         minimum_pv_kwp_per_annual_mwh=minimum_pv_kwp_per_annual_mwh,
-        maximum_usable_kwh_per_pv_kwp=maximum_usable_kwh_per_pv_kwp,
-        maximum_usable_kwh_per_annual_mwh=maximum_usable_kwh_per_annual_mwh,
+        usable_kwh_per_pv_kwp=usable_kwh_per_pv_kwp,
+        usable_kwh_per_annual_mwh=usable_kwh_per_annual_mwh,
         eligible_buildings=eligible_buildings,
         site_by_building=site_by_building,
         location_source=location_source,
@@ -822,6 +825,8 @@ def _build_paired_heat(
             "Site": target_bus,
             "building_type": primary.get("building_type"),
             "building_use": primary.get("building_use"),
+            "number_of_households": primary.get("building_households"),
+            "floor_area": primary.get("building_floor_area"),
         })
         profile_audit.append({
             "sector": "heat", "audit_record_type": "heat_profile",
