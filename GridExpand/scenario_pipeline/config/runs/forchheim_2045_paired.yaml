@@ -7,8 +7,19 @@ run:
   pipeline: paired_validation
 
 resources:
+  # Municipality and postcode whose complete eligible PyLoVo grid set is registered.
+  ags: 9474126
+  plz: 91301
   # Exact pylovo topology version; never inferred from the environment.
   pylovo_version_id: 1
+  # Small grids are removed symmetrically after physical-building pairing.
+  min_buildings: 5
+  # Stable shared heat library; paths are derived from repository conventions.
+  heat_profile_set_id: forchheim_2045_infdb_ro_heat_v1
+  # Existing weather source used to create the shared angle-binned PV library.
+  weather_source_hdf: 9474126-00_91301_1_2.h5
+  # Known incomplete SWF grid retained in coverage but omitted from expansion cost.
+  excluded_real_lv_ids: [113]
   # Prepared allocation/artifact folder name under scenario_calibration outputs.
   paired_dataset_id: swf_2045_paired_pylovo_v1_91301_station_hybrid_v2
   # Run both network adapters; use real_swf or synthetic for a smoke run.
@@ -29,3 +40,5 @@ execution:
   profile_seed: 481527  # Same arbitrary realization seed as the synthetic run.
   cleanup_intermediates: true
   resume: false
+  # Create analysis-ready expansion tables after all requested runs succeed.
+  materialize_expansion: true

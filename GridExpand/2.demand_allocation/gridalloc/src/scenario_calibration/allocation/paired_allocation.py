@@ -5,11 +5,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from dotenv import load_dotenv
 from sqlalchemy import text
+
+from ..paths import ENV_PATH, GRIDEXPAND_DIR
+
+if str(GRIDEXPAND_DIR) not in sys.path:
+    sys.path.insert(0, str(GRIDEXPAND_DIR))
+
+from common.database import SurroGridDatabase  # noqa: E402
 
 from .allocation_plan import build_scenario_allocation_plan
 from .ghd_calibration import build_synthetic_ghd_calibration
@@ -17,7 +26,6 @@ from ..profiles.profile_contract import assert_paired_plan_equivalence
 from .scope_filters import build_grid_scope_summary
 from .sector_asset_calibration import build_sector_asset_calibration
 from .pv_roof_potential import building_roof_capacity, load_lod2_roof_catalog
-from ..paths import configured_pylovo_version_id
 from .swf_2045_building_match import (
     GRIDALLOC_DIR,
     MatchConfig,
@@ -36,6 +44,105 @@ SCENARIO_UNIT_COLUMNS = [
     "building_objectid",
 ]
 PV_LOCATION_MODES = ("swf", "all_buildings")
+
+
+def _register_synthetic_grid_cases(
+    *,
+    ags: int,
+    pylovo_version_id: str,
+    min_buildings: int,
+) -> dict[str, int]:
+    """Register the complete eligible PyLoVo region before using SurroGrid views."""
+    database = SurroGridDatabase()
+    database.ensure_schema()
+    candidate_query = text(
+        """
+        WITH ags_plz AS (
+            SELECT DISTINCT plz
+            FROM pylovo.municipal_register
+            WHERE ags = :ags
+        ),
+        building_counts AS (
+            SELECT grid_result_id, version_id, COUNT(*) AS n_buildings
+            FROM pylovo.buildings_result
+            GROUP BY grid_result_id, version_id
+        ),
+        selected AS (
+            SELECT DISTINCT ON (gr.plz, gr.kcid, gr.bcid)
+                gr.grid_result_id,
+                gr.version_id,
+                gr.plz,
+                gr.kcid,
+                gr.bcid,
+                bc.n_buildings
+            FROM pylovo.grid_result gr
+            JOIN ags_plz ap ON ap.plz = gr.plz
+            JOIN building_counts bc
+              ON bc.grid_result_id = gr.grid_result_id
+             AND bc.version_id = gr.version_id
+            WHERE gr.version_id::text = :pylovo_version_id
+              AND bc.n_buildings >= :min_buildings
+            ORDER BY gr.plz, gr.kcid, gr.bcid, gr.version_id DESC
+        )
+        SELECT
+            *,
+            ROW_NUMBER() OVER (ORDER BY plz, kcid, bcid) - 1 AS candidate_index
+        FROM selected
+        ORDER BY candidate_index
+        """
+    )
+    with database.engine.connect() as conn:
+        candidates = [
+            dict(row)
+            for row in conn.execute(
+                candidate_query,
+                {
+                    "ags": int(ags),
+                    "pylovo_version_id": str(pylovo_version_id),
+                    "min_buildings": int(min_buildings),
+                },
+            ).mappings()
+        ]
+    if not candidates:
+        raise ValueError(
+            "No eligible PyLoVo grids found for "
+            f"AGS={ags}, version={pylovo_version_id!r}."
+        )
+
+    grid_refs = [
+        {
+            "ags": int(ags),
+            "plz": int(row["plz"]),
+            "kcid": int(row["kcid"]),
+            "bcid": int(row["bcid"]),
+            "grid_result_id": int(row["grid_result_id"]),
+            "version_id": str(row["version_id"]),
+            "cell_id": f"{int(ags)}-{int(row['candidate_index']):02d}",
+        }
+        for row in candidates
+    ]
+    insert_query = text(
+        """
+        INSERT INTO surrogrid.grid_case (
+            ags, plz, kcid, bcid, pylovo_grid_result_id,
+            pylovo_version_id, cell_id
+        )
+        VALUES (
+            :ags, :plz, :kcid, :bcid, :grid_result_id,
+            :version_id, :cell_id
+        )
+        ON CONFLICT (ags, plz, kcid, bcid, pylovo_grid_result_id)
+        DO UPDATE SET
+            pylovo_version_id = EXCLUDED.pylovo_version_id,
+            cell_id = EXCLUDED.cell_id
+        """
+    )
+    with database.engine.begin() as conn:
+        conn.execute(insert_query, grid_refs)
+    return {
+        "eligible_grid_cases": len(grid_refs),
+        "eligible_buildings": sum(int(row["n_buildings"]) for row in candidates),
+    }
 
 
 def _deduplicate_exact_wp_identities(
@@ -250,8 +357,7 @@ def _pv_scenario_unit_assignments(
     candidates["building_objectid"] = candidates["building_objectid"].astype(str)
     if location_mode == "swf":
         pv = matches[
-            matches["matched"].fillna(False)
-            & matches["asset_type"].eq("Photovoltaik")
+            matches["matched"].fillna(False) & matches["asset_type"].eq("Photovoltaik")
         ].copy()
         counts = (
             pv.groupby(["building_objectid", "lv_id", "bus"], dropna=False)
@@ -287,14 +393,11 @@ def _pv_scenario_unit_assignments(
         )
         method = "swf_cumulative_pv_location"
     else:
-        candidates["_base_annual_kwh"] = (
-            pd.to_numeric(
-                candidates["residential_equivalent_hh_annual_kwh"], errors="coerce"
-            ).fillna(0.0)
-            + pd.to_numeric(
-                candidates["calibrated_annual_ghd_kwh"], errors="coerce"
-            ).fillna(0.0)
-        )
+        candidates["_base_annual_kwh"] = pd.to_numeric(
+            candidates["residential_equivalent_hh_annual_kwh"], errors="coerce"
+        ).fillna(0.0) + pd.to_numeric(
+            candidates["calibrated_annual_ghd_kwh"], errors="coerce"
+        ).fillna(0.0)
         candidates = candidates.sort_values(
             ["building_objectid", "_base_annual_kwh", "scenario_unit_id"],
             ascending=[True, False, True],
@@ -320,24 +423,26 @@ def _add_pv_roof_assignment(
         how="left",
     )
     result["pv_roof_eligible"] = result["pv_roof_assignment_method"].notna()
-    result["pv_roof_capacity_kw"] = (
-        result["building_objectid"].map(capacity_by_building).fillna(0.0)
-        * result["pv_roof_eligible"].astype(float)
-    )
+    result["pv_roof_capacity_kw"] = result["building_objectid"].map(
+        capacity_by_building
+    ).fillna(0.0) * result["pv_roof_eligible"].astype(float)
     return result
 
 
 def build_paired_allocation(
     *,
+    ags: int,
     plz: int,
     final_year: int,
+    pylovo_version_id: str,
     output_dir: Path | None = None,
     grid_data_path: Path | None = None,
     max_match_distance_m: float = 100.0,
     min_buildings: int = 5,
     pv_location_mode: str = "swf",
 ) -> dict[str, pd.DataFrame]:
-    pylovo_version_id = configured_pylovo_version_id()
+    load_dotenv(ENV_PATH, override=True)
+    os.environ["PYLOVO_VERSION_ID"] = str(pylovo_version_id)
     output_dir = output_dir or (
         GRIDALLOC_DIR
         / "outputs"
@@ -350,6 +455,12 @@ def build_paired_allocation(
         final_year=int(final_year),
         building_scope="all",
         max_match_distance_m=float(max_match_distance_m),
+    )
+
+    registration = _register_synthetic_grid_cases(
+        ags=int(ags),
+        pylovo_version_id=str(pylovo_version_id),
+        min_buildings=int(min_buildings),
     )
 
     buildings = _read_pylovo_buildings(config)
@@ -417,6 +528,7 @@ def build_paired_allocation(
     assert_paired_plan_equivalence(real_plan, synthetic_plan)
 
     metadata = {
+        "ags": int(ags),
         "plz": int(plz),
         "final_year": int(final_year),
         "pylovo_version_id": str(pylovo_version_id),
@@ -437,6 +549,8 @@ def build_paired_allocation(
             ].nunique()
         ),
         "unmatched_ghd_policy": "exclude_row_retain_grid",
+        "registered_pylovo_grid_cases": registration["eligible_grid_cases"],
+        "registered_pylovo_buildings": registration["eligible_buildings"],
         **wp_dedup,
     }
     outputs = {
@@ -465,8 +579,10 @@ def build_paired_allocation(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--plz", type=int, default=91301)
+    parser.add_argument("--ags", type=int, required=True)
+    parser.add_argument("--plz", type=int, required=True)
     parser.add_argument("--final-year", type=int, default=2045)
+    parser.add_argument("--pylovo-version-id", required=True)
     parser.add_argument("--grid-data-path", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--max-match-distance-m", type=float, default=100.0)
@@ -482,8 +598,10 @@ def main() -> None:
     )
     args = parser.parse_args()
     outputs = build_paired_allocation(
+        ags=args.ags,
         plz=args.plz,
         final_year=args.final_year,
+        pylovo_version_id=args.pylovo_version_id,
         output_dir=args.output_dir,
         grid_data_path=args.grid_data_path,
         max_match_distance_m=args.max_match_distance_m,

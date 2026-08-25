@@ -22,6 +22,13 @@ class RunConfig:
     scenario_path: Path
     pipeline: str
     pylovo_version_id: str
+    ags: int | None
+    plz: int | None
+    min_buildings: int
+    heat_profile_set_id: str | None
+    weather_source_hdf: str | None
+    excluded_real_lv_ids: tuple[int, ...]
+    materialize_expansion: bool
 
     # Ordinary synthetic scenario selection.
     inputfile_id: str | None
@@ -83,17 +90,22 @@ class RunConfig:
             _only(
                 execution,
                 {
-                    "n_cpu", "mobility_source", "demand_scope", "timeframe_mode",
-                    "model_cases", "profile_seed",
+                    "n_cpu",
+                    "mobility_source",
+                    "demand_scope",
+                    "timeframe_mode",
+                    "model_cases",
+                    "profile_seed",
                 },
                 "scenario execution",
             )
             storage = str(resources["storage"])
             if storage not in {"db", "h5"}:
                 raise ValueError("resources.storage must be db or h5.")
-            cases = tuple(str(value) for value in execution.get(
-                "model_cases", ("post-hems-heuristic",)
-            ))
+            cases = tuple(
+                str(value)
+                for value in execution.get("model_cases", ("post-hems-heuristic",))
+            )
             if not cases:
                 raise ValueError("execution.model_cases cannot be empty.")
             unknown = set(cases).difference({"pre", *POST_MODEL_CASES})
@@ -106,6 +118,13 @@ class RunConfig:
                 scenario_path=scenario_path,
                 pipeline=pipeline,
                 pylovo_version_id=pylovo_version_id,
+                ags=None,
+                plz=None,
+                min_buildings=5,
+                heat_profile_set_id=None,
+                weather_source_hdf=None,
+                excluded_real_lv_ids=(),
+                materialize_expansion=False,
                 inputfile_id=str(resources["inputfile_id"]),
                 storage=storage,
                 output_directory=path_or_none(resources.get("output_directory")),
@@ -121,26 +140,45 @@ class RunConfig:
                 step3_cpus=1,
                 step3_cluster_concurrency=1,
                 step4_cpus=1,
-                seed=int(_positive(
-                    execution.get("profile_seed", 481527),
-                    "execution.profile_seed",
-                    allow_zero=True,
-                )),
+                seed=int(
+                    _positive(
+                        execution.get("profile_seed", 481527),
+                        "execution.profile_seed",
+                        allow_zero=True,
+                    )
+                ),
                 cleanup_intermediates=False,
                 resume=False,
             )
 
         _only(
             resources,
-            {"paired_dataset_id", "pylovo_version_id", "target_network", "target_grid_id"},
+            {
+                "paired_dataset_id",
+                "pylovo_version_id",
+                "target_network",
+                "target_grid_id",
+                "ags",
+                "plz",
+                "min_buildings",
+                "heat_profile_set_id",
+                "weather_source_hdf",
+                "excluded_real_lv_ids",
+            },
             "paired-validation resources",
         )
         _only(
             execution,
             {
-                "model_cases", "workers", "step3_cpus",
-                "step3_cluster_concurrency", "step4_cpus", "profile_seed",
-                "cleanup_intermediates", "resume",
+                "model_cases",
+                "workers",
+                "step3_cpus",
+                "step3_cluster_concurrency",
+                "step4_cpus",
+                "profile_seed",
+                "cleanup_intermediates",
+                "resume",
+                "materialize_expansion",
             },
             "paired-validation execution",
         )
@@ -149,7 +187,9 @@ class RunConfig:
             raise ValueError("resources.paired_dataset_id must be a directory-safe ID.")
         target = str(resources.get("target_network", "both"))
         if target not in {"both", "real_swf", "synthetic"}:
-            raise ValueError("resources.target_network must be both, real_swf, or synthetic.")
+            raise ValueError(
+                "resources.target_network must be both, real_swf, or synthetic."
+            )
         cases = tuple(str(value) for value in execution["model_cases"])
         if not cases:
             raise ValueError("execution.model_cases cannot be empty.")
@@ -161,12 +201,41 @@ class RunConfig:
         for name in ("cleanup_intermediates", "resume"):
             if name in execution and not isinstance(execution[name], bool):
                 raise ValueError(f"execution.{name} must be true or false.")
+        if "materialize_expansion" in execution and not isinstance(
+            execution["materialize_expansion"], bool
+        ):
+            raise ValueError("execution.materialize_expansion must be true or false.")
+        required_preparation = (
+            "ags",
+            "plz",
+            "heat_profile_set_id",
+            "weather_source_hdf",
+        )
+        missing_preparation = [
+            name for name in required_preparation if resources.get(name) in (None, "")
+        ]
+        if missing_preparation:
+            raise ValueError(
+                "Paired preparation requires resources: "
+                + ", ".join(missing_preparation)
+            )
 
         return cls(
             run_id=run_id,
             scenario_path=scenario_path,
             pipeline=pipeline,
             pylovo_version_id=pylovo_version_id,
+            ags=int(resources["ags"]),
+            plz=int(resources["plz"]),
+            min_buildings=int(
+                _positive(resources.get("min_buildings", 5), "resources.min_buildings")
+            ),
+            heat_profile_set_id=str(resources["heat_profile_set_id"]),
+            weather_source_hdf=str(resources["weather_source_hdf"]),
+            excluded_real_lv_ids=tuple(
+                int(value) for value in resources.get("excluded_real_lv_ids", ())
+            ),
+            materialize_expansion=bool(execution.get("materialize_expansion", True)),
             inputfile_id=None,
             storage="db",
             output_directory=None,
@@ -178,21 +247,30 @@ class RunConfig:
             target_network=target,
             target_grid_id=(
                 int(resources["target_grid_id"])
-                if resources.get("target_grid_id") is not None else None
+                if resources.get("target_grid_id") is not None
+                else None
             ),
             model_cases=cases,
             workers=int(_positive(execution.get("workers", 1), "execution.workers")),
-            step3_cpus=int(_positive(execution.get("step3_cpus", 1), "execution.step3_cpus")),
-            step3_cluster_concurrency=int(_positive(
-                execution.get("step3_cluster_concurrency", 1),
-                "execution.step3_cluster_concurrency",
-            )),
-            step4_cpus=int(_positive(execution.get("step4_cpus", 1), "execution.step4_cpus")),
-            seed=int(_positive(
-                execution.get("profile_seed", 481527),
-                "execution.profile_seed",
-                allow_zero=True,
-            )),
+            step3_cpus=int(
+                _positive(execution.get("step3_cpus", 1), "execution.step3_cpus")
+            ),
+            step3_cluster_concurrency=int(
+                _positive(
+                    execution.get("step3_cluster_concurrency", 1),
+                    "execution.step3_cluster_concurrency",
+                )
+            ),
+            step4_cpus=int(
+                _positive(execution.get("step4_cpus", 1), "execution.step4_cpus")
+            ),
+            seed=int(
+                _positive(
+                    execution.get("profile_seed", 481527),
+                    "execution.profile_seed",
+                    allow_zero=True,
+                )
+            ),
             cleanup_intermediates=bool(execution.get("cleanup_intermediates", False)),
             resume=bool(execution.get("resume", False)),
         )

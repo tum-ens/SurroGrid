@@ -63,7 +63,7 @@ endogenous assets; explicit power-flow convergence accounting.
 
 Aggregate by physical building, scenario unit, target bus, and whole target:
 
-1. heuristic PV equals min(E_base * 2.5 / 1000, pv_max_kwp);
+1. heuristic PV equals min(E_base * 2.0 / 1000, pv_max_kwp);
 2. optimized PV lies between zero and pv_max_kwp;
 3. heuristic batteries reproduce the HTW equation and 2 h E/P ratio;
 4. optimized batteries remain within potential-based bounds;

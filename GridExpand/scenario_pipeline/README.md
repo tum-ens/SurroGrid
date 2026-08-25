@@ -9,3 +9,22 @@ The package layout is deliberately flat: Python configuration models and
 loaders live beside the runner, while user-edited YAML files live under
 `config/scenarios` and `config/runs`. Generated manifests are written to
 `GridExpand/run_logs/scenario_manifests`, never into this source directory.
+
+## Staged entry point
+
+`run_scenario.py` is the single user-facing launcher. For paired validation it
+runs `prepare -> validate -> execute -> postprocess`: it registers the complete
+PyLoVo region, rebuilds the paired allocation and shared heat/PV artifacts,
+checks paired equivalence and heat readiness, executes the requested cases, and
+materializes expansion results. Expansion schema initialization is part of the
+postprocessing command, so no separate `--schema-only` setup is required.
+
+```bash
+uv run --project GridExpand/2.demand_allocation \
+  python GridExpand/scenario_pipeline/run_scenario.py \
+  --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired.yaml
+```
+
+Use `--prepare-only` to rebuild and validate shared inputs without starting
+urbs or power flow. With `resume: true`, preparation is deliberately reused and
+validated rather than rebuilt, preserving the existing job-index ledger.

@@ -112,7 +112,9 @@ From `GridExpand/2.demand_allocation/gridalloc`, run:
 ```bash
 uv run --project .. python \
   -m src.scenario_calibration.allocation.paired_allocation \
+  --ags 9474126 \
   --plz 91301 \
+  --pylovo-version-id 1 \
   --final-year 2045 \
   --min-buildings 5 \
   --pv-location-mode swf \

@@ -574,18 +574,18 @@ def scenario_powerflow_specs(
         "Synthetic": {
             labels["pre"]: {"run_name": f"{scenario_prefix}_synthetic_pre", "stage": "pre"},
             labels["post_no_flex"]: {
-                "run_name": f"{scenario_prefix}_synthetic_no_flex",
+                "run_name": f"{scenario_prefix}_synthetic_post-inflex-heuristic",
                 "stage": "post",
             },
-            labels["post_flex"]: {"run_name": f"{scenario_prefix}_synthetic_flex", "stage": "post"},
+            labels["post_flex"]: {"run_name": f"{scenario_prefix}_synthetic_post-hems-heuristic", "stage": "post"},
         },
         "Real SWF": {
             labels["pre"]: {"run_name": f"{scenario_prefix}_real_swf_pre", "stage": "pre"},
             labels["post_no_flex"]: {
-                "run_name": f"{scenario_prefix}_real_swf_no_flex",
+                "run_name": f"{scenario_prefix}_real_swf_post-inflex-heuristic",
                 "stage": "post",
             },
-            labels["post_flex"]: {"run_name": f"{scenario_prefix}_real_swf_flex", "stage": "post"},
+            labels["post_flex"]: {"run_name": f"{scenario_prefix}_real_swf_post-hems-heuristic", "stage": "post"},
         },
     }
 

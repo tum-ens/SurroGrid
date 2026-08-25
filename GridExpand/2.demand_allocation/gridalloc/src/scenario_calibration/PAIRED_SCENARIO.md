@@ -139,12 +139,14 @@ Topology also matters. Restoring all 15 lines removed by radialization improves 
 
 Build and audit the paired allocation. Creating the physical heat-profile library is a one-time regional preparation step; skip that command when the named profile set already exists:
 
-The allocation command reads `PYLOVO_VERSION_ID` from `GridExpand/.env`. The setting is required and is recorded in the paired-scenario metadata. The shown V4 catalog is needed only for the one-time migration of already validated physical profiles into the reusable library; later topology versions use the library directly.
+The allocation command requires the AGS and PyLoVo version explicitly, registers every eligible regional grid, and records both in paired-scenario metadata. Prefer the staged `run_scenario.py --prepare-only` command for normal operation; the commands below remain useful for component diagnostics. The shown V4 catalog is needed only for the one-time migration of already validated physical profiles into the reusable library; later topology versions use the library directly.
 
 ```bash
 cd GridExpand/2.demand_allocation/gridalloc
 uv run --project .. python -m src.scenario_calibration.allocation.paired_allocation \
+  --ags 9474126 \
   --plz 91301 \
+  --pylovo-version-id 1 \
   --final-year 2045 \
   --min-buildings 5 \
   --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \

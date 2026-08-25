@@ -434,13 +434,18 @@ def _build_paired_pv(
         raise ValueError(
             f"PV profile library has {len(profiles)} rows, expected {hours}."
         )
+    household_column = (
+        "building_households"
+        if "building_households" in eligible
+        else "residential_equivalent_hh_rows"
+    )
     buildings = eligible.assign(
         Site=eligible["_profile_site_id"],
         annual_electricity_kwh=_sum_numeric_columns(
             eligible, ("residential_equivalent_hh_annual_kwh", "calibrated_annual_ghd_kwh")
         ),
         number_of_households=pd.to_numeric(
-            eligible["building_households"], errors="coerce"
+            eligible[household_column], errors="coerce"
         ).fillna(0.0),
     )
     asset_plan, selected_sections = build_pv_asset_plan(
@@ -505,12 +510,13 @@ def _build_paired_battery(
         eligible_buildings = set(inventory["building_objectid"].astype(str))
         site_by_building = (
             inventory.assign(
+                building_objectid=inventory["building_objectid"].astype(str),
                 _battery_site=inventory.get(
                     "_profile_site_id", inventory["allocation_bus"]
                 ).astype(int)
             )
             .drop_duplicates("building_objectid")
-            .set_index(inventory["building_objectid"].astype(str))["_battery_site"]
+            .set_index("building_objectid")["_battery_site"]
             .to_dict()
         )
         location_source = "predefined_swf_battery_locations"

@@ -43,7 +43,12 @@ def load_physical_heat_profile(
     if catalog_row is not None and not bool(
         catalog_row.get("exact_profile_available", True)
     ):
-        if not allow_diagnostic_fallback:
+        approved_fallback = (
+            bool(catalog_row.get("publication_ready", False))
+            and str(catalog_row.get("profile_method", ""))
+            == "nearest_floor_area_scaled_approved"
+        )
+        if not approved_fallback and not allow_diagnostic_fallback:
             raise ValueError(
                 "No exact physical heat profile is available for "
                 f"{building_id}. Add it to the physical heat-profile library "
@@ -58,9 +63,7 @@ def load_physical_heat_profile(
                     f"Diagnostic profile for {building_id} requires a physical "
                     "heat-profile library."
                 )
-            source_building = str(
-                catalog_row["profile_source_building_objectid"]
-            )
+            source_building = str(catalog_row["profile_source_building_objectid"])
             space, water, cop = library.read(source_building, hours=hours)
             return (
                 space * profile_scale,
