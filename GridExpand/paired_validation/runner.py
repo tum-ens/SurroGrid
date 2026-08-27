@@ -289,33 +289,36 @@ def _run_one(
         if not input_hdf.exists():
             raise FileNotFoundError(f"Expected paired input {input_hdf}.")
 
-        run_command(
-            cmd=[
-                "uv",
-                "run",
-                "python",
-                "run_urbs_cluster.py",
-                input_hdf.name,
-                "--n_cpu",
-                str(args.step3_cpus),
-                *_tsam_arguments(args),
-            ],
-            cwd=step3_dir,
-            log_path=log_path,
-            status=status,
-            candidate_index=job_index,
-            stage=(
-                f"step3_{target}_shared_tsam"
-                if args.tsam
-                else f"step3_{target}_full_year"
-            ),
-            env_extra={
-                "URBS_CLUSTER_CONCURRENCY": str(args.step3_cluster_concurrency),
-                "PYLOVO_VERSION_ID": str(args.pylovo_version_id),
-            },
-        )
-        result_hdf = latest_step3_result(step3_dir, input_hdf)
-        validate_shared_tsam(result_hdf, args.shared_tsam_signature)
+        if args.pre_only:
+            result_hdf = input_hdf
+        else:
+            run_command(
+                cmd=[
+                    "uv",
+                    "run",
+                    "python",
+                    "run_urbs_cluster.py",
+                    input_hdf.name,
+                    "--n_cpu",
+                    str(args.step3_cpus),
+                    *_tsam_arguments(args),
+                ],
+                cwd=step3_dir,
+                log_path=log_path,
+                status=status,
+                candidate_index=job_index,
+                stage=(
+                    f"step3_{target}_shared_tsam"
+                    if args.tsam
+                    else f"step3_{target}_full_year"
+                ),
+                env_extra={
+                    "URBS_CLUSTER_CONCURRENCY": str(args.step3_cluster_concurrency),
+                    "PYLOVO_VERSION_ID": str(args.pylovo_version_id),
+                },
+            )
+            result_hdf = latest_step3_result(step3_dir, input_hdf)
+            validate_shared_tsam(result_hdf, args.shared_tsam_signature)
         _run_powerflows(
             job=job,
             args=args,
@@ -401,6 +404,11 @@ def parse_args() -> argparse.Namespace:
         help="Power-flow cases emitted from this materialized asset plan.",
     )
     parser.add_argument("--skip-pre", action="store_true")
+    parser.add_argument(
+        "--pre-only",
+        action="store_true",
+        help="Materialize paired demand and run only pre power flow; skip URBS and all post cases.",
+    )
     parser.add_argument("--run-name-prefix", default="paired_swf_2045_full_local")
     parser.add_argument(
         "--profile-seed",
@@ -462,19 +470,25 @@ def main() -> None:
     args.scenario_config = args.scenario_config.resolve()
     scenario, scenario_hash = load_scenario_config(args.scenario_config)
     requested_model_case = args.model_case
-    result_cases = args.result_cases or [requested_model_case]
-    if len(result_cases) != len(set(result_cases)):
-        raise ValueError("--result-cases contains duplicates.")
-    for result_case in result_cases:
-        if result_case not in scenario.model_cases:
-            raise ValueError(
-                f"Model case {result_case!r} is not enabled by {scenario.scenario_id!r}."
-            )
-    if requested_model_case in {"post-inflex-heuristic", "post-hems-heuristic"}:
-        allowed_results = {"post-inflex-heuristic", "post-hems-heuristic"}
-        args.model_case = "post-hems-heuristic"
+    if args.pre_only:
+        if args.skip_pre:
+            raise ValueError("--pre-only and --skip-pre are mutually exclusive.")
+        result_cases = []
+        allowed_results: set[str] = set()
     else:
-        allowed_results = {"post-hems-optimized"}
+        result_cases = args.result_cases or [requested_model_case]
+        if len(result_cases) != len(set(result_cases)):
+            raise ValueError("--result-cases contains duplicates.")
+        for result_case in result_cases:
+            if result_case not in scenario.model_cases:
+                raise ValueError(
+                    f"Model case {result_case!r} is not enabled by {scenario.scenario_id!r}."
+                )
+        if requested_model_case in {"post-inflex-heuristic", "post-hems-heuristic"}:
+            allowed_results = {"post-inflex-heuristic", "post-hems-heuristic"}
+            args.model_case = "post-hems-heuristic"
+        else:
+            allowed_results = {"post-hems-optimized"}
     if args.model_case not in scenario.model_cases:
         raise ValueError(
             f"Materialization case {args.model_case!r} is not enabled by "
@@ -494,7 +508,7 @@ def main() -> None:
     args.tsam_extreme_method = scenario.time_aggregation.extreme_period_method
     args.reference_year = scenario.mobility.reference_year
     scenario_label_base = args.scenario_label or scenario.scenario_id
-    args.scenario_label = f"{scenario_label_base}_{args.model_case}"
+    args.scenario_label = f"{scenario_label_base}_{'pre' if args.pre_only else args.model_case}"
     args.scenario_hash = scenario_hash
     args.paired_dir = args.paired_dir.resolve()
     if args.grid_data_path is not None:
@@ -564,8 +578,12 @@ def main() -> None:
         repo_root=repo_root,
         status=status,
     )
-    args.shared_tsam_signature = _prepare_shared_tsam_reference(
-        args=args, jobs=jobs, repo_root=repo_root, status=status
+    args.shared_tsam_signature = (
+        None
+        if args.pre_only
+        else _prepare_shared_tsam_reference(
+            args=args, jobs=jobs, repo_root=repo_root, status=status
+        )
     )
     status.event(
         event="batch_start",
@@ -585,6 +603,7 @@ def main() -> None:
         materialization_case=args.model_case,
         result_cases=list(args.result_cases),
         pre_case_emitted=not args.skip_pre,
+        pre_only=args.pre_only,
     )
     started = time.monotonic()
     results = []

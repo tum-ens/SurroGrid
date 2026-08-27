@@ -208,20 +208,18 @@ def _synthetic_building_mapping(
     return mapping
 
 
+def _scenario_unit_keys(plan: pd.DataFrame) -> pd.Series:
+    """Return the stable source-connection identity for every plan row."""
+    return plan[SCENARIO_UNIT_COLUMNS].astype(str).agg("|".join, axis=1)
+
+
 def _add_scenario_unit_ids(
     real: pd.DataFrame,
     synthetic: pd.DataFrame,
 ) -> None:
     """Assign stable sites before either plan is projected onto target buses."""
-    real_keys = real[SCENARIO_UNIT_COLUMNS].astype(str).agg("|".join, axis=1)
-    synthetic_keys = (
-        synthetic[SCENARIO_UNIT_COLUMNS]
-        .astype(str)
-        .agg(
-            "|".join,
-            axis=1,
-        )
-    )
+    real_keys = _scenario_unit_keys(real)
+    synthetic_keys = _scenario_unit_keys(synthetic)
     if real_keys.duplicated().any() or synthetic_keys.duplicated().any():
         raise ValueError("Scenario-unit identity is not unique within a paired plan.")
     if set(real_keys) != set(synthetic_keys):
@@ -256,7 +254,7 @@ def _paired_plans(
     synthetic["allocation_bus"] = synthetic["synthetic_bus"].astype(int)
 
     while True:
-        previous_buildings = set(real["building_objectid"].dropna())
+        previous_scenario_units = set(_scenario_unit_keys(real))
         synthetic_counts = synthetic.groupby(
             "synthetic_grid_case_id",
             observed=True,
@@ -268,19 +266,21 @@ def _paired_plans(
             synthetic["synthetic_grid_case_id"].isin(selected_synthetic_grids)
         ].copy()
 
-        retained_buildings = set(synthetic["building_objectid"].dropna())
-        real = real[real["building_objectid"].isin(retained_buildings)].copy()
+        retained_scenario_units = set(_scenario_unit_keys(synthetic))
+        real = real[
+            _scenario_unit_keys(real).isin(retained_scenario_units)
+        ].copy()
         real_counts = real.groupby("lv_id", observed=True)[
             "building_objectid"
         ].nunique()
         retained_real_grids = set(real_counts[real_counts.ge(int(min_buildings))].index)
         real = real[real["lv_id"].isin(retained_real_grids)].copy()
 
-        retained_buildings = set(real["building_objectid"].dropna())
+        retained_scenario_units = set(_scenario_unit_keys(real))
         synthetic = synthetic[
-            synthetic["building_objectid"].isin(retained_buildings)
+            _scenario_unit_keys(synthetic).isin(retained_scenario_units)
         ].copy()
-        if retained_buildings == previous_buildings:
+        if retained_scenario_units == previous_scenario_units:
             break
 
     _add_scenario_unit_ids(real, synthetic)
