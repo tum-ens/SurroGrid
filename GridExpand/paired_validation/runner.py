@@ -521,7 +521,7 @@ def main() -> None:
                 f"Physical heat-profile library not found: {args.heat_profile_library}"
             )
     args.run_dir = (
-        (repo_root / args.run_dir).resolve()
+        (GRIDEXPAND_DIR.parent / args.run_dir).resolve()
         if not args.run_dir.is_absolute()
         else args.run_dir.resolve()
     )
