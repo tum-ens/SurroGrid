@@ -6,6 +6,7 @@ from pathlib import Path
 import textwrap
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -925,6 +926,10 @@ def plot_powerflow_asset_cutoff_overview_static(
         ax_curve.set_xticklabels([_cutoff_label(q) for q in x_values], rotation=35, ha="right", rotation_mode="anchor", fontsize=tick_fontsize)
         ax_dist.set_xlabel("")
         ax_dist.set_ylabel(y_titles[metric], fontsize=label_fontsize)
+        if metric == "Voltage":
+            voltage_formatter = FormatStrFormatter("%.3f")
+            ax_curve.yaxis.set_major_formatter(voltage_formatter)
+            ax_dist.yaxis.set_major_formatter(voltage_formatter)
         if metric in y_axis_ranges:
             ax_curve.set_ylim(y_axis_ranges[metric])
             ax_dist.set_ylim(y_axis_ranges[metric])
