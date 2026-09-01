@@ -194,7 +194,7 @@ def run_lvds_opt(input_path,        # path to input file
 
     ##### Electrification: #####
     if global_settings["PV_electr"] < 100: data = remove_pv_in_random(data, global_settings["PV_electr"])
-    if global_settings["HP_electr"] < 100: data = remove_heat_in_random(data, global_settings["HP_electr"])
+    if 0 < global_settings["HP_electr"] < 100: data = remove_heat_in_random(data, global_settings["HP_electr"])
     if global_settings["EV_electr"] < 100: data = remove_mobility_in_random(data, global_settings["EV_electr"])
 
     ##### Variable Tariff: #####
