@@ -19,6 +19,8 @@ MODEL_CASES = {
     "post-hems-heuristic": ModelCase("post-hems-heuristic", "heuristic", "optimized"),
 }
 
+POST_MODEL_CASES = tuple(name for name in MODEL_CASES if name != "pre")
+
 
 def get_model_case(name: str) -> ModelCase:
     try:

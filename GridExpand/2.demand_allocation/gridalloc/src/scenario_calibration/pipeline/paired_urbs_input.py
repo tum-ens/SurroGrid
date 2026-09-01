@@ -29,6 +29,7 @@ for path in (GRIDEXPAND_DIR, GRIDALLOC_DIR):
 from config import config  # noqa: E402
 from common.timeframe import build_full_year_metadata, write_hdf_metadata  # noqa: E402
 from scenario_pipeline.config_loader import load_scenario_config  # noqa: E402
+from scenario_pipeline.model_cases import POST_MODEL_CASES  # noqa: E402
 from src.assets.pv.roof_catalog import assert_fallback_share  # noqa: E402
 from src.scenario_calibration.profiles.paired_profiles import (  # noqa: E402
     build_paired_base_electric_demand,
@@ -128,9 +129,9 @@ def materialize_paired_urbs_input(
     """Write one paired full-year Step-3 input HDF."""
     scenario, scenario_hash = load_scenario_config(scenario_config_path)
     config.apply_scenario(scenario)
-    if model_case not in scenario.model_cases:
+    if model_case not in POST_MODEL_CASES:
         raise ValueError(
-            f"Model case {model_case!r} is not enabled in scenario {scenario.scenario_id!r}."
+            f"Paired model case must be one of {POST_MODEL_CASES}; got {model_case!r}."
         )
     pv_sizing_method = scenario.pv_sizing_method(model_case)
     battery_sizing_method = scenario.battery_sizing_method(model_case)
@@ -378,10 +379,7 @@ def main() -> None:
     parser.add_argument("--heat-profile-library", type=Path)
     parser.add_argument(
         "--model-case",
-        choices=[
-            "post-inflex-heuristic", "post-hems-optimized",
-            "post-hems-heuristic",
-        ],
+        choices=POST_MODEL_CASES,
         default="post-hems-heuristic",
     )
     parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)

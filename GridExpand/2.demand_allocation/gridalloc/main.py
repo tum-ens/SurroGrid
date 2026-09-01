@@ -17,6 +17,7 @@ DEFAULT_SCENARIO_CONFIG = (
 from config import config
 from common.database import SurroGridDatabase
 from scenario_pipeline.config_loader import load_scenario_config
+from scenario_pipeline.model_cases import MODEL_CASES
 from common.timeframe import (
     TIMEFRAME_MODES,
     build_initial_metadata,
@@ -150,10 +151,7 @@ if __name__ == '__main__':
         )
         parser.add_argument(
             "--model-case",
-            choices=[
-                "pre", "post-inflex-heuristic", "post-hems-optimized",
-                "post-hems-heuristic",
-            ],
+            choices=tuple(MODEL_CASES),
             default="post-hems-heuristic",
             help="Stable scenario case; determines upstream PV sizing and dispatch contract.",
         )
@@ -175,8 +173,6 @@ if __name__ == '__main__':
         if args.model_case != "pre" and args.profiles == "status_quo":
             parser.error("Post model cases require an electrification profile selection.")
         scenario_config, scenario_hash = load_scenario_config(args.scenario_config)
-        if args.model_case not in scenario_config.model_cases:
-            parser.error(f"Model case {args.model_case!r} is not enabled by the scenario YAML.")
         config.apply_scenario(scenario_config)
 
         timeframe_metadata = build_initial_metadata(args.timeframe_mode)

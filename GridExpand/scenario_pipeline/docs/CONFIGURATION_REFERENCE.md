@@ -15,7 +15,6 @@ from silently selecting another assumption.
 
 - scenario.id: stable scenario identifier.
 - scenario.milestone_year: modeled milestone year.
-- scenario.model_cases: model cases permitted for this scenario.
 - economics.electricity: import price and configurable PV feed-in tariff; a
   zero tariff retains physical export without remuneration.
 - asset_sizing.pv: LoD2 potential, heuristic demand multiplier, fallback, roof
@@ -41,11 +40,12 @@ For run.pipeline: scenario:
   environment by the scenario launcher.
 - resources.storage: db or h5.
 - resources.output_directory: optional output override.
+- execution.model_cases: requested cases for this run. Names are validated
+  against the global model-case registry in scenario_pipeline/model_cases.py.
 - execution.n_cpu, mobility_source, demand_scope, and timeframe_mode:
   machine/runtime choices that do not define scientific assumptions.
 
-One model case is selected with the launcher's optional --model-case; it
-defaults to post-hems-heuristic.
+The launcher's optional --model-case overrides this list for a one-case run.
 
 ## Paired-validation run YAML
 
@@ -66,6 +66,8 @@ For run.pipeline: paired_validation:
 - resources.target_grid_id: optional adapter-local grid filter.
 - execution.model_cases: requested post-cases. Heuristic HEMS and INFLEX share
   one capacity-plan solve; optimized HEMS is solved separately.
+- The paired runner adds the pre case implicitly to the first requested
+  post-case group; pre should therefore not be listed for paired runs.
 - execution workers/CPU values: concurrency limits.
 - execution.powerflow_grid_scope: `full` includes terminal load buses and service
   lines in voltage/loading statistics; `backbone` maps terminal observations one

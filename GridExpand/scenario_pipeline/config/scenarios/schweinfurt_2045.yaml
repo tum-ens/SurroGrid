@@ -2,12 +2,6 @@
 scenario:
   id: schweinfurt_2045
   milestone_year: 2045
-  # Stable public cases; both heuristic post cases consume the same asset plan.
-  model_cases:
-    - pre
-    - post-inflex-heuristic
-    - post-hems-optimized
-    - post-hems-heuristic
 
 economics:
   electricity:

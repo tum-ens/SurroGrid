@@ -7,13 +7,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from .model_cases import MODEL_CASES, POST_MODEL_CASES
 from .scenario_config import _mapping, _only, _positive
-
-POST_MODEL_CASES = {
-    "post-inflex-heuristic",
-    "post-hems-optimized",
-    "post-hems-heuristic",
-}
 
 
 def _grid_scope(execution: dict[str, Any]) -> str:
@@ -112,15 +107,14 @@ class RunConfig:
             storage = str(resources["storage"])
             if storage not in {"db", "h5"}:
                 raise ValueError("resources.storage must be db or h5.")
-            cases = tuple(
-                str(value)
-                for value in execution.get("model_cases", ("post-hems-heuristic",))
-            )
+            if "model_cases" not in execution:
+                raise ValueError("execution.model_cases is required.")
+            cases = tuple(str(value) for value in execution["model_cases"])
             if not cases:
                 raise ValueError("execution.model_cases cannot be empty.")
-            unknown = set(cases).difference({"pre", *POST_MODEL_CASES})
+            unknown = set(cases).difference(MODEL_CASES)
             if unknown:
-                raise ValueError(f"Unknown scenario model cases: {sorted(unknown)}")
+                raise ValueError(f"Unknown model cases: {sorted(unknown)}")
             if len(cases) != len(set(cases)):
                 raise ValueError("execution.model_cases contains duplicates.")
             return cls(
@@ -205,9 +199,15 @@ class RunConfig:
         cases = tuple(str(value) for value in execution["model_cases"])
         if not cases:
             raise ValueError("execution.model_cases cannot be empty.")
-        unknown = set(cases).difference(POST_MODEL_CASES)
+        unknown = set(cases).difference(MODEL_CASES)
         if unknown:
-            raise ValueError(f"Unknown paired model cases: {sorted(unknown)}")
+            raise ValueError(f"Unknown model cases: {sorted(unknown)}")
+        unsupported = set(cases).difference(POST_MODEL_CASES)
+        if unsupported:
+            raise ValueError(
+                "Paired-validation execution.model_cases may only contain post "
+                f"cases: {sorted(unsupported)}"
+            )
         if len(cases) != len(set(cases)):
             raise ValueError("execution.model_cases contains duplicates.")
         for name in ("cleanup_intermediates", "resume"):

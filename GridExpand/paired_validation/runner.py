@@ -45,6 +45,7 @@ from paired_validation.sources.swf import (  # noqa: E402
     ALLOCATION_PLAN_FILENAME as SWF_ALLOCATION_PLAN_FILENAME,
 )
 from scenario_pipeline.config_loader import load_scenario_config  # noqa: E402
+from scenario_pipeline.model_cases import POST_MODEL_CASES  # noqa: E402
 
 ENV_PATH = GRIDEXPAND_DIR / ".env"
 REPO_ROOT_DEFAULT = GRIDEXPAND_DIR.parent
@@ -389,17 +390,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
     parser.add_argument(
         "--model-case",
-        choices=(
-            "post-inflex-heuristic", "post-hems-optimized", "post-hems-heuristic",
-        ),
+        choices=POST_MODEL_CASES,
         default="post-hems-heuristic",
     )
     parser.add_argument(
         "--result-cases",
         nargs="+",
-        choices=(
-            "post-inflex-heuristic", "post-hems-optimized", "post-hems-heuristic",
-        ),
+        choices=POST_MODEL_CASES,
         default=None,
         help="Power-flow cases emitted from this materialized asset plan.",
     )
@@ -484,21 +481,11 @@ def main() -> None:
         result_cases = args.result_cases or [requested_model_case]
         if len(result_cases) != len(set(result_cases)):
             raise ValueError("--result-cases contains duplicates.")
-        for result_case in result_cases:
-            if result_case not in scenario.model_cases:
-                raise ValueError(
-                    f"Model case {result_case!r} is not enabled by {scenario.scenario_id!r}."
-                )
         if requested_model_case in {"post-inflex-heuristic", "post-hems-heuristic"}:
             allowed_results = {"post-inflex-heuristic", "post-hems-heuristic"}
             args.model_case = "post-hems-heuristic"
         else:
             allowed_results = {"post-hems-optimized"}
-    if args.model_case not in scenario.model_cases:
-        raise ValueError(
-            f"Materialization case {args.model_case!r} is not enabled by "
-            f"{scenario.scenario_id!r}."
-        )
     incompatible = set(result_cases).difference(allowed_results)
     if incompatible:
         raise ValueError(

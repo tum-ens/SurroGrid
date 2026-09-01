@@ -197,12 +197,8 @@ def _expansion_commands(
     return commands
 
 
-def _scenario_command(run, scenario, model_case: str) -> tuple[list[str], Path]:
+def _scenario_command(run, model_case: str) -> tuple[list[str], Path]:
     case = get_model_case(model_case)
-    if model_case not in scenario.model_cases:
-        raise ValueError(
-            f"Model case {model_case!r} is not enabled by {scenario.scenario_id!r}."
-        )
     workdir = GRIDEXPAND_DIR / "2.demand_allocation" / "gridalloc"
     profiles = "status_quo" if case.name == "pre" else "all"
     command = [
@@ -300,18 +296,9 @@ def _paired_command(
     return command, workdir
 
 
-def build_commands(
-    run, scenario, model_cases: tuple[str, ...]
-) -> list[tuple[list[str], Path]]:
-    for model_case in model_cases:
-        if model_case not in scenario.model_cases:
-            raise ValueError(
-                f"Model case {model_case!r} is not enabled by {scenario.scenario_id!r}."
-            )
+def build_commands(run, model_cases: tuple[str, ...]) -> list[tuple[list[str], Path]]:
     if run.pipeline == "scenario":
-        return [
-            _scenario_command(run, scenario, model_case) for model_case in model_cases
-        ]
+        return [_scenario_command(run, model_case) for model_case in model_cases]
 
     commands: list[tuple[list[str], Path]] = []
     requested_heuristic = tuple(case for case in HEURISTIC_CASES if case in model_cases)
@@ -360,7 +347,7 @@ def main() -> None:
     if args.prepare_only and run.pipeline != "paired_validation":
         raise ValueError("--prepare-only is only available for paired_validation runs.")
     model_cases = (args.model_case,) if args.model_case is not None else run.model_cases
-    execution_commands = build_commands(run, scenario, model_cases)
+    execution_commands = build_commands(run, model_cases)
     preparation = (
         _paired_preparation_commands(run, scenario)
         if run.pipeline == "paired_validation" and not run.resume

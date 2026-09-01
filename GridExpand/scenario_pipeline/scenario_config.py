@@ -395,7 +395,6 @@ class TimeAggregationConfig:
 class ScenarioConfig:
     scenario_id: str
     milestone_year: int
-    model_cases: tuple[str, ...]
     economics: EconomicsConfig
     pv: PvSizingConfig
     battery: BatterySizingConfig
@@ -409,13 +408,7 @@ class ScenarioConfig:
         raw = _mapping(raw, "scenario configuration")
         _only(raw, {"scenario", "economics", "asset_sizing", "mobility", "technologies", "time_aggregation"}, "top-level scenario")
         scenario = _mapping(raw["scenario"], "scenario")
-        _only(scenario, {"id", "milestone_year", "model_cases"}, "scenario")
-        cases = tuple(str(case) for case in scenario["model_cases"])
-        unknown_cases = set(cases).difference(MODEL_CASES)
-        if unknown_cases:
-            raise ValueError(f"Unknown model cases: {sorted(unknown_cases)}")
-        if len(cases) != len(set(cases)):
-            raise ValueError("scenario.model_cases contains duplicates.")
+        _only(scenario, {"id", "milestone_year"}, "scenario")
         economics = _mapping(raw["economics"], "economics")
         _only(economics, {"electricity"}, "economics")
         assets = _mapping(raw["asset_sizing"], "asset_sizing")
@@ -423,7 +416,6 @@ class ScenarioConfig:
         return cls(
             scenario_id=str(scenario["id"]),
             milestone_year=int(_positive(scenario["milestone_year"], "scenario.milestone_year")),
-            model_cases=cases,
             economics=EconomicsConfig.from_dict(economics["electricity"]),
             pv=PvSizingConfig.from_dict(assets["pv"]),
             battery=BatterySizingConfig.from_dict(assets["battery"]),
