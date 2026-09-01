@@ -28,6 +28,7 @@ resources:
   target_grid_id: null
 
 execution:
+  powerflow_grid_scope: full # full or backbone
   # Requested comparisons. Heuristic cases share one materialization and solve.
   model_cases:
     - post-inflex-heuristic
@@ -37,8 +38,6 @@ execution:
   step3_cpus: 4
   step3_cluster_concurrency: 1
   step4_cpus: 2
-  # full includes terminal buses and service connections; backbone excludes both.
-  powerflow_grid_scope: full
   profile_seed: 481527  # Same arbitrary realization seed as the synthetic run.
   cleanup_intermediates: true
   resume: false

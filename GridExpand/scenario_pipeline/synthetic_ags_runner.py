@@ -1045,6 +1045,8 @@ def run_candidate(
                     raw_run_name,
                     "--n_cpu",
                     str(args.step4_cpus),
+                    "--pylovo-version-id",
+                    str(args.pylovo_version_id),
                 ]
                 if args.demand_scope == "residential":
                     raw_cmd.append("--hh-only")
@@ -1084,6 +1086,8 @@ def run_candidate(
                     summary_run_name,
                     "--n_cpu",
                     str(args.step4_cpus),
+                    "--pylovo-version-id",
+                    str(args.pylovo_version_id),
                 ]
                 if args.demand_scope == "residential":
                     summary_cmd.append("--hh-only")
@@ -1194,6 +1198,8 @@ def run_candidate(
                     "no-flex",
                     "--n_cpu",
                     str(args.step4_cpus),
+                    "--pylovo-version-id",
+                    str(args.pylovo_version_id),
                 ]
                 if args.no_flex_ev_charger_kw is not None:
                     raw_no_flex_cmd.extend(
@@ -1238,6 +1244,8 @@ def run_candidate(
                     "no-flex",
                     "--n_cpu",
                     str(args.step4_cpus),
+                    "--pylovo-version-id",
+                    str(args.pylovo_version_id),
                 ]
                 if args.no_flex_ev_charger_kw is not None:
                     summary_no_flex_cmd.extend(
@@ -1344,6 +1352,8 @@ def run_candidate(
                 raw_run_name,
                 "--n_cpu",
                 str(args.step4_cpus),
+                "--pylovo-version-id",
+                str(args.pylovo_version_id),
             ]
             if args.demand_scope == "residential":
                 raw_cmd.append("--hh-only")
@@ -1384,6 +1394,8 @@ def run_candidate(
                 "no-flex",
                 "--n_cpu",
                 str(args.step4_cpus),
+                "--pylovo-version-id",
+                str(args.pylovo_version_id),
             ]
             if args.no_flex_ev_charger_kw is not None:
                 raw_no_flex_cmd.extend(
@@ -1429,6 +1441,8 @@ def run_candidate(
                 summary_run_name,
                 "--n_cpu",
                 str(args.step4_cpus),
+                "--pylovo-version-id",
+                str(args.pylovo_version_id),
             ]
             if summary_pre_only:
                 summary_cmd.insert(summary_cmd.index("--summary-only"), "--pre-only")
@@ -1476,6 +1490,8 @@ def run_candidate(
                 "no-flex",
                 "--n_cpu",
                 str(args.step4_cpus),
+                "--pylovo-version-id",
+                str(args.pylovo_version_id),
             ]
             if args.no_flex_ev_charger_kw is not None:
                 summary_no_flex_cmd.extend(

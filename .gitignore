@@ -21,3 +21,4 @@ GridExpand/4.powerflow/plots/service_impedance_grid_case_10/summary.csv
 GridExpand/4.powerflow/plots/service_impedance_grid_case_10/voltage_results.npz
 GridExpand/4.powerflow/analysis/reactive_sign_ab.py
 GridExpand/4.powerflow/analysis/service_impedance_counterfactual.py
+paper

@@ -1,13 +1,13 @@
-# Scientific and methodological assumptions for the Forchheim 2045 scenario.
+# Scientific and methodological assumptions for the Schweinfurt 2045 scenario.
 scenario:
-  id: forchheim_2045
+  id: schweinfurt_2045
   milestone_year: 2045
   # Stable public cases; both heuristic post cases consume the same asset plan.
   model_cases:
     - pre
-    # - post-inflex-heuristic
-    # - post-hems-optimized
-    # - post-hems-heuristic
+    - post-inflex-heuristic
+    - post-hems-optimized
+    - post-hems-heuristic
 
 economics:
   electricity:
@@ -206,7 +206,7 @@ technologies:
 
 time_aggregation:
   # TSAM assumptions are scenario methodology, not machine/run settings.
-  enabled: false
+  enabled: true
   number_of_typical_periods: 6
   hours_per_period: 168
   extreme_period_method: replace_cluster_center

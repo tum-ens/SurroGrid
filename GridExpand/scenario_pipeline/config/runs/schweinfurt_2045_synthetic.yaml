@@ -6,7 +6,8 @@ run:
 
 resources:
   # Exact pylovo topology version; never inferred from the environment.
-  pylovo_version_id: 1
+  # Version 100 provides the new Schweinfurt mixed-use building stock.
+  pylovo_version_id: 100
   # AGS, bridge filename prefix, or DB-resolvable grid identifier.
   inputfile_id: "97422"
   storage: db
@@ -14,6 +15,7 @@ resources:
   output_directory: null
 
 execution:
+  powerflow_grid_scope: full # full or backbone
   # One seed defines the physical stochastic realization shared by every model case.
   # Change it only when a deliberately different Monte Carlo realization is wanted.
   profile_seed: 481527  # Arbitrary fixed value; no geographic or scenario meaning.
@@ -22,9 +24,9 @@ execution:
     - pre
     # - post-inflex-heuristic
     # - post-hems-heuristic
-    # - post-hems-optimized
+    - post-hems-optimized
   # Machine-specific execution choices; scientific assumptions stay in the scenario YAML.
   n_cpu: 1
   mobility_source: pool
   demand_scope: all
-  timeframe_mode: full_year
+  timeframe_mode: full_year # ???

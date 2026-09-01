@@ -20,11 +20,13 @@ from common.timeframe import read_hdf_metadata, scenario_key_for_timeframe
 
 
 class SaveFile:
-    def __init__(self, filename, storage="h5", pre_only=False, run_name=None, assumptions_extra=None, grid_case_id=None):
+    def __init__(self, filename, storage="h5", pre_only=False, run_name=None, assumptions_extra=None, grid_case_id=None, pylovo_version_id=None):
         # Copy input file to destination directory
         self.filename = filename
         self.storage = storage
         self.db = SurroGridDatabase() if self.storage == "db" else None
+        if self.db is not None and pylovo_version_id is not None:
+            self.db.pylovo_version_id = str(pylovo_version_id)
         self.grid_ref = None
         self.powerflow_run_id = None
         self.input_path = self._get_readpath()

@@ -173,6 +173,14 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--pylovo-version-id",
+        default=None,
+        help=(
+            "Override the pylovo topology version used to resolve the grid in DB "
+            "mode. Defaults to the PYLOVO_VERSION_ID environment variable (.env)."
+        ),
+    )
+    parser.add_argument(
         "--run-name",
         default=None,
         help="Optional DB powerflow run name. Useful for storing backbone-only summaries separately.",
@@ -305,6 +313,7 @@ if __name__ == "__main__":
         run_name=args.run_name,
         assumptions_extra=assumptions_extra,
         grid_case_id=args.grid_case_id,
+        pylovo_version_id=args.pylovo_version_id,
     )
     residential_buses = _synthetic_residential_buses(SF) if args.hh_only else None
 

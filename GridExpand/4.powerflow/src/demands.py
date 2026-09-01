@@ -64,7 +64,7 @@ def _align_pre_demand_to_urbs(df_pre_demand, df_urbs_demand):
 def _process_pre_demands(df_pre_demand):
     ### Pre-urbs raw household (reactive) electrical demand
     df_raw_demand_elec = df_pre_demand.loc[:, df_pre_demand.columns.get_level_values(1) == 'electricity']
-    df_raw_demand_react = df_raw_demand_elec.copy()*np.tan(np.arccos(config.PF_ELC))*(-1)   # -1 as inductive/lagging and thus a demand
+    df_raw_demand_react = df_raw_demand_elec.copy()*np.tan(np.arccos(config.PF_ELC))#*(-1)   # -1 as inductive/lagging and thus a demand
     df_raw_demand_react.columns = df_raw_demand_react.columns.map(lambda x: (x[0], "electricity-reactive"))
     return df_raw_demand_elec, df_raw_demand_react
 
@@ -115,7 +115,7 @@ def _obtain_post_reactive_power(df_pre_demand_react, df_demand_HP_elec, df_prod_
     df_prod_PV_elec.columns.names     = [None,None]
     
     ### Heat pump
-    df_demand_HP_react = df_demand_HP_elec*np.tan(np.arccos(config.PF_HP))*(-1) # -1 as inductive/lagging and thus a demand
+    df_demand_HP_react = df_demand_HP_elec*np.tan(np.arccos(config.PF_HP))#*(-1) # -1 as inductive/lagging and thus a demand
     df_demand_HP_react = _set_electricity_component(
         df_demand_HP_react,
         "electricity-reactive",

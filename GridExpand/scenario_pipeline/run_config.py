@@ -16,6 +16,14 @@ POST_MODEL_CASES = {
 }
 
 
+def _grid_scope(execution: dict[str, Any]) -> str:
+    """Read and validate execution.powerflow_grid_scope ('full' or 'backbone')."""
+    scope = str(execution.get("powerflow_grid_scope", "full"))
+    if scope not in {"full", "backbone"}:
+        raise ValueError("execution.powerflow_grid_scope must be full or backbone.")
+    return scope
+
+
 @dataclass(frozen=True)
 class RunConfig:
     run_id: str
@@ -97,6 +105,7 @@ class RunConfig:
                     "timeframe_mode",
                     "model_cases",
                     "profile_seed",
+                    "powerflow_grid_scope",
                 },
                 "scenario execution",
             )
@@ -141,7 +150,7 @@ class RunConfig:
                 step3_cpus=1,
                 step3_cluster_concurrency=1,
                 step4_cpus=1,
-                powerflow_grid_scope="full",
+                powerflow_grid_scope=_grid_scope(execution),
                 seed=int(
                     _positive(
                         execution.get("profile_seed", 481527),
@@ -208,9 +217,7 @@ class RunConfig:
             execution["materialize_expansion"], bool
         ):
             raise ValueError("execution.materialize_expansion must be true or false.")
-        powerflow_grid_scope = str(execution.get("powerflow_grid_scope", "full"))
-        if powerflow_grid_scope not in {"full", "backbone"}:
-            raise ValueError("execution.powerflow_grid_scope must be full or backbone.")
+        powerflow_grid_scope = _grid_scope(execution)
         required_preparation = (
             "ags",
             "plz",

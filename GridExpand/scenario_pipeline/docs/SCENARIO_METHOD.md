@@ -465,6 +465,19 @@ case a linear urbs constraint ties maximum buffer energy to the heat-pump
 capacity actually installed. The optimizer therefore cannot exploit the former
 independent full-design-load buffer bound.
 
+The resulting tank sizes are physically modest. The usable energy density of the
+buffer is \(1.163\times\Delta T_{\mathrm{buf}}/1000 = 0.0058\ \mathrm{kWh_{th}/L}\),
+so volumes translate directly through \(V_{\mathrm{buf},i}=20\,P_{\mathrm{HP},i}^{\mathrm{th}}\):
+a single-family heat pump (\(P_{\mathrm{HP}}\approx 5\ \mathrm{kW_{th}}\)) carries
+\(\approx 100\) L (\(\approx 0.6\ \mathrm{kWh_{th}}\)), a 20-flat block
+(\(\approx 57\ \mathrm{kW_{th}}\)) \(\approx 1{,}140\) L (\(\approx 6.6\ \mathrm{kWh_{th}}\)),
+and a 100-flat block (\(\approx 300\ \mathrm{kW_{th}}\)) \(\approx 6{,}000\) L
+(\(\approx 35\ \mathrm{kWh_{th}}\)). These sit well below the oil tanks they
+replace: a typical single-family oil tank holds 3,000–6,000 L and a central
+apartment-block tank 20,000–50,000 L, so the heat-pump buffer reuses a small
+fraction of the existing cellar or boiler-room footprint and remains realizable
+in every building class of the pilot.
+
 `post-inflex-heuristic` and `post-hems-heuristic` consume the identical fixed
 heat asset plan. INFLEX dispatch ignores buffer flexibility, limits HP heat to
 \(\mathrm{COP}_{i,t}P_{\mathrm{HP},i}^{\mathrm{el}}\), and supplies the
