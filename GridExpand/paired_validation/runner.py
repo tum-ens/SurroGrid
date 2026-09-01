@@ -420,6 +420,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step3-cpus", type=int, default=8)
     parser.add_argument("--step3-cluster-concurrency", type=int, default=1)
     parser.add_argument("--step4-cpus", type=int, default=1)
+    parser.add_argument(
+        "--powerflow-grid-scope",
+        choices=("full", "backbone"),
+        default="full",
+    )
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--cleanup-intermediates", action="store_true")

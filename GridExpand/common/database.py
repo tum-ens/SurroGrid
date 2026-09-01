@@ -18,6 +18,9 @@ from common.timeframe import build_full_year_metadata
 GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
 ENV_PATH = GRIDEXPAND_DIR / ".env"
 SCHEMA_SQL_PATH = Path(__file__).with_name("surrogrid_schema.sql")
+GRID_BUILDING_BUS_VIEW_SQL_PATH = Path(__file__).with_name(
+    "grid_building_bus_view.sql"
+)
 TIME_INDEX_START = "2009-01-01 00:00:00+00:00"
 DEFAULT_SCENARIO_KEY = "baseline_static"
 DEFAULT_SCENARIO_LABEL = "Baseline static assumptions"
@@ -65,6 +68,7 @@ class SurroGridDatabase:
             if self._schema_ready(conn):
                 self._ensure_powerflow_summary_columns(conn)
                 self._ensure_real_powerflow_schema(conn)
+                self._ensure_grid_building_bus_view(conn)
                 return
             sql = SCHEMA_SQL_PATH.read_text(encoding="utf-8")
             statements = [statement.strip() for statement in sql.split(";") if statement.strip()]
@@ -76,6 +80,13 @@ class SurroGridDatabase:
                 conn.execute(text(statement))
             self._ensure_powerflow_summary_columns(conn)
             self._ensure_real_powerflow_schema(conn)
+            self._ensure_grid_building_bus_view(conn)
+
+    def _ensure_grid_building_bus_view(self, conn) -> None:
+        """Keep the building-to-bus view compatible with multi-load buildings."""
+        conn.execute(
+            text(GRID_BUILDING_BUS_VIEW_SQL_PATH.read_text(encoding="utf-8"))
+        )
 
     def _ensure_powerflow_summary_columns(self, conn) -> None:
         column_specs = {

@@ -67,6 +67,9 @@ For run.pipeline: paired_validation:
 - execution.model_cases: requested post-cases. Heuristic HEMS and INFLEX share
   one capacity-plan solve; optimized HEMS is solved separately.
 - execution workers/CPU values: concurrency limits.
+- execution.powerflow_grid_scope: `full` includes terminal load buses and service
+  lines in voltage/loading statistics; `backbone` maps terminal observations one
+  bus upstream and removes terminal service edges from those statistics.
 - execution.profile_seed: arbitrary fixed seed defining the reproducible input
   realization; it has no geographic or scenario meaning.
 - execution.cleanup_intermediates and execution.resume: execution-artifact
@@ -86,7 +89,10 @@ Internal directories are deliberately absent from this YAML. Outputs follow:
 Only requested groups are created. When both groups run, pre is emitted by the
 first group only. The external SWF export root remains an environment/deployment
 setting (GRID_DATA_PATH in GridExpand/.env), because it describes where data is
-installed rather than a scenario or run choice.
+installed rather than a scenario or run choice. A station-based dataset must
+contain both `station_split_manifest.csv` and
+`station_radialization_manifest.csv`; their selected files must exist below
+the configured root.
 
 PYLOVO_VERSION_ID in GridExpand/.env is not authoritative for YAML-launched
 scenario runs or paired preparation. The paired-allocation CLI requires the

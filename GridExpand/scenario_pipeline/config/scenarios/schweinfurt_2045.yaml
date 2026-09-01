@@ -1,0 +1,224 @@
+# Scientific and methodological assumptions for the Forchheim 2045 scenario.
+scenario:
+  id: forchheim_2045
+  milestone_year: 2045
+  # Stable public cases; both heuristic post cases consume the same asset plan.
+  model_cases:
+    - pre
+    # - post-inflex-heuristic
+    # - post-hems-optimized
+    # - post-hems-heuristic
+
+economics:
+  electricity:
+    # Retail electricity purchase price used by the building energy model.
+    import_price_eur_per_kwh: 0.398
+    # Compensation for PV exports. Zero represents no feed-in support in 2045.
+    pv_feed_in_tariff_eur_per_kwh: 0.0
+
+asset_sizing:
+  pv:
+    # Heuristic cases use annual base electricity demand; optimized HEMS retains bounds.
+    heuristic_method: annual_electricity_rule
+    optimized_method: optimization
+    # "predefined" uses SWF PV locations when present; use "all_buildings" otherwise.
+    location_mode: all_buildings
+    # Central compromise across public recommendations of roughly 1--2.5 kWp/MWh.
+    # P_PV = min(E_annual * demand_multiplier / 1000, P_PV_max).
+    demand_multiplier: 2.0
+    # Used only when a selected physical building has no usable LoD2 roof section.
+    fallback_capacity_kwp: 14.5
+    # Publication-quality runs fail if more than this share uses the fallback.
+    maximum_fallback_share: 0.0
+    # Module peak capacity and usable fractions applied to actual LoD2 surface area.
+    module_capacity_kw_per_m2: 0.202
+    flat_roof_utilization: 0.27
+    slanted_roof_utilization: 0.58
+    # Shared pvlib profile grid; validated to remain below 10% annual roof deviation.
+    tilt_bin_degrees: 5.0
+    azimuth_bin_degrees: 15.0
+
+  battery:
+    # INFLEX and heuristic-asset HEMS use a central value below the HTW maximum.
+    heuristic_method: htw_2025_scaled_rule
+    # Optimized HEMS uses HTW's actual maximum as an endogenous sizing bound.
+    optimized_method: optimization
+    # Every building with positive PV potential is a battery candidate.
+    location_mode: all_pv_buildings
+    # Source inventories (for example SWF) restrict locations when they exist.
+    predefined_locations_when_available: false
+    # HTW eligibility: PV [kWp] must exceed this factor times annual demand [MWh].
+    minimum_pv_kwp_per_annual_mwh: 0.5
+    # Central heuristic: 1.0 kWh per kWp and per MWh/a base demand.
+    # For sensitivity runs use 0.75 (low) or HTW's 1.5 maximum (high).
+    heuristic_usable_kwh_per_pv_kwp: 1.0
+    heuristic_usable_kwh_per_annual_mwh: 1.0
+    # The optimized model may explore the complete HTW-recommended envelope.
+    optimized_upper_kwh_per_pv_kwp: 1.5
+    optimized_upper_kwh_per_annual_mwh: 1.5
+    # E/P = 2 h means maximum charge/discharge power equals energy / 2.
+    energy_to_power_hours: 2.0
+
+  heat:
+    # Building-level space heat comes from INFDB ro_heat; DHW remains OpenDHW.
+    # Current 8,736 h exports use the documented preliminary final-day rule.
+    space_heat_source: teaser
+    # Degree-day reference temperatures used to derive regional full-load hours.
+    indoor_design_temperature_c: 20.0
+    # DWD/VDI 20/15 convention for the existing residential building stock.
+    heating_limit_temperature_c: 15.0
+    # Thermal HP output at norm outdoor temperature as share of design heat load.
+    heat_pump_design_share: 0.65
+    # Explicit storage is space-heating-only; hourly OpenDHW demand is direct.
+    buffer_volume_l_per_kw_th: 20.0
+    # Usable temperature range for converting buffer litres to kWhth.
+    buffer_usable_temperature_spread_k: 5.0
+
+# Mobility behavior and emobpy vehicle-model assumptions.
+mobility:
+  commuting_probability: 0.62
+  emobpy_timestep_hours: 0.5
+  reference_year: 2009
+  passenger_mass_kg: 75.0
+  passenger_sensible_heat_w: 70.0
+  passengers_per_vehicle: 1.5
+  cabin_heat_transfer_coefficient: 10.0
+  cabin_air_flow_m3_per_s: 0.01
+  driving_cycle_type: WLTC
+  road_type: 0
+  road_slope: 0.0
+
+# Parameters written to the urbs process and storage input tables.
+# Null capacities are derived from upstream asset plans or individual EV profiles.
+technologies:
+  processes:
+    rooftop_pv:
+      installed_capacity_kw: 0.0
+      capacity_upper_kw: 0.0
+      fixed_investment_cost_eur: 6565.0
+      investment_cost_eur_per_kw: 533.7
+      fixed_cost_eur_per_hour: 0.0
+      variable_cost_eur_per_kwh: 0.0
+      wacc: 0.022
+      depreciation_years: 15
+      minimum_power_factor: null
+    heatpump_air:
+      installed_capacity_kw: 0.0
+      capacity_upper_kw: 2000.0
+      fixed_investment_cost_eur: 6600.0
+      investment_cost_eur_per_kw: 750.0
+      fixed_cost_eur_per_hour: 0.0
+      variable_cost_eur_per_kwh: 0.0
+      wacc: 0.0216
+      depreciation_years: 20
+      minimum_power_factor: null
+    heatpump_booster:
+      installed_capacity_kw: 0.0
+      capacity_upper_kw: 2000.0
+      fixed_investment_cost_eur: 100.0
+      investment_cost_eur_per_kw: 83.3
+      fixed_cost_eur_per_hour: 0.0
+      variable_cost_eur_per_kwh: 0.0
+      wacc: 0.0216
+      depreciation_years: 20
+      minimum_power_factor: null
+    heat_dummy:
+      installed_capacity_kw: 2000.0
+      capacity_upper_kw: 2000.0
+      fixed_investment_cost_eur: null
+      investment_cost_eur_per_kw: 0.0
+      fixed_cost_eur_per_hour: 0.0
+      variable_cost_eur_per_kwh: 0.0
+      wacc: 0.07
+      depreciation_years: 1
+      minimum_power_factor: null
+    home_charger:
+      installed_capacity_kw: 11.0
+      capacity_upper_kw: 11.0
+      fixed_investment_cost_eur: null
+      investment_cost_eur_per_kw: 0.0
+      fixed_cost_eur_per_hour: 0.0
+      variable_cost_eur_per_kwh: 0.0
+      wacc: 0.07
+      depreciation_years: 1
+      minimum_power_factor: null
+    grid_connection:
+      installed_capacity_kw: 2000.0
+      capacity_upper_kw: 2000.0
+      fixed_investment_cost_eur: null
+      investment_cost_eur_per_kw: 0.0
+      fixed_cost_eur_per_hour: 0.0
+      variable_cost_eur_per_kwh: 0.0
+      wacc: 0.07
+      depreciation_years: 30
+      minimum_power_factor: null
+  storages:
+    stationary_battery:
+      installed_energy_kwh: null
+      capacity_upper_kwh: null
+      installed_power_kw: null
+      power_upper_kw: null
+      energy_to_power_hours: null
+      charge_efficiency: 0.961
+      discharge_efficiency: 1.0
+      self_discharge_per_timestep: 0.0
+      investment_cost_eur_per_kw: 0.0
+      # 2045 central household-system projection. Sensitivities: 250 / 365 EUR/kWh.
+      # The former 976 was a 2021 German median in 2020 USD/kWh, not a forecast.
+      investment_cost_eur_per_kwh: 300.0
+      fixed_investment_cost_power_eur: 0.0
+      fixed_investment_cost_energy_eur: 0.0
+      variable_cost_eur_per_kwh: 0.001
+      wacc: 0.022
+      depreciation_years: 15
+    thermal_storage:
+      installed_energy_kwh: 0.0
+      capacity_upper_kwh: 10000.0
+      installed_power_kw: 0.0
+      power_upper_kw: 1500.0
+      energy_to_power_hours: 0.15
+      charge_efficiency: 0.932
+      discharge_efficiency: 1.0
+      self_discharge_per_timestep: 0.0
+      investment_cost_eur_per_kw: 0.0
+      investment_cost_eur_per_kwh: 58.0
+      fixed_investment_cost_power_eur: 0.0
+      fixed_investment_cost_energy_eur: 0.0
+      variable_cost_eur_per_kwh: 0.001
+      wacc: 0.0216
+      depreciation_years: 20
+    mobility_storage:
+      installed_energy_kwh: null
+      capacity_upper_kwh: null
+      installed_power_kw: null
+      power_upper_kw: null
+      energy_to_power_hours: null
+      charge_efficiency: 1.0
+      discharge_efficiency: 1.0
+      self_discharge_per_timestep: 0.0
+      investment_cost_eur_per_kw: 0.0
+      investment_cost_eur_per_kwh: 0.0
+      fixed_investment_cost_power_eur: 0.0
+      fixed_investment_cost_energy_eur: 0.0
+      variable_cost_eur_per_kwh: 0.001
+      wacc: 0.07
+      depreciation_years: 20
+
+time_aggregation:
+  # TSAM assumptions are scenario methodology, not machine/run settings.
+  enabled: false
+  number_of_typical_periods: 6
+  hours_per_period: 168
+  extreme_period_method: replace_cluster_center
+  clustering_method: hierarchical
+  cluster_representation: medoid
+  segmentation: false
+  rescale_cluster_periods: false
+  # Selection features and their relative clustering weights.
+  feature_weights:
+    Tamb: 1.0
+    Irradiation: 1.0
+  # Force the coldest and highest-irradiation mean weeks into the representation.
+  extreme_features:
+    - minimum_mean_temperature
+    - maximum_mean_irradiation

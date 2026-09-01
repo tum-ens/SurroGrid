@@ -139,55 +139,6 @@ CREATE INDEX IF NOT EXISTS idx_powerflow_run_scenario ON surrogrid.powerflow_run
 CREATE UNIQUE INDEX IF NOT EXISTS uq_powerflow_run_grid_scenario_name
     ON surrogrid.powerflow_run (grid_case_id, scenario_id, run_name);
 
-CREATE OR REPLACE VIEW surrogrid.grid_building_bus AS
-SELECT
-    gc.grid_case_id,
-    gc.cell_id,
-    gc.ags,
-    gc.plz,
-    gc.kcid,
-    gc.bcid,
-    gc.pylovo_grid_result_id,
-    gc.pylovo_version_id,
-    br.objectid,
-    br.id AS building_id,
-    br.feature_id,
-    br.vertice_id,
-    br.connection_point,
-    COALESCE(pb_name.pp_index, pb_connection.pp_index, br.connection_point) AS bus,
-    COALESCE(pb_name.name, pb_connection.name) AS bus_name,
-    pl.pp_index AS load_index,
-    br.building_use,
-    br.building_type,
-    br.type,
-    br.occupants,
-    br.households,
-    br.floor_area,
-    br.floor_number,
-    br.construction_year,
-    br.postcode,
-    br.street,
-    br.house_number,
-    br.gemeindeschluessel,
-    br.assigned_way_id,
-    br.peak_load_in_kw,
-    ST_Transform(br.centroid, 4326) AS centroid,
-    ST_Y(ST_Transform(br.centroid, 4326)) AS lat,
-    ST_X(ST_Transform(br.centroid, 4326)) AS lon
-FROM surrogrid.grid_case gc
-JOIN pylovo.buildings_result br
-  ON br.grid_result_id = gc.pylovo_grid_result_id
- AND br.version_id = gc.pylovo_version_id
-LEFT JOIN pylovo.pandapower_bus pb_name
-  ON pb_name.grid_result_id = gc.pylovo_grid_result_id
- AND pb_name.name = CONCAT('Consumer Nodebus ', br.vertice_id)
-LEFT JOIN pylovo.pandapower_bus pb_connection
-  ON pb_connection.grid_result_id = gc.pylovo_grid_result_id
- AND pb_connection.pp_index = br.connection_point
-LEFT JOIN pylovo.pandapower_load pl
-  ON pl.grid_result_id = gc.pylovo_grid_result_id
- AND pl.bus = COALESCE(pb_name.pp_index, pb_connection.pp_index, br.connection_point);
-
 DROP TABLE IF EXISTS surrogrid.mobility_profile_availability;
 DROP TABLE IF EXISTS surrogrid.mobility_profile_demand;
 DROP TABLE IF EXISTS surrogrid.mobility_profile_pool;

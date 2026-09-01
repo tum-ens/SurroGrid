@@ -232,6 +232,7 @@ def _lv_id_from_hdf(hdf_path: Path) -> int | None:
 def _prepare_real_grid_for_allocation(
     net: pp.pandapowerNet,
     allocation_buses: list[int],
+    summary_grid_scope: str = "full",
 ):
     grid, transformer_s_rated_mva, cable_max_i_ka, _, _, _, load_scope = (
         _prepare_real_grid(net)
@@ -281,16 +282,17 @@ def _prepare_real_grid_for_allocation(
     }.items():
         grid.load[column] = value
 
-    backbone_cable_ids, voltage_buses = pwrflw.comparison_backbone_scope(
-        grid, load_buses
+    summary_cable_ids, voltage_buses = pwrflw.comparison_evaluation_scope(
+        grid, load_buses, scope=summary_grid_scope
     )
     if not voltage_buses:
         voltage_buses = load_buses
     load_scope.update(
         {
             "scenario_allocation_buses": int(len(load_buses)),
-            "scenario_backbone_voltage_buses": int(len(voltage_buses)),
-            "scenario_backbone_cables": int(len(backbone_cable_ids)),
+            "summary_grid_scope": summary_grid_scope,
+            "scenario_summary_voltage_buses": int(len(voltage_buses)),
+            "scenario_summary_cables": int(len(summary_cable_ids)),
         }
     )
     return (
@@ -298,7 +300,7 @@ def _prepare_real_grid_for_allocation(
         transformer_s_rated_mva,
         cable_max_i_ka,
         voltage_buses,
-        backbone_cable_ids,
+        summary_cable_ids,
         load_scope,
     )
 
@@ -383,7 +385,7 @@ def run_one(
         transformer_s_rated_mva,
         cable_max_i_ka,
         voltage_buses,
-        backbone_cable_ids,
+        summary_cable_ids,
         load_scope,
     ) = _prepare_real_grid_for_allocation(
         net,
@@ -405,7 +407,7 @@ def run_one(
         cable_max_i_ka=cable_max_i_ka,
         voltage_buses=voltage_buses,
         algorithm=["nr", "iwamoto_nr"],
-        cable_ids=backbone_cable_ids,
+        cable_ids=summary_cable_ids,
         on_nonconvergence="nan",
         protect_grid_state=True,
     )
@@ -474,6 +476,7 @@ def run_one_urbs_result(
     post_demand_mode: str,
     max_timesteps: int | None = None,
     no_flex_ev_charger_kw: float | None = None,
+    summary_grid_scope: str = "full",
 ) -> dict[str, Any]:
     start = time.perf_counter()
     hdf_path = Path(urbs_result_hdf).resolve()
@@ -497,11 +500,12 @@ def run_one_urbs_result(
         transformer_s_rated_mva,
         cable_max_i_ka,
         voltage_buses,
-        backbone_cable_ids,
+        summary_cable_ids,
         load_scope,
     ) = _prepare_real_grid_for_allocation(
         net,
         allocation["allocation_bus"].astype(int).tolist(),
+        summary_grid_scope,
     )
 
     adapter = RealUrbsResultAdapter(hdf_path)
@@ -542,7 +546,7 @@ def run_one_urbs_result(
         cable_max_i_ka=cable_max_i_ka,
         voltage_buses=voltage_buses,
         algorithm=["nr", "iwamoto_nr"],
-        cable_ids=backbone_cable_ids,
+        cable_ids=summary_cable_ids,
         on_nonconvergence="nan",
         protect_grid_state=True,
     )
@@ -554,7 +558,7 @@ def run_one_urbs_result(
             cable_max_i_ka=cable_max_i_ka,
             voltage_buses=voltage_buses,
             algorithm=["nr", "iwamoto_nr"],
-            cable_ids=backbone_cable_ids,
+            cable_ids=summary_cable_ids,
             on_nonconvergence="nan",
             protect_grid_state=True,
         )
@@ -684,6 +688,12 @@ def main() -> None:
         default=None,
         help="Optional scenario label stored in the DB. Defaults depend on base-electricity vs URBS-result mode.",
     )
+    parser.add_argument(
+        "--summary-grid-scope",
+        choices=["full", "backbone"],
+        default="full",
+        help="Include service lines/terminal buses (full) or evaluate the upstream backbone only.",
+    )
     args = parser.parse_args()
 
     load_dotenv(ENV_PATH, override=True)
@@ -716,6 +726,7 @@ def main() -> None:
             args.post_demand_mode,
             args.max_timesteps,
             args.no_flex_ev_charger_kw,
+            args.summary_grid_scope,
         )
         result["status"] = "ok"
         result["error"] = ""

@@ -278,6 +278,8 @@ def _paired_command(
         str(run.step3_cluster_concurrency),
         "--step4-cpus",
         str(run.step4_cpus),
+        "--powerflow-grid-scope",
+        run.powerflow_grid_scope,
         "--profile-seed",
         str(run.seed),
         "--scenario-label",

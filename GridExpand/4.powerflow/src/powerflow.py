@@ -407,6 +407,28 @@ def comparison_backbone_scope(grid, load_buses):
     return backbone_cable_ids.astype(int).tolist(), voltage_buses
 
 
+def comparison_evaluation_scope(grid, load_buses, scope="full"):
+    """Return cable and voltage-bus ids for a named comparison scope.
+
+    ``full`` evaluates active service lines and their terminal load buses.
+    ``backbone`` retains the historical comparison behavior that removes each
+    terminal service edge and maps its voltage observation one bus upstream.
+    """
+    if scope not in {"full", "backbone"}:
+        raise ValueError("scope must be either 'full' or 'backbone'.")
+    if scope == "backbone":
+        return comparison_backbone_scope(grid, load_buses)
+
+    cable_ids = _active_line_index(grid).astype(int).tolist()
+    voltage_buses = pd.Index(
+        [int(bus) for bus in load_buses if pd.notna(bus) and int(bus) in grid.bus.index],
+        dtype=int,
+    ).drop_duplicates().tolist()
+    if not voltage_buses:
+        voltage_buses = grid.bus.index.astype(int).tolist()
+    return cable_ids, voltage_buses
+
+
 def pf_summary(
     grid,
     df,
@@ -604,6 +626,17 @@ def pf_summary(
             asset_type="bus",
             tail="lower",
             threshold_percentile=1,
+        ),
+        pd.DataFrame(
+            {
+                "metric": "Power-flow convergence",
+                "asset_type": "grid",
+                "asset_id": 0,
+                "tail": "failure",
+                "threshold_value": 0.0,
+                "t_index": failed_timesteps,
+                "value": 1.0,
+            }
         ),
     ]
     tail_frames = [frame for frame in tail_frames if not frame.empty]

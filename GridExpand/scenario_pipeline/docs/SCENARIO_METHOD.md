@@ -42,6 +42,24 @@ configuration retains only implementation references such as data locations
 and API endpoints.
 
 
+## Paired reference-grid scope and topology
+
+The Forchheim reference population uses the curated `swf_clear` dataset. Its
+49 workbooks are stations that already contain exactly one transformer and
+therefore require no multi-transformer station splitting. This scope decision
+is separate from radialization: the logical source grids had a combined cycle
+rank of 112, so the corresponding validated radialized derivatives are used for
+power flow and reinforcement. All 49 derivatives have zero final cycle rank and
+zero unsupplied load buses.
+
+The external dataset is self-contained. `station_split_manifest.csv` records
+the eligible one-transformer source population, while
+`station_radialization_manifest.csv` records the derived workbook and
+radialization audit for each station. Paired allocation and real-grid power flow
+select the same `regular`/`lvload` entries from these manifests. The
+manifests describe data provenance and topology readiness; they do not define a
+scientific scenario parameter.
+
 ## Reproducible physical-profile realization
 
 Controlled model-case comparisons separate stochastic input realization from

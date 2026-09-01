@@ -48,6 +48,7 @@ class RunConfig:
     step3_cpus: int
     step3_cluster_concurrency: int
     step4_cpus: int
+    powerflow_grid_scope: str
     seed: int
     cleanup_intermediates: bool
     resume: bool
@@ -140,6 +141,7 @@ class RunConfig:
                 step3_cpus=1,
                 step3_cluster_concurrency=1,
                 step4_cpus=1,
+                powerflow_grid_scope="full",
                 seed=int(
                     _positive(
                         execution.get("profile_seed", 481527),
@@ -175,6 +177,7 @@ class RunConfig:
                 "step3_cpus",
                 "step3_cluster_concurrency",
                 "step4_cpus",
+                "powerflow_grid_scope",
                 "profile_seed",
                 "cleanup_intermediates",
                 "resume",
@@ -205,6 +208,9 @@ class RunConfig:
             execution["materialize_expansion"], bool
         ):
             raise ValueError("execution.materialize_expansion must be true or false.")
+        powerflow_grid_scope = str(execution.get("powerflow_grid_scope", "full"))
+        if powerflow_grid_scope not in {"full", "backbone"}:
+            raise ValueError("execution.powerflow_grid_scope must be full or backbone.")
         required_preparation = (
             "ags",
             "plz",
@@ -264,6 +270,7 @@ class RunConfig:
             step4_cpus=int(
                 _positive(execution.get("step4_cpus", 1), "execution.step4_cpus")
             ),
+            powerflow_grid_scope=powerflow_grid_scope,
             seed=int(
                 _positive(
                     execution.get("profile_seed", 481527),

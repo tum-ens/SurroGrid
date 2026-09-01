@@ -194,7 +194,13 @@ Key columns:
 
 ### `surrogrid.grid_building_bus`
 
-Convenience view joining `surrogrid.grid_case` to pylovo building, bus, and load metadata. Use it to map allocated demand and power-flow results back to building attributes and coordinates.
+Convenience view joining `surrogrid.grid_case` to pylovo building, bus, and load
+metadata. It contains exactly one row per physical building and grid case.
+`load_indices` contains every pandapower load on the building bus, including the
+separate residential and non-residential loads of mixed-use buildings.
+`load_index` is retained for compatibility and is populated only when exactly
+one load is associated with the building. Use the view to map allocated demand
+and power-flow results back to building attributes and coordinates.
 
 ## Example Queries
 

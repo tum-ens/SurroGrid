@@ -59,6 +59,8 @@ def run_powerflows(
         str(args.profile_seed),
         "--urbs-result-hdf",
         str(result_hdf),
+        "--summary-grid-scope",
+        args.powerflow_grid_scope,
     ]
     if args.grid_data_path is not None:
         common.extend(["--grid-data-path", str(args.grid_data_path)])

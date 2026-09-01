@@ -78,6 +78,8 @@ def run_powerflows(
         "--summary-only",
         "--summary-nonconvergence",
         "nan",
+        "--summary-grid-scope",
+        args.powerflow_grid_scope,
         "--n_cpu",
         str(args.step4_cpus),
     ]

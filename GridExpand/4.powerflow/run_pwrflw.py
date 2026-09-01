@@ -215,8 +215,18 @@ if __name__ == "__main__":
         default="auto",
         help=(
             "Power-flow non-convergence handling for --summary-only. 'raise' aborts the grid, "
-            "'nan' records failed timesteps and continues, and 'auto' uses 'nan' for no-flex "
-            "summary runs and 'raise' otherwise."
+            "'nan' records failed timesteps and continues, and 'auto' records and continues."
+        ),
+    )
+    parser.add_argument(
+        "--summary-grid-scope",
+        choices=["full", "backbone"],
+        default="full",
+        help=(
+            "Assets included in --summary-only voltage and cable statistics. "
+            "'full' includes terminal buses and service lines (default); "
+            "'backbone' excludes terminal service edges and maps terminal voltage "
+            "observations one bus upstream."
         ),
     )
     args = parser.parse_args()
@@ -237,7 +247,7 @@ if __name__ == "__main__":
 
     summary_nonconvergence = args.summary_nonconvergence
     if summary_nonconvergence == "auto":
-        summary_nonconvergence = "nan" if args.summary_only and args.post_demand_mode == "no-flex" else "raise"
+        summary_nonconvergence = "nan"
     protect_summary_grid_state = summary_nonconvergence == "nan"
 
     # list all .h5 files in your directory
@@ -271,6 +281,8 @@ if __name__ == "__main__":
     )
     assumptions_extra = {
         "post_demand_mode": args.post_demand_mode,
+        "summary_grid_scope": args.summary_grid_scope,
+        "summary_nonconvergence": summary_nonconvergence,
     }
     if args.post_demand_mode == "no-flex":
         assumptions_extra.update({
@@ -371,9 +383,16 @@ if __name__ == "__main__":
     voltage_buses = load_buses or grid.bus.index.tolist()
     # Remove any load restrictions and replace transformer with switch
     grid = pwrflw.prepare_grid(grid)
-    backbone_cable_ids, voltage_buses = pwrflw.comparison_backbone_scope(grid, load_buses)
+    summary_cable_ids, voltage_buses = pwrflw.comparison_evaluation_scope(
+        grid, load_buses, scope=args.summary_grid_scope
+    )
     if not voltage_buses:
         voltage_buses = load_buses or grid.bus.index.tolist()
+    print(
+        f"Summary grid scope={args.summary_grid_scope}: "
+        f"{len(voltage_buses)} voltage buses, {len(summary_cable_ids)} cable rows.",
+        flush=True,
+    )
 
     # Run powerflow pre DER expansion
     with resource_report(name="Pre-Expansion Powerflow Run", include_children=True):
@@ -384,7 +403,7 @@ if __name__ == "__main__":
                 transformer_s_rated_mva=transformer_s_rated_mva,
                 cable_max_i_ka=cable_max_i_ka,
                 voltage_buses=voltage_buses,
-                cable_ids=backbone_cable_ids,
+                cable_ids=summary_cable_ids,
                 on_nonconvergence=summary_nonconvergence,
                 protect_grid_state=protect_summary_grid_state,
             )
@@ -406,7 +425,7 @@ if __name__ == "__main__":
                     transformer_s_rated_mva=transformer_s_rated_mva,
                     cable_max_i_ka=cable_max_i_ka,
                     voltage_buses=voltage_buses,
-                    cable_ids=backbone_cable_ids,
+                    cable_ids=summary_cable_ids,
                     on_nonconvergence=summary_nonconvergence,
                     protect_grid_state=protect_summary_grid_state,
                 )

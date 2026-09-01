@@ -2,7 +2,7 @@
 # Repository paths are resolved from paired_dataset_id; the external SWF grid
 # root comes from GRID_DATA_PATH in GridExpand/.env.
 run:
-  id: forchheim_2045_paired
+  id: forchheim_2045_paired_mixed_use
   scenario: ../scenarios/forchheim_2045.yaml
   pipeline: paired_validation
 
@@ -21,7 +21,7 @@ resources:
   # Known incomplete SWF grid retained in coverage but omitted from expansion cost.
   excluded_real_lv_ids: [113]
   # Prepared allocation/artifact folder name under scenario_calibration outputs.
-  paired_dataset_id: swf_2045_paired_pylovo_v1_91301_station_hybrid_v2
+  paired_dataset_id: swf_2045_paired_mixed_use_91301_station_clear
   # Run both network adapters; use real_swf or synthetic for a smoke run.
   target_network: both
   # Adapter-specific diagnostic filter. Null selects the complete target set.
@@ -37,6 +37,8 @@ execution:
   step3_cpus: 4
   step3_cluster_concurrency: 1
   step4_cpus: 2
+  # full includes terminal buses and service connections; backbone excludes both.
+  powerflow_grid_scope: full
   profile_seed: 481527  # Same arbitrary realization seed as the synthetic run.
   cleanup_intermediates: true
   resume: false
