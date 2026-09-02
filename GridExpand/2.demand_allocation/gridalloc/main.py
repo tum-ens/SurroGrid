@@ -62,7 +62,7 @@ def scenario_assumptions(timeframe_metadata, scenario_key, demand_scope):
     assumptions["scenario_key"] = scenario_key
     assumptions["demand_scope"] = demand_scope
     if demand_scope == "residential":
-        assumptions["demand_scope_filter"] = "building_use == Residential, with residential building-type fallback for HDF inputs"
+        assumptions["demand_scope_filter"] = "included Residential component (residential_floor_area > 0)"
     return assumptions
 
 
@@ -271,6 +271,8 @@ if __name__ == '__main__':
             GRD.SF.copy_save_file()
             GRD.SF.save_timeframe_metadata()
             GRD.SF.save_df(GRD.df_buildings, "raw_data/buildings")
+            GRD.SF.save_df(GRD.df_building_components, "raw_data/building_components")
+            GRD.SF.save_df(GRD.df_demand_component_audit, "raw_data/demand_component_audit")
             if GRD.df_weather_raw is not None and not GRD.df_weather_raw.empty:
                 GRD.SF.save_df(GRD.df_weather_raw, "raw_data/weather")
             GRD.SF.save_df(GRD.df_demand, "urbs_in/demand")
@@ -293,6 +295,8 @@ if __name__ == '__main__':
             GRD.SF.copy_save_file()
             GRD.SF.save_timeframe_metadata()
             GRD.SF.save_df(GRD.df_buildings, "raw_data/buildings")
+            GRD.SF.save_df(GRD.df_building_components, "raw_data/building_components")
+            GRD.SF.save_df(GRD.df_demand_component_audit, "raw_data/demand_component_audit")
             GRD.SF.save_df(GRD.df_weather_raw, "raw_data/weather")
             GRD.SF.save_df(GRD.df_heat_asset_plan, "raw_data/heat_asset_plan")
             GRD.SF.save_df(GRD.df_heat_audit, "raw_data/heat_asset_audit")

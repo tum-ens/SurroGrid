@@ -90,6 +90,29 @@ def assert_paired_plan_equivalence(
             f"only_real={only_real}, only_synthetic={only_synthetic}."
         )
 
+    shared_columns = [
+        column
+        for column in real_plan.columns
+        if column in synthetic_plan.columns
+        and (
+            column in {"building_objectid", "scenario_unit_id"}
+            or column.startswith(("residential_", "ghd_", "unsupported_nonres_", "pv_"))
+        )
+    ]
+    if shared_columns:
+        left = real_plan[shared_columns].copy()
+        right = synthetic_plan[shared_columns].copy()
+        left["building_objectid"] = left["building_objectid"].astype(str)
+        right["building_objectid"] = right["building_objectid"].astype(str)
+        left = left.sort_values(["building_objectid", "scenario_unit_id"]).reset_index(drop=True)
+        right = right.sort_values(["building_objectid", "scenario_unit_id"]).reset_index(drop=True)
+        try:
+            pd.testing.assert_frame_equal(
+                left, right, check_dtype=False, check_exact=False, rtol=0.0, atol=1e-9
+            )
+        except AssertionError as exc:
+            raise ValueError("Paired plans differ in physical technology realization.") from exc
+
     demand_columns = (
         "residential_equivalent_hh_rows",
         "residential_equivalent_hh_annual_kwh",
@@ -136,3 +159,67 @@ def assert_paired_plan_equivalence(
         )
         if real_units != synthetic_units:
             raise ValueError("Paired plans select different PV scenario units.")
+
+
+def assert_paired_component_plan_equivalence(
+    component_plan: pd.DataFrame,
+    synthetic_plan: pd.DataFrame | None = None,
+) -> None:
+    """Validate the paired component contract before URBS materialization."""
+    required = {
+        "component_id", "building_objectid", "scenario_unit_id",
+        "component_category", "included_in_lv", "annual_energy_kwh",
+        "profile_method", "profile_hash", "stable_seed",
+    }
+    for label, frame in (("real", component_plan), ("synthetic", synthetic_plan)):
+        if frame is None:
+            continue
+        missing = sorted(required.difference(frame.columns))
+        if missing:
+            raise ValueError(f"Paired {label} component plan is missing: {missing}")
+        if frame["component_id"].duplicated().any():
+            raise ValueError(f"Paired {label} component IDs are not unique.")
+        if frame["component_category"].isin(["Mixed", "mixed"]).any():
+            raise ValueError("Paired component plans may not contain a Mixed category.")
+        if "suppression_reason" in frame:
+            invalid_suppression = frame["included_in_lv"].astype(bool) & frame["suppression_reason"].notna()
+            if invalid_suppression.any():
+                raise ValueError("Included paired components must not carry a suppression reason.")
+            missing_suppression = (
+                ~frame["included_in_lv"].astype(bool)
+                & frame["suppression_reason"].isna()
+            )
+            if missing_suppression.any():
+                raise ValueError("Every excluded paired component requires a suppression reason.")
+
+    if synthetic_plan is not None:
+        common = sorted(required.intersection(component_plan.columns, synthetic_plan.columns))
+        left = component_plan[common].sort_values("component_id").reset_index(drop=True)
+        right = synthetic_plan[common].sort_values("component_id").reset_index(drop=True)
+        try:
+            pd.testing.assert_frame_equal(
+                left, right, check_dtype=False, check_exact=False, rtol=0.0, atol=1e-9
+            )
+        except AssertionError as exc:
+            raise ValueError("Real and synthetic paired component plans differ.") from exc
+        return
+
+    target_columns = {
+        "real_target_grid_id", "real_target_bus", "synthetic_target_grid_case_id",
+        "synthetic_target_bus",
+    }
+    missing_targets = sorted(target_columns.difference(component_plan.columns))
+    if missing_targets:
+        raise ValueError(f"Paired component plan is missing target mappings: {missing_targets}")
+    if component_plan.empty:
+        raise ValueError("Paired component plan is empty.")
+    for object_id, group in component_plan.groupby("building_objectid", sort=False):
+        for column in (
+            "scenario_unit_id", "source_lv_id", "source_allocation_bus",
+            "real_target_grid_id", "real_target_bus", "synthetic_target_grid_case_id",
+            "synthetic_target_bus",
+        ):
+            if group[column].nunique(dropna=False) != 1:
+                raise ValueError(
+                    f"Paired building {object_id!r} is split across {column} values."
+                )

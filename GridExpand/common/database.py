@@ -12,6 +12,11 @@ import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
+from common.building_components import (
+    build_building_components,
+    validate_component_bus_metadata,
+    validate_physical_buildings,
+)
 from common.timeframe import build_full_year_metadata
 
 
@@ -87,6 +92,40 @@ class SurroGridDatabase:
         conn.execute(
             text(GRID_BUILDING_BUS_VIEW_SQL_PATH.read_text(encoding="utf-8"))
         )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS surrogrid.demand_component_audit (
+                    demand_allocation_run_id BIGINT NOT NULL REFERENCES surrogrid.demand_allocation_run(demand_allocation_run_id) ON DELETE CASCADE,
+                    component_id TEXT NOT NULL,
+                    objectid TEXT NOT NULL,
+                    scenario_unit_id TEXT,
+                    bus INTEGER,
+                    category TEXT NOT NULL,
+                    commodity TEXT NOT NULL,
+                    annual_energy_kwh DOUBLE PRECISION,
+                    max_profile_value DOUBLE PRECISION,
+                    profile_hash TEXT,
+                    profile_method TEXT NOT NULL,
+                    stable_seed BIGINT,
+                    source_asset_count INTEGER,
+                    matched_swf_asset_count INTEGER,
+                    included_in_lv BOOLEAN NOT NULL,
+                    suppression_reason TEXT,
+                    pylovo_version_id VARCHAR(10) NOT NULL,
+                    mix_score DOUBLE PRECISION,
+                    mix_rule TEXT,
+                    mix_confidence TEXT,
+                    mv_direct BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_demand_component_audit UNIQUE (demand_allocation_run_id, component_id, commodity),
+                    CONSTRAINT ck_demand_component_audit_suppression CHECK (included_in_lv OR suppression_reason IS NOT NULL)
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_demand_component_audit_run ON surrogrid.demand_component_audit (demand_allocation_run_id, category, commodity)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_demand_component_audit_component ON surrogrid.demand_component_audit (component_id)"))
 
     def _ensure_powerflow_summary_columns(self, conn) -> None:
         column_specs = {
@@ -674,18 +713,7 @@ class SurroGridDatabase:
                     grid_result_id,
                     version_id,
                     COUNT(*) AS n_buildings,
-                    COUNT(*) FILTER (
-                        WHERE
-                            CASE
-                                WHEN UPPER(COALESCE(TRIM(building_type), TRIM(type), '')) IN ('AB', 'MFH', 'TH', 'SFH')
-                                THEN 'Residential'
-                                WHEN LOWER(COALESCE(TRIM(building_use), TRIM(type), '')) LIKE '%%public%%'
-                                THEN 'Public'
-                                WHEN LOWER(COALESCE(TRIM(building_use), TRIM(type), '')) LIKE '%%commercial%%'
-                                THEN 'Commercial'
-                                ELSE 'Commercial'
-                            END = 'Residential'
-                    ) AS n_residential_buildings
+                    COUNT(*) FILTER (WHERE residential_floor_area > 0) AS n_residential_buildings
                 FROM pylovo.buildings_result
                 GROUP BY grid_result_id, version_id
             ),
@@ -915,6 +943,8 @@ class SurroGridDatabase:
         query = text(
             """
             SELECT
+                b.grid_result_id AS pylovo_grid_result_id,
+                b.version_id AS pylovo_version_id,
                 b.objectid,
                 b.id,
                 b.feature_id,
@@ -922,24 +952,16 @@ class SurroGridDatabase:
                 b.height,
                 b.floor_area,
                 b.floor_number,
-                CASE
-                    WHEN UPPER(COALESCE(TRIM(b.building_type), TRIM(b.type), '')) IN ('AB', 'MFH', 'TH', 'SFH')
-                    THEN UPPER(COALESCE(TRIM(b.building_type), TRIM(b.type)))
-                    WHEN LOWER(COALESCE(TRIM(b.building_use), TRIM(b.type), '')) LIKE '%%public%%'
-                    THEN 'public'
-                    WHEN LOWER(COALESCE(TRIM(b.building_use), TRIM(b.type), '')) LIKE '%%commercial%%'
-                    THEN 'commercial'
-                    ELSE 'commercial'
-                END AS building_type,
-                CASE
-                    WHEN UPPER(COALESCE(TRIM(b.building_type), TRIM(b.type), '')) IN ('AB', 'MFH', 'TH', 'SFH')
-                    THEN 'Residential'
-                    WHEN LOWER(COALESCE(TRIM(b.building_use), TRIM(b.type), '')) LIKE '%%public%%'
-                    THEN 'Public'
-                    WHEN LOWER(COALESCE(TRIM(b.building_use), TRIM(b.type), '')) LIKE '%%commercial%%'
-                    THEN 'Commercial'
-                    ELSE 'Commercial'
-                END AS building_use,
+                b.residential_floor_area,
+                b.nonresidential_floor_area,
+                b.nonresidential_use,
+                b.mix_score,
+                b.mix_rule,
+                b.mix_confidence,
+                b.building_use,
+                b.building_use_id,
+                b.building_type,
+                b.type,
                 b.occupants,
                 b.households,
                 CAST(b.construction_year AS VARCHAR) AS construction_year,
@@ -949,8 +971,12 @@ class SurroGridDatabase:
                 b.house_number,
                 b.gemeindeschluessel,
                 b.assigned_way_id,
+                b.residential_peak_load_in_kw,
+                b.nonresidential_peak_load_in_kw,
+                b.nonresidential_mv_direct,
                 b.peak_load_in_kw,
                 b.connection_point,
+                b.vertice_id AS consumer_vertex,
                 ST_Y(ST_Transform(b.centroid, 4326)) AS lat,
                 ST_X(ST_Transform(b.centroid, 4326)) AS lon
             FROM pylovo.buildings_result b
@@ -984,6 +1010,7 @@ class SurroGridDatabase:
                 f"No buildings found for pylovo grid_result_id={grid_ref['grid_result_id']}."
             )
 
+        df_buildings["grid_case_id"] = int(self.get_or_create_grid_case(grid_ref))
         if not df_bus.empty:
             df_id = pd.DataFrame()
             df_id["vertice_id"] = (
@@ -998,20 +1025,65 @@ class SurroGridDatabase:
 
         if "connection_point" in df_buildings.columns:
             df_buildings["bus"] = df_buildings["bus"].fillna(df_buildings["connection_point"])
-            df_buildings.drop(columns=["connection_point"], inplace=True)
 
-        if {"occupants", "households", "building_use"}.issubset(df_buildings.columns):
-            residential_mask = df_buildings["building_use"].eq("Residential")
-            fallback_occ = df_buildings.loc[residential_mask, "households"].fillna(1)
-            fallback_occ = fallback_occ.clip(lower=1) * 2
-            df_buildings.loc[residential_mask, "occupants"] = (
-                df_buildings.loc[residential_mask, "occupants"].fillna(fallback_occ)
-            )
+        validate_physical_buildings(df_buildings, require_grid_identity=True)
 
         cols = df_buildings.columns.tolist()
         cols.insert(0, cols.pop(cols.index("bus")))
         df_buildings = df_buildings[cols]
         return df_buildings.sort_values(by="bus").reset_index(drop=True)
+
+    def read_building_components(
+        self,
+        grid_ref: dict[str, Any],
+        df_buildings: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
+        """Read and validate the component manifest for one physical grid."""
+        physical = df_buildings if df_buildings is not None else self.read_buildings(grid_ref)
+        grid_case_id = int(self.get_or_create_grid_case(grid_ref))
+        components = build_building_components(physical, grid_case_id=grid_case_id)
+
+        with self.engine.connect() as conn:
+            sql_components = pd.read_sql_query(
+                text(
+                    """
+                    SELECT *
+                    FROM surrogrid.grid_building_component
+                    WHERE grid_case_id = :grid_case_id
+                    ORDER BY component_id
+                    """
+                ),
+                conn,
+                params={"grid_case_id": grid_case_id},
+            )
+            load_metadata = pd.read_sql_query(
+                text(
+                    """
+                    SELECT bus, category
+                    FROM pylovo.pandapower_load
+                    WHERE grid_result_id = :grid_result_id
+                    """
+                ),
+                conn,
+                params={"grid_result_id": grid_ref["grid_result_id"]},
+            )
+
+        if sql_components.empty:
+            raise ValueError(
+                f"No SQL component rows found for grid_case_id={grid_case_id}."
+            )
+        compare_columns = [
+            "component_id", "objectid", "component_category", "effective_floor_area_m2",
+            "installed_peak_kw", "bus", "included_in_lv", "mv_direct",
+        ]
+        expected = components[compare_columns].sort_values("component_id").reset_index(drop=True)
+        actual = sql_components[compare_columns].sort_values("component_id").reset_index(drop=True)
+        try:
+            pd.testing.assert_frame_equal(expected, actual, check_dtype=False, check_exact=False, rtol=1e-9, atol=1e-7)
+        except AssertionError as exc:
+            raise ValueError("SQL and normalized mixed-use component manifests differ.") from exc
+        validate_component_bus_metadata(components, load_metadata)
+        return components
 
     def read_pandapower_grid(self, grid_ref: dict[str, Any]):
         import pandapower as pp
@@ -1366,6 +1438,7 @@ class SurroGridDatabase:
         for table_name in (
             "allocated_vehicle",
             "allocated_eff_factor",
+            "demand_component_audit",
             "allocated_demand",
         ):
             conn.execute(
@@ -1381,6 +1454,24 @@ class SurroGridDatabase:
 
     def write_allocated_eff_factor(self, run_id: int, df: pd.DataFrame) -> None:
         self._write_allocated_timeseries(run_id, df, "component", "allocated_eff_factor")
+
+    def write_demand_component_audit(self, run_id: int, df: pd.DataFrame) -> None:
+        """Persist compact component profile evidence, never hourly profiles."""
+        if df.empty:
+            return
+        columns = [
+            "component_id", "objectid", "scenario_unit_id", "bus", "category",
+            "commodity", "annual_energy_kwh", "max_profile_value", "profile_hash",
+            "profile_method", "stable_seed", "source_asset_count",
+            "matched_swf_asset_count", "included_in_lv", "suppression_reason",
+            "pylovo_version_id", "mix_score", "mix_rule", "mix_confidence", "mv_direct",
+        ]
+        missing = sorted(set(columns).difference(df.columns))
+        if missing:
+            raise ValueError(f"Demand component audit is missing columns: {missing}")
+        out = df[columns].copy()
+        out.insert(0, "demand_allocation_run_id", int(run_id))
+        self._append(out, "demand_component_audit")
 
     def write_allocated_vehicles(self, run_id: int, df_buildings: pd.DataFrame, battery_dict: dict | None = None) -> None:
         battery_dict = battery_dict or {}

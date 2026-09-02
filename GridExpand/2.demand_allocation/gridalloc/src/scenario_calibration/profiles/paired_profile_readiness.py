@@ -43,6 +43,7 @@ def build_heat_profile_catalog(
         building_plan[
             [
                 "building_objectid",
+                "residential_effective_floor_area_m2",
                 "building_use",
                 "building_type",
                 "building_floor_area",
@@ -61,6 +62,10 @@ def build_heat_profile_catalog(
         selected["building_use"] = selected["building_use"].fillna(
             selected["building_use_building"]
         )
+    if "residential_effective_floor_area_m2" in selected:
+        selected["building_floor_area"] = selected[
+            "residential_effective_floor_area_m2"
+        ].fillna(selected["building_floor_area"])
 
     column_cache: dict[str, tuple[pd.Index, pd.Index]] = {}
     records = []

@@ -34,7 +34,18 @@ SELECT
     ST_Y(ST_Transform(br.centroid, 4326)) AS lat,
     ST_X(ST_Transform(br.centroid, 4326)) AS lon,
     loads.load_indices,
-    loads.load_count
+    loads.load_count,
+    br.vertice_id AS consumer_vertex,
+    br.building_use_id,
+    br.residential_floor_area,
+    br.nonresidential_floor_area,
+    br.nonresidential_use,
+    br.mix_score,
+    br.mix_rule,
+    br.mix_confidence,
+    br.residential_peak_load_in_kw,
+    br.nonresidential_peak_load_in_kw,
+    br.nonresidential_mv_direct
 FROM surrogrid.grid_case gc
 JOIN pylovo.buildings_result br
   ON br.grid_result_id = gc.pylovo_grid_result_id
@@ -61,3 +72,62 @@ LEFT JOIN (
      pb_connection.pp_index,
      br.connection_point
  );
+
+CREATE OR REPLACE VIEW surrogrid.grid_building_component AS
+WITH physical AS (
+    SELECT *
+    FROM surrogrid.grid_building_bus
+)
+SELECT
+    CONCAT(p.objectid, '::residential') AS component_id,
+    p.grid_case_id,
+    p.objectid,
+    p.pylovo_grid_result_id,
+    p.pylovo_version_id,
+    'Residential'::TEXT AS component_category,
+    p.residential_floor_area AS effective_floor_area_m2,
+    p.floor_area * p.floor_number AS gross_floor_area_m2,
+    p.households,
+    p.occupants,
+    p.residential_peak_load_in_kw AS installed_peak_kw,
+    p.households::DOUBLE PRECISION AS load_units,
+    p.consumer_vertex,
+    p.bus,
+    TRUE AS included_in_lv,
+    FALSE AS mv_direct,
+    p.mix_score,
+    p.mix_rule,
+    p.mix_confidence,
+    p.building_use AS source_building_use,
+    p.building_use_id AS source_building_use_id,
+    p.building_type AS source_building_type
+FROM physical p
+WHERE p.residential_floor_area > 0
+
+UNION ALL
+
+SELECT
+    CONCAT(p.objectid, '::', LOWER(p.nonresidential_use)) AS component_id,
+    p.grid_case_id,
+    p.objectid,
+    p.pylovo_grid_result_id,
+    p.pylovo_version_id,
+    p.nonresidential_use AS component_category,
+    p.nonresidential_floor_area AS effective_floor_area_m2,
+    p.floor_area * p.floor_number AS gross_floor_area_m2,
+    NULL::INTEGER AS households,
+    NULL::INTEGER AS occupants,
+    p.nonresidential_peak_load_in_kw AS installed_peak_kw,
+    1.0::DOUBLE PRECISION AS load_units,
+    p.consumer_vertex,
+    p.bus,
+    NOT COALESCE(p.nonresidential_mv_direct, FALSE) AS included_in_lv,
+    COALESCE(p.nonresidential_mv_direct, FALSE) AS mv_direct,
+    p.mix_score,
+    p.mix_rule,
+    p.mix_confidence,
+    p.building_use AS source_building_use,
+    p.building_use_id AS source_building_use_id,
+    p.building_type AS source_building_type
+FROM physical p
+WHERE p.nonresidential_floor_area > 0;

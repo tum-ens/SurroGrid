@@ -1,5 +1,6 @@
 """Shared pylovo grid export helpers for Step 1."""
 
+from common.building_components import build_building_components
 import pandas as pd
 
 import src.grid_topol as grdtpl
@@ -58,9 +59,10 @@ def export_pylovo_grid(db, grid_specs: dict, region_specs, skip_weather: bool = 
 
     net = db.read_single_ppgrid(grid_specs)
     net = grdtpl.assign_min_linelen(net)
-    net = grdtpl.remove_duplicate_loads(net)
+    net = grdtpl.normalize_scenario_loads(net)
 
     df_buildings = db.read_buildings(grid_specs, net.bus)
+    df_building_components = build_building_components(df_buildings)
 
     df_weather = None
     if not skip_weather:
@@ -73,6 +75,7 @@ def export_pylovo_grid(db, grid_specs: dict, region_specs, skip_weather: bool = 
     save_file.save_topology(net, "/raw_data/")
     save_file.save_df(df_region, "/raw_data/region")
     save_file.save_df(df_buildings, "/raw_data/buildings")
+    save_file.save_df(df_building_components, "/raw_data/building_components")
     if df_weather is not None:
         save_file.save_df(df_weather, "/raw_data/weather")
 

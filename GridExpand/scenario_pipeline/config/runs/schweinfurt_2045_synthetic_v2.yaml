@@ -1,12 +1,16 @@
-# Execution and resource selection for one ordinary synthetic scenario run.
+# Execution and resource selection for the v2 (ampacity-only) Schweinfurt run.
+# v2 is the clean baseline for the voltage-drop-aware dimensioning feature:
+# identical equipment data, transformers, topology, and all other generation
+# parameters to v3, with the end-to-end feeder voltage-drop upsizing inactive
+# (0 feeder lines upsized vs 47 in v3). Compare head-to-head with v3.
 run:
-  id: schweinfurt_2045_synthetic
+  id: schweinfurt_2045_synthetic_v2
   scenario: ../scenarios/schweinfurt_2045.yaml
   pipeline: scenario
 
 resources:
-  # Exact pylovo topology version
-  pylovo_version_id: 3
+  # Exact pylovo topology version: v2 = ampacity-only dimensioned grids (baseline).
+  pylovo_version_id: 2
   # AGS, bridge filename prefix, or DB-resolvable grid identifier.
   inputfile_id: "97422"
   storage: db
@@ -28,4 +32,4 @@ execution:
   n_cpu: 1
   mobility_source: pool
   demand_scope: all
-  timeframe_mode: full_year # ???
+  timeframe_mode: full_year

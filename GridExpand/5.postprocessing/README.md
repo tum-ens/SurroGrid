@@ -15,7 +15,7 @@ Database connection details are read from the repository-level `.env` through `S
 
 Step 5 is split by workflow responsibility:
 
-- `powerflow.comparison_data`: load compact synthetic and real power-flow summaries, build comparison datasets, and compute similarity tables.
+- `powerflow.comparison_data`: load compact synthetic and real power-flow summaries, build comparison datasets, compute similarity tables, and summarize component-category/mixed-use exposure from the compact Step-2 audit. `demand_component_exposure_summary_db()` reports category energy and effective-area shares, MV-direct shares, mixed-use counts, and low-confidence classification rows.
 - `plotting.*`: create figures from prepared data. Notebooks import the concrete plotting modules directly.
 - `audits.topology_bottleneck`: reusable diagnostics for critical real-grid voltage paths and bottlenecks.
 - `audits.feeder_structure`: graph-normalized feeder, downstream-demand, path-depth, and physical-corridor comparison.
@@ -46,7 +46,7 @@ The entire `output/` tree is generated and ignored by Git. Durable conclusions a
 5.postprocessing/
   pyproject.toml
   powerflow/
-    comparison_data.py                    # DB loaders and synthetic/real comparison datasets
+    comparison_data.py                    # DB loaders, comparison datasets, and component exposure summaries
   notebooks/
     analysis_powerflow.ipynb           # paired real/synthetic status-quo power-flow analysis
     analysis_expansion.ipynb           # paired pre/post-flex/post-no-flex expansion analysis

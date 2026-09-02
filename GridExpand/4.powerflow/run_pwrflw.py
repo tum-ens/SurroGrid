@@ -38,13 +38,14 @@ def _synthetic_residential_buses(save_file: svgrd.SaveFile) -> set[int]:
 
     query = text(
         """
-        SELECT DISTINCT gbb.bus
+        SELECT DISTINCT gbc.bus
         FROM surrogrid.powerflow_run pr
-        JOIN surrogrid.grid_building_bus gbb ON gbb.grid_case_id = pr.grid_case_id
+        JOIN surrogrid.grid_building_component gbc ON gbc.grid_case_id = pr.grid_case_id
         WHERE pr.powerflow_run_id = :powerflow_run_id
-          AND gbb.bus IS NOT NULL
-          AND lower(COALESCE(gbb.building_use, '')) = 'residential'
-        ORDER BY gbb.bus
+          AND gbc.bus IS NOT NULL
+          AND gbc.included_in_lv
+          AND gbc.component_category = 'Residential'
+        ORDER BY gbc.bus
         """
     )
     with save_file.db.engine.connect() as conn:
@@ -190,7 +191,7 @@ if __name__ == "__main__":
         action="store_true",
         help=(
             "Synthetic-grid DB mode: restrict demand and pandapower load rows to "
-            "residential building_use buses from surrogrid.grid_building_bus."
+            "included Residential component buses from surrogrid.grid_building_component."
         ),
     )
     parser.add_argument(
@@ -301,7 +302,7 @@ if __name__ == "__main__":
     if args.hh_only:
         assumptions_extra.update({
             "demand_scope": "synthetic_hh_only",
-            "hh_only_filter": "grid_building_bus.building_use == Residential",
+            "hh_only_filter": "grid_building_component.included_in_lv AND component_category == Residential",
             "hh_annual_demand_scale": float(args.hh_annual_demand_scale),
         })
 
@@ -361,30 +362,20 @@ if __name__ == "__main__":
     ##### Powerflow #####
     # Readout grid from file
     grid = SF.get_input_grid()
-    if scenario_unit_optimization:
-        load_buses = sorted(_demand_buses(df_pre_demand, df_post_demand))
-        original_load_rows = len(grid.load)
-        original_static_p_mw = (
-            float(grid.load["p_mw"].fillna(0.0).sum())
-            if "p_mw" in grid.load.columns
-            else 0.0
-        )
-        grid = pwrflw.set_scenario_load_buses(grid, load_buses)
-        print(
-            "Scenario grid.load: replaced "
-            f"{original_load_rows} static rows ({original_static_p_mw:.6f} MW) "
-            f"with {len(grid.load)} zeroed scenario-bus rows.",
-            flush=True,
-        )
-    elif residential_buses is not None:
-        grid = _filter_grid_loads_to_buses(grid, residential_buses)
-        load_buses = grid.load["bus"].dropna().astype(int).unique().tolist()
-    else:
-        load_buses = (
-            grid.load["bus"].dropna().astype(int).unique().tolist()
-            if "bus" in grid.load.columns
-            else []
-        )
+    load_buses = sorted(_demand_buses(df_pre_demand, df_post_demand))
+    original_load_rows = len(grid.load)
+    original_static_p_mw = (
+        float(grid.load["p_mw"].fillna(0.0).sum())
+        if "p_mw" in grid.load.columns
+        else 0.0
+    )
+    grid = pwrflw.set_scenario_load_buses(grid, load_buses)
+    print(
+        "Scenario grid.load: replaced "
+        f"{original_load_rows} static rows ({original_static_p_mw:.6f} MW) "
+        f"with {len(grid.load)} zeroed scenario-bus rows.",
+        flush=True,
+    )
     transformer_s_rated_mva = float(grid.trafo["sn_mva"].sum()) if "sn_mva" in grid.trafo.columns else float("nan")
     cable_max_i_ka = grid.line.get("max_i_ka")
     if cable_max_i_ka is None:

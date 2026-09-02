@@ -73,6 +73,7 @@ def build_regeneration_catalog(paired_dir: Path) -> pd.DataFrame:
         [
             "building_objectid",
             "building_use",
+            "residential_effective_floor_area_m2",
             "building_type",
             "building_floor_area",
         ]
@@ -91,13 +92,9 @@ def build_regeneration_catalog(paired_dir: Path) -> pd.DataFrame:
         "building_is_residential",
         pd.Series(False, index=selected.index),
     ).astype("boolean").fillna(False).astype(bool)
-    residential = (
-        residential_flag
-        | selected["building_use"].astype(str).str.lower().eq("residential")
-        | selected["building_type"].astype(str).str.upper().isin(
-            RESIDENTIAL_BUILDING_TYPES
-        )
-    )
+    if "residential_effective_floor_area_m2" in selected:
+        selected["building_floor_area"] = selected["residential_effective_floor_area_m2"].fillna(selected["building_floor_area"])
+    residential = pd.to_numeric(selected["building_floor_area"], errors="coerce").gt(0.0)
     return pd.DataFrame(
         {
             "building_objectid": selected["building_objectid"].astype(str),

@@ -123,26 +123,29 @@ def _add_synthetic_household_scope(summary: pd.DataFrame, db: SurroGridDatabase)
         )
         SELECT sr.powerflow_run_id,
                COUNT(*) FILTER (
-                   WHERE lower(COALESCE(gbb.building_use, '')) = 'residential'
+                   WHERE gbc.included_in_lv
+                     AND gbc.component_category = 'Residential'
                ) AS selected_household_load_rows,
-               COUNT(DISTINCT gbb.bus) FILTER (
-                   WHERE lower(COALESCE(gbb.building_use, '')) = 'residential'
-                     AND gbb.bus IS NOT NULL
+               COUNT(DISTINCT gbc.bus) FILTER (
+                   WHERE gbc.included_in_lv
+                     AND gbc.component_category = 'Residential'
+                     AND gbc.bus IS NOT NULL
                ) AS selected_household_load_buses,
-               COALESCE(SUM(gbb.households) FILTER (
-                   WHERE lower(COALESCE(gbb.building_use, '')) = 'residential'
+               COALESCE(SUM(gbc.households) FILTER (
+                   WHERE gbc.included_in_lv
+                     AND gbc.component_category = 'Residential'
                ), 0) AS selected_household_equivalents,
                COUNT(*) FILTER (
-                   WHERE lower(COALESCE(gbb.building_use, '')) <> 'residential'
-                      OR gbb.building_use IS NULL
+                   WHERE gbc.included_in_lv
+                     AND gbc.component_category IN ('Commercial', 'Public')
                ) AS non_household_load_rows,
-               COUNT(DISTINCT gbb.bus) FILTER (
-                   WHERE (lower(COALESCE(gbb.building_use, '')) <> 'residential'
-                          OR gbb.building_use IS NULL)
-                     AND gbb.bus IS NOT NULL
+               COUNT(DISTINCT gbc.bus) FILTER (
+                   WHERE gbc.included_in_lv
+                     AND gbc.component_category IN ('Commercial', 'Public')
+                     AND gbc.bus IS NOT NULL
                ) AS non_household_load_buses
         FROM selected_runs sr
-        LEFT JOIN surrogrid.grid_building_bus gbb USING (grid_case_id)
+        LEFT JOIN surrogrid.grid_building_component gbc USING (grid_case_id)
         GROUP BY sr.powerflow_run_id
         """
     )
@@ -160,6 +163,156 @@ def _add_synthetic_household_scope(summary: pd.DataFrame, db: SurroGridDatabase)
         if column not in out.columns:
             out[column] = pd.NA
     return out
+
+
+def demand_component_exposure_summary_db(
+    demand_allocation_run_ids: list[int] | None = None,
+) -> pd.DataFrame:
+    """Summarize component demand, suppression, and mixed exposure by run.
+
+    The returned table is derived from the compact component audit rather than
+    hourly demand rows. It is therefore suitable for stratifying downstream
+    power-flow and expansion summaries without assigning nonlinear losses back
+    to individual components.
+    """
+    db = SurroGridDatabase()
+    filters = ""
+    params: dict[str, object] = {}
+    if demand_allocation_run_ids is not None:
+        ids = [int(value) for value in demand_allocation_run_ids]
+        if not ids:
+            return pd.DataFrame()
+        filters = "WHERE dca.demand_allocation_run_id = ANY(:run_ids)"
+        params["run_ids"] = ids
+
+    query = text(
+        f"""
+        WITH audited AS (
+            SELECT
+                dca.demand_allocation_run_id,
+                dar.grid_case_id,
+                gc.ags,
+                gc.plz,
+                gc.kcid,
+                gc.bcid,
+                dca.objectid,
+                dca.component_id,
+                dca.category,
+                dca.annual_energy_kwh,
+                dca.included_in_lv,
+                dca.mv_direct,
+                dca.mix_confidence,
+                gbc.effective_floor_area_m2
+            FROM surrogrid.demand_component_audit dca
+            JOIN surrogrid.demand_allocation_run dar
+              USING (demand_allocation_run_id)
+            JOIN surrogrid.grid_case gc USING (grid_case_id)
+            JOIN surrogrid.grid_building_component gbc
+              ON gbc.grid_case_id = dar.grid_case_id
+             AND gbc.component_id = dca.component_id
+            {filters}
+        ), physical AS (
+            SELECT
+                demand_allocation_run_id,
+                COUNT(DISTINCT objectid) AS run_physical_buildings,
+                COUNT(DISTINCT objectid) FILTER (
+                    WHERE category = 'Residential' AND included_in_lv
+                ) AS run_residential_buildings,
+                COUNT(DISTINCT objectid) FILTER (
+                    WHERE category IN ('Commercial', 'Public') AND included_in_lv
+                ) AS run_nonresidential_buildings,
+                (
+                    COUNT(DISTINCT objectid) FILTER (WHERE category = 'Residential') > 0
+                    AND COUNT(DISTINCT objectid) FILTER (
+                        WHERE category IN ('Commercial', 'Public')
+                    ) > 0
+                ) AS mixed_use_buildings_present,
+                COUNT(DISTINCT objectid) FILTER (WHERE mv_direct) AS mv_direct_buildings,
+                COALESCE(SUM(effective_floor_area_m2), 0.0) AS run_effective_component_area_m2,
+                COALESCE(SUM(effective_floor_area_m2) FILTER (WHERE mv_direct), 0.0)
+                    AS mv_direct_area_m2,
+                COALESCE(SUM(annual_energy_kwh) FILTER (WHERE mv_direct), 0.0)
+                    AS mv_direct_energy_kwh,
+                COUNT(*) FILTER (
+                    WHERE LOWER(COALESCE(mix_confidence, '')) = 'low'
+                ) AS low_confidence_component_rows
+            FROM audited
+            GROUP BY demand_allocation_run_id
+        )
+        SELECT
+            a.demand_allocation_run_id,
+            MAX(a.grid_case_id) AS grid_case_id,
+            MAX(a.ags) AS ags,
+            MAX(a.plz) AS plz,
+            MAX(a.kcid) AS kcid,
+            MAX(a.bcid) AS bcid,
+            a.category,
+            COUNT(*) AS component_rows,
+            COUNT(*) FILTER (WHERE a.included_in_lv) AS included_component_rows,
+            COUNT(*) FILTER (WHERE NOT a.included_in_lv) AS suppressed_component_rows,
+            COUNT(DISTINCT a.objectid) AS physical_buildings,
+            COALESCE(SUM(a.effective_floor_area_m2) FILTER (WHERE a.included_in_lv), 0.0)
+                AS included_effective_floor_area_m2,
+            COALESCE(SUM(a.effective_floor_area_m2) FILTER (WHERE NOT a.included_in_lv), 0.0)
+                AS suppressed_effective_floor_area_m2,
+            COALESCE(SUM(a.annual_energy_kwh) FILTER (WHERE a.included_in_lv), 0.0)
+                AS included_annual_energy_kwh,
+            COALESCE(SUM(a.annual_energy_kwh) FILTER (WHERE NOT a.included_in_lv), 0.0)
+                AS suppressed_annual_energy_kwh,
+            MAX(p.run_physical_buildings) AS run_physical_buildings,
+            MAX(p.run_residential_buildings) AS run_residential_buildings,
+            MAX(p.run_nonresidential_buildings) AS run_nonresidential_buildings,
+            MAX(p.mixed_use_buildings_present::int) AS mixed_use_buildings_present,
+            MAX(p.mv_direct_buildings) AS mv_direct_buildings,
+            MAX(p.run_effective_component_area_m2) AS run_effective_component_area_m2,
+            MAX(p.mv_direct_area_m2) AS mv_direct_area_m2,
+            MAX(p.mv_direct_energy_kwh) AS mv_direct_energy_kwh,
+            MAX(p.low_confidence_component_rows) AS low_confidence_component_rows
+        FROM audited a
+        JOIN physical p USING (demand_allocation_run_id)
+        GROUP BY a.demand_allocation_run_id, a.category
+        ORDER BY a.demand_allocation_run_id, a.category
+        """
+    )
+    with db.engine.connect() as conn:
+        result = pd.read_sql_query(query, conn, params=params)
+    if result.empty:
+        return result
+    total = result.groupby("demand_allocation_run_id")[
+        "included_annual_energy_kwh"
+    ].transform("sum")
+    result["included_energy_share"] = np.divide(
+        result["included_annual_energy_kwh"],
+        total,
+        out=np.zeros(len(result), dtype=float),
+        where=total.to_numpy(dtype=float) > 0.0,
+    )
+    area_total = result.groupby("demand_allocation_run_id")[
+        "run_effective_component_area_m2"
+    ].transform("max")
+    result["included_area_share"] = np.divide(
+        result["included_effective_floor_area_m2"],
+        area_total,
+        out=np.zeros(len(result), dtype=float),
+        where=area_total.to_numpy(dtype=float) > 0.0,
+    )
+    result["mv_direct_area_share"] = np.divide(
+        result["mv_direct_area_m2"],
+        area_total,
+        out=np.zeros(len(result), dtype=float),
+        where=area_total.to_numpy(dtype=float) > 0.0,
+    )
+    total_energy = (
+        result["included_annual_energy_kwh"]
+        + result["suppressed_annual_energy_kwh"]
+    )
+    result["mv_direct_energy_share"] = np.divide(
+        result["mv_direct_energy_kwh"],
+        total_energy,
+        out=np.zeros(len(result), dtype=float),
+        where=total_energy.to_numpy(dtype=float) > 0.0,
+    )
+    return result
 
 def powerflow_headline_summary_db(
     input_id: str | None = None,

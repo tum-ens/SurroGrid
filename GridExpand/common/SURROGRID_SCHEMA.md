@@ -117,6 +117,20 @@ Key columns:
 - `battery_cap_kwh`: vehicle battery capacity used by the allocation.
 
 ## Step 4 Power-Flow Tables
+### `surrogrid.demand_component_audit`
+
+Compact component-level evidence for one Step 2 allocation. It records the
+Residential and Commercial/Public profiles before they are aggregated into the
+authoritative bus-level `allocated_demand` table. MV-direct and out-of-scope
+components remain auditable with an explicit `suppression_reason`; hourly
+component series are intentionally not stored here.
+
+Key columns:
+
+- `demand_allocation_run_id`, `component_id`, `objectid`, `scenario_unit_id`, `bus`.
+- `category`, `commodity`, `annual_energy_kwh`, `max_profile_value`.
+- `profile_method`, `profile_hash`, `stable_seed`, and `pylovo_version_id`.
+- `included_in_lv`, `suppression_reason`, `mv_direct`, and mixed-use provenance.
 
 ### `surrogrid.powerflow_run`
 
@@ -264,3 +278,15 @@ WHERE pr.run_name = 'baseline_static_full_powerflow'
 GROUP BY line
 ORDER BY max_i_from_ka DESC;
 ```
+### `surrogrid.grid_building_component`
+
+Long-form component view derived from the physical-building view. It contains
+one row for every positive Residential or Commercial/Public source component,
+including MV-direct non-residential components with `included_in_lv = false`.
+Component lineage is derived from explicit PyLoVo area and category fields;
+the bus-level PyLoVo load table is used only for category/bus consistency
+validation and is not joined one-to-one to `objectid`.
+
+All components belonging to one physical building share its grid case,
+consumer vertex, and bus. Stable component IDs are
+`<objectid>::residential`, `::<commercial|public>`.

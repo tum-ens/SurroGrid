@@ -52,7 +52,6 @@ HH_NAME_PATTERN = re.compile(r"NS_(?:Er)?Last", re.IGNORECASE)
 ANNUAL_DEMAND_PATTERN = re.compile(
     r"2022:\s*([0-9]+(?:[.,][0-9]+)?)\s*kWh", re.IGNORECASE
 )
-RESIDENTIAL_TYPES = {"AB", "MFH", "SFH", "TH"}
 SECTOR_ASSET_TYPES = {"WP", "Ladestation", "Photovoltaik", "Batterie", "Wärmespeicher"}
 
 
@@ -124,29 +123,29 @@ def _scenario_year_mask(df: pd.DataFrame, final_year: int) -> pd.Series:
     return years.isna() | (years <= int(final_year))
 
 
-def _building_is_residential(use: Any, building_type: Any, fallback_type: Any) -> bool:
-    if str(use).strip().casefold() == "residential":
-        return True
-    return str(building_type or fallback_type).strip().upper() in RESIDENTIAL_TYPES
+def _building_is_residential(residential_floor_area: Any) -> bool:
+    """Identify residential electrical scope from the explicit source area."""
+    value = pd.to_numeric(pd.Series([residential_floor_area]), errors="coerce").iloc[0]
+    return bool(pd.notna(value) and float(value) > 0.0)
 
 
 def _read_pylovo_buildings(config: MatchConfig) -> pd.DataFrame:
     version_id = get_pylovo_version_id()
     scope_filter = ""
     if config.building_scope == "residential":
-        scope_filter = (
-            "AND (lower(coalesce(building_use, '')) = 'residential' "
-            "OR upper(coalesce(building_type, type, '')) = ANY(:residential_types))"
-        )
+        scope_filter = "AND residential_floor_area > 0"
     elif config.building_scope != "all":
         raise ValueError("building_scope must be 'residential' or 'all'.")
 
     query = text(
         f"""
         SELECT
+            grid_result_id AS pylovo_grid_result_id,
+            version_id AS pylovo_version_id,
             objectid,
             id,
             feature_id,
+            vertice_id,
             building_use,
             building_use_id,
             building_type,
@@ -155,6 +154,16 @@ def _read_pylovo_buildings(config: MatchConfig) -> pd.DataFrame:
             occupants,
             floor_area,
             floor_number,
+            residential_floor_area,
+            nonresidential_floor_area,
+            nonresidential_use,
+            mix_score,
+            mix_rule,
+            mix_confidence,
+            residential_peak_load_in_kw,
+            nonresidential_peak_load_in_kw,
+            nonresidential_mv_direct,
+            peak_load_in_kw,
             construction_year,
             postcode,
             street,
@@ -172,7 +181,6 @@ def _read_pylovo_buildings(config: MatchConfig) -> pd.DataFrame:
     params = {
         "plz": int(config.plz),
         "version_id": version_id,
-        "residential_types": list(RESIDENTIAL_TYPES),
     }
     with _database_engine().connect() as conn:
         buildings = pd.read_sql_query(query, conn, params=params)
@@ -195,9 +203,7 @@ def _read_pylovo_buildings(config: MatchConfig) -> pd.DataFrame:
     )
     buildings["building_street_key"] = buildings["street"].map(_normalize_text)
     buildings["building_is_residential"] = buildings.apply(
-        lambda row: _building_is_residential(
-            row["building_use"], row["building_type"], row["type"]
-        ),
+        lambda row: _building_is_residential(row["residential_floor_area"]),
         axis=1,
     )
     return buildings

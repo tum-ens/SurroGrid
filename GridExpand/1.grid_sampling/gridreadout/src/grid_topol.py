@@ -2,7 +2,8 @@
 
 Used by the sampling notebooks to make pylovo-exported grids more robust for
 subsequent simulations (e.g., avoid 0-length lines, remove duplicate loads,
-identify consumer buses).
+identify consumer buses). Scenario-load normalization retains one zeroed row
+per consumer bus; component categories remain in the component manifest.
 """
 
 import networkx as nx
@@ -36,12 +37,36 @@ def assign_min_linelen(net):
     net.line = df_lines
     return net
 
-def remove_duplicate_loads(net):
-    # Remove duplicate households for same building
-    df_load = net.load
-    df_load = df_load.drop_duplicates(subset="bus", keep="first")
-    df_load['name'] = df_load['name'].str.extract(r'Load (\d+)')[0].astype(int)
-    
+def normalize_scenario_loads(net):
+    """Keep one zeroed topology load row for every demand bus.
+
+    PyLoVo may persist separate category rows for a mixed building on one
+    consumer bus.  Step 4 writes dynamic scenario demand once per bus, so the
+    exported topology must not retain duplicate static rows.
+    """
+    df_load = net.load.copy()
+    if "bus" not in df_load.columns:
+        raise ValueError("Scenario-load normalization requires a bus column.")
+    if df_load.empty:
+        net.load = df_load
+        return net
+
+    sort_columns = ["bus"] + (["name"] if "name" in df_load.columns else [])
+    df_load = df_load.sort_values(sort_columns, kind="stable")
+    df_load = df_load.drop_duplicates(subset="bus", keep="first").reset_index(drop=True)
+    for column in ("p_mw", "q_mvar"):
+        if column in df_load.columns:
+            df_load[column] = 0.0
+    if "scaling" in df_load.columns:
+        df_load["scaling"] = 1.0
+    if "in_service" in df_load.columns:
+        df_load["in_service"] = True
+    if "max_p_mw" in df_load.columns:
+        df_load["max_p_mw"] = 1000.0
+    if "min_p_mw" in df_load.columns:
+        df_load["min_p_mw"] = -1000.0
+    if df_load["bus"].duplicated().any():
+        raise ValueError("Scenario-load normalization left duplicate demand buses.")
     net.load = df_load
     return net
 

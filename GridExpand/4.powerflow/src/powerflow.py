@@ -138,11 +138,22 @@ def run_single_pf(grid, new_load, algorithm="bfsw"):
     for column in ("p_mw", "q_mvar"):
         if column in df_load_indexed.columns:
             df_load_indexed[column] = 0.0
+    if "bus" not in new_load.columns or new_load["bus"].duplicated().any():
+        raise ValueError("Each power-flow timestep must provide at most one demand row per bus.")
+    if "p_mw" not in new_load.columns:
+        raise ValueError("Each power-flow timestep must provide active p_mw demand.")
+    expected_p_mw = float(pd.to_numeric(new_load["p_mw"], errors="coerce").fillna(0.0).sum())
     new_load_indexed = new_load.set_index('bus')
     # 2. Use DataFrame.update to overwrite only the overlapping entries
     df_load_indexed.update(new_load_indexed)
     # 3. If you need to restore 'bus' as a column rather than the index:
     df_load_updated = df_load_indexed.reset_index()
+    actual_p_mw = float(pd.to_numeric(df_load_updated["p_mw"], errors="coerce").fillna(0.0).sum())
+    if not np.isclose(actual_p_mw, expected_p_mw, rtol=1e-10, atol=1e-12):
+        raise AssertionError(
+            f"Power-flow load assignment changed active demand: expected {expected_p_mw}, "
+            f"assigned {actual_p_mw} MW."
+        )
 
     grid.load = df_load_updated
     algorithms = list(algorithm) if isinstance(algorithm, (list, tuple)) else [algorithm]

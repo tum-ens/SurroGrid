@@ -13,6 +13,11 @@ GRIDEXPAND_DIR = Path(__file__).resolve().parents[4]
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
+from common.building_components import (
+    build_building_components,
+    validate_physical_buildings,
+)
+
 from common.database import SurroGridDatabase
 from common.timeframe import output_filename_for_timeframe, write_hdf_metadata
 
@@ -77,9 +82,39 @@ class SaveFile:
             return self.db.read_step2_input_data(self.grid_ref)
         df_buildings = pd.read_hdf(self.input_path, key=self.building_dir)
         df_region = pd.read_hdf(self.input_path, key=self.region_dir)
-        try: df_weather = pd.read_hdf(self.input_path, key=self.weather_dir)
-        except: df_weather = None
+        try:
+            df_weather = pd.read_hdf(self.input_path, key=self.weather_dir)
+        except (FileNotFoundError, KeyError):
+            df_weather = None
         return df_buildings, df_region, df_weather
+
+    def get_building_components(self) -> pd.DataFrame:
+        """Return the required mixed-capable component manifest."""
+        if self.storage == "db":
+            return self.db.read_building_components(self.grid_ref)
+
+        try:
+            stored = pd.read_hdf(self.input_path, key="raw_data/building_components")
+        except (FileNotFoundError, KeyError) as exc:
+            raise ValueError(
+                "Missing /raw_data/building_components; rerun Step 1 with a mixed-capable PyLoVo export."
+            ) from exc
+
+        physical = pd.read_hdf(self.input_path, key=self.building_dir)
+        validate_physical_buildings(physical)
+        expected = build_building_components(physical)
+        if set(stored.columns) != set(expected.columns):
+            raise ValueError(
+                "The stored building component manifest does not match the mixed-use contract columns."
+            )
+        columns = list(expected.columns)
+        actual = stored[columns].sort_values("component_id").reset_index(drop=True)
+        expected = expected[columns].sort_values("component_id").reset_index(drop=True)
+        try:
+            pd.testing.assert_frame_equal(actual, expected, check_dtype=False, check_exact=False, rtol=1e-9, atol=1e-7)
+        except AssertionError as exc:
+            raise ValueError("Stored and normalized building component manifests differ.") from exc
+        return expected
 
     def copy_save_file(self):
         if self.storage == "db":
@@ -125,6 +160,8 @@ class SaveFile:
             "raw_data/battery_asset_plan",
             "raw_data/battery_asset_audit",
             "raw_data/heat_asset_plan",
+            "raw_data/building_components",
+            "raw_data/demand_component_audit",
             "raw_data/heat_asset_audit",
         }
         if (
@@ -133,8 +170,11 @@ class SaveFile:
             and dir not in db_handoff_raw_keys
         ):
             return
+        clean_dir = dir.strip("/")
+        if self.storage == "db":
+            if clean_dir == "raw_data/demand_component_audit":
+                self.db.write_demand_component_audit(self.demand_allocation_run_id, df)
         if self.storage == "db" and self.persist_allocated_timeseries:
-            clean_dir = dir.strip("/")
             if clean_dir == "urbs_in/demand":
                 self.db.write_allocated_demand(self.demand_allocation_run_id, df)
             elif clean_dir == "urbs_in/eff_factor":

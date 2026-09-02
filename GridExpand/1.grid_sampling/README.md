@@ -136,7 +136,8 @@ This step writes the following entries (paths are HDF5 keys; Pandas objects are 
 - `/raw_data/net` (HDF5 dataset): UTF-8 JSON string of the pandapower `net`.
 - `/raw_data/consumers` (Pandas table): consumer bus mapping as returned by `src/grid_topol.get_consumers(net)`.
 - `/raw_data/region` (Pandas table): one-row DataFrame with at least `lat`, `lon` (and typically `plz`, `regio7`, `altitude`, plus sampling metadata).
-- `/raw_data/buildings` (Pandas table): buildings with assigned `bus` plus building attributes and `lat`/`lon`.
+- `/raw_data/buildings` (Pandas table): exactly one physical-building row per `objectid`, with its shared consumer `bus`, source building classification, effective Residential/non-residential areas, component peaks, and mixed-use provenance.
+- `/raw_data/building_components` (Pandas table): the required mixed-capable component manifest. It contains one Residential and/or Commercial/Public row per positive source component; an MV-direct non-residential row remains present with `included_in_lv=False`.
 - `/raw_data/weather` (Pandas table): hourly TMY-like weather including `temp_air`, `relative_humidity`, `dew_point`, `soil_temp`, etc.
 
 Filename convention used by the notebook:
@@ -154,7 +155,10 @@ To be compatible with downstream steps, ensure your `.h5` contains at least:
 
 - A pandapower net JSON dataset (either at `/raw_data/net` as created here, or at the key expected by the downstream consumer).
 - Location metadata (`lat`, `lon`) somewhere accessible (this repository stores it in `/raw_data/region`).
+- `/raw_data/buildings` and `/raw_data/building_components` generated from the pinned mixed-capable PyLoVo schema.
 - Furthermore, it is recommended to already assign weather data once in this step according to `weather.py` to prevent running out of weather API calls later in the pipeline
+
+Pre-mixed PyLoVo schemas and old Step-1 HDF files are intentionally unsupported. Step 2 fails with a clear regeneration error when the component manifest is missing.
 
 If a downstream step expects a different key (e.g. `grid_top/net`), adapt your file accordingly or add a lightweight conversion step.
 

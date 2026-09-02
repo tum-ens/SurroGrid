@@ -381,13 +381,20 @@ def _build_real_electric_demand(
     pseudo_buildings = pd.DataFrame(
         {
             "bus": profile_ids,
+            "objectid": [f"swf_profile_{int(profile_id)}" for profile_id in profile_ids],
             "real_bus": real_buses,
             "source_load_index": load.index.to_numpy(),
             "households": 1,
             "occupants": _sample_household_occupants(electricity_module, len(load), rng),
             "building_use": "Residential",
+            "building_use_id": pd.NA,
             "building_type": "single_family_house",
+            "source_building_type": "SFH",
             "floor_area": np.nan,
+            "effective_floor_area_m2": 1.0,
+            "component_id": [f"swf_profile_{int(profile_id)}::residential" for profile_id in profile_ids],
+            "component_category": "Residential",
+            "included_in_lv": True,
             "swf_annual_demand_kwh": pd.to_numeric(load["annual_demand_kwh"], errors="coerce").to_numpy(),
         }
     )

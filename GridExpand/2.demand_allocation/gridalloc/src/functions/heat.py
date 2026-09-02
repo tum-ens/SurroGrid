@@ -10,20 +10,6 @@ from src.functions.infdb_ro_heat import generate_opendhw, load_space_heat
 ##############################################################
 ################## Obtaining GHD + HP COP ####################
 ##############################################################
-def _get_single_dhw_timeseries_ghd(building_type, floor_area, df_normalized_lps_ghd):
-    return df_normalized_lps_ghd[building_type] * floor_area
-
-def _get_dhw_demand_ghd(df_buildings):
-    df_normalized_lps_ghd = pd.read_csv(config.DHW_GHD_PATH, skiprows=1, header=[0])*1000
-
-    # Apply function and create a new DataFrame
-    data_dict_ghd = {row["bus"]: _get_single_dhw_timeseries_ghd(row["building_type"], row["floor_area"], df_normalized_lps_ghd) for idx, row in df_buildings.iterrows() if row["building_use"]!="Residential"}
-
-    # Convert to DataFrame
-    df_dhw_demand = pd.DataFrame(data_dict_ghd).reset_index(drop=True)
-    df_dhw_demand.columns = pd.MultiIndex.from_product([df_dhw_demand.columns, ["water_heat"]])
-    return df_dhw_demand
-
 def _get_cop(hp_type, heating_type, df_heat_space, df_heat_water, air_temp, soil_temp):
     ### Select heat pump function:
     if hp_type=="ASHP": hp_cop_func = config.ASHP_COP
@@ -119,6 +105,10 @@ def sample_statistics(df_buildings, base_seed=0):
     return df_buildings
 
 def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_seed=0):
+    if "residential_effective_floor_area_m2" not in df_buildings.columns:
+        raise ValueError(
+            "Residential heat requires residential_effective_floor_area_m2 from the component manifest."
+        )
     if getattr(config, "SPACE_HEAT_SOURCE", "teaser") == "infdb_ro_heat":
         space_heat, audit = load_space_heat(df_buildings)
         if audit["space_heat_source_fallback"]:
@@ -133,8 +123,9 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_
     # TEASER or execute any DistrictGenerator code.
     from src.external.districtgenerator.classes import Datahandler
 
-    # Domestic hot water only for non-residential buildings
-    df_dhw_ghd = _get_dhw_demand_ghd(df_buildings)
+    # The first heat scenario models residential components only. In
+    # particular, do not infer non-residential DHW from a mixed building's
+    # source building_use label.
 
     # Setting up input for heat load generator
     scenario = df_buildings.copy()
@@ -143,9 +134,13 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_
     scenario.rename(inplace=True, columns={"index": "id", "building_type": "building", "households": "nb_flat", "occ_list": "nb_occ", "construction_year": "year", "floor_area": "area", "floor_number": "floors"})
     scenario["NWG"] = scenario["building"].apply(lambda x: 1 if x not in ["SFH","MFH","TH","AB"] else 0)
     scenario["year"] = scenario["year"].str.extract(r'(\d+)(?!.*\d)').astype(int)
-    # pylovo floor_area is the LoD2 footprint, whereas TEASER expects total
-    # net leased area rather than footprint area.
-    scenario["area"] = scenario["area"] * scenario["floors"]
+    # Component area is already effective total floor area. Passing the
+    # physical footprint and multiplying by floor count would double count a
+    # mixed building's non-residential share.
+    scenario["area"] = pd.to_numeric(
+        df_buildings["residential_effective_floor_area_m2"], errors="coerce"
+    ).to_numpy()
+    scenario["floors"] = 1
     scenario["nb_occ"] = scenario["nb_occ"].apply(lambda x: [int(round(y,0)) for y in x])
     scenario["retrofit"] = 0
 
@@ -171,7 +166,6 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_
     # Postprocess demands
     df_dhw.columns = pd.MultiIndex.from_product([df_dhw.columns, ["water_heat"]])
     df_space_heat.columns = pd.MultiIndex.from_product([df_space_heat.columns, ["space_heat"]])
-    df_dhw[df_dhw_ghd.columns] = df_dhw_ghd  # Combine with nonres building results for DHW
 
     return df_space_heat, df_dhw
 
@@ -182,16 +176,18 @@ def generate_hp_cop(df_buildings, df_heat_space, df_heat_water, df_weather):
     ### Generation
     cop_dict = {}
 
-    # Air-source
-    for _, row in df_buildings.iterrows():
+    # Air-source: demand columns are already shared-bus aggregates.
+    for bus, group in df_buildings.groupby("bus", sort=True):
         hp_type = "ASHP"
-        bus = row["bus"]
         if (bus, "space_heat") not in df_heat_space.columns:
             continue
+        row = group.iloc[0]
         heating_type = row["heating_type"]
         space_heat = pd.DataFrame(df_heat_space[bus, "space_heat"])
         water_heat = pd.DataFrame(df_heat_water[bus, "water_heat"])
         cop_dict[bus] = _get_cop(hp_type, heating_type, space_heat, water_heat, air_temp, soil_temp)
+    if not cop_dict:
+        return pd.DataFrame(index=df_heat_space.index)
     cops_air = pd.concat([cop for _,cop in cop_dict.items()], axis=1)
     cops_air.columns = pd.MultiIndex.from_tuples([(col, "heatpump_air") for col in cop_dict.keys()])
 

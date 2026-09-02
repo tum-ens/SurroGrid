@@ -274,10 +274,21 @@ def load_space_heat(
         raise ValueError(f"ro_heat source years are ambiguous: {sorted(years)}")
 
     by_bus: dict[int, list[pd.Series]] = {}
+    residential_area_shares: list[float] = []
     for _, building in buildings.iterrows():
         target_id = str(building[id_column])
         source_id = source_by_target[target_id]
-        scaled = normalized[source_id] * scale_by_target[target_id]
+        area_share = pd.to_numeric(
+            pd.Series([building.get("residential_area_share", 1.0)]),
+            errors="coerce",
+        ).iloc[0]
+        if pd.isna(area_share) or not 0.0 < float(area_share) <= 1.0:
+            raise ValueError(
+                f"Residential heat area share must be in (0, 1], got {area_share!r} "
+                f"for building {target_id}."
+            )
+        residential_area_shares.append(float(area_share))
+        scaled = normalized[source_id] * scale_by_target[target_id] * float(area_share)
         by_bus.setdefault(int(building["bus"]), []).append(scaled)
     result = pd.DataFrame(
         {bus: sum(series_list) for bus, series_list in by_bus.items()}
@@ -315,6 +326,9 @@ def load_space_heat(
         "space_heat_source_fallback_buildings": len(
             set(duplicated_targets) | set(similar_targets)
         ),
+        "space_heat_area_share_method": "infdb_ro_heat_residential_area_share_v1",
+        "space_heat_residential_area_share_min": min(residential_area_shares),
+        "space_heat_residential_area_share_max": max(residential_area_shares),
         "space_heat_last_day_fallback_buildings": len(duplicated_targets),
         "space_heat_similar_building_fallback_buildings": len(similar_targets),
         "space_heat_similar_building_fallback_scopes": {

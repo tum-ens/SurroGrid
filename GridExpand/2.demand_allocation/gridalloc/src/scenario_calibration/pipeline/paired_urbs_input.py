@@ -44,6 +44,9 @@ from src.scenario_calibration.pipeline.urbs_input_tables import (  # noqa: E402
     read_or_create_weather,
     urbs_static_tables,
 )
+from src.scenario_calibration.profiles.profile_contract import (  # noqa: E402
+    assert_paired_component_plan_equivalence,
+)
 
 
 def _plan_path(paired_dir: Path, target_network: str) -> Path:
@@ -54,6 +57,43 @@ def _plan_path(paired_dir: Path, target_network: str) -> Path:
     )
     return paired_dir / filename
 
+
+
+def _target_component_plan(
+    paired_dir: Path,
+    target_network: str,
+    target_grid_id: int,
+    allocation: pd.DataFrame,
+    *,
+    profile_seed: int,
+) -> pd.DataFrame:
+    """Select and validate the shared component manifest for one target."""
+    path = paired_dir / "paired_component_scenario_plan.csv"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Missing paired component scenario plan; regenerate allocation: {path}"
+        )
+    combined = pd.read_csv(path)
+    assert_paired_component_plan_equivalence(combined)
+    if target_network == "real_swf":
+        mask = pd.to_numeric(combined["real_target_grid_id"], errors="coerce").eq(int(target_grid_id))
+        combined["target_bus"] = pd.to_numeric(combined["real_target_bus"], errors="raise").astype(int)
+    else:
+        mask = pd.to_numeric(combined["synthetic_target_grid_case_id"], errors="coerce").eq(int(target_grid_id))
+        combined["target_bus"] = pd.to_numeric(combined["synthetic_target_bus"], errors="raise").astype(int)
+    target = combined.loc[mask].copy()
+    if target.empty:
+        raise ValueError(f"No paired component rows for {target_network} target grid {target_grid_id}.")
+    seeds = pd.to_numeric(target["profile_seed"], errors="coerce").dropna().astype(int).unique()
+    if len(seeds) != 1 or int(seeds[0]) != int(profile_seed):
+        raise ValueError(
+            "Paired component profile seed differs from allocation seed; regenerate the paired allocation."
+        )
+    allocation_units = set(pd.to_numeric(allocation["scenario_unit_id"], errors="raise").astype(int))
+    component_units = set(pd.to_numeric(target["scenario_unit_id"], errors="raise").astype(int))
+    if allocation_units != component_units:
+        raise ValueError("Paired component and physical allocation plans contain different scenario units.")
+    return target.sort_values(["scenario_unit_id", "building_objectid", "component_id"]).reset_index(drop=True)
 
 def _target_plan(
     paired_dir: Path,
@@ -147,6 +187,13 @@ def materialize_paired_urbs_input(
         target_network,
         target_grid_id,
     )
+    component_plan = _target_component_plan(
+        paired_dir,
+        target_network,
+        target_grid_id,
+        allocation,
+        profile_seed=seed,
+    )
     if "scenario_unit_id" not in allocation:
         raise ValueError(
             "Paired allocation is missing scenario_unit_id. Regenerate it with "
@@ -203,6 +250,7 @@ def materialize_paired_urbs_input(
     demand, demand_audit = build_paired_base_electric_demand(
         allocation,
         seed=seed,
+        component_plan=component_plan,
     )
     sector_inputs = build_paired_sector_urbs_inputs(
         allocation,
@@ -275,7 +323,15 @@ def materialize_paired_urbs_input(
         "target_grid_id": int(target_grid_id),
         "scenario_label": scenario_label,
         "scenario_scope": "paired_full_local_demand",
-        "profile_contract": "physical_building_paired_v1",
+        "profile_contract": "physical_building_component_paired_v2",
+        "component_contract": "physical_building_component_v1",
+        "component_rows": int(len(component_plan)),
+        "included_component_rows": int(component_plan["included_in_lv"].astype(bool).sum()),
+        "suppressed_component_rows": int((~component_plan["included_in_lv"].astype(bool)).sum()),
+        "mixed_use_physical_buildings": int(
+            component_plan.groupby("building_objectid")["component_category"].nunique().gt(1).sum()
+        ),
+        "heat_area_method": "residential_effective_floor_area_v1",
         "optimization_space": "scenario_unit",
         "paired_dir": str(paired_dir),
         "profile_seed": int(seed),
@@ -321,6 +377,7 @@ def materialize_paired_urbs_input(
         complib="blosc",
         complevel=9,
     ) as store:
+        store.put("raw_data/component_scenario_plan", component_plan.reset_index(drop=True))
         store.put("raw_data/allocation_plan", allocation.reset_index(drop=True))
         store.put("raw_data/asset_plan", asset_plan.reset_index(drop=True))
         store.put(

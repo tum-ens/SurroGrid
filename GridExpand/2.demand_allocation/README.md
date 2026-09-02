@@ -17,7 +17,7 @@ It then **writes URBS-ready input tables** into the same `.h5` file (stored in `
 The executable entrypoint is `gridalloc/main.py`.
 
 1. **Select input grid file** from `gridalloc/data/grids/` by matching the `inputfile_id` (see “Input selection”).
-1. **Load raw input tables** from the `.h5`: `raw_data/buildings`, `raw_data/region`, optionally `raw_data/weather`.
+1. **Load raw input tables** from the `.h5`: `raw_data/buildings`, the required `raw_data/building_components`, `raw_data/region`, optionally `raw_data/weather`.
 1. **Generate time series** in a strict order (dependencies matter): Weather → PV → Electricity → Heat → Mobility.
 1. **Assemble URBS input sheets** (demand, supply, processes, commodities, storages, etc.).
 1. **Copy the input `.h5` to `gridalloc/results/`** and append/overwrite tables (update `raw_data/buildings`/`raw_data/weather`, add `urbs_in/*`).
@@ -37,6 +37,7 @@ Place input grid files in:
 Each file must contain at least these HDF5 keys (written by Step 1 in this project):
 
 - `raw_data/buildings` (pandas table)
+- `raw_data/building_components` (pandas table; required mixed-capable component manifest)
 - `raw_data/region` (pandas table; typically a single-row DataFrame)
 
 Recommended (and assumed by default in `main.py`):
@@ -60,12 +61,19 @@ The exact schema depends on the Step 1 generator, but Step 2 expects at least:
 `raw_data/buildings` (one row per building):
 
 - `bus` (int): node/site id
-- `use` (str): expects values like `Residential`, `Public`, `Commercial`
-- `type` (str): building type code (e.g. `SFH`, `MFH`, `TH`, `AB` for residential; non-res types for GHD)
-- `houses_per_building` (int): number of flats/households
-- `occupants` (int/float): total occupants in the building (used to distribute to flats)
-- `floors` (int): used to scale non-residential demands
-- `area` (float): building footprint area (m²)
+- `objectid` (str): stable physical-building identity; it must occur once
+- `building_use`/`building_type`: source classifications, kept unchanged
+- `residential_floor_area` and `nonresidential_floor_area` (float): effective component areas
+- `nonresidential_use`: `Commercial` or `Public` when the non-residential area is positive
+- `households`/`occupants`: Residential component quantities
+- `floor_area`/`floor_number`: footprint and above-ground floor count
+- `nonresidential_mv_direct`: whether the non-residential component is outside the LV scenario
+- `residential_peak_load_in_kw`/`nonresidential_peak_load_in_kw`: source installed peaks for provenance only
+
+`raw_data/building_components` is the long-form demand manifest. Step 2 profiles
+included Residential and Commercial/Public component rows independently, then
+aggregates them to their shared physical bus. A missing manifest is a hard
+error; old one-use HDF files are not reconstructed heuristically.
 - `constructi` (str/int/NaN): construction year category for heat model (missing values are sampled)
 
 ### 2) Statistical input data
@@ -192,6 +200,8 @@ By default this step writes (or overwrites) the following keys using `pandas.HDF
 
 - `raw_data/weather` (written even if it existed)
 - `raw_data/buildings` (written with additional sampled fields)
+- `raw_data/building_components` (the validated physical component manifest)
+- `raw_data/demand_component_audit` (compact per-component profile evidence and suppression reasons)
 - `raw_data/heat_asset_plan` (building-level HP, auxiliary, and buffer sizing)
 - `raw_data/heat_asset_audit` (climate, load, capacity, and representation audit fields)
 

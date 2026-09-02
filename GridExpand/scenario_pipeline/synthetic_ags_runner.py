@@ -287,18 +287,7 @@ def get_candidates(
                 grid_result_id,
                 version_id,
                 COUNT(*) AS n_buildings,
-                COUNT(*) FILTER (
-                    WHERE
-                        CASE
-                            WHEN UPPER(COALESCE(TRIM(building_type), TRIM(type), '')) IN ('AB', 'MFH', 'TH', 'SFH')
-                            THEN 'Residential'
-                            WHEN LOWER(COALESCE(TRIM(building_use), TRIM(type), '')) LIKE '%%public%%'
-                            THEN 'Public'
-                            WHEN LOWER(COALESCE(TRIM(building_use), TRIM(type), '')) LIKE '%%commercial%%'
-                            THEN 'Commercial'
-                            ELSE 'Commercial'
-                        END = 'Residential'
-                ) AS n_residential_buildings
+                COUNT(*) FILTER (WHERE residential_floor_area > 0) AS n_residential_buildings
             FROM pylovo.buildings_result
             GROUP BY grid_result_id, version_id
         ),

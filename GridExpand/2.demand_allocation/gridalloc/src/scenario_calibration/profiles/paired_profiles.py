@@ -111,6 +111,82 @@ def _sorted_allocation(allocation: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _build_paired_component_electric_demand(
+    component_plan: pd.DataFrame,
+    *,
+    seed: int,
+    measured_profile_selection: str,
+    measured_profile_band_pct: float,
+    measured_profile_min_candidates: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Generate shared electricity profiles from the paired component plan."""
+    electricity = load_electricity_module()
+    normalized_hh = pd.read_hdf(electricity.config.ELEC_LPS_PATH, key="df_normalized_scaled")
+    hh_totals = pd.read_hdf(electricity.config.ELEC_LPS_PATH, key="df_sums")
+    ghd_shapes = ghd_shape_by_building_use(electricity)
+    entries: list[tuple[int, pd.Series]] = []
+    audit_rows: list[dict[str, Any]] = []
+    for row in component_plan.sort_values(["building_objectid", "component_id"]).to_dict("records"):
+        if not bool(row.get("included_in_lv", False)):
+            continue
+        annual = float(pd.to_numeric(pd.Series([row.get("annual_energy_kwh")]), errors="coerce").fillna(0.0).iloc[0])
+        if annual <= 0.0:
+            continue
+        bus = int(row["target_bus"])
+        category = str(row["component_category"])
+        asset_count = int(round(float(pd.to_numeric(pd.Series([row.get("source_asset_count", 0)]), errors="coerce").fillna(0.0).iloc[0])))
+        if category == "Residential":
+            if asset_count <= 0:
+                raise ValueError(f"Residential paired component {row['component_id']} has energy but no HH evidence.")
+            per_hh_kwh = annual / asset_count
+            for sequence in range(asset_count):
+                rng = np.random.default_rng(stable_seed(int(row["stable_seed"]), "HH", sequence))
+                selected = select_residential_profile(
+                    hh_totals, per_hh_kwh, rng, measured_profile_selection,
+                    measured_profile_band_pct, measured_profile_min_candidates,
+                )
+                series = (normalized_hh[selected["chosen_profile_device"]] * per_hh_kwh).reset_index(drop=True)
+                entries.append((bus, series))
+                audit_rows.append({
+                    "component_id": row["component_id"], "building_objectid": row["building_objectid"],
+                    "target_bus": bus, "category": category, "demand_class": "HH",
+                    "profile_sequence": sequence, "annual_demand_kwh": per_hh_kwh,
+                    "profile_hash": row.get("profile_hash"), "stable_seed": int(row["stable_seed"]),
+                    **{key: value for key, value in selected.items() if key != "chosen_index"},
+                })
+        elif category in {"Commercial", "Public"}:
+            shape_key = category if category in ghd_shapes else "default"
+            entries.append((bus, (ghd_shapes[shape_key] * annual).reset_index(drop=True)))
+            audit_rows.append({
+                "component_id": row["component_id"], "building_objectid": row["building_objectid"],
+                "target_bus": bus, "category": category, "demand_class": "GHD",
+                "profile_sequence": 0, "annual_demand_kwh": annual,
+                "profile_hash": row.get("profile_hash"), "stable_seed": int(row["stable_seed"]),
+                "chosen_profile_device": f"weighted_{shape_key}_ghd",
+                "chosen_profile_kwh": annual, "candidate_count": np.nan,
+                "candidate_method": "weighted_ghd_shape",
+                "candidate_min_kwh": np.nan, "candidate_max_kwh": np.nan,
+            })
+        else:
+            raise ValueError(f"Unsupported paired component category {category!r}.")
+
+    demand = sum_series_by_key(entries)
+    if demand.empty:
+        raise ValueError("Paired component plan produced no active electricity demand.")
+    demand = add_output_data_daylight_saving_shift(demand)
+    demand.columns = pd.MultiIndex.from_tuples(
+        [(int(bus), "electricity") for bus in demand.columns], names=["Site", "Commodity"]
+    )
+    demand = demand.sort_index(axis=1)
+    assert_unique_columns(demand, "paired component electricity")
+    assert_energy_conserved(
+        demand,
+        float(pd.to_numeric(component_plan.loc[component_plan["included_in_lv"].astype(bool), "annual_energy_kwh"], errors="coerce").fillna(0.0).sum()),
+        label="paired component electricity",
+    )
+    return demand, pd.DataFrame(audit_rows)
+
+
 def build_paired_base_electric_demand(
     allocation: pd.DataFrame,
     *,
@@ -118,8 +194,17 @@ def build_paired_base_electric_demand(
     measured_profile_selection: str = MEASURED_PROFILE_SELECTION_RANDOM_BAND,
     measured_profile_band_pct: float = DEFAULT_MEASURED_PROFILE_BAND_PCT,
     measured_profile_min_candidates: int = DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES,
+    component_plan: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Generate one reproducible physical demand realization on target buses."""
+    if component_plan is not None:
+        return _build_paired_component_electric_demand(
+            component_plan,
+            seed=seed,
+            measured_profile_selection=measured_profile_selection,
+            measured_profile_band_pct=measured_profile_band_pct,
+            measured_profile_min_candidates=measured_profile_min_candidates,
+        )
     electricity = load_electricity_module()
     normalized_hh = pd.read_hdf(
         electricity.config.ELEC_LPS_PATH,
@@ -381,7 +466,7 @@ def build_paired_sector_urbs_inputs(
                 )
                 if part is not None
             ],
-            "profile_contract": "physical_building_paired_v1",
+            "profile_contract": "physical_building_component_paired_v2",
             "heat_profile_source": (
                 "matched physical building from pylovo version-specific "
                 "synthetic URBS input"
@@ -562,18 +647,26 @@ def _build_paired_mobility(
     hours: int,
     seed: int,
 ) -> _MobilityInputs | None:
-    row_counts = (
-        _sum_numeric_columns(
-            allocation,
-            ("residential_ev_charger_rows", "ghd_ev_charger_rows"),
-        )
-        .round()
-        .astype(int)
+    # Mobility is a physical household asset. Non-residential EV evidence is
+    # intentionally outside this v1 component scope and must not create a
+    # second vehicle population, or vehicles on a pure non-residential row.
+    residential_area = pd.to_numeric(
+        allocation.get(
+            "residential_effective_floor_area_m2",
+            pd.Series(0.0, index=allocation.index),
+        ),
+        errors="coerce",
+    ).fillna(0.0)
+    row_counts = _sum_numeric_columns(
+        allocation,
+        ("residential_ev_charger_rows",),
     )
+    row_counts = row_counts.where(residential_area.gt(0.0), 0.0).round().astype(int)
     row_capacity = _sum_numeric_columns(
         allocation,
-        ("residential_ev_charger_kw", "ghd_ev_charger_kw"),
+        ("residential_ev_charger_kw",),
     )
+    row_capacity = row_capacity.where(residential_area.gt(0.0), 0.0)
     if int(row_counts.sum()) == 0:
         return None
 
@@ -832,7 +925,7 @@ def _build_paired_heat(
             "building_type": primary.get("building_type"),
             "building_use": primary.get("building_use"),
             "number_of_households": primary.get("building_households"),
-            "floor_area": primary.get("building_floor_area"),
+            "floor_area": primary.get("residential_effective_floor_area_m2", primary.get("building_floor_area")),
         })
         profile_audit.append({
             "sector": "heat", "audit_record_type": "heat_profile",

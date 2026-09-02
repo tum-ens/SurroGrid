@@ -188,6 +188,41 @@ CREATE INDEX IF NOT EXISTS idx_demand_allocation_run_pipeline
 CREATE INDEX IF NOT EXISTS idx_demand_allocation_run_grid_case
     ON surrogrid.demand_allocation_run (grid_case_id);
 
+CREATE TABLE IF NOT EXISTS surrogrid.demand_component_audit (
+    demand_allocation_run_id BIGINT NOT NULL REFERENCES surrogrid.demand_allocation_run(demand_allocation_run_id) ON DELETE CASCADE,
+    component_id TEXT NOT NULL,
+    objectid TEXT NOT NULL,
+    scenario_unit_id TEXT,
+    bus INTEGER,
+    category TEXT NOT NULL,
+    commodity TEXT NOT NULL,
+    annual_energy_kwh DOUBLE PRECISION,
+    max_profile_value DOUBLE PRECISION,
+    profile_hash TEXT,
+    profile_method TEXT NOT NULL,
+    stable_seed BIGINT,
+    source_asset_count INTEGER,
+    matched_swf_asset_count INTEGER,
+    included_in_lv BOOLEAN NOT NULL,
+    suppression_reason TEXT,
+    pylovo_version_id VARCHAR(10) NOT NULL,
+    mix_score DOUBLE PRECISION,
+    mix_rule TEXT,
+    mix_confidence TEXT,
+    mv_direct BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_demand_component_audit UNIQUE (
+        demand_allocation_run_id, component_id, commodity
+    ),
+    CONSTRAINT ck_demand_component_audit_suppression CHECK (
+        included_in_lv OR suppression_reason IS NOT NULL
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_demand_component_audit_run
+    ON surrogrid.demand_component_audit (demand_allocation_run_id, category, commodity);
+CREATE INDEX IF NOT EXISTS idx_demand_component_audit_component
+    ON surrogrid.demand_component_audit (component_id);
 CREATE TABLE IF NOT EXISTS surrogrid.allocated_demand (
     demand_allocation_run_id BIGINT NOT NULL REFERENCES surrogrid.demand_allocation_run(demand_allocation_run_id) ON DELETE CASCADE,
     ts TIMESTAMPTZ NOT NULL,

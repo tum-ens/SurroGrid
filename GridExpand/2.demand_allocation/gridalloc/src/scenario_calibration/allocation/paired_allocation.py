@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -19,10 +20,15 @@ if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
 from common.database import SurroGridDatabase  # noqa: E402
+from common.building_components import build_building_components  # noqa: E402
+from common.reproducibility import stable_seed  # noqa: E402
 
 from .allocation_plan import build_scenario_allocation_plan
 from .ghd_calibration import build_synthetic_ghd_calibration
-from ..profiles.profile_contract import assert_paired_plan_equivalence
+from ..profiles.profile_contract import (
+    assert_paired_component_plan_equivalence,
+    assert_paired_plan_equivalence,
+)
 from .scope_filters import build_grid_scope_summary
 from .sector_asset_calibration import build_sector_asset_calibration
 from .pv_roof_potential import building_roof_capacity, load_lod2_roof_catalog
@@ -228,6 +234,215 @@ def _add_scenario_unit_ids(
     real["scenario_unit_id"] = real_keys.map(unit_ids).astype(int)
     synthetic["scenario_unit_id"] = synthetic_keys.map(unit_ids).astype(int)
 
+
+PAIRED_COMPONENT_COLUMNS = [
+    "scenario_unit_id", "building_objectid", "component_id", "component_kind",
+    "component_category", "source_component_category", "effective_floor_area_m2",
+    "gross_floor_area_m2", "households", "occupants", "installed_peak_kw",
+    "source_pylovo_grid_result_id", "source_pylovo_version_id", "source_building_use",
+    "source_building_use_id", "source_building_type", "mix_score", "mix_rule",
+    "mix_confidence", "source_lv_id", "source_allocation_bus", "real_target_grid_id",
+    "real_target_bus", "synthetic_target_grid_case_id", "synthetic_target_bus",
+    "synthetic_bridge_filename", "included_in_lv", "mv_direct", "annual_energy_kwh",
+    "profile_method", "profile_hash", "stable_seed", "profile_seed",
+    "source_asset_count", "matched_swf_asset_count", "source_asset_ids",
+    "source_use_conflict", "suppression_reason",
+]
+
+
+def _paired_profile_hash(
+    component_id: str,
+    category: str,
+    annual_energy_kwh: float,
+    profile_method: str,
+    stable_profile_seed: int,
+    asset_ids: list[str],
+) -> str:
+    payload = "|".join([
+        str(component_id), str(category), f"{float(annual_energy_kwh):.12f}",
+        str(profile_method), str(int(stable_profile_seed)), ",".join(sorted(asset_ids)),
+    ])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _paired_component_plan(
+    buildings: pd.DataFrame,
+    matches: pd.DataFrame,
+    real_plan: pd.DataFrame,
+    synthetic_plan: pd.DataFrame,
+    *,
+    profile_seed: int,
+) -> pd.DataFrame:
+    """Reconcile matched SWF demand evidence with explicit PyLoVo components."""
+    real_units = real_plan[[
+        "scenario_unit_id", "building_objectid", "source_lv_id",
+        "source_allocation_bus", "target_grid_id", "allocation_bus",
+    ]].copy()
+    synthetic_units = synthetic_plan[[
+        "scenario_unit_id", "building_objectid", "target_grid_id", "allocation_bus",
+        "synthetic_bridge_filename",
+    ]].copy()
+    for frame in (real_units, synthetic_units):
+        frame["building_objectid"] = frame["building_objectid"].astype(str)
+    if real_units["building_objectid"].duplicated().any() or synthetic_units["building_objectid"].duplicated().any():
+        raise ValueError("A paired physical building must map to exactly one scenario unit.")
+    if set(real_units["building_objectid"]) != set(synthetic_units["building_objectid"]):
+        raise ValueError("Paired component planning received different physical buildings.")
+
+    retained_ids = set(real_units["building_objectid"])
+    physical = buildings.copy()
+    physical["objectid"] = physical["objectid"].astype(str)
+    physical = physical[physical["objectid"].isin(retained_ids)].copy()
+    source_bus = real_units.set_index("building_objectid")["source_allocation_bus"]
+    physical["bus"] = physical["objectid"].map(source_bus)
+    if physical["bus"].isna().any():
+        raise ValueError("Every paired physical building requires one source allocation bus.")
+    source_components = build_building_components(physical)
+    source_components["component_kind"] = "pylovo"
+    source_components["source_component_category"] = source_components["component_category"]
+    source_categories = source_components.groupby("objectid")["component_category"].agg(set).to_dict()
+
+    demand_assets = matches[
+        matches["matched"].fillna(False)
+        & matches["asset_type"].isin(["HH", "GHD"])
+        & matches["building_objectid"].notna()
+        & matches["building_objectid"].astype(str).isin(retained_ids)
+    ].copy()
+    demand_assets["building_objectid"] = demand_assets["building_objectid"].astype(str)
+    demand_assets["asset_id"] = demand_assets["asset_id"].astype(str)
+    demand_assets["swf_annual_demand_kwh"] = pd.to_numeric(
+        demand_assets["swf_annual_demand_kwh"], errors="coerce"
+    ).fillna(0.0)
+
+    rows: list[dict[str, Any]] = []
+    for component in source_components.to_dict("records"):
+        object_id = str(component["objectid"])
+        category = str(component["component_category"])
+        asset_type = "HH" if category == "Residential" else "GHD"
+        evidence = demand_assets[
+            demand_assets["building_objectid"].eq(object_id)
+            & demand_assets["asset_type"].eq(asset_type)
+        ]
+        asset_ids = sorted(evidence["asset_id"].tolist())
+        annual = float(evidence["swf_annual_demand_kwh"].sum())
+        direct = bool(component["mv_direct"])
+        if direct:
+            included, suppression, method, annual = False, "outside_paired_lv_scope", "suppressed_mv_direct", 0.0
+        elif evidence.empty or annual <= 0.0:
+            included, suppression, method = False, "no_matched_swf_evidence", "suppressed_no_swf_evidence"
+        else:
+            included, suppression = True, None
+            method = "paired_swf_hh_profile_v2" if asset_type == "HH" else f"paired_swf_ghd_{category.lower()}_shape_v2"
+        stable_profile_seed = stable_seed(
+            int(profile_seed), object_id, category, "electricity", "paired"
+        )
+        real = real_units.loc[real_units["building_objectid"].eq(object_id)].iloc[0]
+        synthetic = synthetic_units.loc[synthetic_units["building_objectid"].eq(object_id)].iloc[0]
+        rows.append({
+            **component,
+            "building_objectid": object_id,
+            "scenario_unit_id": int(real["scenario_unit_id"]),
+            "source_pylovo_grid_result_id": component.get("pylovo_grid_result_id"),
+            "source_pylovo_version_id": component.get("pylovo_version_id"),
+            "source_lv_id": int(real["source_lv_id"]),
+            "source_allocation_bus": int(real["source_allocation_bus"]),
+            "real_target_grid_id": int(real["target_grid_id"]),
+            "real_target_bus": int(real["allocation_bus"]),
+            "synthetic_target_grid_case_id": int(synthetic["target_grid_id"]),
+            "synthetic_target_bus": int(synthetic["allocation_bus"]),
+            "synthetic_bridge_filename": synthetic["synthetic_bridge_filename"],
+            "included_in_lv": bool(included), "mv_direct": direct,
+            "annual_energy_kwh": annual, "profile_method": method,
+            "profile_hash": _paired_profile_hash(component["component_id"], category, annual, method, stable_profile_seed, asset_ids),
+            "stable_seed": int(stable_profile_seed), "profile_seed": int(profile_seed),
+            "source_asset_count": int(len(evidence)), "matched_swf_asset_count": int(len(evidence)),
+            "source_asset_ids": ",".join(asset_ids), "source_use_conflict": None,
+            "suppression_reason": suppression,
+        })
+
+    def add_proxy(object_id: str, asset_type: str, evidence: pd.DataFrame) -> None:
+        if evidence.empty:
+            return
+        physical_row = physical.loc[physical["objectid"].eq(object_id)].iloc[0]
+        category = "Residential" if asset_type == "HH" else "Commercial"
+        component_id = f"{object_id}::swf_evidence_proxy::{asset_type.lower()}"
+        asset_ids = sorted(evidence["asset_id"].tolist())
+        annual = float(evidence["swf_annual_demand_kwh"].sum())
+        stable_profile_seed = stable_seed(
+            int(profile_seed), object_id, category, "electricity", "paired_proxy"
+        )
+        method = f"swf_evidence_proxy_{asset_type.lower()}_v2"
+        real = real_units.loc[real_units["building_objectid"].eq(object_id)].iloc[0]
+        synthetic = synthetic_units.loc[synthetic_units["building_objectid"].eq(object_id)].iloc[0]
+        rows.append({
+            "scenario_unit_id": int(real["scenario_unit_id"]), "building_objectid": object_id,
+            "component_id": component_id, "component_kind": "swf_evidence_proxy",
+            "component_category": category, "source_component_category": "unmatched_upstream_category",
+            "effective_floor_area_m2": 0.0,
+            "gross_floor_area_m2": float(physical_row["floor_area"] * physical_row["floor_number"]),
+            "households": float(pd.to_numeric(pd.Series([physical_row["households"]]), errors="coerce").fillna(0.0).iloc[0]) if asset_type == "HH" else pd.NA,
+            "occupants": float(pd.to_numeric(pd.Series([physical_row["occupants"]]), errors="coerce").fillna(0.0).iloc[0]) if asset_type == "HH" else pd.NA,
+            "installed_peak_kw": 0.0,
+            "source_pylovo_grid_result_id": physical_row.get("pylovo_grid_result_id"),
+            "source_pylovo_version_id": physical_row.get("pylovo_version_id"),
+            "source_building_use": physical_row["building_use"], "source_building_use_id": physical_row["building_use_id"],
+            "source_building_type": physical_row["building_type"], "mix_score": physical_row["mix_score"],
+            "mix_rule": physical_row["mix_rule"], "mix_confidence": physical_row["mix_confidence"],
+            "source_lv_id": int(real["source_lv_id"]), "source_allocation_bus": int(real["source_allocation_bus"]),
+            "real_target_grid_id": int(real["target_grid_id"]), "real_target_bus": int(real["allocation_bus"]),
+            "synthetic_target_grid_case_id": int(synthetic["target_grid_id"]), "synthetic_target_bus": int(synthetic["allocation_bus"]),
+            "synthetic_bridge_filename": synthetic["synthetic_bridge_filename"],
+            "included_in_lv": True, "mv_direct": False, "annual_energy_kwh": annual,
+            "profile_method": method,
+            "profile_hash": _paired_profile_hash(component_id, category, annual, method, stable_profile_seed, asset_ids),
+            "stable_seed": int(stable_profile_seed), "profile_seed": int(profile_seed),
+            "source_asset_count": int(len(evidence)), "matched_swf_asset_count": int(len(evidence)),
+            "source_asset_ids": ",".join(asset_ids),
+            "source_use_conflict": "swf_evidence_on_nonmatching_upstream_category",
+            "suppression_reason": None,
+        })
+
+    for object_id in sorted(retained_ids):
+        evidence = demand_assets[demand_assets["building_objectid"].eq(object_id)]
+        categories = source_categories.get(object_id, set())
+        if "Residential" not in categories:
+            add_proxy(object_id, "HH", evidence[evidence["asset_type"].eq("HH")])
+        if not categories.intersection({"Commercial", "Public"}):
+            add_proxy(object_id, "GHD", evidence[evidence["asset_type"].eq("GHD")])
+
+    plan = pd.DataFrame(rows)
+    if plan.empty:
+        raise ValueError("Paired allocation produced no physical or SWF-evidence components.")
+    plan = plan[PAIRED_COMPONENT_COLUMNS].sort_values(
+        ["scenario_unit_id", "building_objectid", "component_id"]
+    ).reset_index(drop=True)
+    if plan["component_id"].duplicated().any():
+        raise ValueError("Paired component IDs must be unique.")
+    return plan
+
+
+def _refresh_paired_plan_demand(
+    real_plan: pd.DataFrame,
+    synthetic_plan: pd.DataFrame,
+    component_plan: pd.DataFrame,
+) -> None:
+    """Make physical projection totals equal the included component evidence."""
+    included = component_plan[component_plan["included_in_lv"].astype(bool)].copy()
+    residential_area = component_plan.loc[
+        component_plan["component_category"].eq("Residential")
+    ].groupby("scenario_unit_id")["effective_floor_area_m2"].sum()
+    by_unit = included.assign(
+        _hh_kwh=included["annual_energy_kwh"].where(included["component_category"].eq("Residential"), 0.0),
+        _ghd_kwh=included["annual_energy_kwh"].where(included["component_category"].isin(["Commercial", "Public"]), 0.0),
+        _hh_rows=included["source_asset_count"].where(included["component_category"].eq("Residential"), 0.0),
+    ).groupby("scenario_unit_id").agg(
+        _hh_kwh=("_hh_kwh", "sum"), _ghd_kwh=("_ghd_kwh", "sum"), _hh_rows=("_hh_rows", "sum")
+    )
+    for frame in (real_plan, synthetic_plan):
+        frame["residential_effective_floor_area_m2"] = frame["scenario_unit_id"].map(residential_area).fillna(0.0)
+        frame["residential_equivalent_hh_annual_kwh"] = frame["scenario_unit_id"].map(by_unit["_hh_kwh"]).fillna(0.0)
+        frame["calibrated_annual_ghd_kwh"] = frame["scenario_unit_id"].map(by_unit["_ghd_kwh"]).fillna(0.0)
+        frame["residential_equivalent_hh_rows"] = frame["scenario_unit_id"].map(by_unit["_hh_rows"]).fillna(0.0)
 
 def _paired_plans(
     bus_plan: pd.DataFrame,
@@ -440,6 +655,7 @@ def build_paired_allocation(
     max_match_distance_m: float = 100.0,
     min_buildings: int = 5,
     pv_location_mode: str = "swf",
+    profile_seed: int = 481527,
 ) -> dict[str, pd.DataFrame]:
     load_dotenv(ENV_PATH, override=True)
     os.environ["PYLOVO_VERSION_ID"] = str(pylovo_version_id)
@@ -525,6 +741,17 @@ def build_paired_allocation(
     building_plan["pv_roof_eligible"] = building_plan["building_objectid"].isin(
         eligible_buildings
     )
+    component_plan = _paired_component_plan(
+        buildings, matches, real_plan, synthetic_plan, profile_seed=int(profile_seed)
+    )
+    residential_area_by_building = component_plan.loc[
+        component_plan["component_category"].eq("Residential")
+    ].groupby("building_objectid")["effective_floor_area_m2"].sum()
+    building_plan["residential_effective_floor_area_m2"] = building_plan[
+        "building_objectid"
+    ].astype(str).map(residential_area_by_building).fillna(0.0)
+    _refresh_paired_plan_demand(real_plan, synthetic_plan, component_plan)
+    assert_paired_component_plan_equivalence(component_plan)
     assert_paired_plan_equivalence(real_plan, synthetic_plan)
 
     metadata = {
@@ -536,6 +763,16 @@ def build_paired_allocation(
         "min_physical_buildings_per_target_grid": int(min_buildings),
         "scenario_scope": "paired_full_local_demand",
         "pv_location_mode": pv_location_mode,
+        "profile_seed": int(profile_seed),
+        "component_contract": "physical_building_component_v1",
+        "paired_contract": "physical_building_component_paired_v2",
+        "component_rows": int(len(component_plan)),
+        "included_component_rows": int(component_plan["included_in_lv"].astype(bool).sum()),
+        "suppressed_component_rows": int((~component_plan["included_in_lv"].astype(bool)).sum()),
+        "mixed_use_physical_buildings": int(
+            component_plan.groupby("building_objectid")["component_category"].nunique().gt(1).sum()
+        ),
+        "heat_area_method": "residential_effective_floor_area_v1",
         "pv_capacity_source": "citydb_lod2_roof_surfaces",
         "pv_fallback_capacity_kw": 14.5,
         "pv_eligible_buildings": int(len(eligible_buildings)),
@@ -566,6 +803,7 @@ def build_paired_allocation(
         "paired_synthetic_ghd_calibration_summary": ghd_calibration_summary,
         "paired_roof_sections": roof_catalog,
         "paired_pv_roof_assignments": pv_assignments,
+        "paired_component_scenario_plan": component_plan,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, frame in outputs.items():
@@ -596,6 +834,10 @@ def main() -> None:
             "building PV-eligible."
         ),
     )
+    parser.add_argument(
+        "--profile-seed", type=int, default=481527,
+        help="Stable seed used by the paired component profile realization.",
+    )
     args = parser.parse_args()
     outputs = build_paired_allocation(
         ags=args.ags,
@@ -607,6 +849,7 @@ def main() -> None:
         max_match_distance_m=args.max_match_distance_m,
         min_buildings=args.min_buildings,
         pv_location_mode=args.pv_location_mode,
+        profile_seed=args.profile_seed,
     )
     print(outputs["paired_scope_audit"].to_string(index=False))
 

@@ -27,6 +27,7 @@ from common.reproducibility import (
     physical_building_id,
     realization_id,
 )
+from common.building_components import residential_component_mask
 from common.timeframe import (
     TIMESLICE_HOURS,
     build_full_year_metadata,
@@ -48,6 +49,8 @@ class Grid:
 
         ### Basic grid data
         self.df_buildings, self.df_region, self.df_weather_raw = self.SF.get_input_data()
+        self.df_building_components = self.SF.get_building_components()
+        self.df_demand_components = self.df_building_components.copy()
         self._apply_demand_scope()
         self.profile_seed = int(self.settings.get("profile_seed", 0))
         building_ids = [physical_building_id(row) for _, row in self.df_buildings.iterrows()]
@@ -73,9 +76,12 @@ class Grid:
         if not self.settings["weather_data_exists"]: self.df_weather_raw = pd.DataFrame()
         self.df_supim_solar = pd.DataFrame()
         self.df_demand_elec = pd.DataFrame()
+        self.df_electricity_component_profiles = pd.DataFrame()
+        self.df_demand_component_audit = pd.DataFrame()
         # self.df_demand_elec_react = pd.DataFrame()
         self.df_demand_heat_space = pd.DataFrame()
         self.df_demand_heat_water = pd.DataFrame()
+        self._space_heat_source_audit = {}
         self.df_demand_mobility = pd.DataFrame()
         self.df_tve_hpcop = pd.DataFrame()
         self.df_tve_mobility = pd.DataFrame()
@@ -119,27 +125,35 @@ class Grid:
     ############################################
     def _apply_demand_scope(self):
         demand_scope = self.settings.get("demand_scope", "all")
-        if demand_scope == "all":
-            self.settings["demand_scope_stats"] = {
-                "input_buildings": int(len(self.df_buildings)),
-                "selected_buildings": int(len(self.df_buildings)),
-            }
-            return
-        if demand_scope != "residential":
+        if demand_scope not in {"all", "residential"}:
             raise ValueError(f"Unknown demand scope: {demand_scope}")
 
-        before_rows = len(self.df_buildings)
-        before_buses = self.df_buildings.get("bus", pd.Series(dtype=object)).dropna().nunique()
-        mask = self._residential_building_mask(self.df_buildings)
-        self.df_buildings = self.df_buildings.loc[mask].copy().reset_index(drop=True)
-        after_rows = len(self.df_buildings)
-        after_buses = self.df_buildings.get("bus", pd.Series(dtype=object)).dropna().nunique()
-        if self.df_buildings.empty:
-            raise ValueError("Demand scope residential removed all buildings for this grid.")
+        before_buildings = len(self.df_buildings)
+        before_components = len(self.df_building_components)
+        before_buses = self.df_building_components["bus"].dropna().nunique()
+        if demand_scope == "all":
+            selected_components = self.df_building_components.loc[
+                self.df_building_components["included_in_lv"].astype(bool)
+            ].copy()
+            selected_objectids = self.df_buildings["objectid"].astype(str)
+        else:
+            selected_components = self.df_building_components.loc[
+                residential_component_mask(self.df_building_components)
+            ].copy()
+            selected_objectids = selected_components["objectid"].astype(str).unique()
+            self.df_buildings = self.df_buildings.loc[
+                self.df_buildings["objectid"].astype(str).isin(selected_objectids)
+            ].copy().reset_index(drop=True)
 
+        if selected_components.empty or self.df_buildings.empty:
+            raise ValueError(f"Demand scope {demand_scope} removed all demand components/buildings.")
+        self.df_demand_components = selected_components.reset_index(drop=True)
+        after_buses = self.df_demand_components["bus"].dropna().nunique()
         stats = {
-            "input_buildings": int(before_rows),
-            "selected_buildings": int(after_rows),
+            "input_buildings": int(before_buildings),
+            "selected_buildings": int(len(self.df_buildings)),
+            "input_components": int(before_components),
+            "selected_components": int(len(self.df_demand_components)),
             "input_buses": int(before_buses),
             "selected_buses": int(after_buses),
         }
@@ -147,28 +161,24 @@ class Grid:
         if isinstance(self.settings.get("scenario_assumptions"), dict):
             self.settings["scenario_assumptions"].update(stats)
         print(
-            "Residential demand scope: "
-            f"kept {after_rows}/{before_rows} buildings on {after_buses}/{before_buses} buses."
+            f"{demand_scope} demand scope: kept {len(self.df_demand_components)} component(s) "
+            f"from {before_components} on {after_buses}/{before_buses} buses."
         )
 
     @staticmethod
     def _residential_building_mask(df_buildings):
-        residential_types = {"AB", "MFH", "TH", "SFH"}
-        if "building_use" in df_buildings.columns:
-            return df_buildings["building_use"].astype(str).str.lower().eq("residential")
-        if "building_type" in df_buildings.columns:
-            return df_buildings["building_type"].astype(str).str.upper().isin(residential_types)
-        if "type" in df_buildings.columns:
-            return df_buildings["type"].astype(str).str.upper().isin(residential_types)
-        raise ValueError("Demand scope residential requires building_use, building_type, or type in building data.")
+        if "residential_floor_area" not in df_buildings:
+            raise ValueError("Residential selection requires residential_floor_area from the mixed-use PyLoVo contract.")
+        return pd.to_numeric(df_buildings["residential_floor_area"], errors="coerce").gt(0)
 
     def _scenario_assumptions(self):
         assumptions = dict(self.settings.get("scenario_assumptions") or {})
         assumptions.update(self.timeframe_metadata)
         assumptions["scenario_key"] = self.settings.get("scenario_key")
+        assumptions["component_contract"] = "physical_building_component_v1"
         assumptions["demand_scope"] = self.settings.get("demand_scope", "all")
         if assumptions["demand_scope"] == "residential":
-            assumptions["demand_scope_filter"] = "building_use == Residential, with residential building-type fallback for HDF inputs"
+            assumptions["demand_scope_filter"] = "included Residential component (residential_floor_area > 0)"
         assumptions.update(self.settings.get("demand_scope_stats") or {})
         return assumptions
 
@@ -181,6 +191,50 @@ class Grid:
         }
         self.settings["scenario_assumptions"].update(values)
         self.SF.update_timeframe_metadata(self.settings["scenario_assumptions"])
+
+    def _build_demand_component_audit(self):
+        """Create compact component evidence for the current allocation run."""
+        base = self.df_building_components.copy()
+        profiled = self.df_demand_components.set_index("component_id")
+        profile_ids = [
+            str(column[0]) for column in self.df_electricity_component_profiles.columns
+        ]
+        profile_max = self.df_electricity_component_profiles.max(axis=0)
+        profile_max.index = profile_ids
+        audit = base.rename(columns={"component_category": "category"})
+        audit["scenario_unit_id"] = audit["objectid"].astype(str)
+        audit["commodity"] = "electricity"
+        audit["annual_energy_kwh"] = audit["component_id"].map(
+            profiled["annual_electricity_kwh"]
+        ).fillna(0.0)
+        audit["max_profile_value"] = audit["component_id"].map(profile_max).fillna(0.0)
+        audit["profile_hash"] = audit["component_id"].map(profiled["profile_hash"])
+        audit["profile_method"] = audit["component_id"].map(
+            profiled["profile_method"]
+        ).fillna("not_allocated")
+        audit["stable_seed"] = audit["component_id"].map(profiled["stable_seed"])
+        selected_ids = set(self.df_demand_components["component_id"].astype(str))
+        audit["suppression_reason"] = audit.apply(
+            lambda row: (
+                "outside_lv_scope" if not bool(row["included_in_lv"])
+                else None if str(row["component_id"]) in selected_ids
+                else "outside_demand_scope"
+            ),
+            axis=1,
+        )
+        audit["source_asset_count"] = pd.NA
+        audit["matched_swf_asset_count"] = pd.NA
+        audit["mv_direct"] = audit["mv_direct"].astype(bool)
+        return audit[
+            [
+                "component_id", "objectid", "scenario_unit_id", "bus", "category",
+                "commodity", "annual_energy_kwh", "max_profile_value", "profile_hash",
+                "profile_method", "stable_seed", "source_asset_count",
+                "matched_swf_asset_count", "included_in_lv", "suppression_reason",
+                "pylovo_version_id", "mix_score", "mix_rule", "mix_confidence", "mv_direct",
+            ]
+        ]
+
 
     ############################################
     ########### Timeseries Generators ########## 
@@ -240,9 +294,7 @@ class Grid:
             self.location,
             self.altitude,
         )
-        annual_electricity = self.df_buildings["demand_tot_list"].apply(
-            lambda values: float(np.sum(values)) if isinstance(values, (list, tuple, np.ndarray)) else 0.0
-        )
+        annual_electricity = pd.to_numeric(self.df_buildings["annual_electricity_kwh"], errors="coerce").fillna(0.0)
         buildings = pd.DataFrame({
             "building_objectid": building_ids,
             "Site": self.df_buildings["bus"].astype(int),
@@ -301,11 +353,37 @@ class Grid:
         )
 
     def generate_electricity(self):
-        # First, assign missing occupation distribution, total demand and use type by statistics
-        self.df_buildings = elc.sample_statistics(self.df_buildings, self.profile_seed)
-
-        # Now obtain electricity demands
-        self.df_buildings, self.df_demand_elec = elc.get_elec_demand(self.df_buildings)
+        # Profile the explicit electricity components. Physical rows receive
+        # only residential occupancy and aggregate annual demand for assets.
+        self.df_demand_components = elc.sample_statistics(
+            self.df_demand_components, self.profile_seed
+        )
+        (
+            self.df_demand_components,
+            self.df_demand_elec,
+            self.df_electricity_component_profiles,
+        ) = elc.get_elec_demand(
+            self.df_demand_components,
+            base_seed=self.profile_seed,
+            return_component_profiles=True,
+        )
+        residential = self.df_demand_components.loc[
+            self.df_demand_components["component_category"].eq("Residential")
+        ]
+        occupancy_by_building = residential.set_index("objectid")["occ_list"].to_dict()
+        annual_by_building = self.df_demand_components.groupby("objectid")[
+            "annual_electricity_kwh"
+        ].sum()
+        self.df_buildings = self.df_buildings.copy()
+        self.df_buildings["occ_list"] = self.df_buildings["objectid"].map(
+            occupancy_by_building
+        ).apply(
+            lambda value: value if isinstance(value, (list, tuple, np.ndarray)) else []
+        )
+        self.df_buildings["annual_electricity_kwh"] = self.df_buildings["objectid"].map(
+            annual_by_building
+        ).fillna(0.0)
+        self.df_demand_component_audit = self._build_demand_component_audit()
         self._record_profile_fingerprints(base_electricity=self.df_demand_elec)
         # self.df_demand_elec_react = elc.get_elec_react_demand(self.df_demand_elec)
 
@@ -318,9 +396,28 @@ class Grid:
 
     def generate_heat(self):
         # This first sizing method intentionally electrifies residential heat only.
+        residential_components = self.df_demand_components.loc[
+            self.df_demand_components["component_category"].eq("Residential")
+            & self.df_demand_components["included_in_lv"].astype(bool)
+        ]
         residential = self.df_buildings.loc[
             self._residential_building_mask(self.df_buildings)
-        ].copy()
+        ].copy().merge(
+            residential_components[["objectid", "effective_floor_area_m2"]],
+            on="objectid",
+            how="inner",
+            validate="one_to_one",
+        )
+        residential = residential.rename(
+            columns={"effective_floor_area_m2": "residential_effective_floor_area_m2"}
+        )
+        gross_area = pd.to_numeric(residential["floor_area"], errors="coerce") * pd.to_numeric(
+            residential["floor_number"], errors="coerce"
+        )
+        residential["residential_area_share"] = (
+            pd.to_numeric(residential["residential_effective_floor_area_m2"], errors="coerce")
+            / gross_area
+        )
 
         # Electricity is shifted here even when a grid has no residential heat.
         df_wth_input = self._add_input_data_daylight_saving_shift(self.df_weather_raw)
@@ -335,10 +432,24 @@ class Grid:
             return
 
         residential = heat.sample_statistics(residential, self.profile_seed)
+        space_heat_source_audit = {}
+        physical_by_id = self.df_buildings["objectid"].astype(str)
+        sampled_by_id = residential.set_index("objectid")
         for column in ("construction_year", "heating_type"):
-            self.df_buildings.loc[residential.index, column] = residential[column]
+            if column in residential:
+                sampled_values = physical_by_id.map(sampled_by_id[column])
+                if column in self.df_buildings.columns:
+                    sampled_values = sampled_values.where(
+                        sampled_values.notna(), self.df_buildings[column]
+                    )
+                self.df_buildings[column] = sampled_values
 
-        if self.settings["parallel"]:
+        if getattr(heat.config, "SPACE_HEAT_SOURCE", "teaser") == "infdb_ro_heat":
+            self.df_demand_heat_space, space_heat_source_audit = heat.load_space_heat(residential)
+            self.df_demand_heat_water = heat.generate_opendhw(
+                residential, base_seed=self.profile_seed
+            )
+        elif self.settings["parallel"]:
             print(
                 f"Generating heat demands for {len(residential)} building(s) "
                 f"with {sum(residential["households"])} flat(s)..."
@@ -377,6 +488,9 @@ class Grid:
                 self.plz,
                 self.profile_seed,
             )
+        self._space_heat_source_audit = dict(space_heat_source_audit)
+        if space_heat_source_audit:
+            self.settings["scenario_assumptions"].update(space_heat_source_audit)
 
         self.df_demand_heat_space = self._add_output_data_daylight_saving_shift(
             self.df_demand_heat_space
@@ -405,8 +519,10 @@ class Grid:
         heat_buildings = pd.DataFrame({
             "building_objectid": residential[id_column].astype(str),
             "Site": residential["bus"].astype(int),
+            "floor_area": residential["residential_effective_floor_area_m2"].astype(float),
+            "floor_number": 1,
         })
-        for column in ("building_type", "building_use", "floor_area"):
+        for column in ("building_type", "building_use"):
             if column in residential:
                 heat_buildings[column] = residential[column].values
         if "households" in residential:
@@ -439,6 +555,17 @@ class Grid:
         self.df_heat_process_commodity = materialized.process_commodity
         self.df_heat_storage = materialized.storage
         self.df_heat_audit = materialized.audit
+        if self._space_heat_source_audit:
+            source_audit = {
+                "sector": "heat",
+                "audit_record_type": "space_heat_source",
+                **self._space_heat_source_audit,
+            }
+            self.df_heat_audit = pd.concat(
+                [pd.DataFrame([source_audit]), self.df_heat_audit],
+                ignore_index=True,
+                sort=False,
+            )
         self.settings["scenario_assumptions"].update(climate)
         self.settings["scenario_assumptions"]["heat_sizing_method"] = sizing_method
         self.settings["scenario_assumptions"]["heat_scope"] = "residential_buildings"
@@ -451,13 +578,36 @@ class Grid:
         if mobility_source == "pool":
             allowed_models = mbl.get_pool_supported_models()
 
-        # First obtain missing BEV distributions over buildings + specs
-        self.df_buildings = mbl.sample_statistics(
-            self.df_buildings,
-            self.df_region,
-            allowed_models=allowed_models,
-            base_seed=self.profile_seed,
+        # Mobility is physical-building scoped, but only buildings with an
+        # included Residential component may receive a household vehicle set.
+        residential_ids = set(
+            self.df_demand_components.loc[
+                self.df_demand_components["component_category"].eq("Residential")
+                & self.df_demand_components["included_in_lv"].astype(bool),
+                "objectid",
+            ].astype(str)
         )
+        mobility_buildings = self.df_buildings.loc[
+            self.df_buildings["objectid"].astype(str).isin(residential_ids)
+        ].copy()
+        if mobility_buildings.empty:
+            self.df_buildings["cars_by_flat"] = [[] for _ in range(len(self.df_buildings))]
+            self.df_buildings["n_cars_tot"] = 0
+            self.df_buildings["car_dict"] = [{} for _ in range(len(self.df_buildings))]
+        else:
+            mobility_buildings = mbl.sample_statistics(
+                mobility_buildings,
+                self.df_region,
+                allowed_models=allowed_models,
+                base_seed=self.profile_seed,
+            )
+            sampled_by_id = mobility_buildings.set_index("objectid")
+            physical_ids = self.df_buildings["objectid"].astype(str)
+            for column, default in (("cars_by_flat", []), ("n_cars_tot", 0), ("car_dict", {})):
+                values = physical_ids.map(sampled_by_id[column])
+                self.df_buildings[column] = values.apply(
+                    lambda value, fallback=default: fallback if value is None or (not isinstance(value, (list, tuple, dict, np.ndarray)) and pd.isna(value)) else value
+                )
 
         n_cars = self.df_buildings["n_cars_tot"].sum()
         if mobility_source == "pool":
@@ -597,8 +747,9 @@ class Grid:
         self.df_bsp = df_bsp
 
     def create_processes(self):
+        consumer_buses = list(self.df_demand_elec.columns.get_level_values(0).unique())
         dfs = [
-            elc.create_pro_elec(list(self.df_buildings["bus"])),
+            elc.create_pro_elec(consumer_buses),
             self.df_pv_process,
         ]
         if self.settings["include_heat"]:
@@ -609,8 +760,9 @@ class Grid:
         self.df_pro = pd.concat(dfs, axis=0).reset_index(drop=True)
 
     def create_commodities(self):
+        consumer_buses = list(self.df_demand_elec.columns.get_level_values(0).unique())
         dfs = [
-            elc.create_com_elec(list(self.df_buildings["bus"])),
+            elc.create_com_elec(consumer_buses),
             self.df_pv_commodity,
         ]
         if self.settings["include_heat"]:
@@ -649,6 +801,7 @@ class Grid:
     def save_grid_data(self):
         ### Copy input file into results to write results to it:
         self.SF.copy_save_file()
+        self.SF.save_df(self.df_building_components, "raw_data/building_components")
 
         ### Save other data:
         self.SF.save_timeframe_metadata()
@@ -662,6 +815,7 @@ class Grid:
         self.SF.save_df(self.df_battery_audit, "raw_data/battery_asset_audit")
         self.SF.save_df(self.df_heat_asset_plan, "raw_data/heat_asset_plan")
         self.SF.save_df(self.df_heat_audit, "raw_data/heat_asset_audit")
+        self.SF.save_df(self.df_demand_component_audit, "raw_data/demand_component_audit")
         self.SF.save_allocated_vehicles(self.df_buildings, self.battery_dict)
 
         ### Saving urbs input sheets:

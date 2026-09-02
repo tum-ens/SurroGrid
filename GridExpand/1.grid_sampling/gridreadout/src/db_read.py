@@ -11,6 +11,13 @@ Connection credentials are taken from environment variables loaded in
 `gridreadout/config.py`.
 """
 
+from pathlib import Path
+import sys
+
+GRIDEXPAND_DIR = Path(__file__).resolve().parents[3]
+if str(GRIDEXPAND_DIR) not in sys.path:
+    sys.path.insert(0, str(GRIDEXPAND_DIR))
+from common.building_components import validate_physical_buildings
 from config import config
 
 from sqlalchemy import create_engine, text
@@ -244,6 +251,8 @@ class DataBase:
 
     def read_buildings(self, grid_specs, df_bus):
         select_parts = [
+            "b.grid_result_id AS pylovo_grid_result_id",
+            "b.version_id AS pylovo_version_id",
             "b.objectid",
             "b.id",
             "b.feature_id",
@@ -251,28 +260,16 @@ class DataBase:
             "b.height",
             "b.floor_area",
             "b.floor_number",
-            (
-                "CASE "
-                "WHEN UPPER(COALESCE(TRIM(b.building_type), TRIM(b.type), '')) IN ('AB', 'MFH', 'TH', 'SFH') "
-                "THEN UPPER(COALESCE(TRIM(b.building_type), TRIM(b.type))) "
-                "WHEN LOWER(COALESCE(TRIM(b.building_use), TRIM(b.type), '')) LIKE '%public%' "
-                "THEN 'public' "
-                "WHEN LOWER(COALESCE(TRIM(b.building_use), TRIM(b.type), '')) LIKE '%commercial%' "
-                "THEN 'commercial' "
-                "ELSE 'commercial' "
-                "END AS building_type"
-            ),
-            (
-                "CASE "
-                "WHEN UPPER(COALESCE(TRIM(b.building_type), TRIM(b.type), '')) IN ('AB', 'MFH', 'TH', 'SFH') "
-                "THEN 'Residential' "
-                "WHEN LOWER(COALESCE(TRIM(b.building_use), TRIM(b.type), '')) LIKE '%public%' "
-                "THEN 'Public' "
-                "WHEN LOWER(COALESCE(TRIM(b.building_use), TRIM(b.type), '')) LIKE '%commercial%' "
-                "THEN 'Commercial' "
-                "ELSE 'Commercial' "
-                "END AS building_use"
-            ),
+            "b.residential_floor_area",
+            "b.nonresidential_floor_area",
+            "b.nonresidential_use",
+            "b.mix_score",
+            "b.mix_rule",
+            "b.mix_confidence",
+            "b.building_use",
+            "b.building_use_id",
+            "b.building_type",
+            "b.type",
             "b.occupants",
             "b.households",
             "CAST(b.construction_year AS VARCHAR) AS construction_year",
@@ -282,8 +279,12 @@ class DataBase:
             "b.house_number",
             "b.gemeindeschluessel",
             "b.assigned_way_id",
+            "b.residential_peak_load_in_kw",
+            "b.nonresidential_peak_load_in_kw",
+            "b.nonresidential_mv_direct",
             "b.peak_load_in_kw",
             "b.connection_point",
+            "b.vertice_id AS consumer_vertex",
             "ST_AsText(b.centroid) AS centroid",
         ]
 
@@ -333,21 +334,14 @@ class DataBase:
         df_buildings = df_buildings.merge(df_id, on='vertice_id', how="left")
         if "connection_point" in df_buildings.columns:
             df_buildings["bus"] = df_buildings["bus"].fillna(df_buildings["connection_point"])
-            df_buildings.drop(columns=["connection_point"], inplace=True)
+
+        validate_physical_buildings(df_buildings)
 
         ### Take bus to front and order by it
         cols = df_buildings.columns.tolist()
         cols.insert(0, cols.pop(cols.index('bus')))
         df_buildings = df_buildings[cols]
         df_buildings = df_buildings.sort_values(by='bus').reset_index(drop=True)
-
-        if {"occupants", "households", "building_use"}.issubset(df_buildings.columns):
-            residential_mask = df_buildings["building_use"].eq("Residential")
-            fallback_occ = df_buildings.loc[residential_mask, "households"].fillna(1)
-            fallback_occ = fallback_occ.clip(lower=1) * 2
-            df_buildings.loc[residential_mask, "occupants"] = (
-                df_buildings.loc[residential_mask, "occupants"].fillna(fallback_occ)
-            )
 
 
         ### Read out location from string
