@@ -1,0 +1,46 @@
+# Copy to config/runs/<name>.yaml and replace every CHANGE_ME value.
+# This template is for run.pipeline: paired_validation.
+# Fields marked UPDATE are mandatory identity edits for a new paired run.
+run:
+  id: CHANGE_ME_run_id # UPDATE: unique directory-safe run identifier.
+  scenario: ../scenarios/CHANGE_ME_scenario.yaml # UPDATE: copied scenario file.
+  pipeline: paired_validation
+
+resources:
+  # UPDATE: municipality and postcode whose complete eligible grids are used.
+  ags: 9999999
+  plz: 99999
+  # UPDATE: exact PyLoVo topology version; never inferred from the environment.
+  pylovo_version_id: "CHANGE_ME_pylovo_version_id"
+  min_buildings: 5
+  # UPDATE: shared heat-library identity.
+  heat_profile_set_id: CHANGE_ME_heat_profile_set_id
+  # UPDATE: weather artifact used to build the shared PV profile library.
+  weather_source_hdf: CHANGE_ME_weather_source.h5
+  # Optional coverage exclusions. Update only when a known real grid is to be
+  # retained in coverage reporting but omitted from expansion costing.
+  excluded_real_lv_ids: []
+  # UPDATE: unique prepared paired-artifact directory name.
+  paired_dataset_id: CHANGE_ME_paired_dataset_id
+  target_network: both # both, real_swf, or synthetic
+  # Optional adapter-local diagnostic filter; null selects the complete set.
+  target_grid_id: null
+
+execution:
+  powerflow_grid_scope: full # full or backbone
+  # UPDATE: choose post-cases for this run. Do not list `pre` here; the paired
+  # runner adds it to the first requested post-case group.
+  model_cases:
+    - post-inflex-heuristic
+    # - post-hems-heuristic
+    # - post-hems-optimized
+  workers: 1
+  step3_cpus: 1
+  step3_cluster_concurrency: 1
+  step4_cpus: 1
+  # Keep for comparable cases; change only for a deliberately independent
+  # stochastic realization.
+  profile_seed: 481527
+  cleanup_intermediates: true
+  resume: false
+  materialize_expansion: true

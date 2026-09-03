@@ -2,6 +2,9 @@
 
 The pipeline uses two YAML files with separate responsibilities.
 
+Copy-ready templates and the checklist for fields that must be changed for a
+new scenario/run are in `config/templates/`.
+
 - A **scenario YAML** contains scientific and policy assumptions that may change
   results. It is fingerprinted as scenario_hash.
 - A **run YAML** identifies the input dataset and selects execution resources.
@@ -19,8 +22,10 @@ from silently selecting another assumption.
   zero tariff retains physical export without remuneration.
 - asset_sizing.pv: LoD2 potential, heuristic demand multiplier, fallback, roof
   utilization, and pvlib angle-bin choices.
-- asset_sizing.battery: HTW sizing coefficients, adoption/location policy, and
-  energy-to-power ratio.
+- asset_sizing.battery: HTW sizing coefficients and energy-to-power ratio.
+- electrification.heat, electrification.mobility, electrification.pv_battery:
+  strict adoption mode and eligibility policy; deterministic_share requires
+  building_share, while source_inventory requires explicit evidence.
 - asset_sizing.heat: regional heat-pump, auxiliary-heater, and space-heating
   buffer sizing parameters.
 - mobility: emobpy temporal, behavioral, and vehicle-energy assumptions.
@@ -34,7 +39,15 @@ scientific reasoning and equations are centralized in SCENARIO_METHOD.md.
 
 For run.pipeline: scenario:
 
-- resources.inputfile_id: AGS, bridge prefix, or DB/HDF grid identifier.
+- resources.ags: PyLoVo municipality/region identity.
+- resources.plz: optional postcode filter. Null or `"-"` selects all PLZs in
+  the AGS.
+- resources.kcid and resources.bcid: optional exact-grid filters. They must be
+  supplied together; null or `"-"` selects all grids matching broader filters.
+- With only `ags`, the ordinary DB-backed runner enumerates all eligible grids;
+  adding `plz` narrows that set, and adding `kcid`/`bcid` selects one exact grid.
+  The filename form `<AGS>-<candidate_index>_<PLZ>_<KCID>_<BCID>.h5` is an
+  internal/export representation; candidate index is not user input.
 - resources.pylovo_version_id: exact topology version used for DB-backed
   selection. It is passed explicitly and is never inferred from the process
   environment by the scenario launcher.
@@ -44,6 +57,10 @@ For run.pipeline: scenario:
   against the global model-case registry in scenario_pipeline/model_cases.py.
 - execution.n_cpu, mobility_source, demand_scope, and timeframe_mode:
   machine/runtime choices that do not define scientific assumptions.
+
+For `resources.storage: h5`, use `resources.pylovo_grid_id` as the local HDF5
+filename prefix instead of the DB selector fields; HDF5 runs remain single-grid
+runs.
 
 The launcher's optional --model-case overrides this list for a one-case run.
 

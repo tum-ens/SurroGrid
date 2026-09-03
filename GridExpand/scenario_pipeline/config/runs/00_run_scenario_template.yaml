@@ -1,0 +1,40 @@
+# Copy to config/runs/<name>.yaml and replace every CHANGE_ME value.
+# This template is for run.pipeline: scenario (ordinary synthetic/DB-backed run).
+# Fields marked UPDATE are mandatory identity edits for a new run.
+run:
+  id: CHANGE_ME_run_id # UPDATE: unique directory-safe run identifier.
+  scenario: ../scenarios/CHANGE_ME_scenario.yaml # UPDATE: copied scenario file.
+  pipeline: scenario
+
+resources:
+  # UPDATE: exact PyLoVo topology version used by this run; never inferred.
+  pylovo_version_id: "CHANGE_ME_pylovo_version_id"
+  # UPDATE: region identity. This is required for DB-backed runs.
+  ags: 9999999
+  # Optional filters. Use null to select all matching values.
+  plz: null
+  kcid: null
+  bcid: null
+  storage: db # db or h5; structured selectors are for db.
+  # For storage: h5, remove the DB selector fields above and use instead:
+  # pylovo_grid_id: "CHANGE_ME_h5_filename_prefix"
+  # storage: h5
+  # Optional output override. Null uses the standard Step-2 results directory.
+  output_directory: null
+
+execution:
+  powerflow_grid_scope: full # full or backbone
+  # Keep for comparable cases; change only for a deliberately independent
+  # stochastic realization.
+  profile_seed: 481527
+  # UPDATE: choose the model cases required for this run.
+  model_cases:
+    - pre
+    # - post-inflex-heuristic
+    # - post-hems-heuristic
+    # - post-hems-optimized
+  # Machine-specific settings.
+  n_cpu: 1
+  mobility_source: pool
+  demand_scope: all
+  timeframe_mode: full_year

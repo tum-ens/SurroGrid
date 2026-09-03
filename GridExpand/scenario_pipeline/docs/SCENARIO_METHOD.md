@@ -155,13 +155,11 @@ the fixed PV investment cost is charged once per building rather than once per
 roof-angle bin. The optimized process scales the building's capacity-weighted
 roof mix proportionally; it does not choose individual roof orientations.
 
-`location_mode: predefined` limits PV to locations found in the source SWF
-model when that inventory is part of the input. `all_buildings` selects one
-primary electricity connection for every physical building.
+PV and stationary-battery candidates are controlled by the shared electrification assignment manifest. In deterministic_share mode, eligible physical buildings are ranked by a stable seed and selected at the exact rounded share; source_inventory mode retains only rows backed by explicit source evidence. A selected PV+battery row is an investment candidate; its valid sizing may still be zero, including zero battery capacity. The manifest is written before Step 2 and reused unchanged by Step 3.
 
 ## Stationary-battery sizing
 
-All buildings with PV are battery candidates. When a source inventory such as
+Only buildings selected for pv_battery in the shared electrification assignment are battery candidates. When a source inventory such as
 SWF contains battery rows, paired validation uses those rows only as location
 evidence; their reported capacities do not determine the scenario capacity.
 With annual base electricity \(E_{\mathrm{el},i}^{\mathrm{MWh}}\) in MWh/a and

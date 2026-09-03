@@ -7,8 +7,11 @@ run:
 resources:
   # Exact pylovo topology version; never inferred from the environment.
   pylovo_version_id: 1
-  # AGS, bridge filename prefix, or DB-resolvable grid identifier.
-  inputfile_id: "91301"
+  # Region and exact-grid filters; see config/templates/README.md.
+  ags: 9474126
+  plz: 91301
+  kcid: 1
+  bcid: 2
   storage: db
   # Null keeps the standard Step-2 results directory.
   output_directory: null

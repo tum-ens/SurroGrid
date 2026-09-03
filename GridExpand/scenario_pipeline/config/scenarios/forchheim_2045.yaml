@@ -15,8 +15,6 @@ asset_sizing:
     # Heuristic cases use annual base electricity demand; optimized HEMS retains bounds.
     heuristic_method: annual_electricity_rule
     optimized_method: optimization
-    # "predefined" uses SWF PV locations when present; use "all_buildings" otherwise.
-    location_mode: predefined
     # Central compromise across public recommendations of roughly 1--2.5 kWp/MWh.
     # P_PV = min(E_annual * demand_multiplier / 1000, P_PV_max).
     demand_multiplier: 2.0
@@ -37,10 +35,6 @@ asset_sizing:
     heuristic_method: htw_2025_scaled_rule
     # Optimized HEMS uses HTW's actual maximum as an endogenous sizing bound.
     optimized_method: optimization
-    # Every building with positive PV potential is a battery candidate.
-    location_mode: all_pv_buildings
-    # Source inventories (for example SWF) restrict locations when they exist.
-    predefined_locations_when_available: true
     # HTW eligibility: PV [kWp] must exceed this factor times annual demand [MWh].
     minimum_pv_kwp_per_annual_mwh: 0.5
     # Central heuristic: 1.0 kWh per kWp and per MWh/a base demand.
@@ -67,6 +61,14 @@ asset_sizing:
     buffer_volume_l_per_kw_th: 20.0
     # Usable temperature range for converting buffer litres to kWhth.
     buffer_usable_temperature_spread_k: 5.0
+
+electrification: # deterministic_share or source_inventory
+  heat:
+    adoption_mode: source_inventory
+  mobility:
+    adoption_mode: source_inventory
+  pv_battery:
+    adoption_mode: source_inventory
 
 # Mobility behavior and emobpy vehicle-model assumptions.
 mobility:
