@@ -24,8 +24,14 @@ from common.orchestration import command_env, utc_now  # noqa: E402
 from common.timeframe import (  # noqa: E402
     output_filename_for_timeframe,
     read_hdf_metadata,
+    scenario_key_for_timeframe,
+    scenario_output_directory,
 )
-from scenario_pipeline.config_loader import load_run_config  # noqa: E402
+from scenario_pipeline.config_loader import (  # noqa: E402
+    load_run_config,
+    load_scenario_config,
+    scenario_identity_key,
+)
 from scenario_pipeline.synthetic_ags_runner import (  # noqa: E402
     case_qualified_filename,
     get_candidates,
@@ -190,6 +196,7 @@ def archive_case(
         / "2.demand_allocation"
         / "gridalloc"
         / "results"
+        / runner_args.scenario_key
         / step2_filename
     )
     if not step2_path.exists():
@@ -212,7 +219,9 @@ def archive_case(
     else:
         suffix = scenario_suffix_from_hdf(step2_path)
         powerflow_input_filename = step2_filename.replace(".h5", f"_{suffix}.h5")
-        step3_path = GRIDEXPAND_DIR / "3.urbs" / "result" / powerflow_input_filename
+        step3_path = scenario_output_directory(
+            GRIDEXPAND_DIR / "3.urbs" / "result", runner_args.scenario_key
+        ) / powerflow_input_filename
         if not step3_path.exists():
             raise FileNotFoundError(step3_path)
         output_archive = case_dir / "urbs_output.h5"
@@ -435,6 +444,7 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     run_config, run_hash = load_run_config(args.run_config)
+    scenario, scenario_hash = load_scenario_config(run_config.scenario_path)
     if run_config.pipeline != "scenario" or run_config.storage != "db":
         raise ValueError(
             "The smoke runner requires an ordinary DB-backed scenario run YAML."
@@ -576,6 +586,10 @@ def main() -> int:
             timeframe_mode=run_config.timeframe_mode,
             expansion_analysis_prefix=None,
             tsam=True,
+            scenario_key=scenario_key_for_timeframe(
+                run_config.timeframe_mode,
+                base_key=scenario_identity_key(scenario.scenario_id, scenario_hash),
+            ),
         )
         case_manifest.update(
             archive_case(

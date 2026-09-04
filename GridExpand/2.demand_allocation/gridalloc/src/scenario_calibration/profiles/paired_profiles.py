@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
 from typing import Any
@@ -16,6 +17,7 @@ from ...assets.heat.sizing import build_heat_asset_plan
 from ...functions.heat import get_norm_outside_temperature
 from ...assets.pv.materialization import materialize_pv_urbs_inputs
 from ...assets.pv.sizing import build_pv_asset_plan
+from common.electrification import validate_electrification_assignment
 
 from .profile_contract import (
     assert_energy_conserved,
@@ -48,6 +50,80 @@ from ..paths import SYNTHETIC_INPUT_DIR
 from .heat_profile_source import load_physical_heat_profile
 from .physical_heat_profile_library import PhysicalHeatProfileLibrary
 from .pv_profile_library import read_pv_profile_library
+
+
+def source_match_buildings(
+    assignment: pd.DataFrame, evidence_key: str
+) -> set[str]:
+    """Return selected source-study buildings with one exact evidence type."""
+    rows = assignment.loc[
+        assignment["technology"].eq("pv_battery")
+        & assignment["selected"].astype(bool)
+    ]
+    selected: set[str] = set()
+    for row in rows.to_dict("records"):
+        evidence = row.get("source_evidence")
+        if isinstance(evidence, str):
+            try:
+                evidence = json.loads(evidence)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "Invalid pv_battery source evidence in electrification assignment."
+                ) from exc
+        if isinstance(evidence, dict) and int(evidence.get(evidence_key, 0)) > 0:
+            selected.add(str(row["building_objectid"]))
+    return selected
+
+
+def source_asset_sites(
+    allocation: pd.DataFrame,
+    selected_buildings: set[str],
+    count_columns: tuple[str, ...],
+) -> dict[str, int]:
+    """Resolve one exact source-study connection per selected building."""
+    selected_buildings = {str(value) for value in selected_buildings}
+    selected_buildings &= set(
+        allocation["building_objectid"].astype(str)
+    )
+    if not selected_buildings:
+        return {}
+    rows = allocation.loc[
+        allocation["building_objectid"].astype(str).isin(selected_buildings)
+    ].copy()
+    rows["_source_asset_count"] = _sum_numeric_columns(rows, count_columns)
+    rows = rows.loc[rows["_source_asset_count"].gt(0.0)].copy()
+    site_column = (
+        "_profile_site_id" if "_profile_site_id" in rows else "allocation_bus"
+    )
+    sort_columns = ["building_objectid", "_source_asset_count"]
+    ascending = [True, False]
+    for column in (
+        "source_lv_id",
+        "source_allocation_bus",
+        "scenario_unit_id",
+        site_column,
+    ):
+        if column in rows and column not in sort_columns:
+            sort_columns.append(column)
+            ascending.append(True)
+    chosen = rows.sort_values(
+        sort_columns,
+        ascending=ascending,
+        kind="stable",
+    ).drop_duplicates("building_objectid", keep="first")
+    result = dict(
+        zip(
+            chosen["building_objectid"].astype(str),
+            pd.to_numeric(chosen[site_column], errors="raise").astype(int),
+        )
+    )
+    missing = sorted(selected_buildings - set(result))
+    if missing:
+        raise ValueError(
+            "Selected source-study buildings lack an exact asset connection: "
+            f"{missing[:10]}"
+        )
+    return result
 
 
 @dataclass(frozen=True)
@@ -361,7 +437,6 @@ def build_paired_sector_urbs_inputs(
     battery_usable_kwh_per_pv_kwp: float = 1.0,
     battery_usable_kwh_per_annual_mwh: float = 1.0,
     battery_energy_to_power_hours: float = 2.0,
-    battery_predefined_locations_when_available: bool = True,
     synthetic_input_dir: Path = SYNTHETIC_INPUT_DIR,
     technology_parameters=None,
     heat_sizing_method: str = "full_load_hours_rule",
@@ -369,8 +444,51 @@ def build_paired_sector_urbs_inputs(
     heat_profile_catalog: pd.DataFrame | None = None,
     heat_profile_library: Path | None = None,
     allow_diagnostic_heat_fallback: bool = False,
+    electrification_assignment: pd.DataFrame | None = None,
 ) -> SectorUrbsInputs:
     """Build SWF-2045 sector profiles once and remap them to target buses."""
+    if electrification_assignment is None:
+        raise ValueError(
+            "Paired sector materialization requires the shared electrification assignment."
+        )
+    validate_electrification_assignment(electrification_assignment)
+    selected_by_technology = {
+        technology: set(
+            electrification_assignment.loc[
+                electrification_assignment["technology"].eq(technology)
+                & electrification_assignment["selected"].astype(bool),
+                "building_objectid",
+            ].astype(str)
+        )
+        for technology in ("heat", "mobility", "pv_battery")
+    }
+    pv_battery_rows = electrification_assignment.loc[
+        electrification_assignment["technology"].eq("pv_battery")
+    ]
+    pv_battery_mode = str(pv_battery_rows["adoption_mode"].iloc[0])
+    if pv_battery_mode == "source_inventory":
+        selected_pv_buildings = source_match_buildings(
+            electrification_assignment, "pv_match_count"
+        )
+        selected_battery_buildings = source_match_buildings(
+            electrification_assignment, "battery_match_count"
+        )
+    else:
+        selected_pv_buildings = selected_by_technology["pv_battery"]
+        selected_battery_buildings = selected_by_technology["pv_battery"]
+    battery_site_by_building = (
+        source_asset_sites(
+            allocation,
+            selected_battery_buildings,
+            (
+                "residential_battery_rows",
+                "ghd_battery_rows",
+            ),
+        )
+        if pv_battery_mode == "source_inventory"
+        else None
+    )
+
     pv = _build_paired_pv(
         allocation,
         roof_catalog=roof_catalog,
@@ -379,15 +497,18 @@ def build_paired_sector_urbs_inputs(
         sizing_method=pv_sizing_method,
         demand_multiplier=pv_demand_multiplier,
         technical_parameters=technology_parameters.processes["rooftop_pv"],
+        selected_buildings=selected_pv_buildings,
+        battery_candidate_buildings=selected_battery_buildings,
     )
     if pv is None:
         battery = None
     else:
         pv_asset_plan = pv.audit[
-            pv.audit["audit_record_type"].eq("asset_plan")
+            pv.audit["audit_record_type"].isin(
+                ["asset_plan", "battery_pv_reference_plan"]
+            )
         ].copy()
         battery = _build_paired_battery(
-            allocation,
             pv_asset_plan=pv_asset_plan,
             sizing_method=battery_sizing_method,
             minimum_pv_kwp_per_annual_mwh=battery_minimum_pv_kwp_per_annual_mwh,
@@ -396,9 +517,8 @@ def build_paired_sector_urbs_inputs(
                 battery_usable_kwh_per_annual_mwh
             ),
             energy_to_power_hours=battery_energy_to_power_hours,
-            predefined_locations_when_available=(
-                battery_predefined_locations_when_available
-            ),
+            eligible_buildings=selected_battery_buildings,
+            site_by_building=battery_site_by_building,
             technical_parameters=technology_parameters.storages["stationary_battery"],
         )
     mobility = _build_paired_mobility(
@@ -407,6 +527,13 @@ def build_paired_sector_urbs_inputs(
         seed=seed,
         process_parameters=technology_parameters.processes["home_charger"],
         storage_parameters=technology_parameters.storages["mobility_storage"],
+        selected_buildings=selected_by_technology["mobility"],
+        adoption_mode=str(
+            electrification_assignment.loc[
+                electrification_assignment["technology"].eq("mobility"),
+                "adoption_mode",
+            ].iloc[0]
+        ),
     )
     heat = _build_paired_heat(
         allocation,
@@ -419,6 +546,7 @@ def build_paired_sector_urbs_inputs(
         sizing_method=heat_sizing_method,
         heat_config=heat_config,
         technology_parameters=technology_parameters,
+        selected_buildings=selected_by_technology["heat"],
     )
 
     parts = [part for part in (pv, mobility, heat) if part is not None]
@@ -501,19 +629,77 @@ def _build_paired_pv(
     sizing_method: str = "optimization",
     demand_multiplier: float = 2.0,
     technical_parameters=None,
+    selected_buildings: set[str] | None = None,
+    battery_candidate_buildings: set[str] | None = None,
 ) -> _PvInputs | None:
-    if "pv_roof_eligible" not in allocation:
+    if "pv_roof_capacity_kw" not in allocation:
         raise ValueError(
-            "Paired allocation is missing pv_roof_eligible. Regenerate the "
+            "Paired allocation is missing pv_roof_capacity_kw. Regenerate the "
             "LoD2-aware paired allocation first."
         )
-    eligible = allocation[allocation["pv_roof_eligible"].astype(bool)].copy()
+    roof_capacity = pd.to_numeric(
+        allocation["pv_roof_capacity_kw"], errors="coerce"
+    ).fillna(0.0)
+    eligible = allocation.loc[roof_capacity.gt(0.0)].copy()
+    selected_buildings = (
+        {str(value) for value in selected_buildings}
+        if selected_buildings is not None
+        else set(eligible["building_objectid"].astype(str))
+    )
+    battery_candidate_buildings = {
+        str(value) for value in (battery_candidate_buildings or set())
+    }
+    planning_buildings = selected_buildings | battery_candidate_buildings
+    eligible = eligible[
+        eligible["building_objectid"].astype(str).isin(planning_buildings)
+    ].copy()
     if eligible.empty:
         return None
     eligible["building_objectid"] = eligible["building_objectid"].astype(str)
     eligible["_profile_site_id"] = eligible.get(
         "_profile_site_id", eligible["allocation_bus"]
     ).astype(int)
+    local_selected_pv = selected_buildings & set(
+        eligible["building_objectid"]
+    )
+    if local_selected_pv:
+        if "pv_roof_eligible" not in eligible:
+            raise ValueError(
+                "Paired allocation is missing the physical PV source connection."
+            )
+        pv_locations = eligible.loc[
+            eligible["building_objectid"].isin(local_selected_pv)
+            & eligible["pv_roof_eligible"].astype(bool)
+        ]
+        ambiguous = (
+            pv_locations.groupby("building_objectid")["_profile_site_id"]
+            .nunique()
+            .gt(1)
+        )
+        if ambiguous.any():
+            raise ValueError(
+                "Paired allocation contains multiple PV source connections for "
+                f"buildings: {sorted(ambiguous[ambiguous].index)[:10]}"
+            )
+        pv_sites = (
+            pv_locations.drop_duplicates("building_objectid")
+            .set_index("building_objectid")["_profile_site_id"]
+            .astype(int)
+            .to_dict()
+        )
+        missing = sorted(local_selected_pv - set(pv_sites))
+        if missing:
+            raise ValueError(
+                "Selected PV buildings lack an exact assigned connection: "
+                f"{missing[:10]}"
+            )
+    else:
+        pv_sites = {}
+    eligible["_pv_asset_site_id"] = (
+        eligible["building_objectid"].map(pv_sites)
+        .fillna(eligible["_profile_site_id"])
+        .astype(int)
+    )
     profiles = read_pv_profile_library(profile_library).iloc[:hours].reset_index(drop=True)
     if len(profiles) != hours:
         raise ValueError(
@@ -525,7 +711,7 @@ def _build_paired_pv(
         else "residential_equivalent_hh_rows"
     )
     buildings = eligible.assign(
-        Site=eligible["_profile_site_id"],
+        Site=eligible["_pv_asset_site_id"],
         annual_electricity_kwh=_sum_numeric_columns(
             eligible, ("residential_equivalent_hh_annual_kwh", "calibrated_annual_ghd_kwh")
         ),
@@ -540,9 +726,15 @@ def _build_paired_pv(
         sizing_method=sizing_method,
         demand_multiplier=demand_multiplier,
     )
+    pv_asset_plan = asset_plan.loc[
+        asset_plan["building_objectid"].astype(str).isin(selected_buildings)
+    ].copy()
+    pv_sections = selected_sections.loc[
+        selected_sections["building_objectid"].astype(str).isin(selected_buildings)
+    ].copy()
     shared = materialize_pv_urbs_inputs(
-        asset_plan,
-        selected_sections,
+        pv_asset_plan,
+        pv_sections,
         profiles,
         sizing_method=sizing_method,
         technical_parameters=technical_parameters,
@@ -554,7 +746,11 @@ def _build_paired_pv(
     plan_audit = asset_plan.copy()
     plan_audit["sector"] = "pv"
     plan_audit["profile_method"] = "lod2_roof_angles_pvlib"
-    plan_audit["audit_record_type"] = "asset_plan"
+    plan_audit["audit_record_type"] = np.where(
+        plan_audit["building_objectid"].astype(str).isin(selected_buildings),
+        "asset_plan",
+        "battery_pv_reference_plan",
+    )
     audit = pd.concat(
         [plan_audit, audit],
         ignore_index=True,
@@ -569,9 +765,7 @@ def _build_paired_pv(
     )
 
 
-
 def _build_paired_battery(
-    allocation: pd.DataFrame,
     *,
     pv_asset_plan: pd.DataFrame,
     sizing_method: str,
@@ -579,37 +773,16 @@ def _build_paired_battery(
     usable_kwh_per_pv_kwp: float,
     usable_kwh_per_annual_mwh: float,
     energy_to_power_hours: float,
-    predefined_locations_when_available: bool,
+    eligible_buildings: set[str] | None,
+    site_by_building: dict[str, int] | None,
     technical_parameters: dict,
 ) -> _BatteryInputs | None:
     """Size batteries consistently while using SWF rows only as location evidence."""
-    inventory_capacity = _sum_numeric_columns(
-        allocation, ("residential_battery_kwh", "ghd_battery_kwh")
+    eligible_buildings = (
+        {str(value) for value in eligible_buildings}
+        if eligible_buildings is not None
+        else None
     )
-    inventory = allocation.assign(_battery_inventory_kwh=inventory_capacity)
-    inventory = _sorted_allocation(
-        inventory[inventory["_battery_inventory_kwh"].gt(0.0)]
-    )
-    use_inventory = predefined_locations_when_available and not inventory.empty
-    if use_inventory:
-        eligible_buildings = set(inventory["building_objectid"].astype(str))
-        site_by_building = (
-            inventory.assign(
-                building_objectid=inventory["building_objectid"].astype(str),
-                _battery_site=inventory.get(
-                    "_profile_site_id", inventory["allocation_bus"]
-                ).astype(int)
-            )
-            .drop_duplicates("building_objectid")
-            .set_index("building_objectid")["_battery_site"]
-            .to_dict()
-        )
-        location_source = "predefined_swf_battery_locations"
-    else:
-        eligible_buildings = None
-        site_by_building = None
-        location_source = "all_pv_buildings"
-
     plan = build_battery_asset_plan(
         pv_asset_plan,
         sizing_method=sizing_method,
@@ -618,7 +791,7 @@ def _build_paired_battery(
         usable_kwh_per_annual_mwh=usable_kwh_per_annual_mwh,
         eligible_buildings=eligible_buildings,
         site_by_building=site_by_building,
-        location_source=location_source,
+        location_source="electrification_assignment",
     )
     materialized = materialize_battery_urbs_inputs(
         plan,
@@ -646,6 +819,8 @@ def _build_paired_mobility(
     storage_parameters: dict,
     hours: int,
     seed: int,
+    selected_buildings: set[str] | None = None,
+    adoption_mode: str = "source_inventory",
 ) -> _MobilityInputs | None:
     # Mobility is a physical household asset. Non-residential EV evidence is
     # intentionally outside this v1 component scope and must not create a
@@ -657,15 +832,28 @@ def _build_paired_mobility(
         ),
         errors="coerce",
     ).fillna(0.0)
-    row_counts = _sum_numeric_columns(
-        allocation,
-        ("residential_ev_charger_rows",),
-    )
+    if adoption_mode == "source_inventory":
+        row_counts = _sum_numeric_columns(
+            allocation, ("residential_ev_charger_rows",)
+        )
+        row_capacity = _sum_numeric_columns(
+            allocation, ("residential_ev_charger_kw",)
+        )
+    elif adoption_mode == "deterministic_share":
+        row_counts = _sum_numeric_columns(
+            allocation, ("deterministic_vehicle_count",)
+        )
+        row_capacity = row_counts * float(
+            process_parameters["installed_capacity_kw"]
+        )
+    else:
+        raise ValueError(f"Unknown mobility adoption mode {adoption_mode!r}.")
     row_counts = row_counts.where(residential_area.gt(0.0), 0.0).round().astype(int)
-    row_capacity = _sum_numeric_columns(
-        allocation,
-        ("residential_ev_charger_kw",),
-    )
+    if selected_buildings is not None:
+        row_counts = row_counts.where(
+            allocation["building_objectid"].astype(str).isin(selected_buildings),
+            0,
+        )
     row_capacity = row_capacity.where(residential_area.gt(0.0), 0.0)
     if int(row_counts.sum()) == 0:
         return None
@@ -869,12 +1057,24 @@ def _build_paired_heat(
     sizing_method: str,
     heat_config,
     technology_parameters,
+    selected_buildings: set[str] | None = None,
 ) -> _HeatInputs | None:
     # The first heat heuristic is residential only. Commercial HP rows remain
     # outside scope until a separate commercial sizing method is documented.
-    wp_count = _sum_numeric_columns(allocation, ("residential_wp_rows",))
-    selected = allocation.assign(_wp_count=wp_count)
-    selected = selected[selected["_wp_count"].gt(0.0)].copy()
+    selected = allocation.copy()
+    if selected_buildings is not None:
+        selected = selected[
+            selected["building_objectid"].astype(str).isin(selected_buildings)
+        ].copy()
+    selected = selected[
+        pd.to_numeric(
+            selected.get(
+                "residential_effective_floor_area_m2",
+                pd.Series(0.0, index=selected.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0).gt(0.0)
+    ].copy()
     if selected.empty:
         return None
     required = {"building_objectid", "synthetic_bridge_filename", "synthetic_bus"}

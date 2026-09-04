@@ -67,6 +67,14 @@ def scenario_key_for_timeframe(timeframe_mode: str, base_key: str = "baseline_st
     return f"{base_key}_{timeframe_mode}"
 
 
+def scenario_output_directory(base_directory: str | Path, scenario_key: str) -> Path:
+    """Return a validated scenario-specific artifact directory."""
+    key = str(scenario_key).strip()
+    if not key or key in {".", ".."} or Path(key).name != key:
+        raise ValueError(f"scenario_key must be one directory-safe path component: {scenario_key!r}")
+    return Path(base_directory) / key
+
+
 def output_filename_for_timeframe(filename: str, timeframe_mode: str) -> str:
     if timeframe_mode == "full_year":
         return filename

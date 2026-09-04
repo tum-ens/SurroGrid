@@ -10,6 +10,14 @@ loaders live beside the runner, while user-edited YAML files live under
 `config/scenarios` and `config/runs`. Generated manifests are written to
 `GridExpand/run_logs/scenario_manifests`, never into this source directory.
 
+## Starting a new scenario or run
+
+Copy `config/scenarios/00_scenario_template.yaml` and either
+`config/runs/00_run_scenario_template.yaml` or
+`config/runs/00_run_paired_validation_template.yaml`. Replace all `CHANGE_ME`
+values before running. `config/README.md` documents the required identifiers
+and the structured PyLoVo grid-selection filters.
+
 ## Staged entry point
 
 `run_scenario.py` is the single user-facing launcher. For paired validation it

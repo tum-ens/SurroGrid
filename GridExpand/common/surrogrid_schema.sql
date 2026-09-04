@@ -223,6 +223,38 @@ CREATE INDEX IF NOT EXISTS idx_demand_component_audit_run
     ON surrogrid.demand_component_audit (demand_allocation_run_id, category, commodity);
 CREATE INDEX IF NOT EXISTS idx_demand_component_audit_component
     ON surrogrid.demand_component_audit (component_id);
+
+CREATE TABLE IF NOT EXISTS surrogrid.electrification_assignment (
+    demand_allocation_run_id BIGINT NOT NULL REFERENCES surrogrid.demand_allocation_run(demand_allocation_run_id) ON DELETE CASCADE,
+    building_objectid TEXT NOT NULL,
+    technology TEXT NOT NULL,
+    selection_scope_id TEXT NOT NULL,
+    adoption_mode TEXT NOT NULL,
+    configured_share DOUBLE PRECISION,
+    eligible BOOLEAN NOT NULL,
+    selection_score DOUBLE PRECISION,
+    selection_rank INTEGER,
+    selected BOOLEAN NOT NULL,
+    exclusion_reason TEXT,
+    source_evidence TEXT,
+    profile_seed BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_electrification_assignment UNIQUE (
+        demand_allocation_run_id, building_objectid, technology
+    ),
+    CONSTRAINT ck_electrification_assignment_technology
+        CHECK (technology IN ('heat', 'mobility', 'pv_battery')),
+    CONSTRAINT ck_electrification_assignment_selection
+        CHECK (NOT selected OR eligible)
+);
+
+CREATE INDEX IF NOT EXISTS idx_electrification_assignment_run_technology
+    ON surrogrid.electrification_assignment (
+        demand_allocation_run_id, technology, selected
+    );
+CREATE INDEX IF NOT EXISTS idx_electrification_assignment_building
+    ON surrogrid.electrification_assignment (building_objectid);
+
 CREATE TABLE IF NOT EXISTS surrogrid.allocated_demand (
     demand_allocation_run_id BIGINT NOT NULL REFERENCES surrogrid.demand_allocation_run(demand_allocation_run_id) ON DELETE CASCADE,
     ts TIMESTAMPTZ NOT NULL,

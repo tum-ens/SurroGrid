@@ -3,7 +3,7 @@
 The pipeline uses two YAML files with separate responsibilities.
 
 Copy-ready templates and the checklist for fields that must be changed for a
-new scenario/run are in `config/templates/`.
+new scenario/run are in `config/scenarios/` and `config/runs/`.
 
 - A **scenario YAML** contains scientific and policy assumptions that may change
   results. It is fingerprinted as scenario_hash.
@@ -22,10 +22,16 @@ from silently selecting another assumption.
   zero tariff retains physical export without remuneration.
 - asset_sizing.pv: LoD2 potential, heuristic demand multiplier, fallback, roof
   utilization, and pvlib angle-bin choices.
+  Only positive genuine LoD2 capacity defines `pv_battery` eligibility. The
+  fallback remains diagnostic materialization data and never broadens the
+  penetration denominator.
 - asset_sizing.battery: HTW sizing coefficients and energy-to-power ratio.
 - electrification.heat, electrification.mobility, electrification.pv_battery:
   strict adoption mode and eligibility policy; deterministic_share requires
   building_share, while source_inventory requires explicit evidence.
+  The paired Forchheim scenario keeps independent exact PV and battery source
+  matches inside the joint `pv_battery` manifest row. Deterministic synthetic
+  scenarios use the selected `pv_battery` cohort for both PV and battery.
 - asset_sizing.heat: regional heat-pump, auxiliary-heater, and space-heating
   buffer sizing parameters.
 - mobility: emobpy temporal, behavioral, and vehicle-energy assumptions.
@@ -36,6 +42,11 @@ The example scenario YAML comments describe each adjustable value. The
 scientific reasoning and equations are centralized in SCENARIO_METHOD.md.
 
 ## Ordinary scenario run YAML
+
+The repository keeps `forchheim_2045.yaml` for paired source-inventory
+calibration and `forchheim_2045_synthetic.yaml` for the ordinary deterministic
+synthetic run. This prevents an ordinary run from requiring source-study
+evidence that it does not own.
 
 For run.pipeline: scenario:
 

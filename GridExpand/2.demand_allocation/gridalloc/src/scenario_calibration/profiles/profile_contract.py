@@ -95,7 +95,11 @@ def assert_paired_plan_equivalence(
         for column in real_plan.columns
         if column in synthetic_plan.columns
         and (
-            column in {"building_objectid", "scenario_unit_id"}
+            column in {
+                "building_objectid",
+                "scenario_unit_id",
+                "deterministic_vehicle_count",
+            }
             or column.startswith(("residential_", "ghd_", "unsupported_nonres_", "pv_"))
         )
     ]

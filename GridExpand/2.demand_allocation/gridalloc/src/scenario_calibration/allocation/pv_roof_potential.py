@@ -13,6 +13,7 @@ from ...assets.pv.roof_catalog import (
     add_missing_building_fallbacks,
     assert_fallback_share,
     building_roof_capacity,
+    building_lod2_capacity,
     empty_roof_catalog,
     load_lod2_roof_catalog,
     normalize_lod2_roof_sections,
@@ -25,6 +26,6 @@ __all__ = [
     "PROFILE_TILT_BIN_DEG", "PROFILE_AZIMUTH_BIN_DEG",
     "FALLBACK_TILT_DEG", "FALLBACK_AZIMUTH_DEG", "ROOF_SURFACE_QUERY",
     "add_missing_building_fallbacks", "assert_fallback_share",
-    "building_roof_capacity", "empty_roof_catalog", "load_lod2_roof_catalog",
+    "building_lod2_capacity", "building_roof_capacity", "empty_roof_catalog", "load_lod2_roof_catalog",
     "normalize_lod2_roof_sections", "read_lod2_roof_catalog_hdf",
 ]

@@ -13,6 +13,10 @@ GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
+from common.electrification import (  # noqa: E402
+    assignment_manifest_hash,
+    validate_electrification_assignment_config,
+)
 from scenario_pipeline.config_loader import load_run_config, load_scenario_config  # noqa: E402
 from scenario_pipeline.model_cases import MODEL_CASES, get_model_case  # noqa: E402
 
@@ -38,9 +42,6 @@ def _paired_artifact_paths(run) -> tuple[Path, Path, Path]:
 
 def _paired_preparation_commands(run, scenario) -> list[tuple[str, list[str], Path]]:
     paired_dir, heat_library, weather_hdf = _paired_artifact_paths(run)
-    pv_location_mode = (
-        "swf" if scenario.pv.location_mode == "predefined" else "all_buildings"
-    )
     common = ["uv", "run", "--project", "..", "python", "-m"]
     return [
         (
@@ -58,8 +59,10 @@ def _paired_preparation_commands(run, scenario) -> list[tuple[str, list[str], Pa
                 run.pylovo_version_id,
                 "--min-buildings",
                 str(run.min_buildings),
-                "--pv-location-mode",
-                pv_location_mode,
+                "--scenario-config",
+                str(run.scenario_path),
+                "--profile-seed",
+                str(run.seed),
                 "--output-dir",
                 str(paired_dir),
             ],
@@ -84,8 +87,6 @@ def _paired_preparation_commands(run, scenario) -> list[tuple[str, list[str], Pa
                 "src.scenario_calibration.profiles.pv_profile_library",
                 "--roof-catalog",
                 str(paired_dir / "paired_roof_sections.csv"),
-                "--allocation-plan",
-                str(paired_dir / "paired_real_bus_allocation_plan.csv"),
                 "--weather-source-hdf",
                 str(weather_hdf),
                 "--output",
@@ -98,7 +99,9 @@ def _paired_preparation_commands(run, scenario) -> list[tuple[str, list[str], Pa
     ]
 
 
-def _validate_prepared_paired(run) -> dict[str, object]:
+def _validate_prepared_paired(
+    run, scenario, scenario_hash: str
+) -> dict[str, object]:
     from paired_validation.datasets import resolve_paired_dataset
 
     dataset = resolve_paired_dataset(
@@ -122,6 +125,22 @@ def _validate_prepared_paired(run) -> dict[str, object]:
         dataset.paired_dir / "paired_synthetic_bus_allocation_plan.csv"
     )
     heat = pd.read_csv(dataset.paired_dir / "paired_heat_profile_catalog.csv")
+    assignment_path = dataset.paired_dir / "paired_electrification_assignment.csv"
+    if not assignment_path.exists():
+        raise ValueError(f"Missing paired electrification assignment: {assignment_path}")
+    assignment = pd.read_csv(assignment_path)
+    validate_electrification_assignment_config(
+        assignment,
+        scenario.electrification,
+        profile_seed=run.seed,
+    )
+    assignment_hash = assignment_manifest_hash(assignment)
+    if metadata.get("scenario_hash") != scenario_hash:
+        raise ValueError("Prepared paired scenario hash does not match the run YAML.")
+    if metadata.get("electrification_assignment_hash") != assignment_hash:
+        raise ValueError(
+            "Prepared paired electrification assignment hash does not match metadata."
+        )
     not_ready = int((~heat["publication_ready"].astype(bool)).sum())
     if not_ready:
         raise ValueError(f"Paired heat readiness failed for {not_ready} buildings.")
@@ -139,6 +158,10 @@ def _validate_prepared_paired(run) -> dict[str, object]:
         "real_grids": int(real["target_grid_id"].nunique()),
         "synthetic_grids": int(synthetic["target_grid_id"].nunique()),
         "heat_profiles": int(heat["building_objectid"].nunique()),
+        "electrification_assignment_hash": assignment_hash,
+        "electrification_assignment_summary": (
+            assignment.groupby("technology")["selected"].sum().astype(int).to_dict()
+        ),
     }
 
 
@@ -197,10 +220,55 @@ def _expansion_commands(
     return commands
 
 
-def _scenario_command(run, model_case: str) -> tuple[list[str], Path]:
+def _regional_assignment_path(run) -> Path:
+    return GRIDEXPAND_DIR / "run_logs" / run.run_id / "electrification_assignment.csv"
+
+
+def _electrification_preparation_command(
+    run, output_path: Path
+) -> tuple[list[str], Path]:
+    workdir = GRIDEXPAND_DIR / "2.demand_allocation" / "gridalloc"
+    command = [
+        "uv",
+        "run",
+        "--project",
+        "..",
+        "python",
+        "-m",
+        "src.electrification_preparation",
+        "--ags",
+        str(run.ags),
+        "--min-buildings",
+        str(run.min_buildings),
+        "--pylovo-version-id",
+        run.pylovo_version_id,
+        "--demand-scope",
+        run.demand_scope,
+        "--mobility-source",
+        run.mobility_source,
+        "--profile-seed",
+        str(run.seed),
+        "--scenario-config",
+        str(run.scenario_path),
+        "--output",
+        str(output_path),
+    ]
+    if run.plz is not None:
+        command.extend(["--plz", str(run.plz)])
+    return command, workdir
+
+
+def _scenario_command(
+    run,
+    model_case: str,
+    *,
+    grid_id: str | None = None,
+    assignment_path: Path | None = None,
+) -> tuple[list[str], Path]:
     case = get_model_case(model_case)
     workdir = GRIDEXPAND_DIR / "2.demand_allocation" / "gridalloc"
     profiles = "status_quo" if case.name == "pre" else "all"
+    selected_grid_id = grid_id or run.pylovo_grid_id or str(run.ags)
     command = [
         "uv",
         "run",
@@ -208,7 +276,7 @@ def _scenario_command(run, model_case: str) -> tuple[list[str], Path]:
         "..",
         "python",
         "main.py",
-        run.inputfile_id,
+        selected_grid_id,
         "--storage",
         run.storage,
         "--n_cpu",
@@ -231,9 +299,45 @@ def _scenario_command(run, model_case: str) -> tuple[list[str], Path]:
     ]
     if run.storage == "db":
         command.extend(["--pylovo-version-id", run.pylovo_version_id])
+        if grid_id is None and run.kcid is not None:
+            command.extend(
+                [
+                    "--plz", str(run.plz),
+                    "--kcid", str(run.kcid),
+                    "--bcid", str(run.bcid),
+                ]
+            )
     if run.output_directory is not None:
         command.extend(["--output-directory", str(run.output_directory)])
+    if assignment_path is not None:
+        command.extend(["--electrification-assignment", str(assignment_path)])
     return command, workdir
+
+
+def _selected_scenario_grid_ids(run) -> list[str | None]:
+    """Return one command selector, or all matching DB bridge filenames."""
+    if run.storage == "h5":
+        return [None]
+    if run.kcid is not None:
+        return [None]
+
+    from scenario_pipeline.synthetic_ags_runner import get_candidates
+
+    candidates = get_candidates(
+        GRIDEXPAND_DIR.parent,
+        str(run.ags),
+        run.min_buildings,
+        run.demand_scope,
+        run.pylovo_version_id,
+    )
+    if run.plz is not None:
+        candidates = [candidate for candidate in candidates if int(candidate["plz"]) == run.plz]
+    if not candidates:
+        scope = f"AGS={run.ags}"
+        if run.plz is not None:
+            scope += f", PLZ={run.plz}"
+        raise ValueError(f"No PyLoVo grids found for {scope}.")
+    return [str(candidate["bridge_filename"]) for candidate in candidates]
 
 
 def _paired_command(
@@ -298,7 +402,24 @@ def _paired_command(
 
 def build_commands(run, model_cases: tuple[str, ...]) -> list[tuple[list[str], Path]]:
     if run.pipeline == "scenario":
-        return [_scenario_command(run, model_case) for model_case in model_cases]
+        grid_ids = _selected_scenario_grid_ids(run)
+        assignment_path = None
+        if (
+            run.storage == "db"
+            and run.kcid is None
+            and any(model_case != "pre" for model_case in model_cases)
+        ):
+            assignment_path = _regional_assignment_path(run)
+        return [
+            _scenario_command(
+                run,
+                model_case,
+                grid_id=grid_id,
+                assignment_path=assignment_path,
+            )
+            for model_case in model_cases
+            for grid_id in grid_ids
+        ]
 
     commands: list[tuple[list[str], Path]] = []
     requested_heuristic = tuple(case for case in HEURISTIC_CASES if case in model_cases)
@@ -348,11 +469,23 @@ def main() -> None:
         raise ValueError("--prepare-only is only available for paired_validation runs.")
     model_cases = (args.model_case,) if args.model_case is not None else run.model_cases
     execution_commands = build_commands(run, model_cases)
-    preparation = (
-        _paired_preparation_commands(run, scenario)
-        if run.pipeline == "paired_validation" and not run.resume
-        else []
-    )
+    preparation = []
+    if (
+        run.pipeline == "scenario"
+        and run.storage == "db"
+        and run.kcid is None
+        and any(model_case != "pre" for model_case in model_cases)
+    ):
+        preparation.append(
+            (
+                "prepare_electrification_assignment",
+                *_electrification_preparation_command(
+                    run, _regional_assignment_path(run)
+                ),
+            )
+        )
+    if run.pipeline == "paired_validation" and not run.resume:
+        preparation.extend(_paired_preparation_commands(run, scenario))
     postprocessing = (
         _expansion_commands(run, model_cases)
         if run.pipeline == "paired_validation" and not args.prepare_only
@@ -377,7 +510,22 @@ def main() -> None:
         "scenario_id": scenario.scenario_id,
         "scenario_hash": scenario_hash,
         "pylovo_version_id": run.pylovo_version_id,
+        "scenario_grid_selection": {
+            "ags": run.ags,
+            "plz": run.plz,
+            "kcid": run.kcid,
+            "bcid": run.bcid,
+            "storage": run.storage,
+        },
         "profile_seed": run.seed,
+        "electrification_assignment_path": (
+            str(_regional_assignment_path(run))
+            if run.pipeline == "scenario"
+            and run.storage == "db"
+            and run.kcid is None
+            and any(model_case != "pre" for model_case in model_cases)
+            else None
+        ),
         "model_cases": list(model_cases),
         "stages": [
             {"stage": stage, "command": command, "working_directory": str(workdir)}
@@ -398,7 +546,7 @@ def main() -> None:
         subprocess.run(command, cwd=workdir, check=True)
 
     if run.pipeline == "paired_validation":
-        readiness = _validate_prepared_paired(run)
+        readiness = _validate_prepared_paired(run, scenario, scenario_hash)
         manifest["paired_readiness"] = readiness
         _write_manifest(manifest_path, manifest)
         print(f"[validate] {json.dumps(readiness, sort_keys=True)}", flush=True)

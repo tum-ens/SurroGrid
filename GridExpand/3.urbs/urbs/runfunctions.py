@@ -9,7 +9,6 @@ from .validation import *
 from .saveload import *
 from .features import *
 from .scenarios import *
-from .scenarios import _infer_electrification_labels
 import os
 import multiprocessing as mp
 import time
@@ -91,8 +90,19 @@ def _run_worker(data_cluster, global_settings, log_dir, scenario_name, return_di
 
 #     return result_dir
 
-def prepare_result_directory(input_file, script_name):
-    return "result"
+def prepare_result_directory(input_file, script_name, scenario_key=None):
+    key = str(scenario_key).strip() if scenario_key is not None else ""
+    if scenario_key is not None and (
+        not key
+        or key in {".", ".."}
+        or os.path.basename(key) != key
+    ):
+        raise ValueError(
+            f"scenario_key must be one directory-safe path component: {scenario_key!r}"
+        )
+    result_dir = os.path.join("result", key) if key else "result"
+    os.makedirs(result_dir, exist_ok=True)
+    return result_dir
 
 
 def setup_solver_mip(optim, logfile='solver.log'):
@@ -156,9 +166,7 @@ def run_lvds_opt(input_path,        # path to input file
 
     ### Insert settings into data and read out modes/name: ###
     print("\nReading running modes...")
-    inferred_labels = _infer_electrification_labels(data, global_settings)
-    global_settings.update(inferred_labels)
-    scenario_name = urbs.read_scenario_name(global_settings, data) # from actual input data create a filename
+    scenario_name = urbs.read_scenario_name(global_settings, data)
     data = urbs.insert_scenario(data, global_settings)             # insert global settings as df into input data
 
     mode = identify_mode(data)   # check whether intertemporal, transmission, storage, dsm, bsp, tve, availability, acpf/dcpf, type period weight, tsam, tsam season, onoff, minfraction, power_price, uncoordinated, transdist, 14a, uhp
@@ -191,11 +199,6 @@ def run_lvds_opt(input_path,        # path to input file
         for name in tsam_data.keys():
             store['urbs_out/tsam/' + name] = tsam_data[name]
 
-
-    ##### Electrification: #####
-    if global_settings["PV_electr"] < 100: data = remove_pv_in_random(data, global_settings["PV_electr"])
-    if 0 < global_settings["HP_electr"] < 100: data = remove_heat_in_random(data, global_settings["HP_electr"])
-    if global_settings["EV_electr"] < 100: data = remove_mobility_in_random(data, global_settings["EV_electr"])
 
     ##### Variable Tariff: #####
     if global_settings["vartariff"]!=0: raise NotImplementedError("Variable Tariff: Any values different from 0 are currently not safely implemented!") 

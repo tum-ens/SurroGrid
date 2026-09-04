@@ -4,6 +4,7 @@ import os
 import shutil
 import time
 import argparse
+import pandas as pd
 import sys
 from pathlib import Path
 from urbs.resource_report import resource_report
@@ -13,14 +14,22 @@ if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 DEFAULT_SCENARIO_CONFIG = (
     GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
-    / "forchheim_2045.yaml"
+    / "forchheim_2045_synthetic.yaml"
 )
 
-from scenario_pipeline.config_loader import load_scenario_config
+from scenario_pipeline.config_loader import (
+    load_scenario_config,
+    scenario_identity_key,
+)
+from common.electrification import (
+    assignment_manifest_hash,
+    validate_electrification_assignment_config,
+)
+from common.timeframe import read_hdf_metadata, scenario_key_for_timeframe
 
 # Note - this urbs version is deviating in the following ways from urbs-lvds (04 Feb 2025):
 # :: removed grid optimization, 14a/bui-react, uhp, coordination, curtailment
-# :: keeping tsam, flexibility, power_price, different shares of electrification, vartariff
+# :: keeping tsam, flexibility, power_price, and vartariff execution controls
 # :: removed microgrid inputs
 # :: removed LP file and excel generation
 # :: removed CO2 limit/environmental commodities
@@ -71,7 +80,65 @@ if __name__ == '__main__':
         if not matched_files:
             raise FileNotFoundError(f"No Step 3 input file matches {input_id_str} in Input/.")
         input_file = matched_files[0]
-
+        input_path = Path("Input") / input_file
+        input_metadata = read_hdf_metadata(input_path)
+        if input_metadata.get("scenario_hash") not in {None, scenario_hash}:
+            raise ValueError(
+                "Step-3 scenario YAML does not match the Step-2 input scenario_hash."
+            )
+        model_case = input_metadata.get("model_case")
+        assignment_hash = input_metadata.get("electrification_assignment_hash")
+        if model_case == "pre":
+            # Status-quo inputs intentionally contain only base electricity and
+            # therefore have no post-electrification assignment manifest.
+            assignment_hash = None
+        else:
+            if not assignment_hash:
+                raise ValueError(
+                    "Step-3 post-electrification input is missing "
+                    "electrification_assignment_hash."
+                )
+            try:
+                input_assignment = pd.read_hdf(
+                    input_path, key="raw_data/electrification_assignment"
+                )
+            except (FileNotFoundError, KeyError) as exc:
+                raise ValueError(
+                    "Step-3 post-electrification input is missing "
+                    "raw_data/electrification_assignment."
+                ) from exc
+            validate_electrification_assignment_config(
+                input_assignment,
+                scenario.electrification,
+                profile_seed=input_metadata.get("profile_seed"),
+                exact_share=False,
+            )
+            local_assignment_hash = assignment_manifest_hash(
+                input_assignment, exact_share=False
+            )
+            expected_local_hash = input_metadata.get(
+                "electrification_assignment_local_hash", assignment_hash
+            )
+            if local_assignment_hash != expected_local_hash:
+                raise ValueError(
+                    "Step-2 assignment metadata does not match the stored "
+                    "electrification assignment."
+                )
+        scenario_key = input_metadata.get("scenario_key")
+        if not scenario_key:
+            raise ValueError(
+                "Step-2 input is missing scenario_key metadata; "
+                "rerun Step 2 with the active scenario configuration."
+            )
+        expected_scenario_key = scenario_key_for_timeframe(
+            str(input_metadata.get("timeframe_mode", "full_year")),
+            base_key=scenario_identity_key(scenario.scenario_id, scenario_hash),
+        )
+        if str(scenario_key) != expected_scenario_key:
+            raise ValueError(
+                "Step-2 scenario_key is not canonical for the active scenario "
+                f"and timeframe: expected={expected_scenario_key}, got={scenario_key}"
+            )
 
         ### Give global run settings
         tsam_periods = args.tsam_periods or time_aggregation.number_of_typical_periods
@@ -98,12 +165,11 @@ if __name__ == '__main__':
             "tsamMethodSettings": tsam_method_settings,
             "scenario_id": scenario.scenario_id,
             "scenario_hash": scenario_hash,
+            "scenario_key": scenario_key,
+            "electrification_assignment_hash": input_metadata.get(
+                "electrification_assignment_hash"
+            ),
             "reduce_only": args.reduce_only,
-
-            # Electrification
-            "PV_electr": 100,       # 100           # % of building nodes adopting PV (0-100)
-            "HP_electr": 100,       # 100           # % of building nodes adopting HP (0-100)
-            "EV_electr": 100,       # 100           # % of building nodes adopting EV (0-100)
 
             # CPUs
             "n_cpu": int(args.n_cpu)
@@ -123,7 +189,11 @@ if __name__ == '__main__':
 
         # Create result directory (format: datetime-inputfile-resultname), copy input and runfile into it 
         script_name = os.path.basename(__file__)
-        result_dir = urbs.prepare_result_directory(input_file=input_file.replace('.h5', ''), script_name=script_name[:-3])  # time stamp + filename + script name
+        result_dir = urbs.prepare_result_directory(
+            input_file=input_file.replace(".h5", ""),
+            script_name=script_name[:-3],
+            scenario_key=scenario_key,
+        )
         result_path = os.path.join(result_dir, input_file) 
         shutil.copyfile(input_path, result_path)
 

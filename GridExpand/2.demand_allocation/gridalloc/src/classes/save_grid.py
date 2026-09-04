@@ -19,7 +19,11 @@ from common.building_components import (
 )
 
 from common.database import SurroGridDatabase
-from common.timeframe import output_filename_for_timeframe, write_hdf_metadata
+from common.timeframe import (
+    output_filename_for_timeframe,
+    scenario_output_directory,
+    write_hdf_metadata,
+)
 
 
 class SaveFile:
@@ -73,9 +77,12 @@ class SaveFile:
         return os.path.join(directory, self.input_filename)
 
     def _generate_savepath(self):
-        directory = self.output_directory or config.STORAGE_DIR
-        os.makedirs(directory, exist_ok=True)
-        return os.path.join(directory, self.filename)
+        directory = scenario_output_directory(
+            self.output_directory or config.STORAGE_DIR,
+            self.scenario_key,
+        )
+        directory.mkdir(parents=True, exist_ok=True)
+        return str(directory / self.filename)
 
     def get_input_data(self):
         if self.storage == "db":
@@ -163,6 +170,8 @@ class SaveFile:
             "raw_data/building_components",
             "raw_data/demand_component_audit",
             "raw_data/heat_asset_audit",
+            "raw_data/electrification_assignment",
+            "raw_data/electrification_assignment_summary",
         }
         if (
             self.storage == "db"
@@ -174,6 +183,10 @@ class SaveFile:
         if self.storage == "db":
             if clean_dir == "raw_data/demand_component_audit":
                 self.db.write_demand_component_audit(self.demand_allocation_run_id, df)
+            elif clean_dir == "raw_data/electrification_assignment":
+                self.db.write_electrification_assignment(
+                    self.demand_allocation_run_id, df
+                )
         if self.storage == "db" and self.persist_allocated_timeseries:
             if clean_dir == "urbs_in/demand":
                 self.db.write_allocated_demand(self.demand_allocation_run_id, df)

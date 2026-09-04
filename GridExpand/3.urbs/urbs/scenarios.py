@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import os
-import re
 
 
 # SCENARIO GENERATORS
@@ -82,70 +81,16 @@ def flex_all(data, cross_scenario_data):
     # do nothing
     return data, cross_scenario_data
 
-def _contains_label(labels, tokens):
-    labels = [str(label).lower() for label in labels]
-    return any(any(token in label for token in tokens) for label in labels)
-
-
-def _column_labels(df):
-    if df is None or df.empty:
-        return []
-    if isinstance(df.columns, pd.MultiIndex):
-        return list(df.columns.get_level_values(-1))
-    return list(df.columns)
-
-
-def _data_contains(data, table, column, tokens):
-    df = data.get(table)
-    if df is None or df.empty or column not in df.columns:
-        return False
-    return _contains_label(df[column].dropna().unique(), tokens)
-
-
-def _infer_electrification_labels(data, global_settings):
-    demand_labels = _column_labels(data.get("demand"))
-    supim_labels = _column_labels(data.get("supim"))
-
-    has_pv = bool(supim_labels) or _data_contains(data, "process", "Process", ["pv", "rooftop"])
-    has_heat = (
-        _contains_label(demand_labels, ["space_heat", "water_heat", "heat"])
-        or _data_contains(data, "process", "Process", ["heatpump", "heat_dummy", "heat"])
-        or _data_contains(data, "commodity", "Commodity", ["space_heat", "water_heat", "common_heat"])
-    )
-    has_ev = (
-        _contains_label(demand_labels, ["mobility", "bev", "ev"])
-        or _data_contains(data, "process", "Process", ["charging_station", "bev", "mobility"])
-        or _data_contains(data, "commodity", "Commodity", ["mobility", "bev"])
-    )
-
-    return {
-        "PV_electr": 100 if has_pv else 0,
-        "HP_electr": 100 if has_heat else 0,
-        "EV_electr": 100 if has_ev else 0,
-        "vartariff": global_settings["vartariff"],
-        "power_price_kw": global_settings["power_price_kw"],
-    }
-
-
 def read_scenario_name(global_settings, data=None):
-    '''
-        name structure: 'PV{}_HP{}_EV{}_VarTar{}_CapPr{}'
-    '''
-    labels = _infer_electrification_labels(data, global_settings) if data is not None else global_settings
-    PV=labels["PV_electr"]
-    HP=labels["HP_electr"]
-    EV=labels["EV_electr"]
-    VarTar=labels["vartariff"]
-    CapPr=labels["power_price_kw"]
+    """Return the canonical scenario identity prepared by Step 2."""
+    scenario_key = global_settings.get("scenario_key")
+    if not scenario_key:
+        raise ValueError(
+            "URBS input is missing scenario_key; use the Step 2 scenario metadata."
+        )
+    return str(scenario_key)
 
-    return f"PV{PV}_HP{HP}_EV{EV}_VarTar{VarTar}_CapPr{CapPr}"
 
-def extract_number(s, es):
-    match = re.search(r'{}(\d+)'.format(es), s)
-    if match:
-        return int(match.group(1))
-    else:
-        return None
 def insert_scenario(data, global_settings):
     support_timeframes = data["demand"].index.get_level_values("support_timeframe").unique()
     if len(support_timeframes) != 1:

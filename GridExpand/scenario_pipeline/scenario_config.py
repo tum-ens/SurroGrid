@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from dataclasses import dataclass
+import math
 from typing import Any
 
 
 from .model_cases import MODEL_CASES
-PV_LOCATION_MODES = ("predefined", "all_buildings")
 PV_SIZING_METHODS = ("annual_electricity_rule", "optimization")
+ADOPTION_MODES = ("deterministic_share", "source_inventory")
+ELECTRIFICATION_TECHNOLOGIES = ("heat", "mobility", "pv_battery")
 
 
 def _only(mapping: dict[str, Any], allowed: set[str], label: str) -> None:
@@ -39,6 +42,72 @@ def _number_or_none(value: Any, label: str) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be numeric or null.")
     return float(value)
+
+
+def _share(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{label} must be numeric.")
+    result = float(value)
+    if not math.isfinite(result) or not 0.0 <= result <= 1.0:
+        raise ValueError(f"{label} must be a finite number in [0, 1].")
+    return result
+
+
+@dataclass(frozen=True)
+class TechnologyAdoptionConfig:
+    adoption_mode: str
+    building_share: float | None = None
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any], label: str) -> "TechnologyAdoptionConfig":
+        raw = _mapping(raw, label)
+        _only(raw, {"adoption_mode", "building_share"}, label)
+        if "adoption_mode" not in raw:
+            raise ValueError(f"{label}.adoption_mode is required.")
+        mode = str(raw["adoption_mode"])
+        if mode not in ADOPTION_MODES:
+            raise ValueError(
+                f"{label}.adoption_mode must be one of {ADOPTION_MODES}."
+            )
+        has_share = "building_share" in raw
+        if mode == "deterministic_share":
+            if not has_share:
+                raise ValueError(f"{label}.building_share is required for deterministic_share.")
+            share = _share(raw["building_share"], f"{label}.building_share")
+        else:
+            if has_share:
+                raise ValueError(f"{label}.building_share is not allowed for source_inventory.")
+            share = None
+        return cls(adoption_mode=mode, building_share=share)
+
+
+@dataclass(frozen=True)
+class ElectrificationConfig:
+    heat: TechnologyAdoptionConfig
+    mobility: TechnologyAdoptionConfig
+    pv_battery: TechnologyAdoptionConfig
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "ElectrificationConfig":
+        raw = _mapping(raw, "electrification")
+        _only(raw, {"heat", "mobility", "pv_battery"}, "electrification")
+        missing = [name for name in ELECTRIFICATION_TECHNOLOGIES if name not in raw]
+        if missing:
+            raise ValueError(f"electrification is missing: {missing}")
+        return cls(
+            heat=TechnologyAdoptionConfig.from_dict(raw["heat"], "electrification.heat"),
+            mobility=TechnologyAdoptionConfig.from_dict(
+                raw["mobility"], "electrification.mobility"
+            ),
+            pv_battery=TechnologyAdoptionConfig.from_dict(
+                raw["pv_battery"], "electrification.pv_battery"
+            ),
+        )
+
+    def for_technology(self, technology: str) -> TechnologyAdoptionConfig:
+        if technology not in ELECTRIFICATION_TECHNOLOGIES:
+            raise ValueError(f"Unknown electrification technology {technology!r}.")
+        return getattr(self, technology)
 
 
 @dataclass(frozen=True)
@@ -72,7 +141,6 @@ class EconomicsConfig:
 class PvSizingConfig:
     heuristic_method: str
     optimized_method: str
-    location_mode: str
     demand_multiplier: float
     fallback_capacity_kwp: float
     maximum_fallback_share: float
@@ -86,7 +154,7 @@ class PvSizingConfig:
     def from_dict(cls, raw: dict[str, Any]) -> "PvSizingConfig":
         raw = _mapping(raw, "asset_sizing.pv")
         allowed = {
-            "heuristic_method", "optimized_method", "location_mode",
+            "heuristic_method", "optimized_method",
             "demand_multiplier", "fallback_capacity_kwp",
             "maximum_fallback_share", "module_capacity_kw_per_m2",
             "flat_roof_utilization", "slanted_roof_utilization",
@@ -97,9 +165,6 @@ class PvSizingConfig:
         optimized = str(raw["optimized_method"])
         if heuristic not in PV_SIZING_METHODS or optimized not in PV_SIZING_METHODS:
             raise ValueError(f"PV sizing methods must be one of {PV_SIZING_METHODS}.")
-        location_mode = str(raw["location_mode"])
-        if location_mode not in PV_LOCATION_MODES:
-            raise ValueError(f"PV location mode must be one of {PV_LOCATION_MODES}.")
         fallback_share = _positive(
             raw["maximum_fallback_share"],
             "asset_sizing.pv.maximum_fallback_share",
@@ -115,7 +180,6 @@ class PvSizingConfig:
         return cls(
             heuristic_method=heuristic,
             optimized_method=optimized,
-            location_mode=location_mode,
             demand_multiplier=_positive(raw["demand_multiplier"], "asset_sizing.pv.demand_multiplier"),
             fallback_capacity_kwp=_positive(raw["fallback_capacity_kwp"], "asset_sizing.pv.fallback_capacity_kwp"),
             maximum_fallback_share=fallback_share,
@@ -174,8 +238,6 @@ class HeatSizingConfig:
 class BatterySizingConfig:
     heuristic_method: str
     optimized_method: str
-    location_mode: str
-    predefined_locations_when_available: bool
     minimum_pv_kwp_per_annual_mwh: float
     heuristic_usable_kwh_per_pv_kwp: float
     heuristic_usable_kwh_per_annual_mwh: float
@@ -187,8 +249,7 @@ class BatterySizingConfig:
     def from_dict(cls, raw: dict[str, Any]) -> "BatterySizingConfig":
         raw = _mapping(raw, "asset_sizing.battery")
         allowed = {
-            "heuristic_method", "optimized_method", "location_mode",
-            "predefined_locations_when_available",
+            "heuristic_method", "optimized_method",
             "minimum_pv_kwp_per_annual_mwh",
             "heuristic_usable_kwh_per_pv_kwp",
             "heuristic_usable_kwh_per_annual_mwh",
@@ -201,10 +262,6 @@ class BatterySizingConfig:
             raise ValueError("asset_sizing.battery.heuristic_method must be htw_2025_scaled_rule.")
         if raw["optimized_method"] != "optimization":
             raise ValueError("asset_sizing.battery.optimized_method must be optimization.")
-        if raw["location_mode"] != "all_pv_buildings":
-            raise ValueError("asset_sizing.battery.location_mode must be all_pv_buildings.")
-        if not isinstance(raw["predefined_locations_when_available"], bool):
-            raise ValueError("asset_sizing.battery.predefined_locations_when_available must be true or false.")
         coefficients = {
             name: _positive(raw[name], f"asset_sizing.battery.{name}")
             for name in (
@@ -225,8 +282,6 @@ class BatterySizingConfig:
         return cls(
             heuristic_method="htw_2025_scaled_rule",
             optimized_method="optimization",
-            location_mode="all_pv_buildings",
-            predefined_locations_when_available=raw["predefined_locations_when_available"],
             minimum_pv_kwp_per_annual_mwh=_positive(raw["minimum_pv_kwp_per_annual_mwh"], "asset_sizing.battery.minimum_pv_kwp_per_annual_mwh"),
             heuristic_usable_kwh_per_pv_kwp=coefficients["heuristic_usable_kwh_per_pv_kwp"],
             heuristic_usable_kwh_per_annual_mwh=coefficients["heuristic_usable_kwh_per_annual_mwh"],
@@ -400,13 +455,14 @@ class ScenarioConfig:
     battery: BatterySizingConfig
     heat: HeatSizingConfig
     mobility: MobilityConfig
+    electrification: ElectrificationConfig
     technologies: TechnologyParameters
     time_aggregation: TimeAggregationConfig
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "ScenarioConfig":
         raw = _mapping(raw, "scenario configuration")
-        _only(raw, {"scenario", "economics", "asset_sizing", "mobility", "technologies", "time_aggregation"}, "top-level scenario")
+        _only(raw, {"scenario", "economics", "asset_sizing", "mobility", "electrification", "technologies", "time_aggregation"}, "top-level scenario")
         scenario = _mapping(raw["scenario"], "scenario")
         _only(scenario, {"id", "milestone_year"}, "scenario")
         economics = _mapping(raw["economics"], "economics")
@@ -421,9 +477,14 @@ class ScenarioConfig:
             battery=BatterySizingConfig.from_dict(assets["battery"]),
             heat=HeatSizingConfig.from_dict(assets["heat"]),
             mobility=MobilityConfig.from_dict(raw["mobility"]),
+            electrification=ElectrificationConfig.from_dict(raw["electrification"]),
             technologies=TechnologyParameters.from_dict(raw["technologies"]),
             time_aggregation=TimeAggregationConfig.from_dict(raw["time_aggregation"]),
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the typed scientific configuration in canonical field form."""
+        return asdict(self)
 
     def pv_sizing_method(self, model_case: str) -> str:
         if model_case not in MODEL_CASES:

@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import hashlib
 import json
 import math
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import time
 import traceback
@@ -27,12 +29,17 @@ GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
+from common.electrification import (  # noqa: E402
+    assignment_manifest_hash,
+    validate_electrification_assignment_config,
+)
 from common.timeframe import (  # noqa: E402
     TIMEFRAME_MODES,
     build_initial_metadata,
     horizon_hours_from_hdf,
     output_filename_for_timeframe,
     read_hdf_metadata,
+    scenario_output_directory,
     scenario_key_for_timeframe,
 )
 from common.orchestration import (  # noqa: E402
@@ -41,11 +48,11 @@ from common.orchestration import (  # noqa: E402
     run_command,
     utc_now,
 )
-from scenario_pipeline.config_loader import load_scenario_config  # noqa: E402
+from scenario_pipeline.config_loader import load_scenario_config, scenario_identity_key  # noqa: E402
 
 DEFAULT_SCENARIO_CONFIG = (
     GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
-    / "forchheim_2045.yaml"
+    / "forchheim_2045_synthetic.yaml"
 )
 
 
@@ -97,6 +104,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step3-cluster-concurrency", type=int, default=1)
     parser.add_argument("--step4-cpus", type=int, default=4)
     parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
+    parser.add_argument(
+        "--electrification-assignment",
+        type=Path,
+        help=(
+            "Precomputed regional assignment manifest. If omitted, the runner "
+            "prepares one before starting candidate workers."
+        ),
+    )
     parser.add_argument(
         "--profile-seed",
         type=int,
@@ -210,6 +225,7 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     args.scenario_config = args.scenario_config.resolve()
     scenario, args.scenario_hash = load_scenario_config(args.scenario_config)
+    args.scenario = scenario
     args.tsam = scenario.time_aggregation.enabled
     args.tsam_periods = scenario.time_aggregation.number_of_typical_periods
     args.tsam_hours_per_period = scenario.time_aggregation.hours_per_period
@@ -241,10 +257,13 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def step_paths(repo_root: Path) -> dict[str, Path]:
+def step_paths(repo_root: Path, scenario_key: str) -> dict[str, Path]:
     gridexpand = repo_root / "GridExpand"
     return {
-        "step2_results": gridexpand / "2.demand_allocation" / "gridalloc" / "results",
+        "step2_results": scenario_output_directory(
+            gridexpand / "2.demand_allocation" / "gridalloc" / "results",
+            scenario_key,
+        ),
         "step3_input": gridexpand / "3.urbs" / "Input",
         "step4_input": gridexpand / "4.powerflow" / "Input",
     }
@@ -348,17 +367,10 @@ def get_candidates(
     ]
 
 
-def scenario_base_key(args: argparse.Namespace) -> str:
-    return (
-        "baseline_static_hh_only"
-        if args.demand_scope == "residential"
-        else "baseline_static"
-    )
-
-
 def pipeline_scenario_key(args: argparse.Namespace) -> str:
     return scenario_key_for_timeframe(
-        args.timeframe_mode, base_key=scenario_base_key(args)
+        args.timeframe_mode,
+        base_key=scenario_identity_key(args.scenario.scenario_id, args.scenario_hash),
     )
 
 
@@ -529,43 +541,11 @@ def _contains_any(labels: list[str], tokens: tuple[str, ...]) -> bool:
 
 
 def scenario_suffix_from_hdf(path: Path) -> str:
-    with pd.HDFStore(path, mode="r") as store:
-        demand = (
-            store["/urbs_in/demand"] if "/urbs_in/demand" in store else pd.DataFrame()
-        )
-        supim = store["/urbs_in/supim"] if "/urbs_in/supim" in store else pd.DataFrame()
-        process = (
-            store["/urbs_in/process"] if "/urbs_in/process" in store else pd.DataFrame()
-        )
-        commodity = (
-            store["/urbs_in/commodity"]
-            if "/urbs_in/commodity" in store
-            else pd.DataFrame()
-        )
-
-    demand_labels = _labels_from_columns(demand)
-    supim_labels = _labels_from_columns(supim)
-    process_labels = _labels_from_column(process, "Process")
-    commodity_labels = _labels_from_column(commodity, "Commodity")
-
-    has_pv = bool(supim_labels) or _contains_any(process_labels, ("pv", "rooftop"))
-    has_heat = (
-        _contains_any(demand_labels, ("space_heat", "water_heat", "heat"))
-        or _contains_any(process_labels, ("heatpump", "heat_dummy", "heat"))
-        or _contains_any(commodity_labels, ("space_heat", "water_heat", "common_heat"))
-    )
-    has_ev = (
-        _contains_any(demand_labels, ("mobility", "bev", "ev"))
-        or _contains_any(process_labels, ("charging_station", "bev", "mobility"))
-        or _contains_any(commodity_labels, ("mobility", "bev"))
-    )
-
-    return (
-        f"PV{100 if has_pv else 0}_"
-        f"HP{100 if has_heat else 0}_"
-        f"EV{100 if has_ev else 0}_"
-        "VarTar0_CapPr0"
-    )
+    """Return the canonical scenario suffix stored by Step 2."""
+    scenario_key = read_hdf_metadata(path).get("scenario_key")
+    if not scenario_key:
+        raise ValueError(f"Step-2 HDF is missing scenario_key metadata: {path}")
+    return str(scenario_key)
 
 
 def choose_step3_settings(
@@ -781,7 +761,7 @@ def candidate_failed_payload(
 def candidate_intermediate_files(
     repo_root: Path, candidate: dict[str, object], args: argparse.Namespace
 ) -> list[Path]:
-    paths = step_paths(repo_root)
+    paths = step_paths(repo_root, pipeline_scenario_key(args))
     step2_filename = case_qualified_filename(
         output_filename_for_timeframe(
             str(candidate["bridge_filename"]), args.timeframe_mode
@@ -978,6 +958,8 @@ def run_candidate(
                 str(args.profile_seed),
                 "--scenario-config",
                 str(args.scenario_config),
+                "--electrification-assignment",
+                str(args.electrification_assignment),
                 "--n_cpu",
                 str(args.step2_cpus),
             ]
@@ -991,7 +973,9 @@ def run_candidate(
             candidate_index=candidate_index,
             stage=current_stage,
         )
-        step2_output = step2_dir / "results" / step2_filename
+        step2_output = scenario_output_directory(
+            step2_dir / "results", pipeline_scenario_key(args)
+        ) / step2_filename
         if not step2_output.exists():
             raise FileNotFoundError(f"Missing Step 2 output {step2_output}")
         timeframe_metadata = read_hdf_metadata(step2_output)
@@ -1164,7 +1148,9 @@ def run_candidate(
                 stage=current_stage,
                 env_extra={"URBS_CLUSTER_CONCURRENCY": str(cluster_concurrency)},
             )
-            step3_output = step3_dir / "result" / scenario_filename
+            step3_output = scenario_output_directory(
+                step3_dir / "result", pipeline_scenario_key(args)
+            ) / scenario_filename
             if not step3_output.exists():
                 raise FileNotFoundError(f"Missing Step 3 output {step3_output}")
             powerflow_filename = scenario_filename
@@ -1320,7 +1306,9 @@ def run_candidate(
             stage=current_stage,
             env_extra={"URBS_CLUSTER_CONCURRENCY": str(cluster_concurrency)},
         )
-        step3_output = step3_dir / "result" / scenario_filename
+        step3_output = scenario_output_directory(
+            step3_dir / "result", pipeline_scenario_key(args)
+        ) / scenario_filename
         if not step3_output.exists():
             raise FileNotFoundError(f"Missing Step 3 output {step3_output}")
         shutil.copy2(step3_output, step4_dir / "Input" / scenario_filename)
@@ -1593,6 +1581,82 @@ def filter_candidates(
     return runnable
 
 
+CANDIDATE_IDENTITY_KEYS = (
+    "candidate_index",
+    "ags",
+    "plz",
+    "kcid",
+    "bcid",
+    "grid_result_id",
+    "version_id",
+    "bridge_filename",
+    "n_buildings",
+    "n_residential_buildings",
+)
+
+
+def _candidate_manifest(candidates: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        {key: candidate.get(key) for key in CANDIDATE_IDENTITY_KEYS}
+        for candidate in candidates
+    ]
+
+
+def _candidate_manifest_hash(candidates: list[dict[str, object]]) -> str:
+    payload = json.dumps(
+        _candidate_manifest(candidates),
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def validate_prepared_electrification_assignment(
+    path: Path,
+    *,
+    args: argparse.Namespace,
+    candidates: list[dict[str, object]],
+) -> None:
+    """Reject a reused regional manifest that does not belong to this run."""
+    metadata_path = path.with_suffix(".json")
+    if not metadata_path.exists():
+        raise ValueError(
+            f"Prepared electrification assignment is missing sidecar: {metadata_path}"
+        )
+    assignment = pd.read_csv(path)
+    validate_electrification_assignment_config(
+        assignment,
+        args.scenario.electrification,
+        profile_seed=args.profile_seed,
+    )
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    actual_hash = assignment_manifest_hash(assignment)
+    if metadata.get("assignment_hash") != actual_hash:
+        raise ValueError(
+            "Prepared electrification assignment does not match its sidecar hash."
+        )
+    expected = {
+        "scenario_id": args.scenario.scenario_id,
+        "scenario_hash": args.scenario_hash,
+        "profile_seed": int(args.profile_seed),
+        "pylovo_version_id": str(args.pylovo_version_id),
+        "demand_scope": args.demand_scope,
+        "mobility_source": "pool",
+        "candidate_grid_manifest_hash": _candidate_manifest_hash(candidates),
+        "candidate_grid_count": len(candidates),
+        "candidate_grid_manifest": _candidate_manifest(candidates),
+    }
+    mismatches = [
+        key for key, value in expected.items() if metadata.get(key) != value
+    ]
+    if mismatches:
+        raise ValueError(
+            "Prepared electrification assignment is stale or belongs to a "
+            f"different run; mismatched metadata: {mismatches}."
+        )
+
+
 def main() -> int:
     args = parse_args()
     repo_root = args.repo_root.resolve()
@@ -1602,6 +1666,11 @@ def main() -> int:
     status = StatusLog(run_dir, resume=args.resume or args.cleanup_completed_only)
 
     started_wall = time.monotonic()
+    args.electrification_assignment = (
+        args.electrification_assignment.resolve()
+        if args.electrification_assignment is not None
+        else run_dir / "electrification_assignment.csv"
+    )
     status.event(
         event="batch_start",
         repo_root=str(repo_root),
@@ -1653,6 +1722,69 @@ def main() -> int:
             json.dumps(summary, indent=2, default=str), encoding="utf-8"
         )
         return 0
+
+    if args.profiles != "status_quo":
+        if not args.electrification_assignment.exists():
+            preparation_log = run_dir / "logs" / "electrification_preparation.log"
+            preparation_command = [
+                "uv",
+                "run",
+                "--project",
+                "..",
+                "python",
+                "-m",
+                "src.electrification_preparation",
+                "--ags",
+                str(args.ags),
+                "--min-buildings",
+                str(args.min_buildings),
+                "--pylovo-version-id",
+                str(args.pylovo_version_id),
+                "--demand-scope",
+                str(args.demand_scope),
+                "--mobility-source",
+                "pool",
+                "--profile-seed",
+                str(args.profile_seed),
+                "--scenario-config",
+                str(args.scenario_config.resolve()),
+                "--output",
+                str(args.electrification_assignment),
+            ]
+            if not args.electrification_assignment.parent.exists():
+                args.electrification_assignment.parent.mkdir(
+                    parents=True, exist_ok=True
+                )
+            status.event(
+                event="electrification_preparation_start",
+                output=str(args.electrification_assignment),
+            )
+            with preparation_log.open("w", encoding="utf-8") as handle:
+                subprocess.run(
+                    preparation_command,
+                    cwd=repo_root / "GridExpand" / "2.demand_allocation" / "gridalloc",
+                    stdout=handle,
+                    stderr=subprocess.STDOUT,
+                    check=True,
+                )
+            status.event(
+                event="electrification_preparation_finish",
+                output=str(args.electrification_assignment),
+            )
+        else:
+            status.event(
+                event="electrification_preparation_reused",
+                output=str(args.electrification_assignment),
+            )
+        validate_prepared_electrification_assignment(
+            args.electrification_assignment,
+            args=args,
+            candidates=candidates,
+        )
+        status.event(
+            event="electrification_preparation_validated",
+            output=str(args.electrification_assignment),
+        )
 
     candidates = filter_candidates(candidates, args, status)
     status.event(event="candidates_selected", count=len(candidates))

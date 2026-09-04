@@ -11,6 +11,8 @@ import subprocess
 import threading
 import time
 
+from common.timeframe import read_hdf_metadata
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -192,13 +194,20 @@ def run_batch_command(
 
 
 def latest_step3_result(step3_dir: Path, input_hdf: Path) -> Path:
+    result_root = step3_dir / "result"
+    try:
+        scenario_key = read_hdf_metadata(input_hdf).get("scenario_key")
+    except (FileNotFoundError, KeyError, OSError, ValueError, TypeError):
+        scenario_key = None
+    if scenario_key:
+        result_root = result_root / str(scenario_key)
     matches = sorted(
-        (step3_dir / "result").glob(f"{input_hdf.stem}_*.h5"),
+        result_root.glob(f"{input_hdf.stem}_*.h5"),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
     if not matches:
         raise FileNotFoundError(
-            f"No Step 3 result found for {input_hdf.name} in {step3_dir / 'result'}"
+            f"No Step 3 result found for {input_hdf.name} in {result_root}"
         )
     return matches[0]

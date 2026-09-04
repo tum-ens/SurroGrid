@@ -4,11 +4,22 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
 
-from ..paths import GRIDALLOC_DIR, SYNTHETIC_INPUT_DIR
+from ..paths import GRIDALLOC_DIR, GRIDEXPAND_DIR, SYNTHETIC_INPUT_DIR
+
+if str(GRIDEXPAND_DIR) not in sys.path:
+    sys.path.insert(0, str(GRIDEXPAND_DIR))
+
+from common.electrification import validate_electrification_assignment  # noqa: E402
+
+PUBLICATION_READY_HEAT_METHODS = frozenset({
+    "exact_physical_building",
+    "nearest_floor_area_scaled_approved",
+})
 from .physical_heat_profile_library import PhysicalHeatProfileLibrary
 
 DEFAULT_PAIRED_DIR = (
@@ -25,19 +36,26 @@ def build_heat_profile_catalog(
     *,
     synthetic_input_dir: Path = SYNTHETIC_INPUT_DIR,
     heat_profile_library: Path | None = None,
+    building_ids: set[str] | None = None,
 ) -> pd.DataFrame:
-    """Map each SWF heat-pump building to an exact or area-matched profile."""
+    """Map each heat-eligible residential building to a physical heat profile."""
     library = (
         PhysicalHeatProfileLibrary(heat_profile_library)
         if heat_profile_library is not None
         else None
     )
-    # Paired heat materialization currently models residential_wp_rows only.
-    wp_count = pd.to_numeric(
-        allocation.get("residential_wp_rows", 0.0),
-        errors="coerce",
-    ).fillna(0.0)
-    selected = allocation.loc[wp_count.gt(0.0)].copy()
+    if building_ids is None:
+        wp_count = pd.to_numeric(
+            allocation.get("residential_wp_rows", 0.0),
+            errors="coerce",
+        ).fillna(0.0)
+        selected = allocation.loc[wp_count.gt(0.0)].copy()
+    else:
+        selected = allocation.loc[
+            allocation["building_objectid"]
+            .astype(str)
+            .isin({str(value) for value in building_ids})
+        ].copy()
     selected = selected.drop_duplicates("building_objectid")
     attributes = (
         building_plan[
@@ -252,11 +270,7 @@ def build_heat_profile_catalog(
                     else None
                 ),
                 "publication_ready": bool(
-                    method
-                    in {
-                        "exact_physical_building",
-                        "nearest_floor_area_scaled_approved",
-                    }
+                    method in PUBLICATION_READY_HEAT_METHODS
                 ),
             }
         )
@@ -292,6 +306,17 @@ def main() -> None:
     paired_dir = args.paired_dir.resolve()
     allocation = pd.read_csv(paired_dir / "paired_real_bus_allocation_plan.csv")
     buildings = pd.read_csv(paired_dir / "paired_building_scenario_plan.csv")
+    assignment = pd.read_csv(
+        paired_dir / "paired_electrification_assignment.csv"
+    )
+    validate_electrification_assignment(assignment)
+    eligible_heat_buildings = set(
+        assignment.loc[
+            assignment["technology"].eq("heat")
+            & assignment["eligible"].astype(bool),
+            "building_objectid",
+        ].astype(str)
+    )
     catalog = build_heat_profile_catalog(
         allocation,
         buildings,
@@ -301,6 +326,7 @@ def main() -> None:
             if args.heat_profile_library is not None
             else None
         ),
+        building_ids=eligible_heat_buildings,
     )
     output = paired_dir / "paired_heat_profile_catalog.csv"
     catalog.to_csv(output, index=False)

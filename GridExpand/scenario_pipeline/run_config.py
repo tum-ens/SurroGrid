@@ -19,6 +19,21 @@ def _grid_scope(execution: dict[str, Any]) -> str:
     return scope
 
 
+def _optional_int(value: Any, label: str) -> int | None:
+    """Parse an optional numeric selector; '-' is an explicit wildcard."""
+    if value in (None, "", "-"):
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValueError(f"{label} must be an integer, null, or '-'.")
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be an integer, null, or '-'.") from exc
+    if result < 0:
+        raise ValueError(f"{label} must be non-negative.")
+    return result
+
+
 @dataclass(frozen=True)
 class RunConfig:
     run_id: str
@@ -33,8 +48,11 @@ class RunConfig:
     excluded_real_lv_ids: tuple[int, ...]
     materialize_expansion: bool
 
-    # Ordinary synthetic scenario selection.
-    inputfile_id: str | None
+    # Ordinary synthetic scenario selection. DB runs use ags/plz/kcid/bcid;
+    # HDF5 runs use the local filename-prefix selector.
+    pylovo_grid_id: str | None
+    kcid: int | None
+    bcid: int | None
     storage: str
     output_directory: Path | None
     n_cpu: int
@@ -86,11 +104,55 @@ class RunConfig:
             raise ValueError("resources.pylovo_version_id must be set explicitly.")
 
         if pipeline == "scenario":
-            _only(
-                resources,
-                {"inputfile_id", "storage", "output_directory", "pylovo_version_id"},
-                "scenario resources",
-            )
+            storage = str(resources["storage"])
+            if storage == "db":
+                _only(
+                    resources,
+                    {
+                        "ags", "plz", "kcid", "bcid", "storage",
+                        "output_directory", "pylovo_version_id",
+                    },
+                    "scenario resources",
+                )
+                ags_value = resources.get("ags")
+                if ags_value in (None, "", "-"):
+                    raise ValueError("scenario resources.ags is required for DB runs.")
+                try:
+                    ags = int(ags_value)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("scenario resources.ags must be an integer.") from exc
+                if ags < 0:
+                    raise ValueError("scenario resources.ags must be non-negative.")
+                pylovo_grid_id = None
+            elif storage == "h5":
+                _only(
+                    resources,
+                    {"pylovo_grid_id", "storage", "output_directory", "pylovo_version_id"},
+                    "scenario resources",
+                )
+                if resources.get("pylovo_grid_id") in (None, ""):
+                    raise ValueError(
+                        "scenario resources.pylovo_grid_id is required for HDF5 runs."
+                    )
+                ags = None
+                pylovo_grid_id = str(resources["pylovo_grid_id"])
+            else:
+                raise ValueError("resources.storage must be db or h5.")
+            plz = _optional_int(resources.get("plz"), "scenario resources.plz")
+            kcid = _optional_int(resources.get("kcid"), "scenario resources.kcid")
+            bcid = _optional_int(resources.get("bcid"), "scenario resources.bcid")
+            if (kcid is None) != (bcid is None):
+                raise ValueError(
+                    "scenario resources.kcid and resources.bcid must be set together."
+                )
+            if storage == "db" and kcid is not None and plz is None:
+                raise ValueError(
+                    "scenario resources.plz is required when kcid/bcid are set."
+                )
+            if storage == "h5" and any(value is not None for value in (plz, kcid, bcid)):
+                raise ValueError(
+                    "HDF5 runs use resources.pylovo_grid_id; do not add DB selectors."
+                )
             _only(
                 execution,
                 {
@@ -104,9 +166,6 @@ class RunConfig:
                 },
                 "scenario execution",
             )
-            storage = str(resources["storage"])
-            if storage not in {"db", "h5"}:
-                raise ValueError("resources.storage must be db or h5.")
             if "model_cases" not in execution:
                 raise ValueError("execution.model_cases is required.")
             cases = tuple(str(value) for value in execution["model_cases"])
@@ -122,14 +181,16 @@ class RunConfig:
                 scenario_path=scenario_path,
                 pipeline=pipeline,
                 pylovo_version_id=pylovo_version_id,
-                ags=None,
-                plz=None,
+                ags=ags,
+                plz=plz,
                 min_buildings=5,
                 heat_profile_set_id=None,
                 weather_source_hdf=None,
                 excluded_real_lv_ids=(),
                 materialize_expansion=False,
-                inputfile_id=str(resources["inputfile_id"]),
+                pylovo_grid_id=pylovo_grid_id,
+                kcid=kcid,
+                bcid=bcid,
                 storage=storage,
                 output_directory=path_or_none(resources.get("output_directory")),
                 n_cpu=int(_positive(execution["n_cpu"], "execution.n_cpu")),
@@ -249,7 +310,9 @@ class RunConfig:
                 int(value) for value in resources.get("excluded_real_lv_ids", ())
             ),
             materialize_expansion=bool(execution.get("materialize_expansion", True)),
-            inputfile_id=None,
+            pylovo_grid_id=None,
+            kcid=None,
+            bcid=None,
             storage="db",
             output_directory=None,
             n_cpu=1,

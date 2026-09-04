@@ -1,13 +1,13 @@
 # Execution and resource selection for one ordinary synthetic scenario run.
 run:
   id: forchheim_2045_synthetic
-  scenario: ../scenarios/forchheim_2045.yaml
+  scenario: ../scenarios/forchheim_2045_synthetic.yaml
   pipeline: scenario
 
 resources:
   # Exact pylovo topology version; never inferred from the environment.
   pylovo_version_id: 1
-  # Region and exact-grid filters; see config/templates/README.md.
+  # Region and exact-grid filters; see scenario_pipeline/config/runs/README.md.
   ags: 9474126
   plz: 91301
   kcid: 1

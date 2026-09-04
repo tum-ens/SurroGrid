@@ -25,6 +25,7 @@ GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
 if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
+from common.electrification import assignment_manifest_hash  # noqa: E402
 from common.orchestration import (  # noqa: E402
     StatusLog,
     latest_step3_result,
@@ -32,6 +33,7 @@ from common.orchestration import (  # noqa: E402
     run_command,
     utc_now,
 )
+from common.timeframe import read_hdf_metadata  # noqa: E402
 from paired_validation.comparison import (  # noqa: E402
     read_tsam_signature,
     validate_shared_tsam,
@@ -214,8 +216,6 @@ def _prepare_shared_pv_profiles(
             "src.scenario_calibration.profiles.pv_profile_library",
             "--roof-catalog",
             str(args.paired_dir / "paired_roof_sections.csv"),
-            "--allocation-plan",
-            str(args.paired_dir / SWF_ALLOCATION_PLAN_FILENAME),
             "--weather-source-hdf",
             str(args.weather_source_hdf),
             "--output",
@@ -230,6 +230,31 @@ def _prepare_shared_pv_profiles(
         env_extra={"PYLOVO_VERSION_ID": str(args.pylovo_version_id)},
     )
     return output
+
+
+def _assignment_hash_from_hdf(path: Path) -> str:
+    """Validate the assignment rows against their Step-2 metadata hash."""
+    metadata = read_hdf_metadata(path)
+    expected = metadata.get("electrification_assignment_hash")
+    if not expected:
+        raise ValueError(
+            f"Paired Step-2 input is missing electrification_assignment_hash: {path}"
+        )
+    try:
+        assignment = pd.read_hdf(
+            path, key="raw_data/electrification_assignment"
+        )
+    except (FileNotFoundError, KeyError) as exc:
+        raise ValueError(
+            f"Paired Step-2 input is missing raw_data/electrification_assignment: {path}"
+        ) from exc
+    actual = assignment_manifest_hash(assignment)
+    if actual != expected:
+        raise ValueError(
+            "Paired Step-2 assignment rows do not match metadata: "
+            f"expected={expected}, actual={actual}, path={path}"
+        )
+    return actual
 
 
 def _run_powerflows(
@@ -289,6 +314,7 @@ def _run_one(
         )
         if not input_hdf.exists():
             raise FileNotFoundError(f"Expected paired input {input_hdf}.")
+        assignment_hash = _assignment_hash_from_hdf(input_hdf)
 
         if args.pre_only:
             result_hdf = input_hdf
@@ -340,7 +366,12 @@ def _run_one(
             seconds=seconds,
             message="ok",
         )
-        return {**job, "status": "done", "seconds": seconds}
+        return {
+            **job,
+            "status": "done",
+            "seconds": seconds,
+            "electrification_assignment_hash": assignment_hash,
+        }
     except Exception as exc:
         seconds = round(time.monotonic() - started, 1)
         status.update(
@@ -610,6 +641,25 @@ def main() -> None:
             for future in as_completed(futures):
                 results.append(future.result())
     result = pd.DataFrame(results).sort_values("job_index")
+    hashes = (
+        set(result["electrification_assignment_hash"].dropna().astype(str))
+        if "electrification_assignment_hash" in result
+        else set()
+    )
+    if len(hashes) > 1:
+        raise ValueError(
+            "Paired real/synthetic targets carry different electrification "
+            f"assignment hashes: {sorted(hashes)}"
+        )
+    if hashes:
+        status.event(
+            event="paired_electrification_assignment_equivalence",
+            assignment_hash=sorted(hashes)[0],
+            targets=sorted(result.loc[
+                result["electrification_assignment_hash"].notna(),
+                "target_network",
+            ].astype(str).unique()),
+        )
     result.to_csv(args.run_dir / "results.csv", index=False)
     failures = int(result["status"].eq("failed").sum())
     status.event(

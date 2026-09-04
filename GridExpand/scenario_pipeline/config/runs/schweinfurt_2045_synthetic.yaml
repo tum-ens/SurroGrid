@@ -8,12 +8,12 @@ run:
 
 resources:
   # Exact pylovo topology version: v3 = voltage-drop-aware dimensioned grids.
-  pylovo_version_id: 3
-  # Region and exact-grid filters; see config/templates/README.md.
+  pylovo_version_id: 200
+  # Region and exact-grid filters; see scenario_pipeline/config/runs/README.md.
   ags: 9662000
   plz: 97422
-  kcid: 1
-  bcid: 1
+  kcid: null
+  bcid: null
   storage: db
   # Null keeps the standard Step-2 results directory.
   output_directory: null
@@ -26,8 +26,8 @@ execution:
   # Cases listed together use identical controlled demand/profile realizations.
   model_cases:
     - pre
-    # - post-inflex-heuristic
-    # - post-hems-heuristic
+    - post-inflex-heuristic
+    - post-hems-heuristic
     - post-hems-optimized
   # Machine-specific execution choices; scientific assumptions stay in the scenario YAML.
   n_cpu: 1

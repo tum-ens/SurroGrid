@@ -2,35 +2,6 @@ from urbs.identify import *
 import copy
 import numpy as np
 from datetime import date
-import random
-import re
-
-def remove_battery(data):
-    # de-flexiblise electricity demand by disallowing battery investment
-    data['storage'].loc[pd.IndexSlice[:, :, 'battery_private', :], ['inst-cap-p']] = 0
-    data['storage'].loc[pd.IndexSlice[:, :, 'battery_private', :], ['inst-cap-c']] = 0
-    data['storage'].loc[pd.IndexSlice[:, :, 'battery_private', :], ['cap-up-p']] = 0
-    data['storage'].loc[pd.IndexSlice[:, :, 'battery_private', :], ['cap-up-c']] = 0
-    return data
-
-def remove_heat_storage(data):
-    # de-flexiblise electricity demand by disallowing battery investment
-    data['storage'].loc[pd.IndexSlice[:, :, 'heat_storage', :], ['cap-up-p']] = 0
-    data['storage'].loc[pd.IndexSlice[:, :, 'heat_storage', :], ['cap-up-c']] = 0
-    data['storage'].loc[pd.IndexSlice[:, :, 'heat_storage', :], ['inst-cap-p']] = 0
-    data['storage'].loc[pd.IndexSlice[:, :, 'heat_storage', :], ['inst-cap-c']] = 0
-    return data
-
-def remove_mob_flexibility(data):
-    # remove mobility flexibility
-    for (stf, sit, sto, com) in data['storage'].index:
-        if sto.startswith('mobility'):
-            data['storage'].loc[(stf, sit, sto, com), 'inst-cap-p'] = 0
-            data['storage'].loc[(stf, sit, sto, com), 'inst-cap-c'] = 0
-            data['storage'].loc[(stf, sit, sto, com), 'cap-up-p'] = 0
-            data['storage'].loc[(stf, sit, sto, com), 'cap-up-c'] = 0
-
-    return data
 
 def create_xls_file_labels(uncoordinated, flexible, mode, data):
     coordination_text = '_uncoordinated' if uncoordinated else '_coordinated'
@@ -47,19 +18,6 @@ def create_xls_file_labels(uncoordinated, flexible, mode, data):
         capacity_price_text = ''
 
     return coordination_text, flexible_text, regulation_text, capacity_price_text
-
-def create_h5_file_labels(input_files, electrification):
-    grid_text = input_files.split('_')[2]
-    paradigm_text = input_files.split('_')[3][:-4]
-    if electrification == 1:
-        electrification_text = 'full'
-    elif electrification == 0.5:
-        electrification_text = 'half'
-    elif electrification == 0.25:
-        electrification_text = 'quarter'
-    else:
-        electrification_text = 'unknown'
-    return grid_text, paradigm_text, electrification_text
 
 def add_import_hp_bev_process(data):
     year = date.today().year
@@ -260,115 +218,6 @@ def distributed_building_specific_import_processes(data):
         data['process'].loc[year, building, 'Q_feeder_central']['cap-up'] = 999
         data['process'].loc[year, building, 'Q_feeder_central']['inst-cap'] = 999
 
-    return data
-
-def remove_heat_in_random(data, electrification):
-    demand_nodes = list(data["site"].index.get_level_values("Name").unique())
-    random.seed(43)
-    disable_nodes = random.sample(demand_nodes, round(len(demand_nodes) * (100 - electrification)/100))
-
-    data['process']=data["process"][~(data['process'].index.get_level_values(1).isin(disable_nodes) &
-                                      (data['process'].index.get_level_values(2)==('heatpump_air')))]
-    data['process']=data["process"][~(data['process'].index.get_level_values(1).isin(disable_nodes) &
-                                      (data['process'].index.get_level_values(2)==('heatpump_grd')))]
-    data['process']=data["process"][~(data['process'].index.get_level_values(1).isin(disable_nodes) &
-                                      (data['process'].index.get_level_values(2)==('heatpump_booster')))]
-    data['process']=data["process"][~(data['process'].index.get_level_values(1).isin(disable_nodes) &
-                                      (data['process'].index.get_level_values(2)==('Heat_dummy_space')))]
-    data['process']=data["process"][~(data['process'].index.get_level_values(1).isin(disable_nodes) &
-                                      (data['process'].index.get_level_values(2)==('Heat_dummy_water')))]
-    
-    data['commodity']=data["commodity"][~(data['commodity'].index.get_level_values(1).isin(disable_nodes) &
-                                          (data['commodity'].index.get_level_values(2)=='common_heat'))]
-    data['commodity']=data["commodity"][~(data['commodity'].index.get_level_values(1).isin(disable_nodes) &
-                                          (data['commodity'].index.get_level_values(2)=='space_heat'))]
-    data['commodity']=data["commodity"][~(data['commodity'].index.get_level_values(1).isin(disable_nodes) &
-                                          (data['commodity'].index.get_level_values(2)=='water_heat'))]
-    
-    data['storage']=data["storage"][~(data['storage'].index.get_level_values(1).isin(disable_nodes) &
-                                     (data['storage'].index.get_level_values(2)=="heat_storage"))]
-
-
-    data["demand"] = data["demand"].loc[:, ~((data["demand"].columns.get_level_values(0).isin(disable_nodes)) &
-                                           (data["demand"].columns.get_level_values(1) == "water_heat"))]
-    data["demand"] = data["demand"].loc[:, ~((data["demand"].columns.get_level_values(0).isin(disable_nodes)) &
-                                           (data["demand"].columns.get_level_values(1) == "space_heat"))]
-    data["eff_factor"] = data["eff_factor"].loc[:, ~((data["eff_factor"].columns.get_level_values(0).isin(disable_nodes)) &
-                                           (data["eff_factor"].columns.get_level_values(1) == "heatpump_air"))]
-    data["eff_factor"] = data["eff_factor"].loc[:, ~((data["eff_factor"].columns.get_level_values(0).isin(disable_nodes)) &
-                                           (data["eff_factor"].columns.get_level_values(1) == "heatpump_grd"))]
-
-    # year = date.today().year
-    # demand_nodes = [sit for (sit, demand) in data['demand'].columns if demand == 'space_heat']
-    # random.seed(42)
-    # unelectrified_heat_nodes = random.sample(demand_nodes, int(len(demand_nodes) * (1 - electrification)))
-    # data['process'].loc[(year, unelectrified_heat_nodes, 'heatpump_air'), 'cap-up'] = 0
-
-    # instead of HP, provide heat by another means, e.g. gas boiler
-    # data['commodity'].loc[(year, unelectrified_heat_nodes, 'common_heat'), 'price'] = 0.12  # assumed gas price
-    # data['commodity'].loc[(year, unelectrified_heat_nodes, 'common_heat'), 'max'] = np.inf # allow gas supply
-    # data['commodity'].loc[(year, unelectrified_heat_nodes, 'common_heat'), 'maxperhour'] = np.inf # allow gas supply
-    return data
-
-def remove_pv_in_random(data, electrification):
-    demand_nodes = list(data["site"].index.get_level_values("Name").unique())
-    random.seed(43)
-    disable_nodes = random.sample(demand_nodes, round(len(demand_nodes) * (100 - electrification)/100))
-
-    data['process']=data["process"][~(data['process'].index.get_level_values(1).isin(disable_nodes) &
-                                      data['process'].index.get_level_values(2).str.startswith('Rooftop PV'))]
-    data['commodity']=data["commodity"][~(data['commodity'].index.get_level_values(1).isin(disable_nodes) &
-                                          data['commodity'].index.get_level_values(2).str.startswith('solar'))]
-    data["supim"] = data["supim"].loc[:, ~((data["supim"].columns.get_level_values(0).isin(disable_nodes)) &
-                                           (data["supim"].columns.get_level_values(1).str.startswith('solar')))]
-    data['storage']=data["storage"][~(data['storage'].index.get_level_values(1).isin(disable_nodes) &
-                                     (data['storage'].index.get_level_values(2)=="battery_private"))]
-
-    # # Set PV and associated battery to 0 upper cap to prevent from expansion
-    # data['process'].loc[((data['process'].index.get_level_values(1).isin(disable_pv_nodes)) &
-    #                         (data['process'].index.get_level_values(2).str.startswith('Rooftop PV'))), 'cap-up'] = 0
-    # data['storage'].loc[((data['storage'].index.get_level_values(1).isin(disable_pv_nodes)) &
-    #                     (data['storage'].index.get_level_values(2).str.startswith('battery_private'))), ['cap-up-c', "cap-up-p"]]=0
-
-    return data
-
-def remove_mobility_in_random(data, electrification):
-    random.seed(44)
-    all_cars = [col for col in data['demand'].columns if col[1].startswith('mobility')]
-    unelectrified_cars = random.sample(all_cars, round(len(all_cars) * (100 - electrification)/100))
-
-    for (site, car) in unelectrified_cars:
-        match = re.search(r'\d+$', car)
-        car_idx = match.group() if match else None
-
-        data['process']=data["process"][~((data['process'].index.get_level_values(1)==site) &
-                                        (data['process'].index.get_level_values(2)=="charging_station"+car_idx))]
-        data['commodity']=data["commodity"][~((data['commodity'].index.get_level_values(1)==site) &
-                                        (data['commodity'].index.get_level_values(2)=="mobility"+car_idx))]   
-        data['storage']=data["storage"][~((data['storage'].index.get_level_values(1)==site) &
-                                        (data['storage'].index.get_level_values(2)=="mobility_storage"+car_idx))]
-        data["demand"] = data["demand"].loc[:, ~((data["demand"].columns.get_level_values(0)==site) &
-                                            (data["demand"].columns.get_level_values(1) == "mobility"+car_idx))]
-        data["eff_factor"] = data["eff_factor"].loc[:, ~((data["eff_factor"].columns.get_level_values(0)==site) &
-                                            (data["eff_factor"].columns.get_level_values(1) == "charging_station"+car_idx))]
-
-
-    # year = date.today().year
-    # demand_nodes = [sit for (sit, demand) in data['demand'].columns if demand == 'space_heat']
-    # random.seed(44)
-    # all_cars = [col for col in data['demand'].columns if col[1].startswith('mobility')]
-    # unelectrified_cars = random.sample(all_cars, int(len(all_cars) * (100 - electrification)/100))
-
-    # for (site, car) in unelectrified_cars:
-    #     car_idx = car[-1]
-    #     data['process'].loc[(year, site, 'charging_station' + car_idx), 'inst-cap'] = 0
-    #     data['process'].loc[
-    #         (year, site, 'charging_station' + car_idx), 'cap-up'] = 0  # set charging_station capacity to zero
-    #     data['commodity'].loc[(year, site, 'mobility' + car_idx, 'Demand'), 'price'] = 0.6  # 60 cent for public charging
-    #     data['commodity'].loc[(year, site, 'mobility' + car_idx, 'Demand'), 'max'] = np.inf
-    #     data['commodity'].loc[(year, site, 'mobility' + car_idx,
-    #                            'Demand'), 'maxperhour'] = np.inf  # add stock availabiltiy for mobility commodity
-        
     return data
 
 def adopt_variable_tariffs(data, vartariff_nodes):

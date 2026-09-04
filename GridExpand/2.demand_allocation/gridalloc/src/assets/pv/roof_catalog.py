@@ -173,6 +173,15 @@ def building_roof_capacity(catalog: pd.DataFrame) -> pd.Series:
     return catalog[catalog["profile_usable"]].groupby("building_objectid")["available_pv_kw"].sum()
 
 
+def building_lod2_capacity(catalog: pd.DataFrame) -> pd.Series:
+    """Return genuine usable LoD2 capacity without synthetic fallbacks."""
+    usable = (
+        catalog["profile_usable"].astype(bool)
+        & catalog["quality_flag"].eq("lod2")
+    )
+    return catalog.loc[usable].groupby("building_objectid")["available_pv_kw"].sum()
+
+
 def assert_fallback_share(catalog: pd.DataFrame, building_ids: Iterable[object], maximum_share: float) -> float:
     ids = {str(value) for value in building_ids if pd.notna(value)}
     fallback_ids = set(catalog.loc[catalog["quality_flag"].eq("fallback_14_5_kw"), "building_objectid"].astype(str)) & ids

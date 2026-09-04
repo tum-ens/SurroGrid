@@ -1,6 +1,6 @@
-# Scientific and methodological assumptions for the Schweinfurt 2045 scenario.
+# Scientific and methodological assumptions for the Forchheim 2045 scenario.
 scenario:
-  id: schweinfurt_2045
+  id: forchheim_2045_synthetic
   milestone_year: 2045
 
 economics:
@@ -50,7 +50,7 @@ asset_sizing:
   heat:
     # Building-level space heat comes from INFDB ro_heat; DHW remains OpenDHW.
     # Current 8,736 h exports use the documented preliminary final-day rule.
-    space_heat_source: teaser
+    space_heat_source: infdb_ro_heat
     # Degree-day reference temperatures used to derive regional full-load hours.
     indoor_design_temperature_c: 20.0
     # DWD/VDI 20/15 convention for the existing residential building stock.
@@ -65,13 +65,13 @@ asset_sizing:
 electrification: # deterministic_share or source_inventory
   heat:
     adoption_mode: deterministic_share
-    building_share: 0.75
+    building_share: 1.0
   mobility:
     adoption_mode: deterministic_share
-    building_share: 0.75
+    building_share: 1.0
   pv_battery:
     adoption_mode: deterministic_share
-    building_share: 0.75
+    building_share: 1.0
 
 # Mobility behavior and emobpy vehicle-model assumptions.
 mobility:

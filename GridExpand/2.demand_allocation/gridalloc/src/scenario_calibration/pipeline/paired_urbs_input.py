@@ -27,17 +27,30 @@ for path in (GRIDEXPAND_DIR, GRIDALLOC_DIR):
         sys.path.insert(0, str(path))
 
 from config import config  # noqa: E402
+from common.electrification import (
+    assignment_manifest_hash,
+    assignment_summary,
+    validate_electrification_assignment,
+    validate_electrification_assignment_config,
+)  # noqa: E402
 from common.timeframe import build_full_year_metadata, write_hdf_metadata  # noqa: E402
-from scenario_pipeline.config_loader import load_scenario_config  # noqa: E402
+from scenario_pipeline.config_loader import (  # noqa: E402
+    load_scenario_config,
+    scenario_identity_key,
+)
 from scenario_pipeline.model_cases import POST_MODEL_CASES  # noqa: E402
 from src.assets.pv.roof_catalog import assert_fallback_share  # noqa: E402
 from src.scenario_calibration.profiles.paired_profiles import (  # noqa: E402
     build_paired_base_electric_demand,
     build_paired_sector_urbs_inputs,
     load_electricity_module,
+    source_match_buildings,
 )
 from src.scenario_calibration.profiles.physical_heat_profile_library import (  # noqa: E402
     PhysicalHeatProfileLibrary,
+)
+from src.scenario_calibration.profiles.paired_profile_readiness import (  # noqa: E402
+    PUBLICATION_READY_HEAT_METHODS,
 )
 from src.scenario_calibration.pipeline.urbs_input_tables import (  # noqa: E402
     buy_sell_price,
@@ -152,6 +165,164 @@ def _combine_static_tables(
     return tables
 
 
+def _paired_electrification_asset_plan_summary(
+    assignment: pd.DataFrame,
+    audit: pd.DataFrame,
+    component_plan: pd.DataFrame | None = None,
+) -> dict[str, dict[str, object]]:
+    """Separate assigned cohorts from positive capacities in paired outputs."""
+    result: dict[str, dict[str, object]] = {}
+    for technology in ("heat", "mobility", "pv_battery"):
+        result[technology] = {
+            "reporting_stage": "step2_urbs_input",
+            "selected_candidate_building_count": int(
+                assignment.loc[
+                    assignment["technology"].eq(technology)
+                    & assignment["selected"].astype(bool),
+                    "building_objectid",
+                ].astype(str).nunique()
+            )
+        }
+
+    def subset(sector: str, record_type: str | None = None) -> pd.DataFrame:
+        if audit.empty:
+            return audit.iloc[0:0]
+        mask = audit.get(
+            "sector", pd.Series(index=audit.index, dtype=object)
+        ).astype(str).eq(sector)
+        if record_type is not None:
+            mask &= audit.get(
+                "audit_record_type",
+                pd.Series(index=audit.index, dtype=object),
+            ).astype(str).eq(record_type)
+        return audit.loc[mask]
+
+    def positive(rows: pd.DataFrame, column: str) -> int:
+        if rows.empty or column not in rows or "building_objectid" not in rows:
+            return 0
+        values = pd.to_numeric(rows[column], errors="coerce").fillna(0.0)
+        return int(
+            rows.loc[values.gt(0.0), "building_objectid"]
+            .dropna()
+            .astype(str)
+            .nunique()
+        )
+
+    def total(rows: pd.DataFrame, column: str) -> float:
+        if rows.empty or column not in rows:
+            return 0.0
+        return float(pd.to_numeric(rows[column], errors="coerce").fillna(0.0).sum())
+
+    def component_energy(selected: set[str]) -> float:
+        if component_plan is None or component_plan.empty:
+            return 0.0
+        rows = component_plan.loc[
+            component_plan["building_objectid"].astype(str).isin(selected)
+            & component_plan["included_in_lv"].astype(bool)
+        ]
+        return total(rows, "annual_energy_kwh")
+
+    pv_plan = subset("pv", "asset_plan")
+    pv_materialized = subset("pv", "pv_materialization")
+    battery_plan = subset("stationary_battery", "battery_asset_plan")
+    battery_materialized = subset("stationary_battery", "battery_materialization")
+    heat_plan = subset("heat", "heat_asset_plan")
+    mobility_rows = subset("mobility")
+
+    result["pv_battery"].update(
+        {
+            "step2_materialized_asset_count": positive(pv_materialized, "capacity_kw"),
+            "positive_pv_capacity_upper_bound_building_count": positive(
+                pv_plan, "pv_max_kwp"
+            ),
+            "positive_pv_input_building_count": positive(
+                pv_materialized, "capacity_kw"
+            ),
+            "step2_input_capacity_kw": total(pv_materialized, "capacity_kw"),
+            "pv_capacity_upper_bound_kw": total(pv_plan, "pv_max_kwp"),
+            "positive_battery_capacity_upper_bound_building_count": positive(
+                battery_plan, "battery_capacity_upper_kwh"
+            ),
+            "positive_battery_input_building_count": positive(
+                battery_materialized, "energy_capacity_upper_kwh"
+            ),
+            "step2_materialized_battery_candidate_count": positive(
+                battery_materialized, "energy_capacity_upper_kwh"
+            ),
+            "battery_input_capacity_upper_kwh": total(
+                battery_materialized, "energy_capacity_upper_kwh"
+            ),
+            "battery_capacity_upper_bound_kwh": total(
+                battery_plan, "battery_capacity_upper_kwh"
+            ),
+            "selected_building_base_electricity_kwh": total(
+                pv_plan, "annual_electricity_kwh"
+            ),
+            "electricity_quantity_basis": "base_electricity_sizing_input",
+        }
+    )
+    heat_selected = set(
+        assignment.loc[
+            assignment["technology"].eq("heat")
+            & assignment["selected"].astype(bool),
+            "building_objectid",
+        ].astype(str)
+    )
+    result["heat"].update(
+        {
+            "step2_materialized_asset_count": positive(
+                heat_plan, "heat_pump_capacity_upper_kw_el"
+            ),
+            "positive_heat_pump_capacity_upper_bound_building_count": positive(
+                heat_plan, "heat_pump_capacity_upper_kw_el"
+            ),
+            "positive_heat_pump_input_installed_building_count": positive(
+                heat_plan, "heat_pump_installed_kw_el"
+            ),
+            "step2_capacity_upper_kw_el": total(
+                heat_plan, "heat_pump_capacity_upper_kw_el"
+            ),
+            "step2_input_installed_capacity_kw_el": total(
+                heat_plan, "heat_pump_installed_kw_el"
+            ),
+            "selected_building_base_electricity_kwh": component_energy(heat_selected),
+            "heat_electricity_outcome_basis": "solver_output_not_step2_input",
+        }
+    )
+    if not mobility_rows.empty and "building_objectid" in mobility_rows:
+        ev_capacity = pd.to_numeric(
+            mobility_rows.get(
+                "capacity_kw",
+                pd.Series(0.0, index=mobility_rows.index),
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+        positive_ev_buildings = int(
+            mobility_rows.loc[ev_capacity.gt(0.0), "building_objectid"]
+            .dropna()
+            .astype(str)
+            .nunique()
+        )
+        ev_count = int(len(mobility_rows))
+    else:
+        positive_ev_buildings = 0
+        ev_count = 0
+    result["mobility"].update(
+        {
+            "step2_materialized_asset_count": ev_count,
+            "positive_ev_building_count": positive_ev_buildings,
+            "positive_ev_vehicle_count": ev_count,
+            "ev_profile_count": ev_count,
+            "step2_input_capacity_kw": total(mobility_rows, "capacity_kw"),
+            "annual_ev_charging_demand_kwh": total(
+                mobility_rows, "demand_sum_kwh"
+            ),
+            "electricity_quantity_basis": "charging_demand_input",
+        }
+    )
+    return result
+
+
 def materialize_paired_urbs_input(
     *,
     paired_dir: Path,
@@ -187,6 +358,31 @@ def materialize_paired_urbs_input(
         target_network,
         target_grid_id,
     )
+    assignment_path = paired_dir / "paired_electrification_assignment.csv"
+    if not assignment_path.exists():
+        raise FileNotFoundError(
+            "Run paired_allocation with the selected scenario before materialization: "
+            f"{assignment_path}"
+        )
+    electrification_assignment = pd.read_csv(assignment_path)
+    validate_electrification_assignment_config(
+        electrification_assignment,
+        scenario.electrification,
+        profile_seed=seed,
+    )
+    target_building_ids = set(allocation["building_objectid"].astype(str))
+    assignment_building_ids = set(
+        electrification_assignment["building_objectid"].astype(str)
+    )
+    missing_assignment_ids = sorted(target_building_ids - assignment_building_ids)
+    if missing_assignment_ids:
+        raise ValueError(
+            "Paired electrification assignment is missing target buildings: "
+            f"{missing_assignment_ids[:10]}"
+        )
+    electrification_assignment_hash = assignment_manifest_hash(
+        electrification_assignment
+    )
     component_plan = _target_component_plan(
         paired_dir,
         target_network,
@@ -211,14 +407,32 @@ def materialize_paired_urbs_input(
         )
     roof_catalog = pd.read_csv(roof_catalog_path)
     pv_profile_library = paired_dir / "paired_pv_profile_library.h5"
-    if allocation["pv_roof_eligible"].astype(bool).any() and not pv_profile_library.exists():
+    pv_battery_assignment = electrification_assignment.loc[
+        electrification_assignment["technology"].eq("pv_battery")
+    ]
+    if str(pv_battery_assignment["adoption_mode"].iloc[0]) == "source_inventory":
+        selected_pv_buildings = source_match_buildings(
+            electrification_assignment, "pv_match_count"
+        )
+        selected_battery_buildings = source_match_buildings(
+            electrification_assignment, "battery_match_count"
+        )
+        planning_buildings = selected_pv_buildings | selected_battery_buildings
+    else:
+        planning_buildings = set(
+            pv_battery_assignment.loc[
+                pv_battery_assignment["selected"].astype(bool),
+                "building_objectid",
+            ].astype(str)
+        )
+    if planning_buildings and not pv_profile_library.exists():
         raise FileNotFoundError(
             "Build the shared PV profile library before materialization: "
             f"{pv_profile_library}"
         )
     assert_fallback_share(
         roof_catalog,
-        allocation.loc[allocation["pv_roof_eligible"].astype(bool), "building_objectid"],
+        planning_buildings,
         scenario.pv.maximum_fallback_share,
     )
     library_sources = (
@@ -265,9 +479,6 @@ def materialize_paired_urbs_input(
         battery_usable_kwh_per_pv_kwp=battery_pv_coefficient,
         battery_usable_kwh_per_annual_mwh=battery_demand_coefficient,
         battery_energy_to_power_hours=scenario.battery.energy_to_power_hours,
-        battery_predefined_locations_when_available=(
-            scenario.battery.predefined_locations_when_available
-        ),
         technology_parameters=scenario.technologies,
         heat_sizing_method=heat_sizing_method,
         heat_config=scenario.heat,
@@ -275,6 +486,7 @@ def materialize_paired_urbs_input(
         heat_profile_catalog=heat_catalog,
         heat_profile_library=heat_profile_library,
         allow_diagnostic_heat_fallback=allow_diagnostic_heat_fallback,
+        electrification_assignment=electrification_assignment,
     )
     if not sector_inputs.demand.empty:
         demand = pd.concat(
@@ -337,12 +549,21 @@ def materialize_paired_urbs_input(
         "profile_seed": int(seed),
         "scenario_id": scenario.scenario_id,
         "scenario_hash": scenario_hash,
+        "scenario_key": scenario_identity_key(scenario.scenario_id, scenario_hash),
+        "electrification_assignment_hash": electrification_assignment_hash,
+        "electrification_assignment_summary": (
+            assignment_summary(electrification_assignment).to_dict("records")
+        ),
+        "electrification_asset_plan_summary": _paired_electrification_asset_plan_summary(
+            electrification_assignment,
+            sector_inputs.audit,
+            component_plan=component_plan,
+        ),
         "model_case": model_case,
         "pv_sizing_method": pv_sizing_method,
         "pv_feed_in_tariff_eur_per_kwh": scenario.economics.pv_feed_in_tariff_eur_per_kwh,
         "battery_sizing_method": battery_sizing_method,
         "battery_energy_to_power_hours": scenario.battery.energy_to_power_hours,
-        "battery_predefined_locations_when_available": scenario.battery.predefined_locations_when_available,
         "heat_sizing_method": heat_sizing_method,
         "heat_scope": "residential_buildings",
         "physical_buildings": int(allocation["building_objectid"].nunique()),
@@ -365,7 +586,7 @@ def materialize_paired_urbs_input(
                 "profile_method",
                 pd.Series(dtype=str),
             )
-            .eq("exact_physical_building")
+            .isin(PUBLICATION_READY_HEAT_METHODS)
             .all()
         ),
         **sector_inputs.metadata,
@@ -377,6 +598,10 @@ def materialize_paired_urbs_input(
         complib="blosc",
         complevel=9,
     ) as store:
+        store.put(
+            "raw_data/electrification_assignment",
+            electrification_assignment.reset_index(drop=True),
+        )
         store.put("raw_data/component_scenario_plan", component_plan.reset_index(drop=True))
         store.put("raw_data/allocation_plan", allocation.reset_index(drop=True))
         store.put("raw_data/asset_plan", asset_plan.reset_index(drop=True))

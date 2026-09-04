@@ -20,18 +20,11 @@ from ...assets.pv.labels import profile_label
 DEFAULT_PROFILE_LIBRARY_NAME = "paired_pv_profile_library.h5"
 
 
-def required_profile_angles(
-    roof_catalog: pd.DataFrame,
-    allocation: pd.DataFrame,
-) -> list[tuple[float, float]]:
-    eligible = set(
-        allocation.loc[
-            allocation["pv_roof_eligible"].astype(bool), "building_objectid"
-        ].astype(str)
-    )
+def required_profile_angles(roof_catalog: pd.DataFrame) -> list[tuple[float, float]]:
+    """Return angle bins for all genuine usable roofs in the paired population."""
     selected = roof_catalog[
-        roof_catalog["building_objectid"].astype(str).isin(eligible)
-        & roof_catalog["profile_usable"].astype(bool)
+        roof_catalog["profile_usable"].astype(bool)
+        & roof_catalog["quality_flag"].eq("lod2")
     ].copy()
     return sorted(
         {
@@ -46,17 +39,15 @@ def required_profile_angles(
 def build_pv_profile_library(
     *,
     roof_catalog_path: Path,
-    allocation_path: Path,
     weather_source_hdf: Path,
     output_path: Path,
     reference_year: int,
 ) -> Path:
-    """Create or reuse normalized annual profiles for all eligible angle bins."""
+    """Create or reuse profiles for all genuine roofs in the paired population."""
     roof_catalog = pd.read_csv(roof_catalog_path)
-    allocation = pd.read_csv(allocation_path)
-    angles = required_profile_angles(roof_catalog, allocation)
+    angles = required_profile_angles(roof_catalog)
     if not angles:
-        raise ValueError("The paired allocation contains no eligible PV roof profiles.")
+        raise ValueError("The paired roof catalog contains no genuine usable LoD2 profiles.")
     metadata = _expected_metadata(
         weather_source_hdf,
         angles,
@@ -232,14 +223,12 @@ def _load_gridalloc_function_module(name: str, relative_dir: str = "functions"):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--roof-catalog", type=Path, required=True)
-    parser.add_argument("--allocation-plan", type=Path, required=True)
     parser.add_argument("--weather-source-hdf", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--reference-year", type=int, required=True)
     args = parser.parse_args()
     output = build_pv_profile_library(
         roof_catalog_path=args.roof_catalog.resolve(),
-        allocation_path=args.allocation_plan.resolve(),
         weather_source_hdf=args.weather_source_hdf.resolve(),
         output_path=args.output.resolve(),
         reference_year=args.reference_year,

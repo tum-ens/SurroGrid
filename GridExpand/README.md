@@ -237,11 +237,11 @@ uv run --project .. python main.py <inputfile_id> --n_cpu <N>
 
 The script selects the first `.h5` in `data/grids/` whose prefix before the first underscore matches `inputfile_id`.
 
-Use `--demand-scope residential` for a household-only run. This filters the building table before electricity, PV, heat, mobility, and URBS input sheets are generated. DB-backed residential runs use the `baseline_static_hh_only` scenario key family so they do not overwrite all-demand results.
+Use `--demand-scope residential` for a household-only run. This filters the building table before electricity, PV, heat, mobility, and URBS input sheets are generated. Step-2 outputs are isolated below `results/<scenario-key>/`; the key is derived from the scientific scenario identity and timeframe.
 
 #### Step 2: Outputs
 
-- A copied/augmented `.h5` in `2.demand_allocation/gridalloc/results/` containing:
+- A copied/augmented `.h5` in `2.demand_allocation/gridalloc/results/<scenario-key>/` containing:
   - updated `/raw_data/weather` (always written)
   - updated `/raw_data/buildings` (with sampled attributes)
   - new `/urbs_in/*` URBS input tables
@@ -263,7 +263,7 @@ uv run python run_urbs_cluster.py <inputfile_id> --n_cpu <N>
 
 #### Step 3: Outputs
 
-- A copied/augmented result file in `3.urbs/result/` whose filename includes a scenario suffix, e.g. `_PV100_HP100_EV100_VarTar0_CapPr0.h5`.
+- A copied/augmented result file in `3.urbs/result/<scenario-key>/` whose metadata carries the canonical scenario identity and assignment hash.
 
 Solver notes:
 
@@ -298,7 +298,7 @@ uv run python GridExpand/scenario_pipeline/synthetic_ags_runner.py \
   --ags <AGS> \
   --profiles all \
   --powerflow-output summary \
-  --scenario-config GridExpand/scenario_pipeline/config/scenarios/forchheim_2045.yaml \
+  --scenario-config GridExpand/scenario_pipeline/config/scenarios/forchheim_2045_synthetic.yaml \
   --include-no-flex-powerflow \
   --run-dir GridExpand/run_logs/<RUN_NAME>
 ```
@@ -322,7 +322,7 @@ uv run --project GridExpand/2.demand_allocation python GridExpand/scenario_pipel
   --profiles all \
   --demand-scope residential \
   --powerflow-output summary \
-  --scenario-config GridExpand/scenario_pipeline/config/scenarios/forchheim_2045.yaml \
+  --scenario-config GridExpand/scenario_pipeline/config/scenarios/forchheim_2045_synthetic.yaml \
   --include-no-flex-powerflow \
   --cleanup-completed-only \
   --run-dir GridExpand/run_logs/<EXISTING_RUN_DIR>

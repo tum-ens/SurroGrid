@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import text
@@ -21,7 +22,19 @@ if str(GRIDEXPAND_DIR) not in sys.path:
 
 from common.database import SurroGridDatabase  # noqa: E402
 from common.building_components import build_building_components  # noqa: E402
+from common.electrification import (
+    assignment_manifest_hash,
+    assignment_summary,
+    build_electrification_assignment,
+)  # noqa: E402
 from common.reproducibility import stable_seed  # noqa: E402
+from config import config as grid_config  # noqa: E402
+import src.functions.electricity as electricity  # noqa: E402
+import src.functions.mobility as mobility  # noqa: E402
+from scenario_pipeline.config_loader import (  # noqa: E402
+    load_scenario_config,
+    scenario_identity_key,
+)
 
 from .allocation_plan import build_scenario_allocation_plan
 from .ghd_calibration import build_synthetic_ghd_calibration
@@ -31,7 +44,7 @@ from ..profiles.profile_contract import (
 )
 from .scope_filters import build_grid_scope_summary
 from .sector_asset_calibration import build_sector_asset_calibration
-from .pv_roof_potential import building_roof_capacity, load_lod2_roof_catalog
+from .pv_roof_potential import building_lod2_capacity, load_lod2_roof_catalog
 from .swf_2045_building_match import (
     GRIDALLOC_DIR,
     MatchConfig,
@@ -49,7 +62,7 @@ SCENARIO_UNIT_COLUMNS = [
     "source_allocation_bus",
     "building_objectid",
 ]
-PV_LOCATION_MODES = ("swf", "all_buildings")
+PV_SOURCE_LOCATION_MODES = ("swf", "all_buildings")
 
 
 def _register_synthetic_grid_cases(
@@ -566,8 +579,8 @@ def _pv_scenario_unit_assignments(
     location_mode: str,
 ) -> pd.DataFrame:
     """Choose exactly one source connection for each eligible physical roof."""
-    if location_mode not in PV_LOCATION_MODES:
-        raise ValueError(f"pv_location_mode must be one of {PV_LOCATION_MODES}.")
+    if location_mode not in PV_SOURCE_LOCATION_MODES:
+        raise ValueError(f"internal PV source location must be one of {PV_SOURCE_LOCATION_MODES}.")
     candidates = real_plan.copy()
     candidates["building_objectid"] = candidates["building_objectid"].astype(str)
     if location_mode == "swf":
@@ -638,10 +651,218 @@ def _add_pv_roof_assignment(
         how="left",
     )
     result["pv_roof_eligible"] = result["pv_roof_assignment_method"].notna()
+    # Physical LoD2 potential is eligibility evidence. The assignment method is
+    # a separate source-location/materialization decision.
     result["pv_roof_capacity_kw"] = result["building_objectid"].map(
         capacity_by_building
-    ).fillna(0.0) * result["pv_roof_eligible"].astype(float)
+    ).fillna(0.0)
     return result
+
+
+def _paired_mobility_ownership(
+    component_plan: pd.DataFrame,
+    *,
+    ags: int,
+    plz: int,
+    profile_seed: int,
+) -> pd.Series:
+    """Build the shared deterministic household vehicle realization."""
+    residential = component_plan.loc[
+        component_plan["component_category"].eq("Residential")
+        & component_plan["included_in_lv"].astype(bool)
+    ].copy()
+    if residential.empty:
+        return pd.Series(dtype=int, name="deterministic_vehicle_count")
+    residential = electricity.sample_statistics(
+        residential, base_seed=int(profile_seed)
+    )
+    if residential["building_objectid"].astype(str).duplicated().any():
+        raise ValueError(
+            "Paired mobility ownership requires one residential component per "
+            "physical building."
+        )
+    buildings = pd.DataFrame(
+        {
+            "objectid": residential["building_objectid"].astype(str),
+            "building_objectid": residential["building_objectid"].astype(str),
+            "bus": residential["real_target_bus"].astype(int),
+            "occ_list": residential["occ_list"],
+        }
+    )
+    with _database_engine().connect() as connection:
+        region = pd.read_sql_query(
+            text(
+                """
+                SELECT regio7
+                FROM pylovo.municipal_register
+                WHERE ags = :ags AND plz = :plz
+                LIMIT 1
+                """
+            ),
+            connection,
+            params={"ags": int(ags), "plz": int(plz)},
+        )
+    if region.empty:
+        raise ValueError(
+            f"No mobility region found for AGS={ags} and PLZ={plz}."
+        )
+    owned = mobility.sample_statistics(
+        buildings,
+        region,
+        allowed_models=mobility.get_pool_supported_models(),
+        base_seed=int(profile_seed),
+    )
+    return (
+        pd.to_numeric(owned["n_cars_tot"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+        .set_axis(owned["objectid"].astype(str))
+        .rename("deterministic_vehicle_count")
+    )
+
+
+def _build_paired_electrification_assignment(
+    real_plan: pd.DataFrame,
+    *,
+    adoption,
+    selection_scope_id: str,
+    profile_seed: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Create one population manifest shared by real and synthetic targets."""
+    frame = real_plan.copy()
+    frame["building_objectid"] = frame["building_objectid"].astype(str)
+
+    def numeric_column(name: str) -> pd.Series:
+        if name not in frame:
+            return pd.Series(0.0, index=frame.index, dtype=float)
+        return pd.to_numeric(frame[name], errors="coerce").fillna(0.0)
+
+    numeric_names = [
+        "residential_equivalent_hh_annual_kwh",
+        "calibrated_annual_ghd_kwh",
+        "residential_effective_floor_area_m2",
+        "residential_equivalent_hh_rows",
+        "residential_wp_rows",
+        "residential_ev_charger_rows",
+        "residential_ev_charger_kw",
+        "deterministic_vehicle_count",
+        "pv_roof_capacity_kw",
+        "residential_pv_rows",
+        "ghd_pv_rows",
+        "residential_battery_rows",
+        "ghd_battery_rows",
+        "residential_battery_kwh",
+        "ghd_battery_kwh",
+    ]
+    frame = frame.assign(
+        **{name: numeric_column(name) for name in numeric_names}
+    )
+
+    def first_present(values: pd.Series) -> object:
+        for value in values:
+            try:
+                present = bool(pd.notna(value))
+            except (TypeError, ValueError):
+                present = True
+            if present and str(value).strip().lower() not in {"", "nan", "<na>"}:
+                return value
+        return pd.NA
+
+    pv_locations = (
+        frame.groupby("building_objectid", sort=True)["pv_roof_assignment_method"]
+        .agg(first_present)
+        if "pv_roof_assignment_method" in frame
+        else pd.Series(dtype=object)
+    )
+    frame = (
+        frame.groupby("building_objectid", sort=True)[numeric_names]
+        .sum()
+        .reset_index()
+    )
+    if not pv_locations.empty:
+        frame = frame.merge(
+            pv_locations.rename("pv_roof_assignment_method"),
+            on="building_objectid",
+            how="left",
+            validate="one_to_one",
+        )
+
+    frame["annual_electricity_kwh"] = (
+        frame["residential_equivalent_hh_annual_kwh"]
+        + frame["calibrated_annual_ghd_kwh"]
+    )
+    residential = frame["residential_effective_floor_area_m2"].gt(0.0)
+    heat_evidence = frame["residential_wp_rows"]
+    household_evidence = frame["residential_equivalent_hh_rows"]
+    mobility_evidence = frame["residential_ev_charger_rows"]
+    mobility_mode = adoption.for_technology("mobility").adoption_mode
+    vehicle_inventory = (
+        mobility_evidence
+        if mobility_mode == "source_inventory"
+        else frame["deterministic_vehicle_count"]
+    )
+    pv_match_count = frame["residential_pv_rows"] + frame["ghd_pv_rows"]
+    battery_match_count = (
+        frame["residential_battery_rows"] + frame["ghd_battery_rows"]
+    )
+
+    # The physical heat-profile library can provide a residential profile
+    # independently of whether the source study already contains a heat pump.
+    frame["heat_eligible"] = residential
+    frame["heat_exclusion_reason"] = np.where(
+        residential, None, "no_residential_component"
+    )
+    frame["mobility_eligible"] = (
+        residential
+        & household_evidence.gt(0.0)
+        & vehicle_inventory.gt(0.0)
+    )
+    frame["mobility_exclusion_reason"] = np.select(
+        [
+            ~residential,
+            household_evidence.le(0.0),
+            vehicle_inventory.le(0.0),
+        ],
+        ["no_residential_component", "no_household", "no_vehicle_inventory"],
+        default=None,
+    )
+    roof_capacity = frame["pv_roof_capacity_kw"]
+    base_electricity = frame["annual_electricity_kwh"]
+    frame["pv_battery_eligible"] = roof_capacity.gt(0.0) & base_electricity.gt(0.0)
+    frame["pv_battery_exclusion_reason"] = np.select(
+        [roof_capacity.le(0.0), base_electricity.le(0.0)],
+        ["no_usable_lod2_roof", "no_base_electricity"],
+        default=None,
+    )
+    frame["heat_source_evidence"] = heat_evidence.where(
+        heat_evidence.gt(0.0), pd.NA
+    )
+    frame["mobility_source_evidence"] = mobility_evidence.where(
+        mobility_evidence.gt(0.0), pd.NA
+    )
+    frame["pv_battery_source_evidence"] = [
+        (
+            {
+                "pv_match_count": int(pv_count),
+                "battery_match_count": int(battery_count),
+            }
+            if pv_count > 0 or battery_count > 0
+            else pd.NA
+        )
+        for pv_count, battery_count in zip(pv_match_count, battery_match_count)
+    ]
+    assignment = build_electrification_assignment(
+        frame,
+        adoption,
+        selection_scope_id=selection_scope_id,
+        profile_seed=int(profile_seed),
+        source_evidence_columns={
+            "heat": "heat_source_evidence",
+            "mobility": "mobility_source_evidence",
+            "pv_battery": "pv_battery_source_evidence",
+        },
+    )
+    return assignment, assignment_summary(assignment)
 
 
 def build_paired_allocation(
@@ -654,11 +875,19 @@ def build_paired_allocation(
     grid_data_path: Path | None = None,
     max_match_distance_m: float = 100.0,
     min_buildings: int = 5,
-    pv_location_mode: str = "swf",
     profile_seed: int = 481527,
+    scenario_config_path: Path | None = None,
 ) -> dict[str, pd.DataFrame]:
     load_dotenv(ENV_PATH, override=True)
     os.environ["PYLOVO_VERSION_ID"] = str(pylovo_version_id)
+    scenario_config_path = scenario_config_path or (
+        GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
+        / "forchheim_2045.yaml"
+    )
+    scenario, scenario_hash = load_scenario_config(scenario_config_path)
+    pv_adoption_mode = scenario.electrification.pv_battery.adoption_mode
+    pv_location_mode = "swf" if pv_adoption_mode == "source_inventory" else "all_buildings"
+    grid_config.apply_scenario(scenario)
     output_dir = output_dir or (
         GRIDALLOC_DIR
         / "outputs"
@@ -720,8 +949,20 @@ def build_paired_allocation(
     retained_buildings = sorted(
         real_plan["building_objectid"].dropna().astype(str).unique()
     )
-    roof_catalog = load_lod2_roof_catalog(_database_engine(), retained_buildings)
-    roof_capacity = building_roof_capacity(roof_catalog)
+    roof_options = {
+        "tilt_bin_deg": scenario.pv.tilt_bin_degrees,
+        "azimuth_bin_deg": scenario.pv.azimuth_bin_degrees,
+        "module_capacity_kw_per_m2": scenario.pv.module_capacity_kw_per_m2,
+        "flat_roof_utilization": scenario.pv.flat_roof_utilization,
+        "slanted_roof_utilization": scenario.pv.slanted_roof_utilization,
+        "fallback_capacity_kw": scenario.pv.fallback_capacity_kwp,
+    }
+    roof_catalog = load_lod2_roof_catalog(
+        _database_engine(),
+        retained_buildings,
+        **roof_options,
+    )
+    roof_capacity = building_lod2_capacity(roof_catalog)
     pv_assignments = _pv_scenario_unit_assignments(
         real_plan,
         matches,
@@ -751,6 +992,38 @@ def build_paired_allocation(
         "building_objectid"
     ].astype(str).map(residential_area_by_building).fillna(0.0)
     _refresh_paired_plan_demand(real_plan, synthetic_plan, component_plan)
+    vehicle_ownership = _paired_mobility_ownership(
+        component_plan,
+        ags=int(ags),
+        plz=int(plz),
+        profile_seed=int(profile_seed),
+    )
+    for target_plan in (real_plan, synthetic_plan):
+        target_plan["deterministic_vehicle_count"] = (
+            target_plan["building_objectid"]
+            .astype(str)
+            .map(vehicle_ownership)
+            .fillna(0)
+            .astype(int)
+        )
+    building_plan["deterministic_vehicle_count"] = (
+        building_plan["building_objectid"]
+        .astype(str)
+        .map(vehicle_ownership)
+        .fillna(0)
+        .astype(int)
+    )
+    electrification_assignment, electrification_summary = (
+        _build_paired_electrification_assignment(
+            real_plan,
+            adoption=scenario.electrification,
+            selection_scope_id=(
+                f"{scenario.scenario_id}|paired|{ags}|{plz}|{pylovo_version_id}"
+            ),
+            profile_seed=int(profile_seed),
+        )
+    )
+    assignment_hash = assignment_manifest_hash(electrification_assignment)
     assert_paired_component_plan_equivalence(component_plan)
     assert_paired_plan_equivalence(real_plan, synthetic_plan)
 
@@ -762,8 +1035,16 @@ def build_paired_allocation(
         "max_match_distance_m": float(max_match_distance_m),
         "min_physical_buildings_per_target_grid": int(min_buildings),
         "scenario_scope": "paired_full_local_demand",
-        "pv_location_mode": pv_location_mode,
+        "pv_adoption_mode": pv_adoption_mode,
+        "pv_roof_parameters": roof_options,
         "profile_seed": int(profile_seed),
+        "scenario_id": scenario.scenario_id,
+        "scenario_hash": scenario_hash,
+        "scenario_key": scenario_identity_key(scenario.scenario_id, scenario_hash),
+        "electrification_assignment_hash": assignment_hash,
+        "electrification_assignment_summary": (
+            electrification_summary.to_dict("records")
+        ),
         "component_contract": "physical_building_component_v1",
         "paired_contract": "physical_building_component_paired_v2",
         "component_rows": int(len(component_plan)),
@@ -804,6 +1085,8 @@ def build_paired_allocation(
         "paired_roof_sections": roof_catalog,
         "paired_pv_roof_assignments": pv_assignments,
         "paired_component_scenario_plan": component_plan,
+        "paired_electrification_assignment": electrification_assignment,
+        "paired_electrification_assignment_summary": electrification_summary,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, frame in outputs.items():
@@ -826,13 +1109,10 @@ def main() -> None:
     parser.add_argument("--max-match-distance-m", type=float, default=100.0)
     parser.add_argument("--min-buildings", type=int, default=5)
     parser.add_argument(
-        "--pv-location-mode",
-        choices=PV_LOCATION_MODES,
-        default="swf",
-        help=(
-            "Use cumulative SWF PV locations or make every retained physical "
-            "building PV-eligible."
-        ),
+        "--scenario-config",
+        type=Path,
+        default=None,
+        help="Scientific scenario YAML that owns technology adoption policy.",
     )
     parser.add_argument(
         "--profile-seed", type=int, default=481527,
@@ -848,8 +1128,10 @@ def main() -> None:
         grid_data_path=args.grid_data_path,
         max_match_distance_m=args.max_match_distance_m,
         min_buildings=args.min_buildings,
-        pv_location_mode=args.pv_location_mode,
         profile_seed=args.profile_seed,
+        scenario_config_path=args.scenario_config
+        if hasattr(args, "scenario_config")
+        else None,
     )
     print(outputs["paired_scope_audit"].to_string(index=False))
 

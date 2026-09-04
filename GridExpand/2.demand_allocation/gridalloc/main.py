@@ -11,12 +11,12 @@ if str(GRIDEXPAND_DIR) not in sys.path:
 
 DEFAULT_SCENARIO_CONFIG = (
     GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
-    / "forchheim_2045.yaml"
+    / "forchheim_2045_synthetic.yaml"
 )
 
 from config import config
 from common.database import SurroGridDatabase
-from scenario_pipeline.config_loader import load_scenario_config
+from scenario_pipeline.config_loader import load_scenario_config, scenario_identity_key
 from scenario_pipeline.model_cases import MODEL_CASES
 from common.timeframe import (
     TIMEFRAME_MODES,
@@ -47,14 +47,6 @@ def profile_flags(profile):
         },
         "include_mobility": profile in {"electricity_mobility", "electricity_heat_mobility", "all"},
     }
-
-
-def scenario_base_key_for_scope(demand_scope):
-    if demand_scope == "all":
-        return "baseline_static"
-    if demand_scope == "residential":
-        return "baseline_static_hh_only"
-    raise ValueError(f"Unknown demand scope: {demand_scope}")
 
 
 def scenario_assumptions(timeframe_metadata, scenario_key, demand_scope):
@@ -160,6 +152,14 @@ if __name__ == '__main__':
             help="Scientific scenario YAML.",
         )
         parser.add_argument(
+            "--electrification-assignment",
+            type=Path,
+            help=(
+                "Optional precomputed CSV or HDF5 assignment manifest. Required "
+                "for source_inventory scenarios when the input has no source evidence."
+            ),
+        )
+        parser.add_argument(
             "--case-qualified-output",
             action="store_true",
             help="Append the model-case name to the Step-2 HDF output.",
@@ -178,12 +178,17 @@ if __name__ == '__main__':
         timeframe_metadata = build_initial_metadata(args.timeframe_mode)
         scenario_key = scenario_key_for_timeframe(
             args.timeframe_mode,
-            base_key=scenario_base_key_for_scope(args.demand_scope),
+            base_key=scenario_identity_key(scenario_config.scenario_id, scenario_hash),
         )
         assumptions = scenario_assumptions(timeframe_metadata, scenario_key, args.demand_scope)
         assumptions.update({
             "scenario_id": scenario_config.scenario_id,
             "scenario_hash": scenario_hash,
+            "electrification_assignment_path": (
+                args.electrification_assignment.resolve()
+                if args.electrification_assignment is not None
+                else None
+            ),
             "model_case": args.model_case,
             "profile_seed": args.profile_seed,
             "pv_feed_in_tariff_eur_per_kwh": (
@@ -240,6 +245,11 @@ if __name__ == '__main__':
             "scenario_assumptions": assumptions,
             "scenario_config": scenario_config,
             "scenario_hash": scenario_hash,
+            "electrification_assignment_path": (
+                args.electrification_assignment.resolve()
+                if args.electrification_assignment is not None
+                else None
+            ),
             "model_case": args.model_case,
             "profile_seed": args.profile_seed,
             "case_qualified_output": args.case_qualified_output,

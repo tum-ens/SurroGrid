@@ -147,7 +147,7 @@ def build_battery_asset_plan(
             plan["annual_electricity_mwh"].le(0.0),
             plan["battery_reference_pv_kwp"].le(plan["battery_pv_threshold_kwp"]),
         ],
-        ["not_predefined", "no_pv", "no_base_electricity", "insufficient_pv_surplus"],
+        ["not_selected", "no_pv", "no_base_electricity", "insufficient_pv_surplus"],
         default="selected",
     )
     return plan

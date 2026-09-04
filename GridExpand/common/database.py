@@ -1437,6 +1437,7 @@ class SurroGridDatabase:
     def _clear_demand_allocation_run(self, conn, run_id: int) -> None:
         for table_name in (
             "allocated_vehicle",
+            "electrification_assignment",
             "allocated_eff_factor",
             "demand_component_audit",
             "allocated_demand",
@@ -1454,6 +1455,33 @@ class SurroGridDatabase:
 
     def write_allocated_eff_factor(self, run_id: int, df: pd.DataFrame) -> None:
         self._write_allocated_timeseries(run_id, df, "component", "allocated_eff_factor")
+
+    def write_electrification_assignment(
+        self, run_id: int, df: pd.DataFrame
+    ) -> None:
+        """Persist the auditable physical-building technology assignment."""
+        if df.empty:
+            return
+        columns = [
+            "building_objectid", "technology", "selection_scope_id",
+            "adoption_mode", "configured_share", "eligible",
+            "selection_score", "selection_rank", "selected",
+            "exclusion_reason", "source_evidence", "profile_seed",
+        ]
+        missing = sorted(set(columns).difference(df.columns))
+        if missing:
+            raise ValueError(f"Electrification assignment is missing columns: {missing}")
+        out = df[columns].copy().astype(object)
+        out["eligible"] = out["eligible"].map(bool)
+        out["selected"] = out["selected"].map(bool)
+        out["profile_seed"] = pd.to_numeric(
+            out["profile_seed"], errors="raise"
+        ).astype(int)
+        for column in ("configured_share", "selection_score", "selection_rank"):
+            out[column] = out[column].where(pd.notna(out[column]), None)
+        out = out.where(pd.notna(out), None)
+        out.insert(0, "demand_allocation_run_id", int(run_id))
+        self._append(out, "electrification_assignment")
 
     def write_demand_component_audit(self, run_id: int, df: pd.DataFrame) -> None:
         """Persist compact component profile evidence, never hourly profiles."""

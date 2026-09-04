@@ -12,16 +12,16 @@ The code in `urbs/` is a vendored / adapted urbs variant tailored to this GridEx
 ## What this step does (high-level)
 
 1. **Selects an input HDF5** from `Input/` based on a numeric/prefix ID.
-2. **Builds a `global_settings` dict** (electrification shares, TSAM on/off, etc.).
-3. **Copies the input file to `result/`** (working copy).
+2. **Reads scenario identity and electrification-manifest metadata** and builds the execution `global_settings` dict (TSAM on/off, etc.).
+3. **Copies the input file to `result/<scenario-key>/`** (working copy).
 4. **Reads the input datasets** from the HDF5 (`/urbs_in/...`).
 5. **Optionally applies Time Series Aggregation (TSAM)** to reduce the time horizon.
-6. **Optionally reduces electrification adoption** (PV/HP/EV) by removing technologies at a random subset of nodes.
+6. **Consumes the exact Step-2 technology assignment**; it does not resample or randomly remove electrification cohorts.
 7. **Solves the optimization**:
    - The building nodes are split into `n_cpu` clusters.
    - Each cluster is solved in a separate Python process.
    - Results are merged and written into the output HDF5.
-8. **Renames the output file** to include the scenario label (e.g. `..._PV100_HP100_EV100_VarTar0_CapPr0.h5`).
+8. **Names the output file** using the canonical scenario identity carried by the Step-2 metadata.
 
 ## Folder / file structure
 
@@ -39,7 +39,8 @@ The code in `urbs/` is a vendored / adapted urbs variant tailored to this GridEx
     *.h5                  # required input files for this step
 
   result/
-    *_PV*_HP*_EV*_...h5   # generated result files (HDF5)
+    <scenario-key>/
+      *.h5                 # generated result files (HDF5)
 
   logs/
     normal/               # SLURM stdout logs (if using sbatch)
@@ -100,19 +101,13 @@ Notes on expected structure:
 
 ## Generated outputs
 
-### 1) Result HDF5 in `result/`
+### 1) Result HDF5 in `result/<scenario-key>/`
 
-The script copies the selected input file into `result/` and writes results into that copy.
+The script copies the selected input file into the scenario-specific result directory and writes results into that copy.
 
-Final naming:
-
-- Base: same as input file name
-- After solving: renamed to include scenario string
-
-Example:
-
-- Input: `Input/0_N2819500E4261500_86165_2_40.h5`
-- Output: `result/0_N2819500E4261500_86165_2_40_PV100_HP100_EV100_VarTar0_CapPr0.h5`
+Final naming uses the input base name plus the canonical scenario key from
+`/metadata/timeframe`; the exact key is therefore scientific-identity
+aware and no longer encodes legacy electrification percentages.
 
 ### 2) HDF5 output groups written
 
@@ -168,27 +163,31 @@ Note: uv manages Python dependencies only. Gurobi binaries/licenses are external
 
 ## Configuration knobs (most important)
 
-The primary user-exposed settings are currently set inside `run_urbs_cluster.py`:
+Scenario YAML is the source of scientific and policy assumptions. The
+electrification section defines one adoption mode for each of heat, mobility,
+and pv_battery: deterministic_share uses an exact stable building selection,
+while source_inventory requires explicit source evidence in the prepared
+assignment manifest. Step 3 consumes the manifest and does not resample
+technology adoption.
 
-- `tsam` (`True/False`): enable/disable time series aggregation
-- `noTypicalPeriods` (int): number of typical periods (TSAM)
-- `hoursPerPeriod` (int): hours per typical period (TSAM), commonly 168 (1 week)
-- `PV_electr`, `HP_electr`, `EV_electr` (0–100): adoption shares per technology
-- `n_cpu` (int): number of parallel worker processes
+Execution-only settings remain command-line controls:
 
-Scenario naming is derived from these values as:
-
-`PV{PV}_HP{HP}_EV{EV}_VarTar{VarTar}_CapPr{CapPr}`
+- n_cpu (int): number of parallel worker processes
+- timeframe_mode: full-year or a named operational stress slice
+- model_case: pre, heuristic, or optimized materialization case
 
 ## Details to keep in mind
 
-### Result overwrites / reproducibility
+### Result isolation / reproducibility
 
-- `urbs.prepare_result_directory()` is currently configured to always return `"result"`.
-  - This means runs reuse the same folder.
-  - If you rerun the same input/scenario, the output file may be overwritten.
-
-If you need per-run folders (timestamped), you can re-enable the previously commented logic in `urbs/runfunctions.py`.
+- `urbs.prepare_result_directory()` writes outputs below
+  `3.urbs/result/<scenario-key>/`, where the key contains the scenario identity
+  and timeframe mode.
+- Step-2 and Step-3 artifacts use the same scenario-key contract, so different
+  adoption shares, seeds, or timeframes do not silently reuse one another s
+  files.
+- Re-running the same input and scenario may overwrite that scenario s own
+  output file; preserve or archive it when comparing repeated runs.
 
 ### Parallelism and CPU usage
 
@@ -238,7 +237,7 @@ To quickly inspect what’s inside an output file, you can do:
 ```python
 import pandas as pd
 
-path = "result/<your_output>.h5"
+path = "result/<scenario-key>/<your_output>.h5"
 with pd.HDFStore(path, mode="r") as store:
     print(store.keys())
 

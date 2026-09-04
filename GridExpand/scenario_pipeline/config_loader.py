@@ -28,6 +28,11 @@ def configuration_hash(raw: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def scenario_identity_key(scenario_id: str, scenario_hash: str) -> str:
+    """Return the stable scenario identity used across pipeline stages."""
+    return f"scenario_{scenario_id}_{str(scenario_hash)[:12]}"
+
+
 def load_scenario_config(path: str | Path) -> tuple[ScenarioConfig, str]:
     raw = _read_yaml(Path(path))
     return ScenarioConfig.from_dict(raw), configuration_hash(raw)
