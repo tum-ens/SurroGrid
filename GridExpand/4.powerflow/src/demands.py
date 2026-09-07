@@ -63,9 +63,20 @@ def _align_pre_demand_to_urbs(df_pre_demand, df_urbs_demand):
 
 def _process_pre_demands(df_pre_demand):
     ### Pre-urbs raw household (reactive) electrical demand
-    df_raw_demand_elec = df_pre_demand.loc[:, df_pre_demand.columns.get_level_values(1) == 'electricity']
-    df_raw_demand_react = df_raw_demand_elec.copy()*np.tan(np.arccos(config.PF_ELC))#*(-1)   # -1 as inductive/lagging and thus a demand
-    df_raw_demand_react.columns = df_raw_demand_react.columns.map(lambda x: (x[0], "electricity-reactive"))
+    df_raw_demand_elec = df_pre_demand.loc[
+        :, df_pre_demand.columns.get_level_values(1) == "electricity"
+    ]
+    # Normalize level names before arithmetic with reconstructed heat, mobility,
+    # PV, and battery frames; their semantic alignment is positional.
+    df_raw_demand_elec = _set_electricity_component(
+        df_raw_demand_elec, "electricity"
+    )
+    df_raw_demand_react = (
+        df_raw_demand_elec.copy() * np.tan(np.arccos(config.PF_ELC))
+    )
+    df_raw_demand_react = _set_electricity_component(
+        df_raw_demand_react, "electricity-reactive"
+    )
     return df_raw_demand_elec, df_raw_demand_react
 
 def _extract_relevant_demands(df_net_demand):

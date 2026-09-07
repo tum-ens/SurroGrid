@@ -60,6 +60,16 @@ select the same `regular`/`lvload` entries from these manifests. The
 manifests describe data provenance and topology readiness; they do not define a
 scientific scenario parameter.
 
+The paired energy model represents one central HEMS per LoD2 physical building.
+Where several SWF source connections are matched to the same building within one
+LV grid, their annual demand and source-asset evidence are summed and assigned to
+the connection with the largest annual base-electricity demand (ties use the
+lowest bus ID). This avoids duplicating building-level heat demand and roof
+potential. A building matched to connections in different LV grids is excluded
+from the paired population because no single building-level connection can
+preserve both transformer assignments. Both consolidation and exclusion counts
+are recorded in the paired scope audit and dataset metadata.
+
 ## Reproducible physical-profile realization
 
 Controlled model-case comparisons separate stochastic input realization from

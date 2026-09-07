@@ -30,9 +30,9 @@ execution:
   # UPDATE: choose the model cases required for this run.
   model_cases:
     - pre
-    # - post-inflex-heuristic
-    # - post-hems-heuristic
-    # - post-hems-optimized
+    - post-inflex-heuristic
+    - post-hems-heuristic
+    - post-hems-optimized
   # Machine-specific settings.
   n_cpu: 1
   mobility_source: pool

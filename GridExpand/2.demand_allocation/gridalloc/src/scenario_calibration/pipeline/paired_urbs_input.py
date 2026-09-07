@@ -27,12 +27,11 @@ for path in (GRIDEXPAND_DIR, GRIDALLOC_DIR):
         sys.path.insert(0, str(path))
 
 from config import config  # noqa: E402
-from common.electrification import (
+from common.electrification import (  # noqa: E402
     assignment_manifest_hash,
     assignment_summary,
-    validate_electrification_assignment,
     validate_electrification_assignment_config,
-)  # noqa: E402
+)
 from common.timeframe import build_full_year_metadata, write_hdf_metadata  # noqa: E402
 from scenario_pipeline.config_loader import (  # noqa: E402
     load_scenario_config,
@@ -89,12 +88,19 @@ def _target_component_plan(
     combined = pd.read_csv(path)
     assert_paired_component_plan_equivalence(combined)
     if target_network == "real_swf":
-        mask = pd.to_numeric(combined["real_target_grid_id"], errors="coerce").eq(int(target_grid_id))
-        combined["target_bus"] = pd.to_numeric(combined["real_target_bus"], errors="raise").astype(int)
+        mask = pd.to_numeric(
+            combined["real_target_grid_id"], errors="coerce"
+        ).eq(int(target_grid_id))
     else:
-        mask = pd.to_numeric(combined["synthetic_target_grid_case_id"], errors="coerce").eq(int(target_grid_id))
-        combined["target_bus"] = pd.to_numeric(combined["synthetic_target_bus"], errors="raise").astype(int)
+        mask = pd.to_numeric(
+            combined["synthetic_target_grid_case_id"], errors="coerce"
+        ).eq(int(target_grid_id))
     target = combined.loc[mask].copy()
+    # URBS operates on topology-independent scenario units. Step 4 projects
+    # those units onto real or synthetic buses with the target allocation plan.
+    target["target_bus"] = pd.to_numeric(
+        target["scenario_unit_id"], errors="raise"
+    ).astype(int)
     if target.empty:
         raise ValueError(f"No paired component rows for {target_network} target grid {target_grid_id}.")
     seeds = pd.to_numeric(target["profile_seed"], errors="coerce").dropna().astype(int).unique()

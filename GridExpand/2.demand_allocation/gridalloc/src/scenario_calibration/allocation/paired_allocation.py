@@ -457,13 +457,108 @@ def _refresh_paired_plan_demand(
         frame["calibrated_annual_ghd_kwh"] = frame["scenario_unit_id"].map(by_unit["_ghd_kwh"]).fillna(0.0)
         frame["residential_equivalent_hh_rows"] = frame["scenario_unit_id"].map(by_unit["_hh_rows"]).fillna(0.0)
 
+_BUILDING_CONNECTION_EXTENSIVE_COLUMNS = (
+    "residential_equivalent_hh_rows",
+    "residential_equivalent_hh_annual_kwh",
+    "swf_ghd_rows",
+    "calibrated_annual_ghd_kwh",
+    "residential_ev_charger_rows",
+    "residential_ev_charger_kw",
+    "residential_wp_rows",
+    "residential_pv_rows",
+    "residential_pv_kw",
+    "residential_battery_rows",
+    "residential_battery_kwh",
+    "residential_heat_storage_rows",
+    "ghd_ev_charger_rows",
+    "ghd_ev_charger_kw",
+    "ghd_wp_rows",
+    "ghd_pv_rows",
+    "ghd_pv_kw",
+    "ghd_battery_rows",
+    "ghd_battery_kwh",
+    "ghd_heat_storage_rows",
+    "unsupported_nonres_ev_charger_rows",
+    "unsupported_nonres_ev_charger_kw",
+    "unsupported_nonres_wp_rows",
+    "unsupported_nonres_pv_rows",
+    "unsupported_nonres_pv_kw",
+    "unsupported_nonres_battery_rows",
+    "unsupported_nonres_battery_kwh",
+    "unsupported_nonres_heat_storage_rows",
+)
+
+
+def _consolidate_building_connections(bus_plan: pd.DataFrame) -> pd.DataFrame:
+    """Represent each physical building by its dominant real-grid connection.
+
+    SWF may contain several source connection records inside one LoD2 building.
+    The scenario model intentionally uses one central HEMS per physical building,
+    so their inventories and annual demands are summed and assigned to the
+    connection carrying the largest annual base demand. This preserves total
+    source evidence without duplicating building-level heat or roof potential.
+    """
+    if bus_plan.empty:
+        return bus_plan.copy()
+    plan = bus_plan.copy()
+    plan["building_objectid"] = plan["building_objectid"].astype("string")
+    lv_counts = plan.groupby("building_objectid", observed=True)["lv_id"].nunique()
+    cross_grid = lv_counts[lv_counts.gt(1)]
+    if not cross_grid.empty:
+        raise ValueError(
+            "A physical building is assigned to source connections in more than "
+            f"one real LV grid: {cross_grid.index.astype(str).tolist()[:10]}"
+        )
+
+    plan["source_connection_rows"] = 1
+    plan["_base_demand_kwh"] = (
+        pd.to_numeric(
+            plan["residential_equivalent_hh_annual_kwh"], errors="coerce"
+        ).fillna(0.0)
+        + pd.to_numeric(
+            plan["calibrated_annual_ghd_kwh"], errors="coerce"
+        ).fillna(0.0)
+    )
+    rows: list[pd.Series] = []
+    for _, group in plan.groupby("building_objectid", observed=True, sort=False):
+        representative = group.sort_values(
+            ["_base_demand_kwh", "allocation_bus"],
+            ascending=[False, True],
+            kind="stable",
+        ).iloc[0].copy()
+        representative["source_connection_rows"] = int(len(group))
+        for column in _BUILDING_CONNECTION_EXTENSIVE_COLUMNS:
+            if column in group.columns:
+                representative[column] = pd.to_numeric(
+                    group[column], errors="coerce"
+                ).fillna(0.0).sum()
+        rows.append(representative)
+    result = pd.DataFrame(rows).drop(columns="_base_demand_kwh")
+    return result.reindex(columns=[*bus_plan.columns, "source_connection_rows"])
+
+
 def _paired_plans(
     bus_plan: pd.DataFrame,
     synthetic_mapping: pd.DataFrame,
     *,
     min_buildings: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    full = bus_plan[bus_plan["include_full_local_demand_scenario"]].copy()
+    source_scope = bus_plan[
+        bus_plan["include_full_local_demand_scenario"]
+    ].copy()
+    source_scope["building_objectid"] = source_scope["building_objectid"].astype(
+        "string"
+    )
+    source_grid_counts = source_scope.groupby(
+        "building_objectid", observed=True
+    )["lv_id"].nunique()
+    ambiguous_buildings = set(
+        source_grid_counts[source_grid_counts.gt(1)].index.astype(str)
+    )
+    unambiguous_scope = source_scope[
+        ~source_scope["building_objectid"].astype(str).isin(ambiguous_buildings)
+    ]
+    full = _consolidate_building_connections(unambiguous_scope)
     full["building_objectid"] = full["building_objectid"].astype("string")
     mapped = full.merge(
         synthetic_mapping, on="building_objectid", how="left", indicator=True
@@ -524,6 +619,47 @@ def _paired_plans(
         [
             _plan_summary("real_swf", real),
             _plan_summary("synthetic", synthetic),
+            {
+                "target_network": "ambiguous_across_real_grids",
+                "target_grids": int(
+                    source_scope.loc[
+                        source_scope["building_objectid"].astype(str).isin(
+                            ambiguous_buildings
+                        ),
+                        "lv_id",
+                    ].nunique()
+                ),
+                "physical_buildings": int(len(ambiguous_buildings)),
+                "plan_rows": int(
+                    source_scope["building_objectid"].astype(str).isin(
+                        ambiguous_buildings
+                    ).sum()
+                ),
+                "hh_rows": float(
+                    source_scope.loc[
+                        source_scope["building_objectid"].astype(str).isin(
+                            ambiguous_buildings
+                        ),
+                        "residential_equivalent_hh_rows",
+                    ].sum()
+                ),
+                "hh_annual_kwh": float(
+                    source_scope.loc[
+                        source_scope["building_objectid"].astype(str).isin(
+                            ambiguous_buildings
+                        ),
+                        "residential_equivalent_hh_annual_kwh",
+                    ].sum()
+                ),
+                "ghd_annual_kwh": float(
+                    source_scope.loc[
+                        source_scope["building_objectid"].astype(str).isin(
+                            ambiguous_buildings
+                        ),
+                        "calibrated_annual_ghd_kwh",
+                    ].sum()
+                ),
+            },
             {
                 "target_network": "unmapped_from_synthetic_version",
                 "target_grids": 0,
@@ -588,38 +724,21 @@ def _pv_scenario_unit_assignments(
             matches["matched"].fillna(False) & matches["asset_type"].eq("Photovoltaik")
         ].copy()
         counts = (
-            pv.groupby(["building_objectid", "lv_id", "bus"], dropna=False)
+            pv.assign(building_objectid=pv["building_objectid"].astype(str))
+            .groupby("building_objectid", observed=True)
             .size()
-            .rename("swf_pv_rows_at_connection")
-            .reset_index()
-            .rename(
-                columns={
-                    "lv_id": "source_lv_id",
-                    "bus": "source_allocation_bus",
-                }
-            )
+            .rename("swf_pv_rows_at_building")
         )
-        counts["building_objectid"] = counts["building_objectid"].astype(str)
-        candidates = candidates.merge(
-            counts,
-            on=[
-                "building_objectid",
-                "source_lv_id",
-                "source_allocation_bus",
-            ],
-            how="inner",
+        candidates["swf_pv_rows_at_building"] = candidates[
+            "building_objectid"
+        ].map(counts)
+        candidates = candidates[
+            candidates["swf_pv_rows_at_building"].fillna(0).gt(0)
+        ].sort_values(
+            ["building_objectid", "scenario_unit_id"],
+            ascending=[True, True],
         )
-        candidates = candidates.sort_values(
-            [
-                "building_objectid",
-                "swf_pv_rows_at_connection",
-                "source_lv_id",
-                "source_allocation_bus",
-                "scenario_unit_id",
-            ],
-            ascending=[True, False, True, True, True],
-        )
-        method = "swf_cumulative_pv_location"
+        method = "swf_cumulative_pv_building_consolidated_connection"
     else:
         candidates["_base_annual_kwh"] = pd.to_numeric(
             candidates["residential_equivalent_hh_annual_kwh"], errors="coerce"
@@ -1047,6 +1166,19 @@ def build_paired_allocation(
         ),
         "component_contract": "physical_building_component_v1",
         "paired_contract": "physical_building_component_paired_v2",
+        "source_connection_policy": "one_building_dominant_annual_base_demand_bus",
+        "source_connection_rows": int(real_plan["source_connection_rows"].sum()),
+        "multi_connection_buildings": int(
+            real_plan["source_connection_rows"].gt(1).sum()
+        ),
+        "ambiguous_cross_real_grid_buildings": int(
+            paired_audit.loc[
+                paired_audit["target_network"].eq(
+                    "ambiguous_across_real_grids"
+                ),
+                "physical_buildings",
+            ].sum()
+        ),
         "component_rows": int(len(component_plan)),
         "included_component_rows": int(component_plan["included_in_lv"].astype(bool).sum()),
         "suppressed_component_rows": int((~component_plan["included_in_lv"].astype(bool)).sum()),

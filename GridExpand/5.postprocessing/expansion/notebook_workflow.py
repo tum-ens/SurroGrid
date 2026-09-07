@@ -144,19 +144,33 @@ def load_expansion_stage_context(
         if is_available:
             meta = analysis_run.iloc[0]
             analysis_meta_by_stage[label] = meta
-            cost_summary = tables["cost_summary"].iloc[0] if not tables["cost_summary"].empty else None
+            cost_summary = (
+                tables["cost_summary"].iloc[0]
+                if not tables["cost_summary"].empty
+                else None
+            )
             status_row.update(
                 {
                     "data_source": meta.get("data_source", "Synthetic"),
                     "run_name": meta["run_name"],
                     "stage": meta["stage"],
-                    "grids_with_expansion_summary": int(cost_summary["grids_with_line_rows"])
+                    "grids_with_expansion_summary": int(
+                        cost_summary["grids_with_line_rows"]
+                    )
                     if cost_summary is not None
                     else 0,
-                    "grids_total": int(cost_summary["grids_total"]) if cost_summary is not None else 0,
-                    "grids_complete": int(cost_summary["grids_complete"]) if cost_summary is not None else 0,
-                    "grids_incomplete": int(cost_summary["grids_incomplete"]) if cost_summary is not None else 0,
-                    "grids_excluded": int(cost_summary["grids_excluded"]) if cost_summary is not None else 0,
+                    "grids_total": int(cost_summary["grids_total"])
+                    if cost_summary is not None
+                    else 0,
+                    "grids_complete": int(cost_summary["grids_complete"])
+                    if cost_summary is not None
+                    else 0,
+                    "grids_incomplete": int(cost_summary["grids_incomplete"])
+                    if cost_summary is not None
+                    else 0,
+                    "grids_excluded": int(cost_summary["grids_excluded"])
+                    if cost_summary is not None
+                    else 0,
                     "total_cost_eur": float(cost_summary["total_cost_eur"])
                     if cost_summary is not None
                     else 0.0,
@@ -176,7 +190,9 @@ def load_expansion_stage_context(
     }
     if not available_analysis_keys:
         if not allow_empty:
-            raise ValueError("None of the configured analysis keys exist in surrogrid.expansion_analysis_run.")
+            raise ValueError(
+                "None of the configured analysis keys exist in surrogrid.expansion_analysis_run."
+            )
         return {
             "expansion_tables_by_stage": expansion_tables_by_stage,
             "analysis_meta_by_stage": analysis_meta_by_stage,
@@ -217,7 +233,11 @@ def expansion_cost_comparison_from_tables(
     cost_rows = []
     for label in (post_no_flex_label, post_flex_label):
         tables = expansion_tables_by_stage.get(label)
-        if tables is None or label not in analysis_meta_by_stage or tables["cost_summary"].empty:
+        if (
+            tables is None
+            or label not in analysis_meta_by_stage
+            or tables["cost_summary"].empty
+        ):
             continue
         cost_summary_row = tables["cost_summary"].iloc[0]
         cost_rows.extend(
@@ -237,7 +257,6 @@ def expansion_cost_comparison_from_tables(
             ]
         )
     return pd.DataFrame(cost_rows)
-
 
 
 def reinforcement_catalog_summary(
@@ -265,7 +284,6 @@ def reinforcement_catalog_summary(
                 }
             )
     return pd.DataFrame(rows)
-
 
 
 def expansion_cost_reduction_summary(
@@ -335,7 +353,9 @@ def expansion_cost_coverage_summary(analysis_status: pd.DataFrame) -> pd.DataFra
         "total_cost_eur",
     ]
     result = analysis_status.loc[analysis_status["available"], columns].copy()
-    result["cost_per_complete_grid_eur"] = result["total_cost_eur"] / result["grids_complete"].replace(0, pd.NA)
+    result["cost_per_complete_grid_eur"] = result["total_cost_eur"] / result[
+        "grids_complete"
+    ].replace(0, pd.NA)
     return result.round({"total_cost_eur": 0, "cost_per_complete_grid_eur": 0})
 
 
@@ -397,13 +417,17 @@ def load_powerflow_cutoff_comparison(
                         "excluded_grids": excluded["grid"].nunique(),
                     }
                 )
-            profile = profile[~profile["lv_id"].astype(str).isin(excluded_lv_ids)].copy()
+            profile = profile[
+                ~profile["lv_id"].astype(str).isin(excluded_lv_ids)
+            ].copy()
         profile["comparison_stage"] = label
         profile["data_source"] = "Real SWF"
         powerflow_profiles.append(profile)
 
     if not powerflow_profiles:
-        raise ValueError("No configured synthetic or real compact power-flow summary runs were found.")
+        raise ValueError(
+            "No configured synthetic or real compact power-flow summary runs were found."
+        )
 
     powerflow_profile = pd.concat(powerflow_profiles, ignore_index=True, sort=False)
     powerflow_profile["comparison_stage"] = pd.Categorical(
@@ -445,7 +469,9 @@ def meta_filter(meta: pd.Series) -> dict[str, object]:
     return {
         "run_name": meta["run_name"],
         "stage": meta["stage"],
-        "scenario_id": None if pd.isna(meta["scenario_id"]) else int(meta["scenario_id"]),
+        "scenario_id": None
+        if pd.isna(meta["scenario_id"])
+        else int(meta["scenario_id"]),
         "ags": None if pd.isna(meta["ags"]) else int(meta["ags"]),
         "plz": None if pd.isna(meta["plz"]) else int(meta["plz"]),
     }
@@ -468,7 +494,6 @@ def load_voltage_summaries_for_analysis(
     if not voltage_summaries:
         raise ValueError("No available expansion analyses for voltage diagnostics.")
     return voltage_summaries
-
 
 
 def load_voltage_summaries_for_powerflow_comparison(
@@ -509,7 +534,9 @@ def load_voltage_summaries_for_powerflow_comparison(
         except ValueError:
             continue
         if excluded_lv_ids and "lv_id" in summary.columns:
-            summary = summary[~summary["lv_id"].astype(str).isin(excluded_lv_ids)].copy()
+            summary = summary[
+                ~summary["lv_id"].astype(str).isin(excluded_lv_ids)
+            ].copy()
         if summary.empty or "voltage_min_asset_time_pu" not in summary.columns:
             continue
         real[label] = pd.DataFrame(
@@ -563,6 +590,12 @@ DEFAULT_STAGE_LABELS = {
     "post_flex": "HEMS",
 }
 
+ALL_MODEL_CASE_STAGE_LABELS = {
+    **DEFAULT_STAGE_LABELS,
+    "post_flex": "HEMS heuristic",
+    "post_optimized": "HEMS optimized",
+}
+
 
 def scenario_powerflow_specs(
     scenario_prefix: str,
@@ -570,24 +603,46 @@ def scenario_powerflow_specs(
 ) -> dict[str, dict[str, dict[str, str]]]:
     """Derive all compact-summary run names from one scenario prefix."""
     labels = dict(stage_labels or DEFAULT_STAGE_LABELS)
-    return {
+    specs = {
         "Synthetic": {
-            labels["pre"]: {"run_name": f"{scenario_prefix}_synthetic_pre", "stage": "pre"},
+            labels["pre"]: {
+                "run_name": f"{scenario_prefix}_synthetic_pre",
+                "stage": "pre",
+            },
             labels["post_no_flex"]: {
                 "run_name": f"{scenario_prefix}_synthetic_post-inflex-heuristic",
                 "stage": "post",
             },
-            labels["post_flex"]: {"run_name": f"{scenario_prefix}_synthetic_post-hems-heuristic", "stage": "post"},
+            labels["post_flex"]: {
+                "run_name": f"{scenario_prefix}_synthetic_post-hems-heuristic",
+                "stage": "post",
+            },
         },
         "Real SWF": {
-            labels["pre"]: {"run_name": f"{scenario_prefix}_real_swf_pre", "stage": "pre"},
+            labels["pre"]: {
+                "run_name": f"{scenario_prefix}_real_swf_pre",
+                "stage": "pre",
+            },
             labels["post_no_flex"]: {
                 "run_name": f"{scenario_prefix}_real_swf_post-inflex-heuristic",
                 "stage": "post",
             },
-            labels["post_flex"]: {"run_name": f"{scenario_prefix}_real_swf_post-hems-heuristic", "stage": "post"},
+            labels["post_flex"]: {
+                "run_name": f"{scenario_prefix}_real_swf_post-hems-heuristic",
+                "stage": "post",
+            },
         },
     }
+    if "post_optimized" in labels:
+        specs["Synthetic"][labels["post_optimized"]] = {
+            "run_name": f"{scenario_prefix}_synthetic_post-hems-optimized",
+            "stage": "post",
+        }
+        specs["Real SWF"][labels["post_optimized"]] = {
+            "run_name": f"{scenario_prefix}_real_swf_post-hems-optimized",
+            "stage": "post",
+        }
+    return specs
 
 
 def scenario_analysis_keys(
@@ -599,11 +654,16 @@ def scenario_analysis_keys(
     """Derive stable expansion-analysis keys for one network source."""
     labels = dict(stage_labels or DEFAULT_STAGE_LABELS)
     source_suffix = "" if data_source == "Synthetic" else "_real"
-    return {
+    keys = {
         labels["pre"]: f"{scenario_prefix}{source_suffix}_pre",
         labels["post_no_flex"]: f"{scenario_prefix}{source_suffix}_post_no_flex",
         labels["post_flex"]: f"{scenario_prefix}{source_suffix}_post",
     }
+    if "post_optimized" in labels:
+        keys[labels["post_optimized"]] = (
+            f"{scenario_prefix}{source_suffix}_post_hems_optimized"
+        )
+    return keys
 
 
 def _powerflow_run_readiness(
@@ -664,14 +724,21 @@ def _powerflow_run_readiness(
     with db.engine.connect() as conn:
         for source, specs in specs_by_source.items():
             for stage_label, spec in specs.items():
-                params = {"run_name": str(spec["run_name"]), "stage": str(spec["stage"])}
+                params = {
+                    "run_name": str(spec["run_name"]),
+                    "stage": str(spec["stage"]),
+                }
                 if source == "Synthetic":
                     params["ags"] = int(normalize_ags_string(ags))
                     result = conn.execute(synthetic_query, params).mappings().one()
                 else:
                     params["plz"] = real_plz
                     result = conn.execute(real_query, params).mappings().one()
-                expected = None if expected_grid_counts is None else expected_grid_counts.get(source)
+                expected = (
+                    None
+                    if expected_grid_counts is None
+                    else expected_grid_counts.get(source)
+                )
                 launched = int(result["launched_grids"] or 0)
                 summaries = int(result["summary_grids"] or 0)
                 failed_timesteps = int(result["failed_timesteps"] or 0)
@@ -690,7 +757,9 @@ def _powerflow_run_readiness(
                         "launched_grids": launched,
                         "summary_grids": summaries,
                         "pending_or_missing_summaries": max(launched - summaries, 0),
-                        "grids_with_failed_timesteps": int(result["grids_with_failed_timesteps"] or 0),
+                        "grids_with_failed_timesteps": int(
+                            result["grids_with_failed_timesteps"] or 0
+                        ),
                         "failed_timesteps": failed_timesteps,
                         "timestep_signatures": result["timestep_signatures"],
                         "scenario_labels": result["scenario_labels"],
@@ -710,12 +779,14 @@ def _publication_gate(
     expected_grid_counts: Mapping[str, int] | None,
 ) -> pd.DataFrame:
     checks = []
+    expected_stage_count = sum(len(specs) for specs in specs_by_source.values())
     all_runs_complete = bool(
-        len(powerflow_status) == 6 and powerflow_status["complete"].fillna(False).all()
+        len(powerflow_status) == expected_stage_count
+        and powerflow_status["complete"].fillna(False).all()
     )
     checks.append(
         {
-            "check": "All six compact power-flow runs complete",
+            "check": f"All {expected_stage_count} compact power-flow runs complete",
             "passed": all_runs_complete,
             "detail": (
                 f"{int(powerflow_status['summary_grids'].sum())} grid-stage summaries; "
@@ -732,7 +803,9 @@ def _publication_gate(
     checks.append(
         {
             "check": "Shared temporal horizon",
-            "passed": len(signatures) == 1 and len(powerflow_status) == 6,
+            "passed": (
+                len(signatures) == 1 and len(powerflow_status) == expected_stage_count
+            ),
             "detail": ", ".join(sorted(signatures)) or "No compact summaries",
         }
     )
@@ -769,9 +842,11 @@ def _publication_gate(
     }
     if not rows.empty:
         rows["run_matches"] = rows.apply(
-            lambda row: bool(row["available"])
-            and str(row["run_name"])
-            == expected_runs.get((str(row["data_source"]), str(row["stage_label"]))),
+            lambda row: (
+                bool(row["available"])
+                and str(row["run_name"])
+                == expected_runs.get((str(row["data_source"]), str(row["stage_label"])))
+            ),
             axis=1,
         )
         rows["grid_count_matches"] = rows.apply(
@@ -779,20 +854,27 @@ def _publication_gate(
                 int(row["grids_total"]) > 0
                 if expected_grid_counts is None
                 else int(row["grids_total"])
-                == int(expected_grid_counts.get(str(row["data_source"]), row["grids_total"]))
+                == int(
+                    expected_grid_counts.get(
+                        str(row["data_source"]), row["grids_total"]
+                    )
+                )
             ),
             axis=1,
         )
         expansion_complete = bool(
-            len(rows) == 6 and rows["run_matches"].all() and rows["grid_count_matches"].all()
+            len(rows) == expected_stage_count
+            and rows["run_matches"].all()
+            and rows["grid_count_matches"].all()
         )
     else:
         expansion_complete = False
     checks.append(
         {
-            "check": "Six matching synthetic/real expansion materializations",
+            "check": f"{expected_stage_count} matching synthetic/real expansion materializations",
             "passed": expansion_complete,
-            "detail": f"{int(rows['available'].fillna(False).sum()) if not rows.empty else 0}/6 available",
+            "detail": f"{int(rows['available'].fillna(False).sum()) if not rows.empty else 0}/"
+            f"{expected_stage_count} available",
         }
     )
     incomplete = int(rows["grids_incomplete"].sum()) if not rows.empty else 0
@@ -815,11 +897,15 @@ def prepare_expansion_analysis(
     ags: str | int,
     expected_grid_counts: Mapping[str, int] | None = None,
     stage_labels: Mapping[str, str] | None = None,
+    include_optimized: bool = False,
     default_stage: str = "post_flex",
     real_plz: int | None = None,
 ) -> dict[str, object]:
     """Prepare one coherent synthetic/real scenario for the analysis notebook."""
-    labels = dict(stage_labels or DEFAULT_STAGE_LABELS)
+    labels = dict(
+        stage_labels
+        or (ALL_MODEL_CASE_STAGE_LABELS if include_optimized else DEFAULT_STAGE_LABELS)
+    )
     if real_plz is None and normalize_ags_string(ags) == "09474126":
         real_plz = 91301
     specs_by_source = scenario_powerflow_specs(scenario_prefix, labels)
@@ -837,7 +923,10 @@ def prepare_expansion_analysis(
         for source, keys in analysis_keys_by_source.items()
     }
     expansion_status = pd.concat(
-        [context["analysis_status"] for context in expansion_context_by_source.values()],
+        [
+            context["analysis_status"]
+            for context in expansion_context_by_source.values()
+        ],
         ignore_index=True,
     )
     powerflow_status = _powerflow_run_readiness(
@@ -876,7 +965,11 @@ def prepare_expansion_analysis(
             for source, context in expansion_context_by_source.items()
         },
         "analysis_status": expansion_status,
-        **{key: value for key, value in synthetic_context.items() if key != "analysis_status"},
+        **{
+            key: value
+            for key, value in synthetic_context.items()
+            if key != "analysis_status"
+        },
     }
 
 
@@ -927,7 +1020,10 @@ def load_cable_loading_decomposition(
     with db.engine.connect() as conn:
         for source, specs in (("Synthetic", synthetic_specs), ("Real SWF", real_specs)):
             for stage_label, spec in specs.items():
-                params = {"run_name": str(spec["run_name"]), "stage": str(spec["stage"])}
+                params = {
+                    "run_name": str(spec["run_name"]),
+                    "stage": str(spec["stage"]),
+                }
                 if source == "Synthetic":
                     params["ags"] = int(normalize_ags_string(ags))
                     frame = pd.read_sql_query(synthetic_query, conn, params=params)
@@ -941,7 +1037,8 @@ def load_cable_loading_decomposition(
                 frame["data_source"] = source
                 frame["comparison_stage"] = stage_label
                 frame["installed_capacity_a"] = (
-                    pd.to_numeric(frame["cable_installed_capacity_ka"], errors="coerce") * 1000.0
+                    pd.to_numeric(frame["cable_installed_capacity_ka"], errors="coerce")
+                    * 1000.0
                 )
                 frame["max_loading_percent"] = pd.to_numeric(
                     frame["cable_loading_max_time_percent"], errors="coerce"
@@ -1005,7 +1102,9 @@ def export_scenario_analysis_manifest(
     manifest_path = output_dir / "scenario_analysis_manifest.json"
     status_path = output_dir / "powerflow_readiness.csv"
     gate_path = output_dir / "publication_gate.csv"
-    manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+    )
     powerflow_status.to_csv(status_path, index=False)
     publication_gate.to_csv(gate_path, index=False)
     return {

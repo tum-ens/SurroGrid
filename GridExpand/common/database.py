@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
+import numbers
 import os
 import re
 from pathlib import Path
@@ -51,6 +53,25 @@ def get_pylovo_version_id() -> str | None:
 def normalize_ags(value: str | int) -> int:
     """Store AGS as an integer, without a leading zero."""
     return int(str(value).strip().lstrip("0") or "0")
+
+
+def _json_safe(value: Any) -> Any:
+    """Replace non-finite numeric metadata before PostgreSQL JSONB writes."""
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, numbers.Integral):
+        return int(value)
+    if isinstance(value, numbers.Real):
+        return float(value) if math.isfinite(float(value)) else None
+    return value
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(_json_safe(value), allow_nan=False)
 
 
 class SurroGridDatabase:
@@ -1143,7 +1164,7 @@ class SurroGridDatabase:
                         "scenario_key": scenario_key,
                         "scenario_label": scenario_label,
                         "description": description,
-                        "assumptions": json.dumps(scenario_assumptions),
+                        "assumptions": _json_dumps(scenario_assumptions),
                         "has_assumptions": assumptions is not None,
                     },
                 ).scalar_one()
@@ -1405,7 +1426,7 @@ class SurroGridDatabase:
                         "bridge_filename": bridge_filename,
                         "profiles": profiles,
                         "mobility_source": mobility_source,
-                        "assumptions": json.dumps(assumptions or {}),
+                        "assumptions": _json_dumps(assumptions or {}),
                     },
                 ).scalar_one()
             )
@@ -1423,7 +1444,7 @@ class SurroGridDatabase:
                     WHERE demand_allocation_run_id = :run_id
                     """
                 ),
-                {"run_id": int(run_id), "assumptions": json.dumps(assumptions)},
+                {"run_id": int(run_id), "assumptions": _json_dumps(assumptions)},
             )
 
     def default_demand_allocation_run_name(
@@ -1586,7 +1607,7 @@ class SurroGridDatabase:
             "bus_count": grid_ref.get("bus_count"),
             "line_count": grid_ref.get("line_count"),
             "load_count": grid_ref.get("load_count"),
-            "assumptions": json.dumps(grid_ref.get("assumptions") or {}),
+            "assumptions": _json_dumps(grid_ref.get("assumptions") or {}),
         }
         with self.engine.begin() as conn:
             return int(conn.execute(query, params).scalar_one())
@@ -1630,7 +1651,7 @@ class SurroGridDatabase:
                         "real_grid_case_id": real_grid_case_id,
                         "scenario_id": scenario_id,
                         "run_name": run_name,
-                        "assumptions": json.dumps(assumptions or {}),
+                        "assumptions": _json_dumps(assumptions or {}),
                     },
                 ).scalar_one()
             )
@@ -1779,7 +1800,7 @@ class SurroGridDatabase:
                         "run_name": run_name,
                         "urbs_input_file": urbs_input_file,
                         "pre_only": bool(pre_only),
-                        "assumptions": json.dumps(assumptions or {}),
+                        "assumptions": _json_dumps(assumptions or {}),
                     },
                 ).scalar_one()
             )

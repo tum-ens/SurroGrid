@@ -2,7 +2,9 @@
 # Repository paths are resolved from paired_dataset_id; the external SWF grid
 # root comes from GRID_DATA_PATH in GridExpand/.env.
 run:
-  id: forchheim_2045_paired_mixed_use
+  # Version-qualified identity prevents results from different PyLoVo topologies
+  # from being combined by the post-processing notebook.
+  id: forchheim_2045_paired_v11
   scenario: ../scenarios/forchheim_2045.yaml
   pipeline: paired_validation
 
@@ -11,7 +13,7 @@ resources:
   ags: 9474126
   plz: 91301
   # Exact pylovo topology version; never inferred from the environment.
-  pylovo_version_id: 1
+  pylovo_version_id: 11
   # Small grids are removed symmetrically after physical-building pairing.
   min_buildings: 5
   # Stable shared heat library; paths are derived from repository conventions.
@@ -21,7 +23,7 @@ resources:
   # Known incomplete SWF grid retained in coverage but omitted from expansion cost.
   excluded_real_lv_ids: [113]
   # Prepared allocation/artifact folder name under scenario_calibration outputs.
-  paired_dataset_id: swf_2045_paired_mixed_use_91301_station_clear
+  paired_dataset_id: swf_2045_paired_v11_91301_swf_clear
   # Run both network adapters; use real_swf or synthetic for a smoke run.
   target_network: both
   # Adapter-specific diagnostic filter. Null selects the complete target set.
