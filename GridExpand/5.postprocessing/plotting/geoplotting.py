@@ -135,7 +135,9 @@ def _convex_envelope(points: np.ndarray) -> np.ndarray | None:
     return np.vstack([envelope, envelope[0]])
 
 
-def _make_envelopes(df: pd.DataFrame, source: str, id_column: str) -> list[GridEnvelope]:
+def _make_envelopes(
+    df: pd.DataFrame, source: str, id_column: str
+) -> list[GridEnvelope]:
     envelopes: list[GridEnvelope] = []
     for grid_id, group in df.groupby(id_column, sort=True):
         points = group[["x", "y"]].dropna().to_numpy(dtype=float)
@@ -198,7 +200,7 @@ def load_synthetic_grid_points(
                ST_Y(ST_Transform(gbb.centroid, :target_epsg)) AS y
         FROM surrogrid.grid_building_bus gbb
         {run_join}
-        WHERE {' AND '.join(filters)}
+        WHERE {" AND ".join(filters)}
         """
     )
 
@@ -262,9 +264,7 @@ def load_real_grid_points(
             validate="one_to_one",
         )
         selected["file"] = selected.pop("radialized_file")
-        selected["lv_id"] = (
-            selected["station_id"].astype(str).str.removeprefix("LV_")
-        )
+        selected["lv_id"] = selected["station_id"].astype(str).str.removeprefix("LV_")
     else:
         raise FileNotFoundError(
             "Could not find a supported real-grid manifest in "
@@ -370,11 +370,15 @@ def _add_envelopes(
 
     if lines:
         ax.add_collection(
-            LineCollection(lines, colors=edgecolor, linewidths=linewidth, alpha=0.8, zorder=3)
+            LineCollection(
+                lines, colors=edgecolor, linewidths=linewidth, alpha=0.8, zorder=3
+            )
         )
 
     for points in point_clouds:
-        ax.scatter(points[:, 0], points[:, 1], s=10, color=edgecolor, alpha=0.8, zorder=4)
+        ax.scatter(
+            points[:, 0], points[:, 1], s=10, color=edgecolor, alpha=0.8, zorder=4
+        )
 
 
 def plot_grid_area_envelope_comparison(
@@ -464,7 +468,9 @@ def plot_grid_area_envelope_comparison(
     ax_syn.set_title(
         f"Synthetic envelopes ({len(synthetic_envelopes)} grids, {len(synthetic_points)} points)"
     )
-    ax_real.set_title(f"Real envelopes ({len(real_envelopes)} grids, {len(real_points)} points)")
+    ax_real.set_title(
+        f"Real envelopes ({len(real_envelopes)} grids, {len(real_points)} points)"
+    )
     fig.suptitle(
         f"Transformer-supplied area envelopes in PLZ {plz}\\n"
         "Convex hulls around building/load-bus points",
@@ -476,24 +482,32 @@ def plot_grid_area_envelope_comparison(
         output.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output, dpi=220)
 
-    return fig, (ax_syn, ax_real), {
-        "synthetic_points": synthetic_points,
-        "real_points": real_points,
-        "synthetic_envelopes": pd.DataFrame(
-            {
-                "grid_id": [item.grid_id for item in synthetic_envelopes],
-                "n_points": [item.n_points for item in synthetic_envelopes],
-                "has_polygon": [item.envelope is not None for item in synthetic_envelopes],
-            }
-        ),
-        "real_envelopes": pd.DataFrame(
-            {
-                "grid_id": [item.grid_id for item in real_envelopes],
-                "n_points": [item.n_points for item in real_envelopes],
-                "has_polygon": [item.envelope is not None for item in real_envelopes],
-            }
-        ),
-    }
+    return (
+        fig,
+        (ax_syn, ax_real),
+        {
+            "synthetic_points": synthetic_points,
+            "real_points": real_points,
+            "synthetic_envelopes": pd.DataFrame(
+                {
+                    "grid_id": [item.grid_id for item in synthetic_envelopes],
+                    "n_points": [item.n_points for item in synthetic_envelopes],
+                    "has_polygon": [
+                        item.envelope is not None for item in synthetic_envelopes
+                    ],
+                }
+            ),
+            "real_envelopes": pd.DataFrame(
+                {
+                    "grid_id": [item.grid_id for item in real_envelopes],
+                    "n_points": [item.n_points for item in real_envelopes],
+                    "has_polygon": [
+                        item.envelope is not None for item in real_envelopes
+                    ],
+                }
+            ),
+        },
+    )
 
 
 def _latest_expansion_analysis_key(db: SurroGridDatabase) -> str:
@@ -522,7 +536,10 @@ def load_synthetic_expansion_envelope_points(
 
     db = SurroGridDatabase()
     analysis_key = analysis_key or _latest_expansion_analysis_key(db)
-    params: dict[str, object] = {"analysis_key": analysis_key, "target_epsg": int(target_epsg)}
+    params: dict[str, object] = {
+        "analysis_key": analysis_key,
+        "target_epsg": int(target_epsg),
+    }
     filters = ["gbb.centroid IS NOT NULL"]
     if building_use is not None:
         if isinstance(building_use, str):
@@ -591,7 +608,7 @@ def load_synthetic_expansion_envelope_points(
             gc.total_cost_eur
         FROM grid_cost gc
         JOIN surrogrid.grid_building_bus gbb USING (grid_case_id)
-        WHERE {' AND '.join(filters)}
+        WHERE {" AND ".join(filters)}
         """
     )
     with db.engine.connect() as conn:
@@ -600,7 +617,64 @@ def load_synthetic_expansion_envelope_points(
     return points
 
 
-def _grid_metrics_from_points(points: pd.DataFrame) -> pd.DataFrame:
+def _canonical_real_grid_id(value: object) -> str:
+    """Return the numeric LV id without an ``LV_`` prefix or zero padding."""
+
+    text_value = str(value).strip().removeprefix("LV_")
+    try:
+        return str(int(float(text_value)))
+    except (TypeError, ValueError):
+        return text_value
+
+
+def load_real_expansion_grid_costs(*, analysis_key: str) -> pd.DataFrame:
+    """Load cost-complete real-grid metrics for one expansion analysis key."""
+
+    from expansion.grid_expansion import load_expansion_overview
+
+    overview = load_expansion_overview(analysis_key=analysis_key)
+    metrics = overview["grid_cost_summary"].copy()
+    if metrics.empty:
+        raise ValueError(
+            f"No real expansion grid costs found for analysis_key={analysis_key!r}."
+        )
+    sources = set(metrics["data_source"].dropna().astype(str))
+    if sources != {"Real SWF"}:
+        raise ValueError(
+            f"Expected a Real SWF expansion analysis for {analysis_key!r}; "
+            f"found data_source values {sorted(sources)!r}."
+        )
+
+    metrics["lv_id"] = metrics["grid_label"].map(_canonical_real_grid_id)
+    metrics = metrics[metrics["cost_status"].eq("complete")].copy()
+    metrics.attrs["analysis_key"] = analysis_key
+    return metrics
+
+
+def load_real_expansion_envelope_points(
+    *,
+    analysis_key: str,
+    real_grid_data_path: str | Path,
+    real_load_type: str | Sequence[str] | None = "HH",
+) -> pd.DataFrame:
+    """Load real SWF load-bus points with cost-complete grid metrics."""
+
+    points = load_real_grid_points(
+        real_grid_data_path=real_grid_data_path,
+        real_load_type=real_load_type,
+    ).copy()
+    points["lv_id"] = points["lv_id"].map(_canonical_real_grid_id)
+    metrics = load_real_expansion_grid_costs(analysis_key=analysis_key)
+    merged = points.merge(metrics, on="lv_id", how="inner", validate="many_to_one")
+    merged.attrs["analysis_key"] = analysis_key
+    return merged
+
+
+def _grid_metrics_from_points(
+    points: pd.DataFrame,
+    *,
+    grid_id_column: str = "grid_case_id",
+) -> pd.DataFrame:
     metric_cols = [
         "kcid",
         "bcid",
@@ -613,10 +687,12 @@ def _grid_metrics_from_points(points: pd.DataFrame) -> pd.DataFrame:
         "transformer_loading_percent",
         "additional_transformer_kva",
         "total_cost_eur",
+        "cost_status",
+        "n_failed_timesteps",
+        "status_reason",
     ]
     available_cols = [col for col in metric_cols if col in points.columns]
-    return points.groupby("grid_case_id", as_index=False)[available_cols].first()
-
+    return points.groupby(grid_id_column, as_index=False)[available_cols].first()
 
 
 def _synthetic_expansion_envelope_layers(
@@ -626,8 +702,10 @@ def _synthetic_expansion_envelope_layers(
     value_scale: float,
 ) -> dict[str, object]:
     envelopes = _make_envelopes(points, "Synthetic", "grid_case_id")
-    metrics = _grid_metrics_from_points(points)
-    values_by_grid = metrics.set_index("grid_case_id")[value_column].astype(float).to_dict()
+    metrics = _grid_metrics_from_points(points, grid_id_column="grid_case_id")
+    values_by_grid = (
+        metrics.set_index("grid_case_id")[value_column].astype(float).to_dict()
+    )
 
     polygons = []
     polygon_values = []
@@ -648,10 +726,64 @@ def _synthetic_expansion_envelope_layers(
             point_clouds.append(envelope.points)
             point_values.append(display_value)
 
-    display_values = pd.Series(
-        polygon_values + line_values + point_values,
-        dtype=float,
-    ).replace([np.inf, -np.inf], np.nan).dropna()
+    display_values = (
+        pd.Series(
+            polygon_values + line_values + point_values,
+            dtype=float,
+        )
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+    )
+    return {
+        "points": points,
+        "grid_metrics": metrics,
+        "polygons": polygons,
+        "polygon_values": polygon_values,
+        "line_segments": line_segments,
+        "line_values": line_values,
+        "point_clouds": point_clouds,
+        "point_values": point_values,
+        "display_values": display_values,
+    }
+
+
+def _real_expansion_envelope_layers(
+    points: pd.DataFrame,
+    *,
+    value_column: str,
+    value_scale: float,
+) -> dict[str, object]:
+    envelopes = _make_envelopes(points, "Real SWF", "lv_id")
+    metrics = _grid_metrics_from_points(points, grid_id_column="lv_id")
+    values_by_grid = metrics.set_index("lv_id")[value_column].astype(float).to_dict()
+
+    polygons = []
+    polygon_values = []
+    line_segments = []
+    line_values = []
+    point_clouds = []
+    point_values = []
+    for envelope in envelopes:
+        value = float(values_by_grid.get(envelope.grid_id, np.nan))
+        display_value = value / value_scale
+        if envelope.envelope is not None:
+            polygons.append(envelope.envelope)
+            polygon_values.append(display_value)
+        elif envelope.n_points == 2:
+            line_segments.append(envelope.points)
+            line_values.append(display_value)
+        else:
+            point_clouds.append(envelope.points)
+            point_values.append(display_value)
+
+    display_values = (
+        pd.Series(
+            polygon_values + line_values + point_values,
+            dtype=float,
+        )
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+    )
     return {
         "points": points,
         "grid_metrics": metrics,
@@ -741,7 +873,15 @@ def _draw_synthetic_expansion_envelope_layers(
         )
 
     if show_points:
-        ax.scatter(points["x"], points["y"], s=2, color="#111111", alpha=0.12, linewidths=0, zorder=6)
+        ax.scatter(
+            points["x"],
+            points["y"],
+            s=2,
+            color="#111111",
+            alpha=0.12,
+            linewidths=0,
+            zorder=6,
+        )
 
     ax.set_aspect("equal", adjustable="box")
     if add_osm_layer:
@@ -766,13 +906,16 @@ def _ordered_analysis_items(
     else:
         items = list(analysis_keys)
     if not items:
-        raise ValueError("analysis_keys must contain at least one labeled analysis key.")
+        raise ValueError(
+            "analysis_keys must contain at least one labeled analysis key."
+        )
     return [(str(label), str(analysis_key)) for label, analysis_key in items]
 
 
 def plot_synthetic_expansion_envelope_panels(
     *,
     analysis_keys: Mapping[str, str] | Sequence[tuple[str, str]],
+    real_analysis_keys: Mapping[str, str] | Sequence[tuple[str, str]] | None = None,
     value_column: str = "total_cost_eur",
     building_use: str | Sequence[str] | None = None,
     target_epsg: int = 25832,
@@ -795,7 +938,12 @@ def plot_synthetic_expansion_envelope_panels(
     real_grid_data_path: str | Path | None = None,
     real_load_type: str | Sequence[str] | None = "HH",
 ) -> tuple[plt.Figure, np.ndarray, dict[str, dict[str, pd.DataFrame]]]:
-    """Plot synthetic expansion envelopes, optionally with a real-reference row."""
+    """Plot scenario-colored synthetic and real expansion-cost envelopes.
+
+    When real analysis keys are omitted, a supplied real-grid path retains the
+    legacy geometry-only reference row. Passing real keys colors both rows by
+    their respective materialized expansion costs on one shared scale.
+    """
 
     analysis_items = _ordered_analysis_items(analysis_keys)
     value_scale, value_unit = _display_value_scale(value_column)
@@ -807,14 +955,73 @@ def plot_synthetic_expansion_envelope_panels(
             target_epsg=target_epsg,
         )
         if points.empty:
-            raise ValueError(f"No synthetic expansion envelope points found for analysis_key={analysis_key!r}.")
+            raise ValueError(
+                f"No synthetic expansion envelope points found for analysis_key={analysis_key!r}."
+            )
         if value_column not in points.columns:
             available = ", ".join(sorted(points.columns))
-            raise ValueError(f"Unknown value_column {value_column!r}. Available columns: {available}.")
-        layers = _synthetic_expansion_envelope_layers(points, value_column=value_column, value_scale=value_scale)
-        datasets.append({"analysis_key": analysis_key, "label": label, "layers": layers})
+            raise ValueError(
+                f"Unknown value_column {value_column!r}. Available columns: {available}."
+            )
+        layers = _synthetic_expansion_envelope_layers(
+            points, value_column=value_column, value_scale=value_scale
+        )
+        datasets.append(
+            {"analysis_key": analysis_key, "label": label, "layers": layers}
+        )
 
-    all_values = pd.concat([dataset["layers"]["display_values"] for dataset in datasets], ignore_index=True)
+    real_points = pd.DataFrame()
+    real_envelopes = []
+    real_datasets = []
+    if real_grid_data_path is not None:
+        real_points = load_real_grid_points(
+            real_grid_data_path=real_grid_data_path,
+            real_load_type=real_load_type,
+        ).copy()
+        if not real_points.empty:
+            real_points["lv_id"] = real_points["lv_id"].map(_canonical_real_grid_id)
+        if real_analysis_keys is not None:
+            real_items = dict(_ordered_analysis_items(real_analysis_keys))
+            synthetic_labels = [label for label, _ in analysis_items]
+            if set(real_items) != set(synthetic_labels):
+                raise ValueError(
+                    "real_analysis_keys must use the same scenario labels as analysis_keys."
+                )
+            for label in synthetic_labels:
+                analysis_key = real_items[label]
+                metrics = load_real_expansion_grid_costs(analysis_key=analysis_key)
+                points = real_points.merge(
+                    metrics,
+                    on="lv_id",
+                    how="inner",
+                    validate="many_to_one",
+                )
+                if points.empty:
+                    raise ValueError(
+                        "No real expansion envelope points found for "
+                        f"analysis_key={analysis_key!r}."
+                    )
+                if value_column not in points.columns:
+                    available = ", ".join(sorted(points.columns))
+                    raise ValueError(
+                        f"Unknown value_column {value_column!r}. Available columns: {available}."
+                    )
+                layers = _real_expansion_envelope_layers(
+                    points,
+                    value_column=value_column,
+                    value_scale=value_scale,
+                )
+                real_datasets.append(
+                    {"analysis_key": analysis_key, "label": label, "layers": layers}
+                )
+        elif not real_points.empty:
+            real_envelopes = _make_envelopes(real_points, "Real SWF", "lv_id")
+
+    value_datasets = datasets + real_datasets
+    all_values = pd.concat(
+        [dataset["layers"]["display_values"] for dataset in value_datasets],
+        ignore_index=True,
+    )
     all_values = all_values.replace([np.inf, -np.inf], np.nan).dropna()
     if all_values.empty:
         raise ValueError(f"No finite values available for {value_column!r}.")
@@ -824,7 +1031,9 @@ def plot_synthetic_expansion_envelope_panels(
         if q > 1:
             q = q / 100
         if q <= 0 or q > 1:
-            raise ValueError("clip_quantile must satisfy 0 < value <= 1, or 0 < value <= 100.")
+            raise ValueError(
+                "clip_quantile must satisfy 0 < value <= 1, or 0 < value <= 100."
+            )
         vmax = float(all_values.quantile(q))
     vmax = max(vmax, 1e-9)
     if log_scale:
@@ -832,19 +1041,12 @@ def plot_synthetic_expansion_envelope_panels(
         if positive.empty:
             norm = Normalize(vmin=0.0, vmax=max(float(all_values.max()), 1e-9))
         else:
-            norm = LogNorm(vmin=max(float(positive.min()), 1e-6), vmax=max(vmax, float(positive.min()) * 1.01))
+            norm = LogNorm(
+                vmin=max(float(positive.min()), 1e-6),
+                vmax=max(vmax, float(positive.min()) * 1.01),
+            )
     else:
         norm = Normalize(vmin=0.0, vmax=vmax)
-
-    real_points = pd.DataFrame()
-    real_envelopes = []
-    if real_grid_data_path is not None:
-        real_points = load_real_grid_points(
-            real_grid_data_path=real_grid_data_path,
-            real_load_type=real_load_type,
-        )
-        if not real_points.empty:
-            real_envelopes = _make_envelopes(real_points, "Real SWF", "lv_id")
 
     # Keep both rows on the synthetic model scope. Real-grid coordinate
     # outliers must not change the comparison extent.
@@ -858,7 +1060,7 @@ def plot_synthetic_expansion_envelope_panels(
     ylim = (y_min - pad_y, y_max + pad_y)
 
     n_panels = len(datasets)
-    has_real_row = bool(real_envelopes)
+    has_real_row = bool(real_datasets or real_envelopes)
     if has_real_row:
         ncols = n_panels
         synthetic_rows = 1
@@ -871,7 +1073,9 @@ def plot_synthetic_expansion_envelope_panels(
     if figsize is None:
         figsize = (max(5.2 * ncols, 8.0), max(4.6 * nrows, 7.3))
     cmap_obj = _cost_colormap(cmap)
-    fig, axes_raw = plt.subplots(nrows, ncols, figsize=figsize, constrained_layout=True, sharex=True, sharey=True)
+    fig, axes_raw = plt.subplots(
+        nrows, ncols, figsize=figsize, constrained_layout=True, sharex=True, sharey=True
+    )
     axes_grid = np.atleast_2d(axes_raw)
     axes = axes_grid.ravel()
     color_source = plt.cm.ScalarMappable(norm=norm, cmap=cmap_obj)
@@ -910,25 +1114,53 @@ def plot_synthetic_expansion_envelope_panels(
             ax.set_xlabel("")
             ax.set_ylabel("")
 
-    for ax in axes[len(datasets):synthetic_rows * ncols]:
+    for ax in axes[len(datasets) : synthetic_rows * ncols]:
         ax.set_axis_off()
 
     if has_real_row:
         real_axes = axes_grid[synthetic_rows, :]
-        for col_idx, (ax, dataset) in enumerate(zip(real_axes, datasets)):
-            _add_envelopes(
-                ax,
-                real_envelopes,
-                facecolor="#F58518",
-                edgecolor="#B75D00",
-                point_color="#B75D00",
-                alpha=0.18,
-                linewidth=0.8,
-                show_points=show_points,
-            )
+        row_datasets = real_datasets if real_datasets else datasets
+        for ax, dataset in zip(real_axes, row_datasets):
+            if real_datasets:
+                color_source = _draw_synthetic_expansion_envelope_layers(
+                    ax,
+                    dataset["layers"],
+                    cmap_obj=cmap_obj,
+                    norm=norm,
+                    target_epsg=target_epsg,
+                    show_points=show_points,
+                    show_buildings=show_buildings,
+                    building_point_size=building_point_size,
+                    building_alpha=building_alpha,
+                    envelope_alpha=envelope_alpha,
+                    add_osm_layer=False,
+                    osm_source=osm_source,
+                    osm_zoom=osm_zoom,
+                    osm_alpha=osm_alpha,
+                )
+                metric_count = len(dataset["layers"]["grid_metrics"])
+                title = (
+                    f"Real SWF - {dataset['label']} "
+                    f"({metric_count} cost-complete grids)"
+                )
+            else:
+                _add_envelopes(
+                    ax,
+                    real_envelopes,
+                    facecolor="#F58518",
+                    edgecolor="#B75D00",
+                    point_color="#B75D00",
+                    alpha=0.18,
+                    linewidth=0.8,
+                    show_points=show_points,
+                )
+                title = (
+                    f"Real SWF geometry reference - {dataset['label']} "
+                    f"({len(real_envelopes)} grids)"
+                )
             ax.set_xlim(xlim)
             ax.set_ylim(ylim)
-            ax.set_title(f"Real SWF reference - {dataset['label']} ({len(real_envelopes)} grids)")
+            ax.set_title(title)
             ax.set_aspect("equal", adjustable="box")
             if add_osm_layer:
                 _add_osm_basemap(
@@ -953,25 +1185,47 @@ def plot_synthetic_expansion_envelope_panels(
         output.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output, dpi=240, bbox_inches="tight")
 
-    return fig, axes, {
+    result = {
         **{
             dataset["label"]: {
                 "points": dataset["layers"]["points"],
-                "grid_metrics": dataset["layers"]["grid_metrics"].sort_values(value_column, ascending=False).reset_index(drop=True),
+                "grid_metrics": dataset["layers"]["grid_metrics"]
+                .sort_values(value_column, ascending=False)
+                .reset_index(drop=True),
             }
             for dataset in datasets
         },
-        **({
-            "Real SWF": {
-                "points": real_points,
-                "grid_metrics": pd.DataFrame({
-                    "grid_id": [item.grid_id for item in real_envelopes],
-                    "n_points": [item.n_points for item in real_envelopes],
-                    "has_polygon": [item.envelope is not None for item in real_envelopes],
-                }),
-            }
-        } if has_real_row else {}),
     }
+    if real_datasets:
+        result.update(
+            {
+                f"Real SWF - {dataset['label']}": {
+                    "points": dataset["layers"]["points"],
+                    "grid_metrics": dataset["layers"]["grid_metrics"]
+                    .sort_values(value_column, ascending=False)
+                    .reset_index(drop=True),
+                }
+                for dataset in real_datasets
+            }
+        )
+    elif has_real_row:
+        result.update(
+            {
+                "Real SWF": {
+                    "points": real_points,
+                    "grid_metrics": pd.DataFrame(
+                        {
+                            "grid_id": [item.grid_id for item in real_envelopes],
+                            "n_points": [item.n_points for item in real_envelopes],
+                            "has_polygon": [
+                                item.envelope is not None for item in real_envelopes
+                            ],
+                        }
+                    ),
+                }
+            }
+        )
+    return fig, axes, result
 
 
 def plot_synthetic_expansion_envelope_comparison(
@@ -1022,6 +1276,7 @@ def plot_synthetic_expansion_envelope_comparison(
         figsize=figsize,
     )
 
+
 def plot_synthetic_expansion_envelopes(
     *,
     analysis_key: str | None = None,
@@ -1060,15 +1315,21 @@ def plot_synthetic_expansion_envelopes(
         target_epsg=target_epsg,
     )
     if points.empty:
-        raise ValueError("No synthetic expansion envelope points found for the selected filters.")
+        raise ValueError(
+            "No synthetic expansion envelope points found for the selected filters."
+        )
     if value_column not in points.columns:
         available = ", ".join(sorted(points.columns))
-        raise ValueError(f"Unknown value_column {value_column!r}. Available columns: {available}.")
+        raise ValueError(
+            f"Unknown value_column {value_column!r}. Available columns: {available}."
+        )
 
     analysis_key = str(points.attrs.get("analysis_key", analysis_key or "latest"))
     envelopes = _make_envelopes(points, "Synthetic", "grid_case_id")
     metrics = _grid_metrics_from_points(points)
-    values_by_grid = metrics.set_index("grid_case_id")[value_column].astype(float).to_dict()
+    values_by_grid = (
+        metrics.set_index("grid_case_id")[value_column].astype(float).to_dict()
+    )
 
     polygons = []
     polygon_values = []
@@ -1092,10 +1353,14 @@ def plot_synthetic_expansion_envelopes(
     polygon_display_values = [value / value_scale for value in polygon_values]
     line_display_values = [value / value_scale for value in line_values]
     point_display_values = [value / value_scale for value in point_values]
-    all_values = pd.Series(
-        polygon_display_values + line_display_values + point_display_values,
-        dtype=float,
-    ).replace([np.inf, -np.inf], np.nan).dropna()
+    all_values = (
+        pd.Series(
+            polygon_display_values + line_display_values + point_display_values,
+            dtype=float,
+        )
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+    )
     if all_values.empty:
         raise ValueError(f"No finite values available for {value_column!r}.")
 
@@ -1105,7 +1370,9 @@ def plot_synthetic_expansion_envelopes(
         if q > 1:
             q = q / 100
         if q <= 0 or q > 1:
-            raise ValueError("clip_quantile must satisfy 0 < value <= 1, or 0 < value <= 100.")
+            raise ValueError(
+                "clip_quantile must satisfy 0 < value <= 1, or 0 < value <= 100."
+            )
         vmax = float(all_values.quantile(q))
     vmax = max(vmax, 1e-9)
     if log_scale:
@@ -1113,7 +1380,10 @@ def plot_synthetic_expansion_envelopes(
         if positive.empty:
             norm = Normalize(vmin=0.0, vmax=max(float(all_values.max()), 1e-9))
         else:
-            norm = LogNorm(vmin=max(float(positive.min()), 1e-6), vmax=max(vmax, float(positive.min()) * 1.01))
+            norm = LogNorm(
+                vmin=max(float(positive.min()), 1e-6),
+                vmax=max(vmax, float(positive.min()) * 1.01),
+            )
     else:
         norm = Normalize(vmin=0.0, vmax=vmax)
 
@@ -1138,7 +1408,15 @@ def plot_synthetic_expansion_envelopes(
 
     if line_segments:
         colors = cmap_obj(norm(np.asarray(line_display_values, dtype=float)))
-        ax.add_collection(LineCollection(line_segments, colors=colors, linewidths=1.6, alpha=min(0.9, envelope_alpha + 0.18), zorder=3))
+        ax.add_collection(
+            LineCollection(
+                line_segments,
+                colors=colors,
+                linewidths=1.6,
+                alpha=min(0.9, envelope_alpha + 0.18),
+                zorder=3,
+            )
+        )
     for cloud, value in zip(point_clouds, point_display_values):
         ax.scatter(
             cloud[:, 0],
@@ -1163,7 +1441,15 @@ def plot_synthetic_expansion_envelopes(
         )
 
     if show_points:
-        ax.scatter(points["x"], points["y"], s=2, color="#111111", alpha=0.12, linewidths=0, zorder=6)
+        ax.scatter(
+            points["x"],
+            points["y"],
+            s=2,
+            color="#111111",
+            alpha=0.12,
+            linewidths=0,
+            zorder=6,
+        )
 
     ax.autoscale_view()
     ax.set_aspect("equal", adjustable="box")
@@ -1188,10 +1474,17 @@ def plot_synthetic_expansion_envelopes(
         output.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output, dpi=240)
 
-    return fig, ax, {
-        "points": points,
-        "grid_metrics": metrics.sort_values(value_column, ascending=False).reset_index(drop=True),
-    }
+    return (
+        fig,
+        ax,
+        {
+            "points": points,
+            "grid_metrics": metrics.sort_values(
+                value_column, ascending=False
+            ).reset_index(drop=True),
+        },
+    )
+
 
 def load_paired_synthetic_building_coverage(
     *,
@@ -1214,9 +1507,7 @@ def load_paired_synthetic_building_coverage(
             plan["synthetic_grid_case_id"], errors="raise"
         ).unique()
     )
-    paired_buildings = set(
-        plan["building_objectid"].dropna().astype(str).unique()
-    )
+    paired_buildings = set(plan["building_objectid"].dropna().astype(str).unique())
     if not grid_case_ids or not paired_buildings:
         raise ValueError("Paired allocation plan contains no synthetic buildings.")
 
@@ -1365,4 +1656,3 @@ def plot_paired_synthetic_building_coverage(
         fig.savefig(output, dpi=300, bbox_inches="tight")
 
     return fig, ax, points
-
