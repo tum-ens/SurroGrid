@@ -21,7 +21,9 @@ Outputs:
 Important conventions:
 
 - Reactive power is derived from fixed power factors in `config.py`.
-- Inductive/lagging demand is represented as negative Q.
+- Net consumption uses pandapower's load convention: positive P consumes active
+  power; positive Q absorbs inductive reactive power. PV compensation contributes
+  negative Q to this net-load representation.
 """
 
 from config import config
@@ -118,6 +120,11 @@ def _extract_relevant_demands(df_net_demand):
     return df_net_demand_elec, df_demand_HP_elec, df_prod_PV_elec
 
 def _obtain_post_reactive_power(df_pre_demand_react, df_demand_HP_elec, df_prod_PV_elec):
+    """Return net, PV and HP Q in the consumer convention for both dispatch modes.
+
+    HP electricity and PV production are positive component magnitudes. PV Q is
+    a signed contribution to net load, not a pandapower sgen setpoint.
+    """
     df_pre_demand_react.index.name    = None
     df_demand_HP_elec.index.name      = None
     df_prod_PV_elec.index.name        = None
@@ -126,7 +133,7 @@ def _obtain_post_reactive_power(df_pre_demand_react, df_demand_HP_elec, df_prod_
     df_prod_PV_elec.columns.names     = [None,None]
     
     ### Heat pump
-    df_demand_HP_react = df_demand_HP_elec*np.tan(np.arccos(config.PF_HP))#*(-1) # -1 as inductive/lagging and thus a demand
+    df_demand_HP_react = df_demand_HP_elec * np.tan(np.arccos(config.PF_HP))
     df_demand_HP_react = _set_electricity_component(
         df_demand_HP_react,
         "electricity-reactive",
@@ -140,7 +147,8 @@ def _obtain_post_reactive_power(df_pre_demand_react, df_demand_HP_elec, df_prod_
         df_prod_PV_react = _empty_electricity_frame(df_pre_demand_react.index)
         return react_without_pv, df_prod_PV_react, df_demand_HP_react
 
-    ### Determine PV as optimal operation between -tan(phi) <= Q/P <= tan(phi) to obtain minimal reactive power demand from grid
+    # Local compensation: minimize |Q_load + Q_PV| within the assumed
+    # generation-dependent inverter limit. At zero PV output the limit is zero.
     upper_constraint = df_prod_PV_elec*np.tan(np.arccos(config.PF_PV_MIN))
     upper_constraint = _set_electricity_component(
         upper_constraint,
@@ -702,20 +710,10 @@ def _apply_no_flex_battery_control(
 
 
 def _reactive_from_no_flex_components(df_pre_demand_react, df_heat_elec, df_pv_elec):
-    heat_react = df_heat_elec * np.tan(np.arccos(config.PF_HP)) * (-1)
-    heat_react = _set_electricity_component(heat_react, "electricity-reactive")
-
-    react_without_pv = df_pre_demand_react.add(heat_react, fill_value=0.0)
-    if df_pv_elec.empty:
-        pv_react = _empty_electricity_frame(df_pre_demand_react.index)
-        return react_without_pv, pv_react, heat_react
-
-    pv_limit = df_pv_elec * np.tan(np.arccos(config.PF_PV_MIN))
-    pv_limit = _set_electricity_component(pv_limit, "electricity-reactive")
-    ideal_pv_react = -react_without_pv.reindex(columns=pv_limit.columns, fill_value=0.0)
-    pv_react = ideal_pv_react.clip(lower=-pv_limit, upper=pv_limit)
-    post_react = react_without_pv.add(pv_react, fill_value=0.0)
-    return post_react, pv_react, heat_react
+    """Use the same physical Q assumptions as HEMS; heat input is HP-only."""
+    return _obtain_post_reactive_power(
+        df_pre_demand_react, df_heat_elec, df_pv_elec
+    )
 
 
 def _process_no_flex_demands(no_flex_inputs, df_pre_demand_elec, df_pre_demand_react, ev_charger_kw):

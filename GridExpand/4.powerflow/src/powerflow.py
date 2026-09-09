@@ -177,6 +177,11 @@ def run_single_pf(grid, new_load, algorithm="bfsw"):
 
 
 def _demand_row_to_load(row):
+    """Convert net-consumer kW/kvar to load MW/Mvar without changing signs.
+
+    Negative P represents net export; positive Q still represents absorption.
+    PV generation and compensation are already included in the net demand.
+    """
     reshaped_load = row.unstack(level=1)
     reshaped_load.index.name = 'bus'
     reshaped_load = reshaped_load.reset_index()
