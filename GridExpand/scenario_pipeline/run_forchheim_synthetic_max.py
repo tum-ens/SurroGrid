@@ -75,8 +75,8 @@ CASE_SPECS = (
         "model_case": "post-inflex-heuristic",
         "profiles": "all",
         "description": "Shared heuristic capacities with causal rule-based dispatch.",
-        "extra_args": ("--no-flex-only",),
-        "powerflow_mode": "summary_no_flex",
+        "extra_args": ("--inflex-only",),
+        "powerflow_mode": "summary_inflex",
     },
     {
         "model_case": "post-hems-heuristic",

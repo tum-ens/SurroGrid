@@ -205,11 +205,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--post-demand-mode",
-        choices=["flexible", "no-flex"],
+        choices=["flexible", "inflex"],
         default="flexible",
         help=(
             "Post-electrification demand reconstruction. 'flexible' uses optimized URBS net import; "
-            "'no-flex' derives fixed heat, PV, and capped EV charging while splitting heat via optimized post-flex heatpump_air/heatpump_booster capacities."
+            "'inflex' derives fixed heat, PV, and capped EV charging while splitting heat via optimized post-flex heatpump_air/heatpump_booster capacities."
         ),
     )
     parser.add_argument(
@@ -223,10 +223,10 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "--no-flex-ev-charger-kw",
+        "--inflex-ev-charger-kw",
         type=float,
         default=None,
-        help="Optional cross-check of the per-vehicle EV charger rating for --post-demand-mode no-flex. Ratings come from the EV session table; a value that disagrees with any vehicle is rejected.",
+        help="Optional cross-check of the per-vehicle EV charger rating for --post-demand-mode inflex. Ratings come from the EV session table; a value that disagrees with any vehicle is rejected.",
     )
     parser.add_argument(
         "--summary-nonconvergence",
@@ -257,10 +257,10 @@ if __name__ == "__main__":
         parser.error("--hh-annual-demand-scale requires --hh-only.")
     if args.hh_annual_demand_scale != 1.0 and not args.pre_only:
         parser.error("--hh-annual-demand-scale is only supported for --pre-only HH demand runs.")
-    if args.post_demand_mode == "no-flex" and args.pre_only:
-        parser.error("--post-demand-mode no-flex requires a post-electrification run, not --pre-only.")
-    if args.no_flex_ev_charger_kw is not None and args.post_demand_mode != "no-flex":
-        parser.error("--no-flex-ev-charger-kw requires --post-demand-mode no-flex.")
+    if args.post_demand_mode == "inflex" and args.pre_only:
+        parser.error("--post-demand-mode inflex requires a post-electrification run, not --pre-only.")
+    if args.inflex_ev_charger_kw is not None and args.post_demand_mode != "inflex":
+        parser.error("--inflex-ev-charger-kw requires --post-demand-mode inflex.")
     if args.summary_nonconvergence != "auto" and not args.summary_only:
         parser.error("--summary-nonconvergence only applies with --summary-only.")
 
@@ -296,20 +296,20 @@ if __name__ == "__main__":
     # Per-vehicle charger ratings come from the EV session table, which is
     # validated against the scenario process rows. An explicit CLI value is only
     # accepted as a cross-check and must agree with every vehicle's own rating.
-    no_flex_ev_charger_kw = args.no_flex_ev_charger_kw
+    inflex_ev_charger_kw = args.inflex_ev_charger_kw
     assumptions_extra = {
         "post_demand_mode": args.post_demand_mode,
         "summary_grid_scope": args.summary_grid_scope,
         "summary_nonconvergence": summary_nonconvergence,
     }
-    if args.post_demand_mode == "no-flex":
+    if args.post_demand_mode == "inflex":
         assumptions_extra.update({
-            "no_flex_assumption": "fixed heat and EV profiles; optimized post-flex PV capacity; fixed SWF battery inventory with causal local PV self-consumption control, no grid charging, and no battery export; heat split uses optimized post-flex heatpump_air and heatpump_booster capacities",
-            "no_flex_ev_charger_kw": (
-                None if no_flex_ev_charger_kw is None else float(no_flex_ev_charger_kw)
+            "inflex_assumption": "fixed heat and EV profiles; optimized post-flex PV capacity; fixed SWF battery inventory with causal local PV self-consumption control, no grid charging, and no battery export; heat split uses optimized post-flex heatpump_air and heatpump_booster capacities",
+            "inflex_ev_charger_kw": (
+                None if inflex_ev_charger_kw is None else float(inflex_ev_charger_kw)
             ),
             "ev_service_model": "dedicated_sessions",
-            "no_flex_capacity_source": "post-flex cap_pro",
+            "inflex_capacity_source": "post-flex cap_pro",
         })
     if args.hh_only:
         assumptions_extra.update({
@@ -363,7 +363,7 @@ if __name__ == "__main__":
             SF,
             save_reactive=not args.summary_only,
             post_demand_mode=args.post_demand_mode,
-            ev_charger_kw=no_flex_ev_charger_kw,
+            ev_charger_kw=inflex_ev_charger_kw,
         )
 
     scenario_unit_optimization = (

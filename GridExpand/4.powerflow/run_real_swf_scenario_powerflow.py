@@ -13,7 +13,7 @@ Implemented scope in this first runner:
 Sector-coupling assets are kept in the allocation plan and stored in the run
 assumptions, but heat, EV, PV and battery time-series are intentionally not yet
 translated here. That keeps this first executable step auditable before the post
-flex/no-flex sector-coupling layer is added.
+flex/inflex sector-coupling layer is added.
 """
 
 from __future__ import annotations
@@ -159,13 +159,13 @@ class RealUrbsResultAdapter:
     def has_urbs_results(self) -> bool:
         return self._hdf_key_exists(self.net_demand_dir)
 
-    def get_no_flex_inputs(self) -> dict[str, Any]:
-        """Delegate to the single shared no-flex input contract.
+    def get_inflex_inputs(self) -> dict[str, Any]:
+        """Delegate to the single shared inflex input contract.
 
         The real adapter previously maintained its own copy of this dictionary
         and silently lost the EV session tables when they were introduced.
         """
-        return svgrd.read_no_flex_inputs(self.input_path)
+        return svgrd.read_inflex_inputs(self.input_path)
 
     def get_ev_sessions(self):
         return svgrd.read_ev_sessions(self.input_path)
@@ -465,7 +465,7 @@ def run_one_urbs_result(
     scenario_label: str,
     post_demand_mode: str,
     max_timesteps: int | None = None,
-    no_flex_ev_charger_kw: float | None = None,
+    inflex_ev_charger_kw: float | None = None,
     summary_grid_scope: str = "full",
     expect_temporal_method: str | None = None,
 ) -> dict[str, Any]:
@@ -527,7 +527,7 @@ def run_one_urbs_result(
             save_reactive=False,
             post_demand_mode=post_demand_mode,
             ev_charger_kw=(
-                None if no_flex_ev_charger_kw is None else float(no_flex_ev_charger_kw)
+                None if inflex_ev_charger_kw is None else float(inflex_ev_charger_kw)
             ),
         )
 
@@ -577,13 +577,13 @@ def run_one_urbs_result(
         "max_timesteps": None if max_timesteps is None else int(max_timesteps),
         "allocation_plan_rows": int(len(allocation)),
         "allocation_plan_buses": int(allocation["allocation_bus"].nunique()),
-        "no_flex_ev_charger_kw": None
-        if no_flex_ev_charger_kw is None
-        else float(no_flex_ev_charger_kw),
+        "inflex_ev_charger_kw": None
+        if inflex_ev_charger_kw is None
+        else float(inflex_ev_charger_kw),
         **load_scope,
     }
-    if post_demand_mode == "no-flex":
-        assumptions["no_flex_battery_control"] = (
+    if post_demand_mode == "inflex":
+        assumptions["inflex_battery_control"] = (
             "fixed SWF battery inventory; causal local PV self-consumption; "
             "no grid charging or battery export; cyclic state per TSAM period"
         )
@@ -688,15 +688,15 @@ def main() -> None:
     )
     parser.add_argument(
         "--post-demand-mode",
-        choices=["flexible", "no-flex", "pre-only"],
+        choices=["flexible", "inflex", "pre-only"],
         default="flexible",
         help="Demand reconstruction for --urbs-result-hdf. 'pre-only' runs only urbs_in/reduced pre demand.",
     )
     parser.add_argument(
-        "--no-flex-ev-charger-kw",
+        "--inflex-ev-charger-kw",
         type=float,
         default=None,
-        help="Optional EV charger cap for --post-demand-mode no-flex; defaults to Step-4 config.",
+        help="Optional EV charger cap for --post-demand-mode inflex; defaults to Step-4 config.",
     )
     parser.add_argument(
         "--scenario-label",
@@ -740,7 +740,7 @@ def main() -> None:
             scenario_label,
             args.post_demand_mode,
             args.max_timesteps,
-            args.no_flex_ev_charger_kw,
+            args.inflex_ev_charger_kw,
             args.summary_grid_scope,
             args.expect_temporal_method,
         )

@@ -338,7 +338,7 @@ def _heat_and_cop_by_bus(df_raw_demand, df_eff_factor):
 
     cop_columns = _columns_with_component(df_eff_factor, "heatpump_air")
     if not cop_columns:
-        raise ValueError("No-flex post demand requires heatpump_air COP columns in eff_factor when heat demand is present.")
+        raise ValueError("INFLEX post demand requires heatpump_air COP columns in eff_factor when heat demand is present.")
 
     heat_by_bus = df_raw_demand.loc[:, heat_columns].T.groupby(level=0).sum().T
     cop_by_bus = df_eff_factor.loc[:, cop_columns].copy()
@@ -350,11 +350,11 @@ def _heat_and_cop_by_bus(df_raw_demand, df_eff_factor):
 
 def _capacity_by_bus(cap_pro, process, buses):
     if cap_pro is None:
-        raise ValueError("No-flex heat split requires optimized post-flex cap_pro results.")
+        raise ValueError("INFLEX heat split requires optimized post-flex cap_pro results.")
     if not isinstance(cap_pro.index, pd.MultiIndex):
-        raise ValueError("No-flex heat split expects cap_pro with MultiIndex levels stf, sit, pro.")
+        raise ValueError("INFLEX heat split expects cap_pro with MultiIndex levels stf, sit, pro.")
     if "sit" not in cap_pro.index.names or "pro" not in cap_pro.index.names:
-        raise ValueError("No-flex heat split expects cap_pro index levels named 'sit' and 'pro'.")
+        raise ValueError("INFLEX heat split expects cap_pro index levels named 'sit' and 'pro'.")
 
     process_mask = cap_pro.index.get_level_values("pro") == process
     process_caps = pd.to_numeric(cap_pro.loc[process_mask], errors="coerce").fillna(0.0)
@@ -369,14 +369,14 @@ def _capacity_by_bus(cap_pro, process, buses):
 def _input_capacity_by_bus(process, process_name, buses):
     """Read fixed installed process capacities from an urbs input table."""
     if process is None or process.empty:
-        raise ValueError("No-flex heat dispatch requires urbs process inputs.")
+        raise ValueError("INFLEX heat dispatch requires urbs process inputs.")
     frame = process.reset_index() if isinstance(process.index, pd.MultiIndex) else process.copy()
     site_column = "Site" if "Site" in frame else "sit"
     process_column = "Process" if "Process" in frame else "pro"
     capacity_column = "inst-cap" if "inst-cap" in frame else "inst_cap"
     required = {site_column, process_column, capacity_column}
     if not required.issubset(frame.columns):
-        raise ValueError("No-flex heat dispatch cannot identify Site, Process, and inst-cap columns.")
+        raise ValueError("INFLEX heat dispatch cannot identify Site, Process, and inst-cap columns.")
     selected = frame[frame[process_column].astype(str).eq(process_name)].copy()
     selected[capacity_column] = pd.to_numeric(selected[capacity_column], errors="coerce").fillna(0.0)
     by_site = selected.groupby(site_column)[capacity_column].sum()
@@ -384,7 +384,7 @@ def _input_capacity_by_bus(process, process_name, buses):
     return pd.Series([lookup.get(str(bus), 0.0) for bus in buses], index=buses, dtype=float)
 
 
-def _no_flex_heat_electricity(df_raw_demand, df_eff_factor, process):
+def _inflex_heat_electricity(df_raw_demand, df_eff_factor, process):
     heat_by_bus, cop_by_bus = _heat_and_cop_by_bus(df_raw_demand, df_eff_factor)
     if heat_by_bus.empty:
         empty = _empty_electricity_frame(df_raw_demand.index)
@@ -401,7 +401,7 @@ def _no_flex_heat_electricity(df_raw_demand, df_eff_factor, process):
     maximum_excess = float(excess.max().max()) if not excess.empty else 0.0
     if maximum_excess > 1e-6:
         raise ValueError(
-            "Fixed no-flex HP and auxiliary capacities cannot cover heat demand; "
+            "Fixed inflex HP and auxiliary capacities cannot cover heat demand; "
             f"maximum residual is {maximum_excess:.6f} kW."
         )
     hp_electricity = hp_heat.divide(cop_safe).fillna(0.0)
@@ -410,7 +410,7 @@ def _no_flex_heat_electricity(df_raw_demand, df_eff_factor, process):
     for frame in (total_electricity, hp_electricity, auxiliary_electricity):
         frame.columns = pd.MultiIndex.from_tuples([(bus, "electricity") for bus in frame.columns])
     print(
-        "No-flex heat split from fixed scenario inputs: "
+        "INFLEX heat split from fixed scenario inputs: "
         f"heat-pump electricity={float(hp_electricity.sum().sum()):.1f} kWh, "
         f"auxiliary electricity={float(auxiliary_electricity.sum().sum()):.1f} kWh, "
         f"auxiliary peak={float(auxiliary_electricity.sum(axis=1).max()):.3f} kW.",
@@ -440,7 +440,7 @@ def _mobility_electricity(sessions, session_hours, horizon_hours, index):
     required = float(sessions["energy_kwh"].sum())
     if abs(delivered - required) > max(SESSION_ENERGY_TOL_KWH, 1e-9 * required):
         raise ValueError(
-            "No-flex EV schedule does not deliver the required session energy: "
+            "INFLEX EV schedule does not deliver the required session energy: "
             f"required={required:.9f} kWh, delivered={delivered:.9f} kWh."
         )
 
@@ -453,13 +453,13 @@ def _mobility_electricity(sessions, session_hours, horizon_hours, index):
         residual = max(residual, peak - limit)
     if residual > SESSION_POWER_TOL_KW:
         raise ValueError(
-            f"No-flex EV schedule exceeds a charger rating by {residual:.9f} kW."
+            f"INFLEX EV schedule exceeds a charger rating by {residual:.9f} kW."
         )
 
     schedule = schedule.copy()
     schedule.index = index
     print(
-        f"No-flex EV sessions: vehicles={schedule.shape[1]}, "
+        f"INFLEX EV sessions: vehicles={schedule.shape[1]}, "
         f"sessions={len(sessions)}, delivered={delivered:.1f} kWh, "
         f"max_power_residual={residual:.3e} kW.",
         flush=True,
@@ -526,7 +526,7 @@ def _fixed_stationary_batteries(df_storage):
     }
     if not required.issubset(storage.columns):
         raise ValueError(
-            "No-flex battery control requires storage columns "
+            "INFLEX battery control requires storage columns "
             f"{sorted(required)}."
         )
     storage = storage[storage["Storage"].astype(str).eq("battery_private")].copy()
@@ -541,7 +541,7 @@ def _fixed_stationary_batteries(df_storage):
     fixed_power = np.isclose(storage["inst-cap-p"], storage["cap-up-p"])
     if not bool((fixed_energy & fixed_power).all()):
         raise ValueError(
-            "No-flex battery control only accepts fixed installed capacities; "
+            "INFLEX battery control only accepts fixed installed capacities; "
             "found an endogenous battery investment row."
         )
     if storage["Site"].duplicated().any():
@@ -700,7 +700,7 @@ def _empty_battery_diagnostics():
     }
 
 
-def _apply_no_flex_battery_control(
+def _apply_inflex_battery_control(
     net_demand,
     df_storage,
     *,
@@ -753,7 +753,7 @@ def _apply_no_flex_battery_control(
         [(site, "electricity") for site in adjusted.columns]
     )
     print(
-        "No-flex stationary batteries: "
+        "INFLEX stationary batteries: "
         f"sites={len(batteries)}, charged={total_charged:.1f} kWh, "
         f"discharged={total_discharged:.1f} kWh, "
         f"self_loss={total_self_loss:.3f} kWh, "
@@ -765,46 +765,46 @@ def _apply_no_flex_battery_control(
     return adjusted, pd.DataFrame(diagnostics_rows)
 
 
-def _reactive_from_no_flex_components(df_pre_demand_react, df_heat_elec, df_pv_elec):
+def _reactive_from_inflex_components(df_pre_demand_react, df_heat_elec, df_pv_elec):
     """Use the same physical Q assumptions as HEMS; heat input is HP-only."""
     return _obtain_post_reactive_power(
         df_pre_demand_react, df_heat_elec, df_pv_elec
     )
 
 
-def _process_no_flex_demands(no_flex_inputs, df_pre_demand_elec, df_pre_demand_react):
-    reference = no_flex_inputs.get("reference")
-    timesteps = _reference_timestep_count(reference, no_flex_inputs.get("drop_initial_timestep", False))
-    reference_label = "urbs output" if reference is not None else "raw no-flex demand"
+def _process_inflex_demands(inflex_inputs, df_pre_demand_elec, df_pre_demand_react):
+    reference = inflex_inputs.get("reference")
+    timesteps = _reference_timestep_count(reference, inflex_inputs.get("drop_initial_timestep", False))
+    reference_label = "urbs output" if reference is not None else "raw inflex demand"
     if timesteps is None:
-        timesteps = len(_use_t_as_index(no_flex_inputs["demand"]))
+        timesteps = len(_use_t_as_index(inflex_inputs["demand"]))
 
-    delta_t = no_flex_inputs.get("delta_t_hours")
+    delta_t = inflex_inputs.get("delta_t_hours")
     if delta_t is not None and abs(float(delta_t) - 1.0) > 1e-9:
         raise ValueError(
-            f"No-flex reconstruction supports hourly timesteps only, but this "
+            f"INFLEX reconstruction supports hourly timesteps only, but this "
             f"result records delta_t_hours={delta_t}. Pass the duration through "
             "EV scheduling and battery control before advertising other "
             "resolutions."
         )
-    df_raw_demand = _align_table_to_timesteps(no_flex_inputs["demand"], timesteps, "No-flex demand", reference_label)
-    df_eff_factor = _align_table_to_timesteps(no_flex_inputs["eff_factor"], timesteps, "No-flex eff_factor", reference_label)
-    df_supim = _align_table_to_timesteps(no_flex_inputs["supim"], timesteps, "No-flex supim", reference_label)
-    df_process = no_flex_inputs["process"]
+    df_raw_demand = _align_table_to_timesteps(inflex_inputs["demand"], timesteps, "INFLEX demand", reference_label)
+    df_eff_factor = _align_table_to_timesteps(inflex_inputs["eff_factor"], timesteps, "INFLEX eff_factor", reference_label)
+    df_supim = _align_table_to_timesteps(inflex_inputs["supim"], timesteps, "INFLEX supim", reference_label)
+    df_process = inflex_inputs["process"]
 
-    df_heat_elec, df_heat_hp_elec, _df_heat_auxiliary_elec = _no_flex_heat_electricity(
+    df_heat_elec, df_heat_hp_elec, _df_heat_auxiliary_elec = _inflex_heat_electricity(
         df_raw_demand,
         df_eff_factor,
-        no_flex_inputs["process"],
+        inflex_inputs["process"],
     )
     df_ev_elec = _mobility_electricity(
-        no_flex_inputs["ev_sessions"],
-        no_flex_inputs["ev_session_hours"],
+        inflex_inputs["ev_sessions"],
+        inflex_inputs["ev_session_hours"],
         timesteps,
         df_raw_demand.index,
     )
     df_pv_elec = _pv_generation(
-        df_supim, df_process, no_flex_inputs["cap_pro"]
+        df_supim, df_process, inflex_inputs["cap_pro"]
     )
 
     active_parts = [df_pre_demand_elec, df_heat_elec, df_ev_elec, -df_pv_elec]
@@ -814,13 +814,13 @@ def _process_no_flex_demands(no_flex_inputs, df_pre_demand_elec, df_pre_demand_r
     net_before_battery.columns = pd.MultiIndex.from_tuples(
         [(site, "electricity") for site in net_before_battery.columns]
     )
-    df_post_demand_elec, battery_diagnostics = _apply_no_flex_battery_control(
+    df_post_demand_elec, battery_diagnostics = _apply_inflex_battery_control(
         net_before_battery,
-        no_flex_inputs["storage"],
-        hours_per_period=no_flex_inputs.get("tsam_hours_per_period"),
+        inflex_inputs["storage"],
+        hours_per_period=inflex_inputs.get("tsam_hours_per_period"),
     )
 
-    df_post_demand_react, df_prod_PV_react, df_demand_HP_react = _reactive_from_no_flex_components(
+    df_post_demand_react, df_prod_PV_react, df_demand_HP_react = _reactive_from_inflex_components(
         df_pre_demand_react,
         df_heat_hp_elec,
         df_pv_elec,
@@ -838,8 +838,8 @@ def obtain_pre_demand(SF):
     return pd.concat([df_pre_demand_elec, df_pre_demand_react], axis=1)
 
 def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charger_kw=None):
-    if post_demand_mode not in {"flexible", "no-flex"}:
-        raise ValueError("post_demand_mode must be 'flexible' or 'no-flex'.")
+    if post_demand_mode not in {"flexible", "inflex"}:
+        raise ValueError("post_demand_mode must be 'flexible' or 'inflex'.")
 
     if post_demand_mode == "flexible":
         df_raw_demand, df_urbs_demand = SF.get_input_demands()
@@ -847,22 +847,22 @@ def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charge
         df_pre_demand_elec, df_pre_demand_react = _process_pre_demands(df_raw_demand)
         df_post_demand_elec, df_post_demand_react, df_react_save = _process_post_demands(df_urbs_demand, df_pre_demand_react)
     else:
-        no_flex_inputs = SF.get_no_flex_inputs()
-        reference = no_flex_inputs.get("reference")
-        timesteps = _reference_timestep_count(reference, no_flex_inputs.get("drop_initial_timestep", False))
+        inflex_inputs = SF.get_inflex_inputs()
+        reference = inflex_inputs.get("reference")
+        timesteps = _reference_timestep_count(reference, inflex_inputs.get("drop_initial_timestep", False))
         if timesteps is None:
-            timesteps = len(_use_t_as_index(no_flex_inputs["demand"]))
-        reference_label = "urbs output" if reference is not None else "raw no-flex demand"
-        df_raw_demand = _align_table_to_timesteps(no_flex_inputs["demand"], timesteps, "No-flex demand", reference_label)
+            timesteps = len(_use_t_as_index(inflex_inputs["demand"]))
+        reference_label = "urbs output" if reference is not None else "raw inflex demand"
+        df_raw_demand = _align_table_to_timesteps(inflex_inputs["demand"], timesteps, "INFLEX demand", reference_label)
         # Charger power is per vehicle and comes from the session table, which is
         # validated against the scenario process rows. A run-level override is
         # accepted only if it agrees with every vehicle's actual rating.
-        sessions = no_flex_inputs["ev_sessions"]
+        sessions = inflex_inputs["ev_sessions"]
         validate_sessions(
             sessions,
-            no_flex_inputs["ev_session_hours"],
+            inflex_inputs["ev_session_hours"],
             horizon_hours=timesteps,
-            process_table=no_flex_inputs["process"],
+            process_table=inflex_inputs["process"],
         )
         if ev_charger_kw is not None and not sessions.empty:
             mismatched = sessions.loc[
@@ -875,15 +875,15 @@ def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charge
             ]
             if not mismatched.empty:
                 raise ValueError(
-                    f"--no-flex-ev-charger-kw={ev_charger_kw} disagrees with "
+                    f"--inflex-ev-charger-kw={ev_charger_kw} disagrees with "
                     f"{len(mismatched)} session charger rating(s), for example "
                     f"{mismatched['charger_kw'].iloc[0]} kW at site "
                     f"{mismatched['site'].iloc[0]}."
                 )
         df_pre_demand_elec, df_pre_demand_react = _process_pre_demands(df_raw_demand)
         df_post_demand_elec, df_post_demand_react, df_react_save, battery_diagnostics = (
-            _process_no_flex_demands(
-                no_flex_inputs,
+            _process_inflex_demands(
+                inflex_inputs,
                 df_pre_demand_elec,
                 df_pre_demand_react,
             )
@@ -900,9 +900,9 @@ def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charge
                     flush=True,
                 )
             else:
-                location = saver(battery_diagnostics, "no_flex_battery_state")
+                location = saver(battery_diagnostics, "inflex_battery_state")
                 print(
-                    f"No-flex stationary-battery audit retained at {location}.",
+                    f"INFLEX stationary-battery audit retained at {location}.",
                     flush=True,
                 )
     if save_reactive:

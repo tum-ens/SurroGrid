@@ -49,7 +49,7 @@ The entire `output/` tree is generated and ignored by Git. Durable conclusions a
     comparison_data.py                    # DB loaders, comparison datasets, and component exposure summaries
   notebooks/
     analysis_powerflow.ipynb           # paired real/synthetic status-quo power-flow analysis
-    analysis_expansion.ipynb           # paired pre/post-flex/post-no-flex expansion analysis
+    analysis_expansion.ipynb           # paired pre/post-flex/post-inflex expansion analysis
     grid_area_envelope_comparison.ipynb # spatial supplied-area diagnostic
   plotting/
     powerflow_heatmaps.py                 # HDF/DB timestep heatmaps and single-grid loading CLI

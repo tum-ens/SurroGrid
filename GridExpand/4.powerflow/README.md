@@ -49,9 +49,9 @@ The code expects each input file to contain (HDF5 keys / datasets):
 
 - `raw_data/net`: a pandapower network serialized as a JSON string (loaded via `pandapower.from_json_string`).
 - `urbs_in/demand`: raw household electricity demand time series (active power), used for the **pre-expansion** case.
-- `urbs_in/eff_factor`, `urbs_in/supim`, and `urbs_in/process`: required inputs for no-flex reconstruction after Step 3 has produced a post-flex result file.
-- `urbs_out/MILP/tau_pro`: required for the default flexible post-expansion case and for no-flex timestep alignment.
-- `urbs_out/MILP/cap_pro`: required for no-flex heat reconstruction, because fixed heat demand is split with optimized post-flex `heatpump_air` and `heatpump_booster` capacities.
+- `urbs_in/eff_factor`, `urbs_in/supim`, and `urbs_in/process`: required inputs for inflex reconstruction after Step 3 has produced a post-flex result file.
+- `urbs_out/MILP/tau_pro`: required for the default flexible post-expansion case and for inflex timestep alignment.
+- `urbs_out/MILP/cap_pro`: required for inflex heat reconstruction, because fixed heat demand is split with optimized post-flex `heatpump_air` and `heatpump_booster` capacities.
 
 The exact schema of these tables is defined by upstream steps; this step assumes they match what `src/save_grid.py` and `src/demands.py` read.
 
@@ -99,14 +99,14 @@ With the current TSAM setup, the reduced result contains six 168-hour representa
 Post-electrification runs support two demand modes:
 
 - `--post-demand-mode flexible` (default): use optimized URBS net-import time series from `urbs_out/MILP/tau_pro`. This is the existing HEMS/flexibility case.
-- `--post-demand-mode no-flex`: reconstruct post demand without optimized URBS dispatch, but require a post-flex Step 3 result file. Heat demand is split with the optimized `urbs_out/MILP/cap_pro` capacities: `heatpump_air` covers demand up to its optimized electric capacity times COP, and high-demand residual heat at buses with optimized `heatpump_booster` capacity is assigned to auxiliary electric heating. Rooftop PV uses the exogenous `supim` profile and installed `process` capacity, and EV demand reuses the allocated mobility profiles plus charging-station availability. EV energy is redistributed inside home-availability stretches and capped by `Config.EV_HOME_CHARGER_KW` (default 11 kW) unless `--no-flex-ev-charger-kw` is passed.
+- `--post-demand-mode inflex`: reconstruct post demand without optimized URBS dispatch, but require a post-flex Step 3 result file. Heat demand is split with the optimized `urbs_out/MILP/cap_pro` capacities: `heatpump_air` covers demand up to its optimized electric capacity times COP, and high-demand residual heat at buses with optimized `heatpump_booster` capacity is assigned to auxiliary electric heating. Rooftop PV uses the exogenous `supim` profile and installed `process` capacity, and EV demand reuses the allocated mobility profiles plus charging-station availability. EV energy is redistributed inside home-availability stretches and capped by `Config.EV_HOME_CHARGER_KW` (default 11 kW) unless `--inflex-ev-charger-kw` is passed.
 
-The no-flex mode intentionally reuses the existing Step 2 mobility pool and does not rerun emobpy. It is meant as a stress reference between pre-electrification and optimized post-electrification power-flow results, while keeping the same post-flex technology sizing context.
+The inflex mode intentionally reuses the existing Step 2 mobility pool and does not rerun emobpy. It is meant as a stress reference between pre-electrification and optimized post-electrification power-flow results, while keeping the same post-flex technology sizing context.
 
 Example after Step 3 has produced a post-flex result file:
 
 ```bash
-uv run python run_pwrflw.py <inputfile_id> --storage db --summary-only --post-demand-mode no-flex
+uv run python run_pwrflw.py <inputfile_id> --storage db --summary-only --post-demand-mode inflex
 ```
 
 In DB mode Step 4 still reads `urbs_in/*` and `urbs_out/*` from the input HDF5 file, but reads the pandapower grid from PostgreSQL and writes `pwrflw/*` results to the `surrogrid` schema instead of `Output/*.h5`. Results are grouped under the static `baseline_static` scenario key, integer `scenario_id`, and an interpretable `run_name`; rerunning the same grid/scenario/run overwrites the previous time-series rows. Building-level joins are available through the `surrogrid.grid_building_bus` view.
@@ -132,7 +132,7 @@ For each processed input file, an output file is created in `Output/` with the *
 `run_pwrflw.py` writes:
 
 - `/pwrflw/input/demand_pre`: per-bus pre-expansion demand time series (active + reactive).
-- `/pwrflw/input/demand_post`: per-bus post-expansion demand time series (active + reactive; either optimized-flexible or reconstructed no-flex depending on `--post-demand-mode`).
+- `/pwrflw/input/demand_post`: per-bus post-expansion demand time series (active + reactive; either optimized-flexible or reconstructed inflex depending on `--post-demand-mode`).
 
 - `/pwrflw/output/pre/demand_import`: external grid import (p/q) per timestep.
 - `/pwrflw/output/pre/vm`: bus voltage magnitudes `vm_pu` per timestep.
@@ -162,7 +162,7 @@ On the HPC submission scripts, stdout/stderr are written to:
 	- `import` and `feed_in` (to compute net imports),
 	- `heatpump_air` (heat pump load),
 	- all rooftop PV technologies (`pro` starting with `Rooftop...`).
-- **No-flex post-expansion**: fixed post demand is reconstructed from `urbs_in` / `urbs_out/reduced_data` inputs instead of optimized URBS imports. Heat, EV, and PV are added to the pre-expansion electricity demand at bus level.
+- **INFLEX post-expansion**: fixed post demand is reconstructed from `urbs_in` / `urbs_out/reduced_data` inputs instead of optimized URBS imports. Heat, EV, and PV are added to the pre-expansion electricity demand at bus level.
 
 Reactive power post-expansion is computed using:
 

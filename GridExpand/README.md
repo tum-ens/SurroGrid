@@ -288,9 +288,9 @@ uv run python run_pwrflw.py <inputfile_id> --n_cpu <N>
 
 - A copied/augmented output file in `4.powerflow/Output/` containing `pwrflw/` inputs + results.
 
-#### Optional no-flex post-electrification power flow
+#### Optional inflex post-electrification power flow
 
-The AGS runner can add a post-no-flex power-flow result after the normal post-flex Step 3 optimization. Use `--include-no-flex-powerflow` to run both post-flex and post-no-flex for each candidate in one pass. No-flex is intentionally dependent on the post-flex result: Step 4 reads `urbs_out/MILP/cap_pro` and uses the optimized `heatpump_air` and `heatpump_booster` capacities to translate fixed heat demand into heat-pump and auxiliary electric demand. Mobility profiles are reused from Step 2 and emobpy is not rerun.
+The AGS runner can add a post-inflex power-flow result after the normal post-flex Step 3 optimization. Use `--include-inflex-powerflow` to run both post-flex and post-inflex for each candidate in one pass. INFLEX is intentionally dependent on the post-flex result: Step 4 reads `urbs_out/MILP/cap_pro` and uses the optimized `heatpump_air` and `heatpump_booster` capacities to translate fixed heat demand into heat-pump and auxiliary electric demand. Mobility profiles are reused from Step 2 and emobpy is not rerun.
 
 ```bash
 uv run python GridExpand/scenario_pipeline/synthetic_ags_runner.py \
@@ -299,11 +299,11 @@ uv run python GridExpand/scenario_pipeline/synthetic_ags_runner.py \
   --profiles all \
   --powerflow-output summary \
   --scenario-config GridExpand/scenario_pipeline/config/scenarios/forchheim_2045_synthetic.yaml \
-  --include-no-flex-powerflow \
+  --include-inflex-powerflow \
   --run-dir GridExpand/run_logs/<RUN_NAME>
 ```
 
-Use `--no-flex-only` only when you want to skip the flexible Step 4 power-flow output. It still runs Step 3 optimization first, because the no-flex heat reconstruction needs the optimized post-flex capacities. Use `--no-flex-ev-charger-kw <kW>` to override the default 11 kW home charger cap.
+Use `--inflex-only` only when you want to skip the flexible Step 4 power-flow output. It still runs Step 3 optimization first, because the inflex heat reconstruction needs the optimized post-flex capacities. Use `--inflex-ev-charger-kw <kW>` to override the default 11 kW home charger cap.
 
 #### Intermediate-file cleanup for large AGS runs
 
@@ -323,7 +323,7 @@ uv run --project GridExpand/2.demand_allocation python GridExpand/scenario_pipel
   --demand-scope residential \
   --powerflow-output summary \
   --scenario-config GridExpand/scenario_pipeline/config/scenarios/forchheim_2045_synthetic.yaml \
-  --include-no-flex-powerflow \
+  --include-inflex-powerflow \
   --cleanup-completed-only \
   --run-dir GridExpand/run_logs/<EXISTING_RUN_DIR>
 ```

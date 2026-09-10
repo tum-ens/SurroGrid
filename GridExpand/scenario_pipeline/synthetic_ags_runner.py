@@ -194,26 +194,26 @@ def parse_args() -> argparse.Namespace:
         help="Do not materialize expansion_analysis_run rows after summary power-flow runs.",
     )
     parser.add_argument(
-        "--include-no-flex-powerflow",
+        "--include-inflex-powerflow",
         action="store_true",
         help=(
-            "For post-electrification profiles, run an additional Step 4 no-flex powerflow after "
+            "For post-electrification profiles, run an additional Step 4 inflex powerflow after "
             "Step 3. Heat is reconstructed from fixed demand using optimized post-flex "
             "heat-pump and auxiliary-heater capacities; PV and EV profiles remain fixed."
         ),
     )
     parser.add_argument(
-        "--no-flex-only",
+        "--inflex-only",
         action="store_true",
         help=(
             "Run Step 3 optimization to obtain post-flex capacities, then run only the "
-            "no-flex post-electrification power flow."
+            "inflex post-electrification power flow."
         ),
     )
     parser.add_argument(
-        "--no-flex-ev-charger-kw",
+        "--inflex-ev-charger-kw",
         type=float,
-        help="Optional EV charger cap passed to Step 4 --post-demand-mode no-flex.",
+        help="Optional EV charger cap passed to Step 4 --post-demand-mode inflex.",
     )
     parser.add_argument(
         "--expansion-analysis-prefix",
@@ -234,25 +234,25 @@ def parse_args() -> argparse.Namespace:
         parser.error("The pre model case requires --profiles status_quo.")
     if args.model_case != "pre" and args.profiles == "status_quo":
         parser.error("Post model cases require post-electrification profiles.")
-    if args.include_no_flex_powerflow and args.profiles == "status_quo":
+    if args.include_inflex_powerflow and args.profiles == "status_quo":
         parser.error(
-            "--include-no-flex-powerflow requires post-electrification profiles, not status_quo."
+            "--include-inflex-powerflow requires post-electrification profiles, not status_quo."
         )
-    if args.no_flex_only and args.profiles == "status_quo":
+    if args.inflex_only and args.profiles == "status_quo":
         parser.error(
-            "--no-flex-only requires post-electrification profiles, not status_quo."
+            "--inflex-only requires post-electrification profiles, not status_quo."
         )
-    if args.no_flex_only and args.include_no_flex_powerflow:
+    if args.inflex_only and args.include_inflex_powerflow:
         parser.error(
-            "Use either --no-flex-only or --include-no-flex-powerflow, not both."
+            "Use either --inflex-only or --include-inflex-powerflow, not both."
         )
-    if (args.include_no_flex_powerflow or args.no_flex_only) and args.model_case == "post-hems-optimized":
-        parser.error("No-flex dispatch requires a heuristic model case with fixed asset capacities.")
-    if args.no_flex_ev_charger_kw is not None and not (
-        args.include_no_flex_powerflow or args.no_flex_only
+    if (args.include_inflex_powerflow or args.inflex_only) and args.model_case == "post-hems-optimized":
+        parser.error("INFLEX dispatch requires a heuristic model case with fixed asset capacities.")
+    if args.inflex_ev_charger_kw is not None and not (
+        args.include_inflex_powerflow or args.inflex_only
     ):
         parser.error(
-            "--no-flex-ev-charger-kw requires --include-no-flex-powerflow or --no-flex-only."
+            "--inflex-ev-charger-kw requires --include-inflex-powerflow or --inflex-only."
         )
     return args
 
@@ -441,31 +441,31 @@ def materialize_expansion_analyses(
             stage=log_stage,
         )
 
-    if args.no_flex_only:
-        no_flex_run_name = powerflow_run_name(args, "summary_no_flex")
+    if args.inflex_only:
+        inflex_run_name = powerflow_run_name(args, "summary_inflex")
         materialize_one(
-            no_flex_run_name,
+            inflex_run_name,
             "pre",
             f"{prefix}_pre",
             (
-                f"Automatically materialized by synthetic_ags_runner from {no_flex_run_name} "
+                f"Automatically materialized by synthetic_ags_runner from {inflex_run_name} "
                 "summary stage=pre."
             ),
             "expansion_materialize_pre",
         )
         materialized.append({"stage": "pre", "analysis_key": f"{prefix}_pre"})
         materialize_one(
-            no_flex_run_name,
+            inflex_run_name,
             "post",
-            f"{prefix}_post_no_flex",
+            f"{prefix}_post_inflex",
             (
-                f"Automatically materialized by synthetic_ags_runner from {no_flex_run_name} "
-                "summary stage=post using fixed no-flex demand with post-flex heat capacity split."
+                f"Automatically materialized by synthetic_ags_runner from {inflex_run_name} "
+                "summary stage=post using fixed inflex demand with post-flex heat capacity split."
             ),
-            "expansion_materialize_post_no_flex",
+            "expansion_materialize_post_inflex",
         )
         materialized.append(
-            {"stage": "post_no_flex", "analysis_key": f"{prefix}_post_no_flex"}
+            {"stage": "post_inflex", "analysis_key": f"{prefix}_post_inflex"}
         )
         return materialized
 
@@ -485,21 +485,21 @@ def materialize_expansion_analyses(
         )
         materialized.append({"stage": stage, "analysis_key": analysis_key})
 
-    if args.include_no_flex_powerflow and not summary_pre_only:
-        no_flex_run_name = powerflow_run_name(args, "summary_no_flex")
-        no_flex_analysis_key = f"{prefix}_post_no_flex"
+    if args.include_inflex_powerflow and not summary_pre_only:
+        inflex_run_name = powerflow_run_name(args, "summary_inflex")
+        inflex_analysis_key = f"{prefix}_post_inflex"
         materialize_one(
-            no_flex_run_name,
+            inflex_run_name,
             "post",
-            no_flex_analysis_key,
+            inflex_analysis_key,
             (
-                f"Automatically materialized by synthetic_ags_runner from {no_flex_run_name} "
-                "summary stage=post using fixed no-flex demand with post-flex heat capacity split."
+                f"Automatically materialized by synthetic_ags_runner from {inflex_run_name} "
+                "summary stage=post using fixed inflex demand with post-flex heat capacity split."
             ),
-            "expansion_materialize_post_no_flex",
+            "expansion_materialize_post_inflex",
         )
         materialized.append(
-            {"stage": "post_no_flex", "analysis_key": no_flex_analysis_key}
+            {"stage": "post_inflex", "analysis_key": inflex_analysis_key}
         )
 
     return materialized
@@ -1110,7 +1110,7 @@ def run_candidate(
                 "seconds": seconds,
             }
 
-        if args.no_flex_only:
+        if args.inflex_only:
             validations = []
             shutil.copy2(step2_output, step3_dir / "Input" / step2_filename)
 
@@ -1119,7 +1119,7 @@ def run_candidate(
             )
             step3_stats = {
                 **step3_stats,
-                "post_flex_capacity_source": "required_for_no_flex",
+                "post_flex_capacity_source": "required_for_inflex",
             }
             status.update(
                 candidate_index,
@@ -1128,7 +1128,7 @@ def run_candidate(
                 message=json.dumps(step3_stats, sort_keys=True),
             )
 
-            current_stage = "step3_urbs_for_no_flex"
+            current_stage = "step3_urbs_for_inflex"
             step3_cmd = [
                 "uv",
                 "run",
@@ -1157,9 +1157,9 @@ def run_candidate(
             shutil.copy2(step3_output, step4_dir / "Input" / powerflow_filename)
 
             if args.powerflow_output in {"raw", "both"}:
-                current_stage = "step4_powerflow_raw_no_flex"
-                raw_no_flex_run_name = powerflow_run_name(args, "raw_no_flex")
-                raw_no_flex_cmd = [
+                current_stage = "step4_powerflow_raw_inflex"
+                raw_inflex_run_name = powerflow_run_name(args, "raw_inflex")
+                raw_inflex_cmd = [
                     "uv",
                     "run",
                     "python",
@@ -1168,43 +1168,43 @@ def run_candidate(
                     "--storage",
                     "db",
                     "--run-name",
-                    raw_no_flex_run_name,
+                    raw_inflex_run_name,
                     "--post-demand-mode",
-                    "no-flex",
+                    "inflex",
                     "--n_cpu",
                     str(args.step4_cpus),
                     "--pylovo-version-id",
                     str(args.pylovo_version_id),
                 ]
-                if args.no_flex_ev_charger_kw is not None:
-                    raw_no_flex_cmd.extend(
-                        ["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)]
+                if args.inflex_ev_charger_kw is not None:
+                    raw_inflex_cmd.extend(
+                        ["--inflex-ev-charger-kw", str(args.inflex_ev_charger_kw)]
                     )
                 if args.demand_scope == "residential":
-                    raw_no_flex_cmd.append("--hh-only")
+                    raw_inflex_cmd.append("--hh-only")
                 run_command(
-                    cmd=raw_no_flex_cmd,
+                    cmd=raw_inflex_cmd,
                     cwd=step4_dir,
                     log_path=log_file,
                     status=status,
                     candidate_index=candidate_index,
                     stage=current_stage,
                 )
-                current_stage = "step4_validate_raw_no_flex"
+                current_stage = "step4_validate_raw_inflex"
                 validations.append(
                     validate_powerflow_db(
                         repo_root,
                         powerflow_filename,
                         summary_only=False,
                         pre_only=False,
-                        run_name=raw_no_flex_run_name,
+                        run_name=raw_inflex_run_name,
                     )
                 )
 
             if args.powerflow_output in {"summary", "both"}:
-                current_stage = "step4_powerflow_summary_no_flex"
-                summary_no_flex_run_name = powerflow_run_name(args, "summary_no_flex")
-                summary_no_flex_cmd = [
+                current_stage = "step4_powerflow_summary_inflex"
+                summary_inflex_run_name = powerflow_run_name(args, "summary_inflex")
+                summary_inflex_cmd = [
                     "uv",
                     "run",
                     "python",
@@ -1214,36 +1214,36 @@ def run_candidate(
                     "db",
                     "--summary-only",
                     "--run-name",
-                    summary_no_flex_run_name,
+                    summary_inflex_run_name,
                     "--post-demand-mode",
-                    "no-flex",
+                    "inflex",
                     "--n_cpu",
                     str(args.step4_cpus),
                     "--pylovo-version-id",
                     str(args.pylovo_version_id),
                 ]
-                if args.no_flex_ev_charger_kw is not None:
-                    summary_no_flex_cmd.extend(
-                        ["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)]
+                if args.inflex_ev_charger_kw is not None:
+                    summary_inflex_cmd.extend(
+                        ["--inflex-ev-charger-kw", str(args.inflex_ev_charger_kw)]
                     )
                 if args.demand_scope == "residential":
-                    summary_no_flex_cmd.append("--hh-only")
+                    summary_inflex_cmd.append("--hh-only")
                 run_command(
-                    cmd=summary_no_flex_cmd,
+                    cmd=summary_inflex_cmd,
                     cwd=step4_dir,
                     log_path=log_file,
                     status=status,
                     candidate_index=candidate_index,
                     stage=current_stage,
                 )
-                current_stage = "step4_validate_summary_no_flex"
+                current_stage = "step4_validate_summary_inflex"
                 validations.append(
                     validate_powerflow_db(
                         repo_root,
                         powerflow_filename,
                         summary_only=True,
                         pre_only=False,
-                        run_name=summary_no_flex_run_name,
+                        run_name=summary_inflex_run_name,
                         expected_summary_stages=("pre", "post"),
                     )
                 )
@@ -1354,10 +1354,10 @@ def run_candidate(
                 )
             )
 
-        if args.include_no_flex_powerflow and args.powerflow_output in {"raw", "both"}:
-            current_stage = "step4_powerflow_raw_no_flex"
-            raw_no_flex_run_name = powerflow_run_name(args, "raw_no_flex")
-            raw_no_flex_cmd = [
+        if args.include_inflex_powerflow and args.powerflow_output in {"raw", "both"}:
+            current_stage = "step4_powerflow_raw_inflex"
+            raw_inflex_run_name = powerflow_run_name(args, "raw_inflex")
+            raw_inflex_cmd = [
                 "uv",
                 "run",
                 "python",
@@ -1366,22 +1366,22 @@ def run_candidate(
                 "--storage",
                 "db",
                 "--run-name",
-                raw_no_flex_run_name,
+                raw_inflex_run_name,
                 "--post-demand-mode",
-                "no-flex",
+                "inflex",
                 "--n_cpu",
                 str(args.step4_cpus),
                 "--pylovo-version-id",
                 str(args.pylovo_version_id),
             ]
-            if args.no_flex_ev_charger_kw is not None:
-                raw_no_flex_cmd.extend(
-                    ["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)]
+            if args.inflex_ev_charger_kw is not None:
+                raw_inflex_cmd.extend(
+                    ["--inflex-ev-charger-kw", str(args.inflex_ev_charger_kw)]
                 )
             if args.demand_scope == "residential":
-                raw_no_flex_cmd.append("--hh-only")
+                raw_inflex_cmd.append("--hh-only")
             run_command(
-                cmd=raw_no_flex_cmd,
+                cmd=raw_inflex_cmd,
                 cwd=step4_dir,
                 log_path=log_file,
                 status=status,
@@ -1389,14 +1389,14 @@ def run_candidate(
                 stage=current_stage,
             )
 
-            current_stage = "step4_validate_raw_no_flex"
+            current_stage = "step4_validate_raw_inflex"
             validations.append(
                 validate_powerflow_db(
                     repo_root,
                     scenario_filename,
                     summary_only=False,
                     pre_only=False,
-                    run_name=raw_no_flex_run_name,
+                    run_name=raw_inflex_run_name,
                 )
             )
 
@@ -1446,13 +1446,13 @@ def run_candidate(
                 )
             )
 
-        if args.include_no_flex_powerflow and args.powerflow_output in {
+        if args.include_inflex_powerflow and args.powerflow_output in {
             "summary",
             "both",
         }:
-            current_stage = "step4_powerflow_summary_no_flex"
-            summary_no_flex_run_name = powerflow_run_name(args, "summary_no_flex")
-            summary_no_flex_cmd = [
+            current_stage = "step4_powerflow_summary_inflex"
+            summary_inflex_run_name = powerflow_run_name(args, "summary_inflex")
+            summary_inflex_cmd = [
                 "uv",
                 "run",
                 "python",
@@ -1462,22 +1462,22 @@ def run_candidate(
                 "db",
                 "--summary-only",
                 "--run-name",
-                summary_no_flex_run_name,
+                summary_inflex_run_name,
                 "--post-demand-mode",
-                "no-flex",
+                "inflex",
                 "--n_cpu",
                 str(args.step4_cpus),
                 "--pylovo-version-id",
                 str(args.pylovo_version_id),
             ]
-            if args.no_flex_ev_charger_kw is not None:
-                summary_no_flex_cmd.extend(
-                    ["--no-flex-ev-charger-kw", str(args.no_flex_ev_charger_kw)]
+            if args.inflex_ev_charger_kw is not None:
+                summary_inflex_cmd.extend(
+                    ["--inflex-ev-charger-kw", str(args.inflex_ev_charger_kw)]
                 )
             if args.demand_scope == "residential":
-                summary_no_flex_cmd.append("--hh-only")
+                summary_inflex_cmd.append("--hh-only")
             run_command(
-                cmd=summary_no_flex_cmd,
+                cmd=summary_inflex_cmd,
                 cwd=step4_dir,
                 log_path=log_file,
                 status=status,
@@ -1485,14 +1485,14 @@ def run_candidate(
                 stage=current_stage,
             )
 
-            current_stage = "step4_validate_summary_no_flex"
+            current_stage = "step4_validate_summary_inflex"
             validations.append(
                 validate_powerflow_db(
                     repo_root,
                     scenario_filename,
                     summary_only=True,
                     pre_only=False,
-                    run_name=summary_no_flex_run_name,
+                    run_name=summary_inflex_run_name,
                     expected_summary_stages=("pre", "post"),
                 )
             )

@@ -88,7 +88,7 @@ All three cases use the same paired physical buildings, annual base demand, sect
 |---|---|---|---|---|
 | Status quo | `forchheim_paired_battery_tsam_synthetic_pre` | `forchheim_paired_battery_tsam_real_swf_pre` | `forchheim_paired_battery_tsam_pre` | `forchheim_paired_battery_tsam_real_pre` |
 | Post-flex | `forchheim_paired_battery_tsam_synthetic_flex` | `forchheim_paired_battery_tsam_real_swf_flex` | `forchheim_paired_battery_tsam_post` | `forchheim_paired_battery_tsam_real_post` |
-| Post-no-flex | `forchheim_paired_battery_tsam_synthetic_no_flex` | `forchheim_paired_battery_tsam_real_swf_no_flex` | `forchheim_paired_battery_tsam_post_no_flex` | `forchheim_paired_battery_tsam_real_post_no_flex` |
+| Post-inflex | `forchheim_paired_battery_tsam_synthetic_inflex` | `forchheim_paired_battery_tsam_real_swf_inflex` | `forchheim_paired_battery_tsam_post_inflex` | `forchheim_paired_battery_tsam_real_post_inflex` |
 
 These are the identifiers used by `5.postprocessing/notebooks/analysis_expansion.ipynb`.
 
@@ -99,10 +99,10 @@ The same `de_lv_heuristic_2026` thermal-reinforcement heuristic is materialized 
 | Source | Scenario | Cable cost | Transformer cost | Total cost |
 |---|---|---:|---:|---:|
 | Synthetic | Status quo | EUR 0 | EUR 0 | EUR 0 |
-| Synthetic | Post-no-flex | EUR 843,270 | EUR 830,000 | EUR 1,673,270 |
+| Synthetic | Post-inflex | EUR 843,270 | EUR 830,000 | EUR 1,673,270 |
 | Synthetic | Post-flex / HEMS | EUR 532,413 | EUR 544,000 | EUR 1,076,413 |
 | Real SWF | Status quo | EUR 27,674 | EUR 33,000 | EUR 60,674 |
-| Real SWF | Post-no-flex | EUR 937,028 | EUR 856,000 | EUR 1,793,028 |
+| Real SWF | Post-inflex | EUR 937,028 | EUR 856,000 | EUR 1,793,028 |
 | Real SWF | Post-flex / HEMS | EUR 705,572 | EUR 492,000 | EUR 1,197,572 |
 
 HEMS reduces the modeled total thermal-reinforcement cost by 35.7% on the synthetic networks and 33.2% on the complete real-SWF networks. These are heuristic, loading-driven screening costs; voltage mitigation remains outside the cost total. Because source coverage differs, publication tables must show complete, incomplete, and excluded grid counts alongside totals and should include a per-complete-grid comparison.
@@ -171,9 +171,9 @@ These flags are for resuming an existing run, not for a clean first execution.
 |---|---|---|
 | Earlier synthetic-only Forchheim HH runs | Superseded by the paired full-local-demand run | Method development and historical sensitivity only |
 | `real_swf_2045_full_local_sector_flex` | Superseded | Do not use for publication; predates exact heat-pump deduplication |
-| `real_swf_2045_full_local_sector_no_flex` | Superseded | Do not use for publication; predates exact heat-pump deduplication |
+| `real_swf_2045_full_local_sector_inflex` | Superseded | Do not use for publication; predates exact heat-pump deduplication |
 | Earlier LV 113 diagnostic runs | Diagnostic | Useful for tracing demand duplication and radialization effects, not regional comparison |
-| Munich pre/post-flex/post-no-flex pilot | Deleted and non-authoritative | Exposed disk-volume and initial no-flex EV reconstruction problems; must be regenerated with the current pipeline before use |
+| Munich pre/post-flex/post-inflex pilot | Deleted and non-authoritative | Exposed disk-volume and initial inflex EV reconstruction problems; must be regenerated with the current pipeline before use |
 
 ## Publication Checklist
 

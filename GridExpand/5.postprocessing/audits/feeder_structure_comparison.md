@@ -32,7 +32,7 @@ The normalized physical topology contains 8,460 synthetic and 8,946 real cable r
 | Median physical-section maximum loading | Synthetic | Real SWF | Synthetic / real |
 |---|---:|---:|---:|
 | Status quo | 9.04% | 5.28% | 1.71 |
-| No-flex | 27.67% | 17.06% | 1.62 |
+| INFLEX | 27.67% | 17.06% | 1.62 |
 | HEMS | 25.35% | 15.92% | 1.59 |
 
 Consolidating parallel rows and degree-two cable chains therefore does not remove the loading difference.

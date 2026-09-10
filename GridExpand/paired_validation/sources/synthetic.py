@@ -106,7 +106,7 @@ def run_powerflows(
     definitions = {
         "post-hems-optimized": "flexible",
         "post-hems-heuristic": "flexible",
-        "post-inflex-heuristic": "no-flex",
+        "post-inflex-heuristic": "inflex",
     }
     post_cases = tuple(
         (definitions[case_name], case_name) for case_name in args.result_cases

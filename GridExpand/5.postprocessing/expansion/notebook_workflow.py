@@ -71,10 +71,10 @@ def analysis_prefix_from_ags(ags: str | int, base_suffix: str) -> str:
           AND (
               analysis_key = :pre_key
               OR analysis_key = :post_key
-              OR analysis_key = :post_no_flex_key
+              OR analysis_key = :post_inflex_key
               OR analysis_key LIKE :prefixed_pre_key
               OR analysis_key LIKE :prefixed_post_key
-              OR analysis_key LIKE :prefixed_post_no_flex_key
+              OR analysis_key LIKE :prefixed_post_inflex_key
           )
         ORDER BY created_at DESC
         """
@@ -83,10 +83,10 @@ def analysis_prefix_from_ags(ags: str | int, base_suffix: str) -> str:
         "ags": int(normalized_ags),
         "pre_key": f"{base_suffix}_pre",
         "post_key": f"{base_suffix}_post",
-        "post_no_flex_key": f"{base_suffix}_post_no_flex",
+        "post_inflex_key": f"{base_suffix}_post_inflex",
         "prefixed_pre_key": f"%_{base_suffix}_pre",
         "prefixed_post_key": f"%_{base_suffix}_post",
-        "prefixed_post_no_flex_key": f"%_{base_suffix}_post_no_flex",
+        "prefixed_post_inflex_key": f"%_{base_suffix}_post_inflex",
     }
     with db.engine.connect() as conn:
         rows = conn.execute(query, params).mappings().all()
@@ -94,7 +94,7 @@ def analysis_prefix_from_ags(ags: str | int, base_suffix: str) -> str:
     prefixes: list[str] = []
     for row in rows:
         analysis_key = str(row["analysis_key"])
-        for stage_suffix in ("_post_no_flex", "_post", "_pre"):
+        for stage_suffix in ("_post_inflex", "_post", "_pre"):
             ending = f"{base_suffix}{stage_suffix}"
             if analysis_key.endswith(ending):
                 prefix = analysis_key[: -len(stage_suffix)]
@@ -225,13 +225,13 @@ def expansion_cost_comparison_from_tables(
     expansion_tables_by_stage: Mapping[str, dict[str, pd.DataFrame]],
     analysis_meta_by_stage: Mapping[str, pd.Series],
     *,
-    post_no_flex_label: str,
+    post_inflex_label: str,
     post_flex_label: str,
     data_source: str = "Synthetic",
 ) -> pd.DataFrame:
     """Build the cable/transformer cost table used by the comparison bar chart."""
     cost_rows = []
-    for label in (post_no_flex_label, post_flex_label):
+    for label in (post_inflex_label, post_flex_label):
         tables = expansion_tables_by_stage.get(label)
         if (
             tables is None
@@ -289,7 +289,7 @@ def reinforcement_catalog_summary(
 def expansion_cost_reduction_summary(
     expansion_cost_comparison: pd.DataFrame,
     *,
-    post_no_flex_label: str,
+    post_inflex_label: str,
     post_flex_label: str,
 ) -> pd.DataFrame:
     """Calculate flex savings by component and data source."""
@@ -299,7 +299,7 @@ def expansion_cost_reduction_summary(
     cost_data = expansion_cost_comparison.copy()
     if "data_source" not in cost_data.columns:
         cost_data["data_source"] = "Synthetic"
-    required_columns = {post_no_flex_label, post_flex_label}
+    required_columns = {post_inflex_label, post_flex_label}
     rows = []
     for source, source_data in cost_data.groupby("data_source", sort=False):
         cost_wide = source_data.pivot_table(
@@ -313,25 +313,25 @@ def expansion_cost_reduction_summary(
             continue
         cost_wide.loc["Total"] = cost_wide.sum(axis=0)
         for component, values in cost_wide.iterrows():
-            no_flex_cost = float(values[post_no_flex_label])
+            inflex_cost = float(values[post_inflex_label])
             flex_cost = float(values[post_flex_label])
             rows.append(
                 {
                     "data_source": source,
                     "component": component,
-                    "no_flex_cost_million_eur": no_flex_cost / 1_000_000.0,
+                    "inflex_cost_million_eur": inflex_cost / 1_000_000.0,
                     "flex_cost_million_eur": flex_cost / 1_000_000.0,
-                    "saving_million_eur": (no_flex_cost - flex_cost) / 1_000_000.0,
+                    "saving_million_eur": (inflex_cost - flex_cost) / 1_000_000.0,
                     "reduction_percent": (
-                        (no_flex_cost - flex_cost) / no_flex_cost * 100.0
-                        if no_flex_cost
+                        (inflex_cost - flex_cost) / inflex_cost * 100.0
+                        if inflex_cost
                         else pd.NA
                     ),
                 }
             )
     return pd.DataFrame(rows).round(
         {
-            "no_flex_cost_million_eur": 2,
+            "inflex_cost_million_eur": 2,
             "flex_cost_million_eur": 2,
             "saving_million_eur": 2,
             "reduction_percent": 1,
@@ -586,7 +586,7 @@ def load_transformer_import_distributions_for_specs(
 
 DEFAULT_STAGE_LABELS = {
     "pre": "status-quo",
-    "post_no_flex": "no-flex",
+    "post_inflex": "INFLEX",
     "post_flex": "HEMS",
 }
 
@@ -609,7 +609,7 @@ def scenario_powerflow_specs(
                 "run_name": f"{scenario_prefix}_synthetic_pre",
                 "stage": "pre",
             },
-            labels["post_no_flex"]: {
+            labels["post_inflex"]: {
                 "run_name": f"{scenario_prefix}_synthetic_post-inflex-heuristic",
                 "stage": "post",
             },
@@ -623,7 +623,7 @@ def scenario_powerflow_specs(
                 "run_name": f"{scenario_prefix}_real_swf_pre",
                 "stage": "pre",
             },
-            labels["post_no_flex"]: {
+            labels["post_inflex"]: {
                 "run_name": f"{scenario_prefix}_real_swf_post-inflex-heuristic",
                 "stage": "post",
             },
@@ -656,7 +656,7 @@ def scenario_analysis_keys(
     source_suffix = "" if data_source == "Synthetic" else "_real"
     keys = {
         labels["pre"]: f"{scenario_prefix}{source_suffix}_pre",
-        labels["post_no_flex"]: f"{scenario_prefix}{source_suffix}_post_no_flex",
+        labels["post_inflex"]: f"{scenario_prefix}{source_suffix}_post_inflex",
         labels["post_flex"]: f"{scenario_prefix}{source_suffix}_post",
     }
     if "post_optimized" in labels:

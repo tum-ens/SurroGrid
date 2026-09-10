@@ -63,7 +63,7 @@ def require_temporal_method(path, expected):
 
 
 # HDF keys shared by every Step-4 adapter. Both the synthetic SaveFile and the
-# real-grid adapter must consume exactly one no-flex input contract; a second,
+# real-grid adapter must consume exactly one inflex input contract; a second,
 # independently maintained interpretation is how the real adapter silently lost
 # the EV session tables.
 HDF_KEYS = {
@@ -127,8 +127,8 @@ def read_ev_sessions(path):
     return sessions.reset_index(drop=True), hours.reset_index(drop=True)
 
 
-def read_no_flex_inputs(path):
-    """The single no-flex input contract shared by every Step-4 adapter.
+def read_inflex_inputs(path):
+    """The single inflex input contract shared by every Step-4 adapter.
 
     Heat demand is dispatched without temporal flexibility using the fixed
     heat-pump and auxiliary capacities in the scenario input process table.
@@ -136,15 +136,15 @@ def read_no_flex_inputs(path):
     name = Path(path).name
     if not hdf_key_exists(path, HDF_KEYS["net_demand"]):
         raise KeyError(
-            "No-flex post demand requires post-flex URBS results in "
+            "INFLEX post demand requires post-flex URBS results in "
             f"{HDF_KEYS['net_demand']!r} in {name} so timestep alignment and "
             "optimized capacities are available."
         )
     if not hdf_key_exists(path, HDF_KEYS["cap_pro"]):
         raise KeyError(
-            "No-flex post demand requires optimized post-flex capacities in "
+            "INFLEX post demand requires optimized post-flex capacities in "
             f"{HDF_KEYS['cap_pro']!r}. Run Step 3 optimization before Step 4 "
-            "no-flex power flow."
+            "inflex power flow."
         )
     sessions, session_hours = read_ev_sessions(path)
     temporal = read_temporal_method(path)
@@ -322,7 +322,7 @@ class SaveFile:
     def has_urbs_results(self):
         return self._hdf_key_exists(self.net_demand_dir)
 
-    def has_reduced_no_flex_inputs(self):
+    def has_reduced_inflex_inputs(self):
         return all(
             self._hdf_key_exists(key)
             for key in (
@@ -350,9 +350,9 @@ class SaveFile:
         df_net_demand = pd.read_hdf(self.input_path, key=self.net_demand_dir)
         return df_raw_demand, df_net_demand
 
-    def get_no_flex_inputs(self):
-        """Delegate to the single shared no-flex input contract."""
-        return read_no_flex_inputs(self.input_path)
+    def get_inflex_inputs(self):
+        """Delegate to the single shared inflex input contract."""
+        return read_inflex_inputs(self.input_path)
 
     def save_df(self, df, dir):
         if self.storage == "db":

@@ -124,16 +124,16 @@ The previous full-local run triplicated heat demand through duplicate SWF WP mar
 |---|---:|---:|---:|---:|
 | Old post-flex | 274.1% | 0.455 p.u. | 292.1% | 136 |
 | Corrected diagnostic post-flex | 153.6% | 0.658 p.u. | 187.4% | 0 |
-| Old post-no-flex | 283.9% | 0.482 p.u. | 308.8% | 132 |
-| Corrected diagnostic post-no-flex | 239.2% | 0.469 p.u. | 302.7% | 0 |
+| Old post-inflex | 283.9% | 0.482 p.u. | 308.8% | 132 |
+| Corrected diagnostic post-inflex | 239.2% | 0.469 p.u. | 302.7% | 0 |
 
-The remaining no-flex peak is not an initialization artifact. At the critical reduced timestep, LV113 carries approximately 319 kW base electricity, 378 kW electric heat, and 375 kW EV charging.
+The remaining inflex peak is not an initialization artifact. At the critical reduced timestep, LV113 carries approximately 319 kW base electricity, 378 kW electric heat, and 375 kW EV charging.
 
-Topology also matters. Restoring all 15 lines removed by radialization improves the no-flex minimum voltage from 0.469 to 0.738 p.u. and cable loading from 303% to 189%, while transformer loading remains about 203%. The transformer is the original SWF 630 kVA unit; it was not lost during splitting. LV113 is therefore a mixed case:
+Topology also matters. Restoring all 15 lines removed by radialization improves the inflex minimum voltage from 0.469 to 0.738 p.u. and cable loading from 303% to 189%, while transformer loading remains about 203%. The transformer is the original SWF 630 kVA unit; it was not lost during splitting. LV113 is therefore a mixed case:
 
 - the old post-flex extreme was substantially inflated by a demand-allocation defect;
 - radialization exaggerates cable and voltage stress;
-- the original single-transformer supply area is still genuinely overloaded under the paired no-flex scenario.
+- the original single-transformer supply area is still genuinely overloaded under the paired inflex scenario.
 
 ## Commands
 
@@ -199,7 +199,7 @@ each grid job; avoid multiplying both values without checking available RAM.
 If a regional batch is interrupted,
 repeat the first command with `--resume` in addition to `--force-all`.
 
-The paired runner produces pre electricity-only, post-flex, and post-no-flex power-flow summaries for every selected target. The publication run uses six representative weeks selected only from ambient temperature and irradiation. One canonical mapping is stored in the run directory and every real and synthetic optimization result must reproduce it before its power flows are accepted.
+The paired runner produces pre electricity-only, post-flex, and post-inflex power-flow summaries for every selected target. The publication run uses six representative weeks selected only from ambient temperature and irradiation. One canonical mapping is stored in the run directory and every real and synthetic optimization result must reproduce it before its power flows are accepted.
 
 ```bash
 cd <repository-root>
@@ -219,7 +219,7 @@ Omit `--allow-diagnostic-heat-fallback` for the publication run. The strict runn
 
 ## Publication Gate
 
-Do not use the existing `real_swf_2045_full_local_sector_flex` or `real_swf_2045_full_local_sector_no_flex` regional runs for the final comparison. They predate exact WP deduplication and contain 11 grids with failed power-flow timesteps.
+Do not use the existing `real_swf_2045_full_local_sector_flex` or `real_swf_2045_full_local_sector_inflex` regional runs for the final comparison. They predate exact WP deduplication and contain 11 grids with failed power-flow timesteps.
 
 A publication run requires:
 

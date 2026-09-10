@@ -6,7 +6,7 @@ This document consolidates the investigation of real-SWF grids `LV_038`, `LV_047
 
 ## Summary
 
-| Grid | Original transformer | Status quo | HEMS | No-flex | Main finding | Current treatment |
+| Grid | Original transformer | Status quo | HEMS | INFLEX | Main finding | Current treatment |
 |---|---|---:|---:|---:|---|---|
 | `LV_038` | `MSNS_TrSt_0062`, 400 kVA | 0 failed | 5 failed | 14 failed | Electrification exposes a long, weak single-feeder path; no evidence of lost loads or a harmful radialization | Retain as a stressed grid; expansion must restore feasibility |
 | `LV_047` | `MSNS_TrSt_0101`, 630 kVA | 0 failed | 33 failed | 44 failed | Electrification overloads an early 185 A corridor; the recorded open point is electrically consequential and the station boundary remains uncertain | Retain as incomplete pending reinforcement and DSO clarification |
@@ -20,17 +20,17 @@ The failed post-electrification states in `LV_038` and `LV_047` are not random s
 |---|---|---:|---:|---:|---:|
 | `LV_038` | Status quo | 0 / 1,008 | 43.7% | 107.4% | 0.871 p.u. |
 | `LV_038` | HEMS | 5 / 1,008 | 145.9% | 358.4% | 0.557 p.u. |
-| `LV_038` | No-flex | 14 / 1,008 | 157.5% | 387.0% | 0.501 p.u. |
+| `LV_038` | INFLEX | 14 / 1,008 | 157.5% | 387.0% | 0.501 p.u. |
 | `LV_047` | Status quo | 0 / 1,008 | 36.0% | 111.0% | 0.864 p.u. |
 | `LV_047` | HEMS | 33 / 1,008 | 93.6% | 357.2% | 0.507 p.u. |
-| `LV_047` | No-flex | 44 / 1,008 | 122.0% | 358.6% | 0.471 p.u. |
+| `LV_047` | INFLEX | 44 / 1,008 | 122.0% | 358.6% | 0.471 p.u. |
 | `LV_113` | Status quo | 0 / 1,008 | 85.9% | 299.5% | 0.600 p.u. |
 | `LV_113` | HEMS | 218 / 1,008 | 99.8%* | 348.4%* | 0.502 p.u.* |
-| `LV_113` | No-flex | 289 / 1,008 | 150.0%* | 357.4%* | 0.519 p.u.* |
+| `LV_113` | INFLEX | 289 / 1,008 | 150.0%* | 357.4%* | 0.519 p.u.* |
 
 `*` Extrema are conditional on converged timesteps and do not describe the failed operating points.
 
-For `LV_038` and `LV_047`, nearly all failures occur in the cold first TSAM period, rather than at an initialization timestep. The failed no-flex hours combine high heat-pump and EV demand. Mean demand during these failed hours is approximately 400 kW for `LV_038` and 456 kW for `LV_047`. Calibrated commercial/public demand is zero in `LV_038` and only about 37 MWh/a in `LV_047`, so GHD allocation does not explain these failures.
+For `LV_038` and `LV_047`, nearly all failures occur in the cold first TSAM period, rather than at an initialization timestep. The failed inflex hours combine high heat-pump and EV demand. Mean demand during these failed hours is approximately 400 kW for `LV_038` and 456 kW for `LV_047`. Calibrated commercial/public demand is zero in `LV_038` and only about 37 MWh/a in `LV_047`, so GHD allocation does not explain these failures.
 
 ## LV 038
 
@@ -71,7 +71,7 @@ The evidence does not identify a splitter, load-allocation, radialization, or so
 - No scenario load buses are unsupplied or dropped, and active cable ratings are finite.
 - Radialization opened only line 28979, `NS_Kb_001660_004`, while preserving minimum-impedance supply paths (`1.00x` maximum path stretch).
 - Reusing the logical ring does not restore convergence for the failed snapshots.
-- A diagnostic open-point swap, closing line 26518 and opening line 30094, restores only 20 of 33 HEMS failures and 20 of 44 no-flex failures. Remaining states are still severely stressed.
+- A diagnostic open-point swap, closing line 26518 and opening line 30094, restores only 20 of 33 HEMS failures and 20 of 44 inflex failures. Remaining states are still severely stressed.
 - The station split is more uncertain than for `LV_038`: the original electrically coupled component contains `LV_047`, `LV_062`, and `LV_173`, and the station assignment retained 457 buses compared with 1,091 buses implied by the logical name. Explicit switch states nevertheless provide evidence for the current supply territory, so stress alone is not a sound basis for moving loads to neighboring transformers.
 
 ### Assessment

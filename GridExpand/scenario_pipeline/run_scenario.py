@@ -186,7 +186,7 @@ def _expansion_commands(
                 analysis_suffix = "pre"
                 stage = "pre"
             elif model_case == "post-inflex-heuristic":
-                analysis_suffix = "post_no_flex"
+                analysis_suffix = "post_inflex"
                 stage = "post"
             elif model_case == "post-hems-heuristic":
                 analysis_suffix = "post"

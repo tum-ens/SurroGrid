@@ -4,7 +4,7 @@ This note documents the LV expansion cost assumptions used by `expansion/grid_ex
 
 Default assumption key: `de_lv_heuristic_2026`
 
-The result is a transparent screening estimate for spatial postprocessing. It is not a construction offer, a DSO work-order cost, or a substitute for site-specific grid planning. The current heuristic prices overload-driven cable and transformer reinforcement in existing settlement structures. Flexibility costs are intentionally excluded because flexibility is represented by the separate `Post-flex` and `Post-no-flex` power-flow scenarios.
+The result is a transparent screening estimate for spatial postprocessing. It is not a construction offer, a DSO work-order cost, or a substitute for site-specific grid planning. The current heuristic prices overload-driven cable and transformer reinforcement in existing settlement structures. Flexibility costs are intentionally excluded because flexibility is represented by the separate `Post-flex` and `Post-inflex` power-flow scenarios.
 
 Important topology note: cable capacity must be derived from raw electrical pandapower/pylovo line components, not from `pylovo.lines_result_view`. The `lines_result_view` object is a QGIS-friendly display layer. It can contain artificial helper geometries, offset geometries, merged feeder chains, and visual lines that share geometry without being electrically parallel. It is suitable for displaying and joining final results in QGIS, but it must not be used as the source of installed electrical capacity.
 

@@ -72,7 +72,7 @@ def run_powerflows(
     definitions = {
         "post-hems-optimized": ("flexible", "optimized HEMS"),
         "post-hems-heuristic": ("flexible", "heuristic-assets HEMS"),
-        "post-inflex-heuristic": ("no-flex", "heuristic-assets INFLEX"),
+        "post-inflex-heuristic": ("inflex", "heuristic-assets INFLEX"),
     }
     post_cases = tuple(
         (definitions[case_name][0], case_name, definitions[case_name][1])
