@@ -208,6 +208,9 @@ def read_input(input_path):
 
     return data
 
+EV_SESSION_KEYS = ("ev_sessions", "ev_session_hours")
+
+
 def read_input_h5(input_path):
     ### Read out data
     with pd.HDFStore(input_path, mode="r") as store:
@@ -232,14 +235,26 @@ def read_input_h5(input_path):
             raw_data_dict[key] = pd.concat([zero_row, raw_data_dict[key]], ignore_index=True)
 
     ### Convert columns to multiindex:
-    raw_data_dict["commodity"] = raw_data_dict["commodity"].set_index(['Site', 'Commodity', 'Type'])
-    raw_data_dict["process"] = raw_data_dict["process"].set_index(['Site', 'Process'])
-    raw_data_dict["process_commodity"] = raw_data_dict["process_commodity"].set_index(['Process', "Commodity", "Direction"])
-    raw_data_dict["storage"] = raw_data_dict["storage"].set_index(['Site', "Storage", "Commodity"])
+    # A table can legitimately be empty: retiring the virtual mobility storage
+    # leaves buildings without a stationary battery with no storage rows at all.
+    for key, index_columns in (
+        ("commodity", ['Site', 'Commodity', 'Type']),
+        ("process", ['Site', 'Process']),
+        ("process_commodity", ['Process', "Commodity", "Direction"]),
+        ("storage", ['Site', "Storage", "Commodity"]),
+    ):
+        table = raw_data_dict[key]
+        if table.empty and not set(index_columns).issubset(table.columns):
+            table = pd.DataFrame(columns=list(index_columns))
+        raw_data_dict[key] = table.set_index(index_columns)
 
     ### Add support_timeframe to Multiindex
     support_timeframe = date.today().year    # Used to assign support time frame in data frames (relict from earlier urbs versions)
     for key in raw_data_dict.keys():
+        # The EV session tables are flat relational tables keyed by session_id;
+        # they carry their own model-hour column and must not be reindexed.
+        if key in EV_SESSION_KEYS:
+            continue
         if key in ["buy_sell_price", "demand", "eff_factor", "supim", "weather"]:
             raw_data_dict[key] = pd.concat([raw_data_dict[key]], keys=[support_timeframe], names=['support_timeframe', 't'])
         else:
@@ -787,6 +802,14 @@ def get_cluster_data(data, cluster):
     cluster_data['demand'] = cluster_data['demand'][[(sit, com) for (sit, com) in cluster_data['demand'].columns if sit in cluster]]
     cluster_data['supim'] = cluster_data['supim'][[(sit, com) for (sit, com) in cluster_data['supim'].columns if sit in cluster]]
     cluster_data['eff_factor'] = cluster_data['eff_factor'][[(sit, pro) for (sit, pro) in cluster_data['eff_factor'].columns if sit in cluster]]
+    if 'ev_sessions' in cluster_data and not cluster_data['ev_sessions'].empty:
+        sessions = cluster_data['ev_sessions']
+        keep = sessions['site'].isin(cluster)
+        cluster_data['ev_sessions'] = sessions[keep]
+        retained = set(cluster_data['ev_sessions']['session_id'])
+        cluster_data['ev_session_hours'] = cluster_data['ev_session_hours'][
+            cluster_data['ev_session_hours']['session_id'].isin(retained)
+        ]
     # try: cluster_data['availability'] = cluster_data['availability'][[(sit, pro) for (sit, pro) in cluster_data['availability'].columns if sit in cluster]]
     # except: pass
     return cluster_data

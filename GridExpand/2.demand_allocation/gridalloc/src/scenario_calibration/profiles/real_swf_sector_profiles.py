@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+from common.ev_sessions import SESSION_COLUMNS, SESSION_HOUR_COLUMNS
+
 from ..paths import GRIDALLOC_DIR
 
 MOBILITY_POOL_DIR = (
-    GRIDALLOC_DIR / "data" / "statistics" / "general" / "mobility_profile_pool"
+    GRIDALLOC_DIR / "data" / "statistics" / "general" / "mobility_profile_pool_old"
 )
 DEFAULT_MOBILITY_WEATHER_KEY = "central_germany_tmy"
 DEFAULT_EV_CHARGER_KW = 11.0
@@ -31,6 +33,14 @@ class SectorUrbsInputs:
     storage: pd.DataFrame
     audit: pd.DataFrame
     metadata: dict[str, Any]
+    ev_sessions: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(columns=SESSION_COLUMNS)
+    )
+    ev_session_hours: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(columns=SESSION_HOUR_COLUMNS)
+    )
+    # Pinned content identity of the EV session pool the vehicles came from.
+    ev_pool_id: str = ""
 
 
 def build_real_swf_sector_urbs_inputs(

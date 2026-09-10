@@ -33,9 +33,10 @@ from common.orchestration import (  # noqa: E402
     run_command,
     utc_now,
 )
-from common.timeframe import read_hdf_metadata  # noqa: E402
+from common.timeframe import FULL_YEAR_HOURS, read_hdf_metadata  # noqa: E402
 from paired_validation.comparison import (  # noqa: E402
     read_tsam_signature,
+    validate_full_year_result,
     validate_shared_tsam,
 )
 from paired_validation.datasets import resolve_paired_dataset  # noqa: E402
@@ -53,7 +54,7 @@ ENV_PATH = GRIDEXPAND_DIR / ".env"
 REPO_ROOT_DEFAULT = GRIDEXPAND_DIR.parent
 DEFAULT_SCENARIO_CONFIG = (
     GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
-    / "forchheim_2045.yaml"
+    / "forchheim_2045_full_year.yaml"
 )
 TARGET_CHOICES = (*TARGET_ADAPTERS, "both")
 
@@ -257,6 +258,80 @@ def _assignment_hash_from_hdf(path: Path) -> str:
     return actual
 
 
+def _run_identity(args: argparse.Namespace) -> dict[str, Any]:
+    """Identity a resumed run must match before any prior result is reused."""
+    return {
+        "run_id": str(args.run_dir.name),
+        "scenario_id": str(args.scenario_id),
+        "scenario_hash": str(args.scenario_hash),
+        "temporal_method": (
+            "shared_weather_tsam" if args.tsam else "full_year_no_tsam"
+        ),
+        "operating_hours": (None if args.tsam else int(args.operating_hours)),
+        "tsam_periods": (int(args.tsam_periods) if args.tsam else None),
+        "tsam_hours_per_period": (
+            int(args.tsam_hours_per_period) if args.tsam else None
+        ),
+        "tsam_extreme_method": (
+            str(args.tsam_extreme_method) if args.tsam else None
+        ),
+        "storage_boundary_policy": (
+            "typeperiod_common_initial_state" if args.tsam else "annual_equality"
+        ),
+        "ev_boundary_policy": (
+            "legacy_mobility_buffer" if args.tsam else "dedicated_sessions_annual_wrap"
+        ),
+        "paired_dataset_id": str(args.paired_dataset_id),
+        "ev_pool_id": str(getattr(args, "ev_pool_id", "") or ""),
+        "pylovo_version_id": str(args.pylovo_version_id),
+        "profile_seed": int(args.profile_seed),
+        "powerflow_grid_scope": str(args.powerflow_grid_scope),
+        "target": str(args.target),
+    }
+
+
+def _assert_resume_compatible(args: argparse.Namespace) -> None:
+    """Refuse to resume a run whose recorded identity differs from this request.
+
+    A status log alone cannot show *how* an earlier job was produced. Without
+    this guard a full-year request could silently reuse jobs that were completed
+    under representative-period aggregation, a different scenario hash or a
+    different EV service model.
+    """
+    identity_path = args.run_dir / "run_identity.json"
+    status_path = args.run_dir / "status.tsv"
+    identity = _run_identity(args)
+    if not identity_path.exists():
+        # Prior completed work with no recorded identity cannot be shown to have
+        # been produced the requested way. Writing the new identity over it would
+        # replace missing provenance with an assumption instead of checking it.
+        if args.resume and status_path.exists():
+            raise ValueError(
+                f"{args.run_dir} contains prior job status but no "
+                "run_identity.json, so how those jobs were produced cannot be "
+                "established. Refusing to resume: use a new run id, or delete "
+                "the stale status file if the prior work is known to be "
+                "discardable."
+            )
+        identity_path.parent.mkdir(parents=True, exist_ok=True)
+        identity_path.write_text(
+            json.dumps(identity, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        return
+    recorded = json.loads(identity_path.read_text(encoding="utf-8"))
+    mismatches = {
+        key: (recorded.get(key), value)
+        for key, value in identity.items()
+        if recorded.get(key) != value
+    }
+    if mismatches:
+        raise ValueError(
+            "Refusing to reuse results from an incompatible earlier run in "
+            f"{args.run_dir}. Differences (recorded, requested): {mismatches}. "
+            "Use a new run id instead of resuming."
+        )
+
+
 def _run_powerflows(
     *,
     job: dict[str, Any],
@@ -345,7 +420,18 @@ def _run_one(
                 },
             )
             result_hdf = latest_step3_result(step3_dir, input_hdf)
-            validate_shared_tsam(result_hdf, args.shared_tsam_signature)
+            if args.tsam:
+                validate_shared_tsam(result_hdf, args.shared_tsam_signature)
+            else:
+                # A full-year run must never consume a representative-period
+                # result, whatever its file name looks like.
+                validate_full_year_result(
+                    result_hdf,
+                    expected_operating_hours=args.operating_hours,
+                    expected_scenario_hash=args.scenario_hash,
+                    expected_delta_t_hours=1.0,
+                    expected_source_year=args.reference_year,
+                )
         _run_powerflows(
             job=job,
             args=args,
@@ -526,6 +612,10 @@ def main() -> None:
     args.result_cases = tuple(result_cases)
     # Scientific TSAM choices come exclusively from the scenario YAML.
     args.tsam = scenario.time_aggregation.enabled
+    # Operating hours are the reference-year horizon; the full-year path requires
+    # every original chronological hour, modeled once, plus the URBS
+    # initialization row that carries no energy.
+    args.operating_hours = FULL_YEAR_HOURS
     args.tsam_periods = scenario.time_aggregation.number_of_typical_periods
     args.tsam_hours_per_period = scenario.time_aggregation.hours_per_period
     args.tsam_extreme_method = scenario.time_aggregation.extreme_period_method
@@ -533,6 +623,25 @@ def main() -> None:
     scenario_label_base = args.scenario_label or scenario.scenario_id
     args.scenario_label = f"{scenario_label_base}_{'pre' if args.pre_only else args.model_case}"
     args.scenario_hash = scenario_hash
+    args.scenario_id = scenario.scenario_id
+    # The EV session pool's pinned content identity is part of the run identity:
+    # a pool that gained profiles would otherwise re-pair buildings silently.
+    pool_manifest_path = (
+        repo_root
+        / "GridExpand"
+        / "2.demand_allocation"
+        / "gridalloc"
+        / "data"
+        / "statistics"
+        / "general"
+        / "mobility_profile_pool"
+        / "mobility_pool_manifest.json"
+    )
+    args.ev_pool_id = (
+        str(json.loads(pool_manifest_path.read_text(encoding="utf-8")).get("pool_id", ""))
+        if pool_manifest_path.exists()
+        else ""
+    )
     args.paired_dir = args.paired_dir.resolve()
     if args.grid_data_path is not None:
         args.grid_data_path = args.grid_data_path.resolve()
@@ -595,6 +704,7 @@ def main() -> None:
     )
     if not jobs:
         raise ValueError("No paired target grids matched the requested scope.")
+    _assert_resume_compatible(args)
     status = StatusLog(args.run_dir, resume=args.resume)
     args.pv_profile_library = _prepare_shared_pv_profiles(
         args=args,
@@ -614,6 +724,11 @@ def main() -> None:
         target=args.target,
         workers=args.workers,
         temporal_method=("shared_weather_tsam" if args.tsam else "full_year_no_tsam"),
+        operating_hours=(None if args.tsam else args.operating_hours),
+        storage_boundary_policy=(None if args.tsam else "annual_equality"),
+        ev_boundary_policy=(
+            None if args.tsam else "dedicated_sessions_annual_wrap"
+        ),
         tsam_periods=args.tsam_periods if args.tsam else None,
         tsam_hours_per_period=(args.tsam_hours_per_period if args.tsam else None),
         tsam_extreme_method=(args.tsam_extreme_method if args.tsam else None),

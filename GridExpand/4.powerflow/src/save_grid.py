@@ -16,7 +16,191 @@ if str(GRIDEXPAND_DIR) not in sys.path:
     sys.path.insert(0, str(GRIDEXPAND_DIR))
 
 from common.database import SurroGridDatabase
+from common.ev_sessions import (
+    SESSION_HOURS_HDF_KEY,
+    SESSIONS_HDF_KEY,
+    SESSION_HOUR_COLUMNS,
+    SESSION_COLUMNS,
+    SessionError,
+)
 from common.timeframe import read_hdf_metadata, scenario_key_for_timeframe
+
+
+def hdf_key_exists(path, key):
+    clean_key = str(key).strip("/")
+    with h5py.File(path, "r") as hdf_file:
+        return clean_key in hdf_file
+
+
+def read_temporal_method(path):
+    """Return the Step-3 temporal-method audit, or None for older results."""
+    if not hdf_key_exists(path, "urbs_out/temporal_method"):
+        return None
+    return pd.read_hdf(path, key="urbs_out/temporal_method").to_dict()
+
+
+def require_temporal_method(path, expected):
+    """Reject a result whose temporal method is not the requested one.
+
+    A full-year request must never silently consume a stale representative-period
+    result. The file name and the presence of the 'reduced_data' group prove
+    nothing: Step 3 writes that group in both modes.
+    """
+    audit = read_temporal_method(path)
+    name = Path(path).name
+    if audit is None:
+        raise KeyError(
+            f"{name} has no 'urbs_out/temporal_method' record. It predates "
+            f"temporal provenance and cannot be accepted for a {expected!r} run."
+        )
+    found = str(audit.get("temporal_method"))
+    if found != str(expected):
+        raise ValueError(
+            f"{name} was produced with temporal_method={found!r}, but "
+            f"{expected!r} was requested."
+        )
+    return audit
+
+
+# HDF keys shared by every Step-4 adapter. Both the synthetic SaveFile and the
+# real-grid adapter must consume exactly one no-flex input contract; a second,
+# independently maintained interpretation is how the real adapter silently lost
+# the EV session tables.
+HDF_KEYS = {
+    "raw_demand": "urbs_in/demand",
+    "reduced_demand": "urbs_out/reduced_data/demand",
+    "net_demand": "urbs_out/MILP/tau_pro",
+    "cap_pro": "urbs_out/MILP/cap_pro",
+    "raw_eff_factor": "urbs_in/eff_factor",
+    "reduced_eff_factor": "urbs_out/reduced_data/eff_factor",
+    "raw_supim": "urbs_in/supim",
+    "reduced_supim": "urbs_out/reduced_data/supim",
+    "raw_process": "urbs_in/process",
+    "reduced_process": "urbs_out/reduced_data/process",
+    "raw_storage": "urbs_in/storage",
+    "reduced_storage": "urbs_out/reduced_data/storage",
+    "tsam_hours_per_period": "urbs_out/tsam/hoursPerPeriod",
+}
+
+
+def _preferred(path, reduced_key, raw_key):
+    key = reduced_key if hdf_key_exists(path, reduced_key) else raw_key
+    return pd.read_hdf(path, key=key)
+
+
+def _required(path, key):
+    if not hdf_key_exists(path, key):
+        raise KeyError(
+            f"Required HDF5 key {key!r} is missing in {Path(path).name}."
+        )
+    return pd.read_hdf(path, key=key)
+
+
+def read_pre_demand(path):
+    return _preferred(path, HDF_KEYS["reduced_demand"], HDF_KEYS["raw_demand"])
+
+
+def read_ev_sessions(path):
+    """Read the dedicated EV charging-session contract from a result file.
+
+    An empty contract is valid: a building population can legitimately contain no
+    electric vehicles. It is distinguished from a legacy input by the *presence*
+    of the key, never by its row count.
+    """
+    name = Path(path).name
+    if not hdf_key_exists(path, SESSIONS_HDF_KEY):
+        raise SessionError(
+            f"{name} does not contain '{SESSIONS_HDF_KEY}'. It predates the "
+            "dedicated EV session contract, so its EV service cannot be "
+            "reconstructed without falling back to the old energy-clipping "
+            "heuristic."
+        )
+    sessions = pd.read_hdf(path, key=SESSIONS_HDF_KEY)
+    if hdf_key_exists(path, SESSION_HOURS_HDF_KEY):
+        hours = pd.read_hdf(path, key=SESSION_HOURS_HDF_KEY)
+    else:
+        hours = pd.DataFrame(columns=SESSION_HOUR_COLUMNS)
+    if sessions.empty:
+        sessions = pd.DataFrame(columns=SESSION_COLUMNS)
+    if hours.empty:
+        hours = pd.DataFrame(columns=SESSION_HOUR_COLUMNS)
+    return sessions.reset_index(drop=True), hours.reset_index(drop=True)
+
+
+def read_no_flex_inputs(path):
+    """The single no-flex input contract shared by every Step-4 adapter.
+
+    Heat demand is dispatched without temporal flexibility using the fixed
+    heat-pump and auxiliary capacities in the scenario input process table.
+    """
+    name = Path(path).name
+    if not hdf_key_exists(path, HDF_KEYS["net_demand"]):
+        raise KeyError(
+            "No-flex post demand requires post-flex URBS results in "
+            f"{HDF_KEYS['net_demand']!r} in {name} so timestep alignment and "
+            "optimized capacities are available."
+        )
+    if not hdf_key_exists(path, HDF_KEYS["cap_pro"]):
+        raise KeyError(
+            "No-flex post demand requires optimized post-flex capacities in "
+            f"{HDF_KEYS['cap_pro']!r}. Run Step 3 optimization before Step 4 "
+            "no-flex power flow."
+        )
+    sessions, session_hours = read_ev_sessions(path)
+    temporal = read_temporal_method(path)
+    return {
+        "source": "post-flex",
+        "demand": read_pre_demand(path),
+        "ev_sessions": sessions,
+        "ev_session_hours": session_hours,
+        "eff_factor": _preferred(
+            path, HDF_KEYS["reduced_eff_factor"], HDF_KEYS["raw_eff_factor"]
+        ),
+        "supim": _preferred(path, HDF_KEYS["reduced_supim"], HDF_KEYS["raw_supim"]),
+        "process": _preferred(
+            path, HDF_KEYS["reduced_process"], HDF_KEYS["raw_process"]
+        ),
+        "storage": _preferred(
+            path, HDF_KEYS["reduced_storage"], HDF_KEYS["raw_storage"]
+        ),
+        "tsam_hours_per_period": (
+            int(
+                _required(path, HDF_KEYS["tsam_hours_per_period"])
+                .to_numpy()
+                .reshape(-1)[0]
+            )
+            if hdf_key_exists(path, HDF_KEYS["tsam_hours_per_period"])
+            else None
+        ),
+        "cap_pro": _required(path, HDF_KEYS["cap_pro"]),
+        "reference": pd.read_hdf(path, key=HDF_KEYS["net_demand"]),
+        "drop_initial_timestep": False,
+        # Reconstruction is hourly end to end; the recorded duration is carried
+        # so an incompatible one is rejected at entry rather than assumed.
+        "delta_t_hours": (temporal or {}).get("delta_t_hours"),
+    }
+
+
+def component_audit_path(output_path, run_name=None):
+    """Location of the compact component-audit sidecar for a run."""
+    base = Path(output_path)
+    suffix = f".{run_name}" if run_name else ""
+    return base.with_name(f"{base.stem}{suffix}.component_audit.h5")
+
+
+def write_component_audit(path, df, name):
+    """Append one compact audit table to the sidecar, creating it if needed.
+
+    Returns the path so the caller can report where the audit landed, or None
+    when there is nothing to record.
+    """
+    if df is None or getattr(df, "empty", True):
+        return None
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with pd.HDFStore(path, mode="a", complib="blosc", complevel=9) as store:
+        store.put(f"component_audit/{name}", df.reset_index(drop=True), format="table")
+    return str(path)
 
 
 class SaveFile:
@@ -24,6 +208,7 @@ class SaveFile:
         # Copy input file to destination directory
         self.filename = filename
         self.storage = storage
+        self.run_name = run_name
         self.db = SurroGridDatabase() if self.storage == "db" else None
         if self.db is not None and pylovo_version_id is not None:
             self.db.pylovo_version_id = str(pylovo_version_id)
@@ -148,50 +333,26 @@ class SaveFile:
             )
         )
 
+    def get_temporal_method(self):
+        """Return the Step-3 temporal-method audit, or None for older results."""
+        return read_temporal_method(self.input_path)
+
+    def require_temporal_method(self, expected):
+        """Reject a result whose temporal method is not the requested one."""
+        return require_temporal_method(self.input_path, expected)
+
+    def get_ev_sessions(self):
+        """Delegate to the single shared session reader."""
+        return read_ev_sessions(self.input_path)
+
     def get_input_demands(self):
         df_raw_demand = self.get_pre_demand()
         df_net_demand = pd.read_hdf(self.input_path, key=self.net_demand_dir)
         return df_raw_demand, df_net_demand
 
     def get_no_flex_inputs(self):
-        """Read no-flex inputs from a post-flex Step 3 result file.
-
-        Heat demand is dispatched without temporal flexibility using the fixed
-        heat-pump and auxiliary capacities in the scenario input process table.
-        """
-        if not self.has_urbs_results():
-            raise KeyError(
-                "No-flex post demand requires post-flex URBS results in "
-                f"'{self.net_demand_dir}' so timestep alignment and optimized capacities are available."
-            )
-        if not self._hdf_key_exists(self.cap_pro_dir):
-            raise KeyError(
-                "No-flex post demand requires optimized post-flex capacities in "
-                f"'{self.cap_pro_dir}'. Run Step 3 optimization before Step 4 no-flex power flow."
-            )
-
-        return {
-            "source": "post-flex",
-            "demand": self.get_pre_demand(),
-            "eff_factor": self._read_preferred_hdf(self.reduced_eff_factor_dir, self.raw_eff_factor_dir),
-            "supim": self._read_preferred_hdf(self.reduced_supim_dir, self.raw_supim_dir),
-            "process": self._read_preferred_hdf(self.reduced_process_dir, self.raw_process_dir),
-            "storage": self._read_preferred_hdf(
-                self.reduced_storage_dir, self.raw_storage_dir
-            ),
-            "tsam_hours_per_period": (
-                int(
-                    self._read_required_hdf("urbs_out/tsam/hoursPerPeriod")
-                    .to_numpy()
-                    .reshape(-1)[0]
-                )
-                if self._hdf_key_exists("urbs_out/tsam/hoursPerPeriod")
-                else None
-            ),
-            "cap_pro": self._read_required_hdf(self.cap_pro_dir),
-            "reference": pd.read_hdf(self.input_path, key=self.net_demand_dir),
-            "drop_initial_timestep": False,
-        }
+        """Delegate to the single shared no-flex input contract."""
+        return read_no_flex_inputs(self.input_path)
 
     def save_df(self, df, dir):
         if self.storage == "db":
@@ -199,6 +360,20 @@ class SaveFile:
             return
         with pd.HDFStore(self.output_path, mode="a", complib='blosc', complevel=9) as store:
             store.put(dir, df)
+
+    def audit_path(self):
+        """Sidecar file holding compact component audits for this run."""
+        return component_audit_path(self.output_path, self.run_name)
+
+    def save_component_audit(self, df, name):
+        """Persist a compact component audit, whatever the storage mode.
+
+        Component audits must survive summary-only and database runs, where the
+        reactive time-series tables are deliberately not written and the database
+        has no matching table. They therefore go to a small sidecar HDF that is
+        identified from the run rather than through save_df.
+        """
+        return write_component_audit(self.audit_path(), df, name)
 
     def save_summary(self, summary, stage):
         if self.storage != "db":

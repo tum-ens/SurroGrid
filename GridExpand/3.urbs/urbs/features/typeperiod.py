@@ -231,7 +231,18 @@ def run_tsam(data, noTypicalPeriods, hoursPerPeriod, extremePeriodMethod="replac
 
 
     ############ Limit BEV charging demand ##############
-    # Battery charging availability might become infeasible after tsam split, adjust timeseries (e.g. all of demand is placed in first hour of week, but cannot be met as charging cap too low)
+    # Representative-period selection cuts home stays at period boundaries, which
+    # can leave a charging obligation that no longer fits its truncated window.
+    # The dedicated-session EV contract has no representation for a truncated
+    # session, so it is rejected here rather than silently repaired.
+    if not data.get("ev_sessions", pd.DataFrame()).empty:
+        raise NotImplementedError(
+            "Time series aggregation does not support the dedicated EV charging "
+            "session contract: representative periods truncate home stays and "
+            "there is no defined way to split a session's required energy. Run "
+            "the full-year chronological reference, or use a legacy "
+            "mobility-buffer input."
+        )
     df_ava = data["eff_factor"]
     df_sto = data["storage"]
     df_pro = data["process"]
@@ -260,11 +271,20 @@ def run_tsam(data, noTypicalPeriods, hoursPerPeriod, extremePeriodMethod="replac
             indices = stretch_df.index
             max_charge_allowed = len(indices)*charging_cap
 
-            # Determine total demand in home stretch and if it violates conditions, reduce demand 
+            # Determine total demand in home stretch and report, never repair, a
+            # violation. Silently scaling the demand down discarded EV energy
+            # and made the two controllers serve different obligations.
             total_stretch_demand = df_demand.loc[indices, (column[0], f"mobility{number}")].sum()
-            passable = min(total_stretch_demand, max_charge_allowed-0.1, battery_cap-0.1)           # Include slack for feasibility 
-            if total_stretch_demand != passable:
-                df_demand.loc[indices, (column[0], f"mobility{number}")]*=(passable/total_stretch_demand)
+            passable = min(max_charge_allowed - 0.1, battery_cap - 0.1)
+            if total_stretch_demand > passable:
+                raise ValueError(
+                    "Time series aggregation produced an infeasible EV charging "
+                    f"stretch: site={column[0]}, vehicle={number}, "
+                    f"hours={len(indices)}, required={total_stretch_demand:.6f} kWh, "
+                    f"charger_limit={max_charge_allowed:.6f} kWh, "
+                    f"battery_capacity={battery_cap:.6f} kWh, "
+                    f"shortfall={total_stretch_demand - passable:.6f} kWh."
+                )
 
     ##################### Exit ##########################
     # returns: data of selected type weeks; new range of timesteps; typeperiod weights (excluding 0 row); dict of most relvant aggregation data

@@ -335,7 +335,15 @@ def def_initial_storage_state_rule(m, stf, sit, sto, com):
             m.storage_dict['init'][(stf, sit, sto, com)])     
 
 def res_storage_state_cyclicity_rule(m, stf, sit, sto, com):
-    return (m.e_sto_con[m.t.at(1), stf, sit, sto, com] <=        # Indexing in pyomo starts at 1 not 0!
+    # Full-year chronological reference: one annual closure, as an equality, so
+    # the horizon cannot be used as a free energy source or sink. With type
+    # periods active the closure is handled by
+    # res_storage_state_cyclicity_typeperiod_rule and this constraint keeps its
+    # historical inequality form so existing TSAM runs are unchanged.
+    if m.mode['tdy']:
+        return (m.e_sto_con[m.t.at(1), stf, sit, sto, com] <=    # Indexing in pyomo starts at 1 not 0!
+                m.e_sto_con[m.t.at(len(m.t)), stf, sit, sto, com])
+    return (m.e_sto_con[m.t.at(1), stf, sit, sto, com] ==
             m.e_sto_con[m.t.at(len(m.t)), stf, sit, sto, com])
 
 def def_storage_energy_power_ratio_rule(m, stf, sit, sto, com):

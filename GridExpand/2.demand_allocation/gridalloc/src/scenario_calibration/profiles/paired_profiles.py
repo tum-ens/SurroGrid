@@ -18,6 +18,12 @@ from ...functions.heat import get_norm_outside_temperature
 from ...assets.pv.materialization import materialize_pv_urbs_inputs
 from ...assets.pv.sizing import build_pv_asset_plan
 from common.electrification import validate_electrification_assignment
+from common.ev_sessions import (
+    SESSION_COLUMNS,
+    SESSION_HOUR_COLUMNS,
+    SESSION_HOUR_OFFSET,
+    validate_sessions,
+)
 
 from .profile_contract import (
     assert_energy_conserved,
@@ -37,7 +43,6 @@ from .real_swf_electricity_profiles import (
 )
 from .real_swf_sector_profiles import (
     DEFAULT_MOBILITY_WEATHER_KEY,
-    MOBILITY_POOL_DIR,
     SectorUrbsInputs,
     _choose_source_pv_profile,
     _concat_static,
@@ -46,7 +51,72 @@ from .real_swf_sector_profiles import (
     _read_pool_timeseries,
 )
 
-from ..paths import SYNTHETIC_INPUT_DIR
+from ..paths import GRIDALLOC_DIR, SYNTHETIC_INPUT_DIR
+
+MOBILITY_SESSION_POOL_DIR = (
+    GRIDALLOC_DIR / "data" / "statistics" / "general" / "mobility_profile_pool"
+)
+SESSION_GENERATION_VERSION = "emobpy_pool_v2_sessions"
+
+POOL_MANIFEST_FILENAME = "mobility_pool_manifest.json"
+
+
+def read_pool_manifest(pool_dir: Path) -> dict[str, Any]:
+    """Read the pinned content identity of an EV session pool.
+
+    The manifest is mandatory. Without it the consumer would accept whatever
+    profiles happen to be present, and adding profiles could change an existing
+    building's vehicle while its seed and run identity stayed the same.
+    """
+    path = Path(pool_dir) / POOL_MANIFEST_FILENAME
+    if not path.exists():
+        raise FileNotFoundError(
+            f"EV session pool manifest not found: {path}. Freeze the pool with "
+            "generate_mobility_profile_pool.py --mode session --freeze-manifest "
+            "before using it; vehicle assignment depends on its pinned identity."
+        )
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    declared = str(manifest.get("generation_version"))
+    if declared != SESSION_GENERATION_VERSION:
+        raise ValueError(
+            f"Pool manifest declares generation_version={declared!r}, expected "
+            f"{SESSION_GENERATION_VERSION!r}."
+        )
+    return manifest
+
+
+
+SESSION_POOL_COLUMNS = ["profile_id", "session_index"] + [
+    column
+    for column in SESSION_COLUMNS
+    if column not in {"session_id", "site", "vehicle_index", "process", "profile_id"}
+]
+SESSION_HOUR_POOL_COLUMNS = ["profile_id", "session_index", "t", "order",
+                             "available_fraction"]
+
+
+def _read_session_pool(
+    csv_path: Path, profile_ids: set[str], *, columns: list[str] | None = None
+) -> pd.DataFrame:
+    """Read the rows of the selected profiles from a chunked pool CSV.
+
+    An empty result is valid: every selected profile may legitimately have no
+    home charging session. Completeness is checked against the pool metadata by
+    the caller, which knows how many sessions each profile declares.
+    """
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"EV session pool file not found: {csv_path}. Generate it with "
+            "generate_mobility_profile_pool.py --mode session."
+        )
+    chunks = []
+    for chunk in pd.read_csv(csv_path, chunksize=500_000):
+        subset = chunk[chunk["profile_id"].isin(profile_ids)]
+        if not subset.empty:
+            chunks.append(subset)
+    if not chunks:
+        return pd.DataFrame(columns=list(columns) if columns else ["profile_id"])
+    return pd.concat(chunks, ignore_index=True)
 from .heat_profile_source import load_physical_heat_profile
 from .physical_heat_profile_library import PhysicalHeatProfileLibrary
 from .pv_profile_library import read_pv_profile_library
@@ -126,6 +196,26 @@ def source_asset_sites(
     return result
 
 
+def session_pool_supported_models(pool_dir: Path | None = None) -> list[str]:
+    """EV models the *session* pool actually provides.
+
+    The paired path must restrict its vehicle sampling to the pool its profiles
+    come from. Reading the legacy v1 pool here would let the model universe and
+    the profiles diverge the moment the two pools differ.
+    """
+    directory = Path(pool_dir or MOBILITY_SESSION_POOL_DIR)
+    read_pool_manifest(directory)
+    metadata = pd.read_csv(directory / "mobility_profile_pool_metadata.csv")
+    metadata = metadata[
+        metadata["weather_key"].astype(str).eq(DEFAULT_MOBILITY_WEATHER_KEY)
+    ]
+    if metadata.empty:
+        raise ValueError(
+            f"No session-pool profiles found for {DEFAULT_MOBILITY_WEATHER_KEY}."
+        )
+    return sorted(metadata["model"].astype(str).unique())
+
+
 @dataclass(frozen=True)
 class _MobilityInputs:
     demand: pd.DataFrame
@@ -135,6 +225,9 @@ class _MobilityInputs:
     process_commodity: pd.DataFrame
     storage: pd.DataFrame
     audit: pd.DataFrame
+    sessions: pd.DataFrame
+    session_hours: pd.DataFrame
+    pool_id: str
 
 
 @dataclass(frozen=True)
@@ -582,6 +675,17 @@ def build_paired_sector_urbs_inputs(
         process_commodity=process_commodity,
         storage=storage,
         audit=audit,
+        ev_sessions=(
+            pd.DataFrame(columns=SESSION_COLUMNS)
+            if mobility is None
+            else mobility.sessions
+        ),
+        ev_session_hours=(
+            pd.DataFrame(columns=SESSION_HOUR_COLUMNS)
+            if mobility is None
+            else mobility.session_hours
+        ),
+        ev_pool_id=("" if mobility is None else mobility.pool_id),
         metadata={
             "sector_assets_simulated": bool(audit_parts),
             "sector_assets_simulated_components": [
@@ -858,7 +962,11 @@ def _build_paired_mobility(
     if int(row_counts.sum()) == 0:
         return None
 
-    metadata = pd.read_csv(MOBILITY_POOL_DIR / "mobility_profile_pool_metadata.csv")
+    hours_count = int(hours)
+    pool_manifest = read_pool_manifest(MOBILITY_SESSION_POOL_DIR)
+    metadata = pd.read_csv(
+        MOBILITY_SESSION_POOL_DIR / "mobility_profile_pool_metadata.csv"
+    )
     metadata = (
         metadata[metadata["weather_key"].astype(str).eq(DEFAULT_MOBILITY_WEATHER_KEY)]
         .sort_values("profile_id")
@@ -867,6 +975,26 @@ def _build_paired_mobility(
     if metadata.empty:
         raise ValueError(
             f"No mobility profiles are available for {DEFAULT_MOBILITY_WEATHER_KEY}."
+        )
+    versions = set(metadata["generation_version"].astype(str))
+    if versions != {SESSION_GENERATION_VERSION}:
+        raise ValueError(
+            "The dedicated EV session contract requires a pool generated with "
+            f"{SESSION_GENERATION_VERSION}; found {sorted(versions)}. Old clipped "
+            "pool rows must never be mixed with corrected ones."
+        )
+    # Selection indexes into the *pinned* profile list, so growing the pool
+    # cannot silently re-pair an existing building: the manifest no longer
+    # matches and the run is rejected instead of quietly reassigning vehicles.
+    pinned_ids = sorted(str(value) for value in pool_manifest["profile_ids"])
+    present_ids = list(metadata["profile_id"].astype(str))
+    if present_ids != pinned_ids:
+        raise ValueError(
+            "The EV session pool no longer matches its pinned manifest at "
+            f"{MOBILITY_SESSION_POOL_DIR / POOL_MANIFEST_FILENAME}: the manifest "
+            f"declares {len(pinned_ids)} profile(s), the directory contains "
+            f"{len(present_ids)}. Re-freeze the manifest deliberately if the pool "
+            "was meant to change; vehicle assignment depends on it."
         )
 
     selected_records: list[dict[str, Any]] = []
@@ -903,41 +1031,95 @@ def _build_paired_mobility(
                     ),
                 }
             )
-    profile_ids = [record["profile_id"] for record in selected_records]
-    demand_pool = _read_pool_timeseries(
-        MOBILITY_POOL_DIR / "mobility_demand_pool.csv",
+    profile_ids = {record["profile_id"] for record in selected_records}
+    # A profile can legitimately have no home charging sessions (a vehicle that
+    # never connects at the building), so an absent profile is only an error when
+    # the pool declares sessions for it that we failed to read.
+    pool_sessions = _read_session_pool(
+        MOBILITY_SESSION_POOL_DIR / "mobility_sessions_pool.csv",
         profile_ids,
-        "demand_kwh",
+        columns=SESSION_POOL_COLUMNS,
     )
-    availability_pool = _read_pool_timeseries(
-        MOBILITY_POOL_DIR / "mobility_availability_pool.csv",
+    pool_hours = _read_session_pool(
+        MOBILITY_SESSION_POOL_DIR / "mobility_session_hours_pool.csv",
         profile_ids,
-        "availability",
+        columns=SESSION_HOUR_POOL_COLUMNS,
+    )
+    sessions_by_profile = dict(tuple(pool_sessions.groupby("profile_id")))
+    hours_by_profile = dict(tuple(pool_hours.groupby("profile_id")))
+    metadata_by_profile = (
+        metadata.set_index("profile_id")["sessions"].astype(int).to_dict()
+        if "sessions" in metadata.columns
+        else {
+            str(profile_id): int(
+                (pool_sessions["profile_id"] == profile_id).sum()
+            )
+            for profile_id in profile_ids
+        }
     )
 
-    demand_parts = []
     availability_parts = []
     process_rows = []
-    commodity_rows = []
-    process_commodity_rows = []
-    storage_rows = []
+    session_rows = []
+    session_hour_rows = []
     audit_rows = []
     for global_id, record in enumerate(selected_records):
         bus = _target_bus(record)
         profile_id = record["profile_id"]
-        mobility = f"mobility{global_id}"
         charger = f"charging_station{global_id}"
-        storage = f"mobility_storage{global_id}"
-        demand = demand_pool[profile_id].iloc[:hours].reset_index(drop=True)
-        availability = availability_pool[profile_id].iloc[:hours].reset_index(drop=True)
-        demand_parts.append(demand.rename((bus, mobility)))
+        charger_kw = float(record["charger_kw"])
+        if profile_id not in metadata_by_profile:
+            raise ValueError(
+                f"Session pool metadata has no entry for profile {profile_id}."
+            )
+        declared_sessions = int(metadata_by_profile[profile_id])
+        profile_sessions = sessions_by_profile.get(
+            profile_id, pool_sessions.iloc[0:0]
+        ).sort_values("session_index")
+        profile_hours = hours_by_profile.get(profile_id, pool_hours.iloc[0:0])
+        if len(profile_sessions) != declared_sessions:
+            raise ValueError(
+                f"Session pool is inconsistent for profile {profile_id}: metadata "
+                f"declares {declared_sessions} session(s) but "
+                f"{len(profile_sessions)} row(s) are present."
+            )
+
+        # Re-key the charger-agnostic pool rows onto this physical vehicle and
+        # re-validate feasibility against its actual charger rating.
+        renamed = {
+            int(index): f"{bus}:{global_id}:{int(index)}"
+            for index in profile_sessions["session_index"]
+        }
+        sessions = profile_sessions.drop(columns=["session_index"]).copy()
+        sessions.insert(0, "session_id", [renamed[int(index)] for index in profile_sessions["session_index"]])
+        sessions.insert(1, "site", bus)
+        sessions.insert(2, "vehicle_index", global_id)
+        sessions.insert(3, "process", charger)
+        sessions["charger_kw"] = charger_kw
+
+        hours = profile_hours.copy()
+        hours.insert(0, "session_id", [renamed[int(index)] for index in hours["session_index"]])
+        hours = hours.drop(columns=["session_index", "profile_id"])
+        hours = hours.sort_values(["session_id", "order"]).reset_index(drop=True)
+
+        available = hours.groupby("session_id")["available_fraction"].sum()
+        sessions["available_hours"] = (
+            sessions["session_id"].map(available).astype(float)
+        )
+        sessions["capacity_kwh"] = sessions["available_hours"] * charger_kw
+        sessions = sessions[SESSION_COLUMNS]
+
+        availability = pd.Series(0.0, index=pd.RangeIndex(hours_count))
+        offsets = hours["t"].astype(int) - SESSION_HOUR_OFFSET
+        availability.loc[offsets.to_numpy()] = hours["available_fraction"].to_numpy()
         availability_parts.append(availability.rename((bus, charger)))
+
         process_rows.append(
             {
                 "Site": bus,
                 "Process": charger,
-                "inst-cap": record["charger_kw"],
-                "cap-up": record["charger_kw"],
+                "inst-cap": charger_kw,
+                "cap-up": charger_kw,
                 "inv-cost-fix": process_parameters["fixed_investment_cost_eur"],
                 "inv-cost": process_parameters["investment_cost_eur_per_kw"],
                 "fix-cost": process_parameters["fixed_cost_eur_per_hour"],
@@ -947,79 +1129,60 @@ def _build_paired_mobility(
                 "pf-min": process_parameters["minimum_power_factor"],
             }
         )
-        commodity_rows.append(
-            {
-                "Site": bus,
-                "Commodity": mobility,
-                "Type": "Demand",
-                "price": np.nan,
-            }
-        )
-        process_commodity_rows.extend(
-            [
-                {
-                    "Process": charger,
-                    "Commodity": "electricity",
-                    "Direction": "In",
-                    "ratio": 1,
-                },
-                {
-                    "Process": charger,
-                    "Commodity": mobility,
-                    "Direction": "Out",
-                    "ratio": 1,
-                },
-            ]
-        )
-        storage_rows.append(
-            {
-                "Site": bus,
-                "Storage": storage,
-                "Commodity": mobility,
-                "inst-cap-c": record["battery_cap_kwh"],
-                "cap-up-c": record["battery_cap_kwh"],
-                "inst-cap-p": record["battery_cap_kwh"],
-                "cap-up-p": record["battery_cap_kwh"],
-                "eff-in": storage_parameters["charge_efficiency"],
-                "eff-out": storage_parameters["discharge_efficiency"],
-                "discharge": storage_parameters["self_discharge_per_timestep"],
-                "ep-ratio": storage_parameters["energy_to_power_hours"],
-                "inv-cost-p": storage_parameters["investment_cost_eur_per_kw"],
-                "inv-cost-c": storage_parameters["investment_cost_eur_per_kwh"],
-                "fix-cost-p": storage_parameters["fixed_investment_cost_power_eur"],
-                "fix-cost-c": storage_parameters["fixed_investment_cost_energy_eur"],
-                "var-cost-p": storage_parameters["variable_cost_eur_per_kwh"],
-                "wacc": storage_parameters["wacc"],
-                "depreciation": storage_parameters["depreciation_years"],
-            }
-        )
+        session_rows.append(sessions)
+        session_hour_rows.append(hours)
         audit_rows.append(
             {
                 "sector": "mobility",
                 "allocation_bus": bus,
                 "building_objectid": record.get("building_objectid"),
                 "profile_sequence": record["profile_sequence"],
-                "capacity_kw": record["charger_kw"],
+                "capacity_kw": charger_kw,
                 "profile_label": profile_id,
                 "battery_cap_kwh": record["battery_cap_kwh"],
-                "demand_sum_kwh": float(demand.sum()),
+                "demand_sum_kwh": float(sessions["energy_kwh"].sum()),
+                "sessions": int(len(sessions)),
+                "wrap_sessions": int(sessions["wraps_year"].astype(bool).sum()),
             }
         )
 
-    demand_df = pd.concat(demand_parts, axis=1)
-    demand_df.columns = pd.MultiIndex.from_tuples(demand_df.columns)
-    demand_df.index.name = "t"
+    all_sessions = pd.concat(session_rows, ignore_index=True)
+    all_hours = pd.concat(session_hour_rows, ignore_index=True)
+    process = pd.DataFrame(process_rows)
+    validate_sessions(
+        all_sessions,
+        all_hours,
+        horizon_hours=hours_count,
+        process_table=process,
+    )
+
     eff_df = pd.concat(availability_parts, axis=1)
     eff_df.columns = pd.MultiIndex.from_tuples(eff_df.columns)
     eff_df.index.name = "t"
+    # Dedicated sessions replace the legacy mobility deadline demand, the
+    # mobility commodity and the virtual mobility storage entirely; the charger
+    # is an output-less electrical load governed by the session contract.
     return _MobilityInputs(
-        demand=demand_df,
+        demand=_empty_timeseries(hours_count),
         eff_factor=eff_df,
-        process=pd.DataFrame(process_rows),
-        commodity=pd.DataFrame(commodity_rows),
-        process_commodity=pd.DataFrame(process_commodity_rows),
-        storage=pd.DataFrame(storage_rows),
+        process=process,
+        commodity=pd.DataFrame(),
+        process_commodity=pd.DataFrame(
+            [
+                {
+                    "Process": row["Process"],
+                    "Commodity": "electricity",
+                    "Direction": "In",
+                    "ratio": 1,
+                }
+                for row in process_rows
+            ]
+        ),
+        storage=pd.DataFrame(),
         audit=pd.DataFrame(audit_rows),
+        sessions=all_sessions,
+        session_hours=all_hours,
+        pool_id=str(pool_manifest["pool_id"]),
     )
 
 

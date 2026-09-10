@@ -172,6 +172,24 @@ def run_lvds_opt(input_path,        # path to input file
     mode = identify_mode(data)   # check whether intertemporal, transmission, storage, dsm, bsp, tve, availability, acpf/dcpf, type period weight, tsam, tsam season, onoff, minfraction, power_price, uncoordinated, transdist, 14a, uhp
     print(f"Identified running modes: {mode}")               # for us should be present: sto, bsp, tve, ava, tsam, exp(pro, sto-c, sto-p), uncoordinated
 
+    ### Full-year chronological reference: no aggregation may be active. ###
+    # A fresh Step-2 input initializes weight_typeperiod to NaN, so mode['tdy']
+    # must be False here. Asserting it prevents a stale or hand-edited input from
+    # silently reintroducing representative-period storage resets.
+    if not mode["tsam"]:
+        if mode["tdy"]:
+            raise ValueError(
+                "Time aggregation is disabled but type-period weights are active. "
+                "Full-year runs must not carry representative-period weights or "
+                "the weekly storage-state constraints they enable."
+            )
+        occurrences = data["type_period"]["weight_typeperiod"].dropna()
+        if not occurrences.empty and not (occurrences == 1).all():
+            raise ValueError(
+                "Full-year runs require unit timestep occurrence weights; found "
+                f"{sorted(occurrences.unique())[:5]}."
+            )
+
     end_time = time.time()
     print(f"Preprocesssing took {(end_time-start_time)/60:.2f} minutes to run!\n")
 
@@ -198,6 +216,41 @@ def run_lvds_opt(input_path,        # path to input file
     with pd.HDFStore(result_path, mode='a', complib='blosc', complevel=9) as store:
         for name in tsam_data.keys():
             store['urbs_out/tsam/' + name] = tsam_data[name]
+
+    ###### Temporal-method provenance ######
+    # Written for every run so Step 4 and the post-processing can reject a stale
+    # result on identity instead of guessing from filenames or the presence of
+    # the 'reduced_data' group, which is written in both modes.
+    temporal_audit = pd.Series(
+        {
+            "temporal_method": (
+                "shared_weather_tsam" if mode["tsam"] else "full_year_no_tsam"
+            ),
+            "operating_hours": int(len(global_settings["timesteps"]) - 1),
+            "initialization_rows": 1,
+            "delta_t_hours": float(global_settings["dt"]),
+            "annual_weight": float(8760) / (len(global_settings["timesteps"]) - 1),
+            "source_reference_year": int(global_settings.get("source_reference_year", 2009)),
+            "storage_boundary_policy": (
+                "typeperiod_common_initial_state"
+                if mode["tdy"]
+                else "annual_equality"
+            ),
+            "ev_boundary_policy": (
+                "dedicated_sessions_annual_wrap"
+                if mode.get("evs")
+                else "legacy_mobility_buffer"
+            ),
+            "scenario_key": str(global_settings.get("scenario_key", "")),
+            "scenario_hash": str(global_settings.get("scenario_hash", "")),
+        },
+        dtype=object,
+    )
+    with pd.HDFStore(result_path, mode='a', complib='blosc', complevel=9) as store:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
+            store['urbs_out/temporal_method'] = temporal_audit
+    print(f"Temporal method: {temporal_audit.to_dict()}\n")
 
 
     ##### Variable Tariff: #####

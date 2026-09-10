@@ -107,7 +107,7 @@ uv run --project GridExpand/4.powerflow python GridExpand/scenario_pipeline/synt
   --profiles all \
   --timeframe-mode full_year \
   --powerflow-output summary \
-  --scenario-config GridExpand/scenario_pipeline/config/scenarios/forchheim_2045.yaml \
+  --scenario-config GridExpand/scenario_pipeline/config/scenarios/forchheim_2045_full_year.yaml \
   --run-dir GridExpand/run_logs/<run_name> \
   --workers 1 \
   --step2-cpus 4 \

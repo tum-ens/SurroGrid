@@ -30,6 +30,13 @@ from config import config
 import pandas as pd
 import numpy as np
 
+from common.ev_sessions import (
+    ENERGY_TOL_KWH as SESSION_ENERGY_TOL_KWH,
+    POWER_TOL_KW as SESSION_POWER_TOL_KW,
+    earliest_feasible_schedule,
+    validate_sessions,
+)
+
 
 def _use_t_as_index(df):
     if not isinstance(df.index, pd.MultiIndex):
@@ -412,98 +419,52 @@ def _no_flex_heat_electricity(df_raw_demand, df_eff_factor, process):
     return total_electricity, hp_electricity, auxiliary_electricity
 
 
-def _redistribute_ev_energy_linear(energy_values, available, charger_kw):
-    """Assign EV energy to the earliest available hours in non-cyclic windows."""
-    result = np.zeros_like(energy_values, dtype=float)
-    assigned_energy = 0.0
-    i = 0
-    while i < len(energy_values):
-        if not available[i]:
-            i += 1
-            continue
-        j = i
-        while j < len(energy_values) and available[j]:
-            j += 1
+def _mobility_electricity(sessions, session_hours, horizon_hours, index):
+    """INFLEX EV charging: fill every session from its own arrival, earliest first.
 
-        required = float(energy_values[i:j].sum())
-        assigned_energy += required
-        k = i
-        while required > 1e-9 and k < j:
-            charge = min(float(charger_kw), required)
-            result[k] = charge
-            required -= charge
-            k += 1
-        if required > 1e-9:
-            result[j - 1] += required
-        i = j
+    The session tables are the shared EV service contract; both controllers serve
+    exactly the same per-session energy inside exactly the same window at exactly
+    the same charger rating. Charging power per vehicle comes from its own
+    ``charger_kw``, never from a global default.
+    """
+    if sessions is None or sessions.empty:
+        return _empty_electricity_frame(index)
 
-    return result, assigned_energy
+    schedule = earliest_feasible_schedule(
+        sessions, session_hours, horizon_hours=horizon_hours
+    )
+    if schedule.empty:
+        return _empty_electricity_frame(index)
 
-
-def _cyclic_availability_start(available):
-    starts = np.where((~available[:-1]) & (available[1:]))[0] + 1
-    if len(starts) == 0:
-        return None
-    return int(starts[0])
-
-
-def _redistribute_ev_energy(energy, availability, charger_kw):
-    energy_values = np.asarray(energy, dtype=float)
-    available = np.asarray(availability, dtype=float) > 0.5
-    if len(energy_values) == 0:
-        return np.zeros_like(energy_values, dtype=float)
-
-    if available[0] and available[-1]:
-        start = _cyclic_availability_start(available)
-        if start is not None:
-            rotated_result, assigned_energy = _redistribute_ev_energy_linear(
-                np.roll(energy_values, -start),
-                np.roll(available, -start),
-                charger_kw,
-            )
-            result = np.roll(rotated_result, start)
-        else:
-            result, assigned_energy = _redistribute_ev_energy_linear(
-                energy_values,
-                available,
-                charger_kw,
-            )
-    else:
-        result, assigned_energy = _redistribute_ev_energy_linear(
-            energy_values,
-            available,
-            charger_kw,
-        )
-
-    total_energy = float(energy_values.sum())
-    if abs(total_energy - assigned_energy) > 1e-6:
+    delivered = float(schedule.to_numpy().sum())
+    required = float(sessions["energy_kwh"].sum())
+    if abs(delivered - required) > max(SESSION_ENERGY_TOL_KWH, 1e-9 * required):
         raise ValueError(
-            "No-flex EV redistribution found mobility energy outside home availability. "
-            f"total={total_energy:.6f} kWh, assigned={assigned_energy:.6f} kWh."
-        )
-    return result
-
-
-def _mobility_electricity(df_raw_demand, df_eff_factor, ev_charger_kw):
-    mobility_columns = _columns_starting_with(df_raw_demand, "mobility")
-    if not mobility_columns:
-        return _empty_electricity_frame(df_raw_demand.index)
-
-    direct_profiles = {}
-    for column in mobility_columns:
-        bus, label = column
-        suffix = str(label).replace("mobility", "")
-        availability_column = (bus, f"charging_station{suffix}")
-        if availability_column not in df_eff_factor.columns:
-            raise ValueError(f"Missing EV availability column {availability_column!r} for mobility column {column!r}.")
-        direct_profiles[column] = _redistribute_ev_energy(
-            df_raw_demand[column],
-            df_eff_factor[availability_column],
-            ev_charger_kw,
+            "No-flex EV schedule does not deliver the required session energy: "
+            f"required={required:.9f} kWh, delivered={delivered:.9f} kWh."
         )
 
-    mobility = pd.DataFrame(direct_profiles, index=df_raw_demand.index)
-    return _sum_columns_by_bus(mobility)
+    charger_kw = sessions.set_index(["site", "process"])["charger_kw"]
+    charger_kw = charger_kw[~charger_kw.index.duplicated()]
+    residual = 0.0
+    for column in schedule.columns:
+        limit = float(charger_kw.loc[column])
+        peak = float(schedule[column].max())
+        residual = max(residual, peak - limit)
+    if residual > SESSION_POWER_TOL_KW:
+        raise ValueError(
+            f"No-flex EV schedule exceeds a charger rating by {residual:.9f} kW."
+        )
+
+    schedule = schedule.copy()
+    schedule.index = index
+    print(
+        f"No-flex EV sessions: vehicles={schedule.shape[1]}, "
+        f"sessions={len(sessions)}, delivered={delivered:.1f} kWh, "
+        f"max_power_residual={residual:.3e} kW.",
+        flush=True,
+    )
+    return _sum_columns_by_bus(schedule)
 
 
 def _pv_generation(df_supim, df_process, cap_pro):
@@ -596,54 +557,84 @@ def _simulate_self_consumption_period(
     power_kw,
     charge_efficiency,
     discharge_efficiency,
+    self_discharge_per_timestep=0.0,
+    delta_t=1.0,
 ):
+    """Greedy self-consumption dispatch with explicit losses and timestep length.
+
+    ``net_demand`` is in kW; the returned trajectory is in kW. Energy quantities
+    are in kWh. Self-discharge is applied to the stored energy at the start of
+    each timestep, exactly as URBS does in ``def_storage_state_rule``.
+    """
     soc = float(initial_soc_kwh)
     adjusted = np.asarray(net_demand, dtype=float).copy()
+    soc_trajectory = np.empty(len(adjusted) + 1, dtype=float)
+    soc_trajectory[0] = soc
     charged_kwh = 0.0
     discharged_kwh = 0.0
+    self_loss_kwh = 0.0
+    retention = (1.0 - float(self_discharge_per_timestep)) ** float(delta_t)
     for index, net_kw in enumerate(adjusted):
+        before = soc
+        soc *= retention
+        self_loss_kwh += before - soc
         if net_kw < 0.0:
             charge_kw = min(
                 -float(net_kw),
                 power_kw,
-                max(energy_kwh - soc, 0.0) / charge_efficiency,
+                max(energy_kwh - soc, 0.0) / (charge_efficiency * delta_t),
             )
-            soc += charge_kw * charge_efficiency
+            soc += charge_kw * charge_efficiency * delta_t
             adjusted[index] += charge_kw
-            charged_kwh += charge_kw
+            charged_kwh += charge_kw * delta_t
         elif net_kw > 0.0:
             discharge_kw = min(
                 float(net_kw),
                 power_kw,
-                soc * discharge_efficiency,
+                soc * discharge_efficiency / delta_t,
             )
-            soc -= discharge_kw / discharge_efficiency
+            soc -= discharge_kw * delta_t / discharge_efficiency
             adjusted[index] -= discharge_kw
-            discharged_kwh += discharge_kw
-    return adjusted, soc, charged_kwh, discharged_kwh
+            discharged_kwh += discharge_kw * delta_t
+        # Bounds must hold after every transition, never by resetting the state.
+        if soc < -1e-9 or soc > energy_kwh + 1e-9:
+            raise ValueError(
+                f"Stationary-battery state left its bounds at step {index}: "
+                f"soc={soc:.9f} kWh, capacity={energy_kwh:.9f} kWh."
+            )
+        soc_trajectory[index + 1] = soc
+    return adjusted, soc, charged_kwh, discharged_kwh, self_loss_kwh, soc_trajectory
 
 
-def _cyclic_self_consumption_period(net_demand, battery):
+def _cyclic_self_consumption_period(net_demand, battery, *, delta_t=1.0):
     energy_kwh = float(battery["inst-cap-c"])
     power_kw = float(battery["inst-cap-p"])
     charge_efficiency = float(battery["eff-in"])
     discharge_efficiency = float(battery["eff-out"])
+    self_discharge = float(battery.get("discharge", 0.0) or 0.0)
     if energy_kwh <= 0.0 or power_kw <= 0.0:
-        return np.asarray(net_demand, dtype=float), 0.0, 0.0
+        return np.asarray(net_demand, dtype=float), _empty_battery_diagnostics()
     if not 0.0 < charge_efficiency <= 1.0:
         raise ValueError("Stationary-battery charging efficiency must be in (0, 1].")
     if not 0.0 < discharge_efficiency <= 1.0:
         raise ValueError("Stationary-battery discharging efficiency must be in (0, 1].")
+    if not 0.0 <= self_discharge < 1.0:
+        raise ValueError(
+            f"Unsupported stationary-battery self-discharge {self_discharge!r}; "
+            "it must lie in [0, 1)."
+        )
 
     initial_soc = energy_kwh / 2.0
     for _ in range(1000):
-        _, final_soc, _, _ = _simulate_self_consumption_period(
+        _, final_soc, _, _, _, _ = _simulate_self_consumption_period(
             net_demand,
             initial_soc_kwh=initial_soc,
             energy_kwh=energy_kwh,
             power_kw=power_kw,
             charge_efficiency=charge_efficiency,
             discharge_efficiency=discharge_efficiency,
+            self_discharge_per_timestep=self_discharge,
+            delta_t=delta_t,
         )
         if abs(final_soc - initial_soc) <= 1e-7:
             break
@@ -651,15 +642,62 @@ def _cyclic_self_consumption_period(net_demand, battery):
     else:
         raise RuntimeError("Stationary-battery cyclic state did not converge.")
 
-    adjusted, _, charged, discharged = _simulate_self_consumption_period(
-        net_demand,
-        initial_soc_kwh=initial_soc,
-        energy_kwh=energy_kwh,
-        power_kw=power_kw,
-        charge_efficiency=charge_efficiency,
-        discharge_efficiency=discharge_efficiency,
+    adjusted, final_soc, charged, discharged, self_loss, trajectory = (
+        _simulate_self_consumption_period(
+            net_demand,
+            initial_soc_kwh=initial_soc,
+            energy_kwh=energy_kwh,
+            power_kw=power_kw,
+            charge_efficiency=charge_efficiency,
+            discharge_efficiency=discharge_efficiency,
+            self_discharge_per_timestep=self_discharge,
+            delta_t=delta_t,
+        )
     )
-    return adjusted, charged, discharged
+
+    # Validate the trajectory that is actually returned, not only the preceding
+    # fixed-point iterate.
+    cyclic_residual = final_soc - trajectory[0]
+    tolerance = max(1e-6, 1e-9 * energy_kwh)
+    if abs(cyclic_residual) > tolerance:
+        raise ValueError(
+            "Stationary-battery annual closure is not satisfied by the returned "
+            f"trajectory: residual={cyclic_residual:.9e} kWh, tolerance={tolerance:.3e}."
+        )
+    balance_residual = (
+        charge_efficiency * charged - discharged / discharge_efficiency - self_loss
+    ) - cyclic_residual
+    if abs(balance_residual) > tolerance:
+        raise ValueError(
+            "Stationary-battery energy balance does not close: "
+            f"residual={balance_residual:.9e} kWh."
+        )
+    diagnostics = {
+        "initial_soc_kwh": float(trajectory[0]),
+        "final_soc_kwh": float(final_soc),
+        "min_soc_kwh": float(trajectory.min()),
+        "max_soc_kwh": float(trajectory.max()),
+        "charged_kwh": float(charged),
+        "discharged_kwh": float(discharged),
+        "self_loss_kwh": float(self_loss),
+        "cyclic_residual_kwh": float(cyclic_residual),
+        "balance_residual_kwh": float(balance_residual),
+    }
+    return adjusted, diagnostics
+
+
+def _empty_battery_diagnostics():
+    return {
+        "initial_soc_kwh": 0.0,
+        "final_soc_kwh": 0.0,
+        "min_soc_kwh": 0.0,
+        "max_soc_kwh": 0.0,
+        "charged_kwh": 0.0,
+        "discharged_kwh": 0.0,
+        "self_loss_kwh": 0.0,
+        "cyclic_residual_kwh": 0.0,
+        "balance_residual_kwh": 0.0,
+    }
 
 
 def _apply_no_flex_battery_control(
@@ -667,10 +705,11 @@ def _apply_no_flex_battery_control(
     df_storage,
     *,
     hours_per_period=None,
+    delta_t=1.0,
 ):
     batteries = _fixed_stationary_batteries(df_storage)
     if batteries.empty:
-        return net_demand
+        return net_demand, pd.DataFrame()
 
     adjusted = net_demand.copy()
     adjusted.columns = adjusted.columns.get_level_values(0)
@@ -680,6 +719,10 @@ def _apply_no_flex_battery_control(
 
     total_charged = 0.0
     total_discharged = 0.0
+    total_self_loss = 0.0
+    max_cyclic_residual = 0.0
+    max_balance_residual = 0.0
+    diagnostics_rows = []
     for site, battery in batteries.iterrows():
         if site not in adjusted.columns:
             adjusted[site] = 0.0
@@ -687,12 +730,22 @@ def _apply_no_flex_battery_control(
         controlled = values.copy()
         for start in range(0, len(values), period_hours):
             stop = min(start + period_hours, len(values))
-            segment, charged, discharged = _cyclic_self_consumption_period(
-                values[start:stop], battery
+            segment, diagnostics = _cyclic_self_consumption_period(
+                values[start:stop], battery, delta_t=delta_t
             )
             controlled[start:stop] = segment
-            total_charged += charged
-            total_discharged += discharged
+            total_charged += diagnostics["charged_kwh"]
+            total_discharged += diagnostics["discharged_kwh"]
+            total_self_loss += diagnostics["self_loss_kwh"]
+            max_cyclic_residual = max(
+                max_cyclic_residual, abs(diagnostics["cyclic_residual_kwh"])
+            )
+            max_balance_residual = max(
+                max_balance_residual, abs(diagnostics["balance_residual_kwh"])
+            )
+            diagnostics_rows.append(
+                {"site": site, "period_start": start, **diagnostics}
+            )
         adjusted[site] = controlled
 
     adjusted = adjusted.sort_index(axis=1)
@@ -703,10 +756,13 @@ def _apply_no_flex_battery_control(
         "No-flex stationary batteries: "
         f"sites={len(batteries)}, charged={total_charged:.1f} kWh, "
         f"discharged={total_discharged:.1f} kWh, "
+        f"self_loss={total_self_loss:.3f} kWh, "
+        f"max_cyclic_residual={max_cyclic_residual:.3e} kWh, "
+        f"max_balance_residual={max_balance_residual:.3e} kWh, "
         f"control_period_hours={period_hours}.",
         flush=True,
     )
-    return adjusted
+    return adjusted, pd.DataFrame(diagnostics_rows)
 
 
 def _reactive_from_no_flex_components(df_pre_demand_react, df_heat_elec, df_pv_elec):
@@ -716,13 +772,21 @@ def _reactive_from_no_flex_components(df_pre_demand_react, df_heat_elec, df_pv_e
     )
 
 
-def _process_no_flex_demands(no_flex_inputs, df_pre_demand_elec, df_pre_demand_react, ev_charger_kw):
+def _process_no_flex_demands(no_flex_inputs, df_pre_demand_elec, df_pre_demand_react):
     reference = no_flex_inputs.get("reference")
     timesteps = _reference_timestep_count(reference, no_flex_inputs.get("drop_initial_timestep", False))
     reference_label = "urbs output" if reference is not None else "raw no-flex demand"
     if timesteps is None:
         timesteps = len(_use_t_as_index(no_flex_inputs["demand"]))
 
+    delta_t = no_flex_inputs.get("delta_t_hours")
+    if delta_t is not None and abs(float(delta_t) - 1.0) > 1e-9:
+        raise ValueError(
+            f"No-flex reconstruction supports hourly timesteps only, but this "
+            f"result records delta_t_hours={delta_t}. Pass the duration through "
+            "EV scheduling and battery control before advertising other "
+            "resolutions."
+        )
     df_raw_demand = _align_table_to_timesteps(no_flex_inputs["demand"], timesteps, "No-flex demand", reference_label)
     df_eff_factor = _align_table_to_timesteps(no_flex_inputs["eff_factor"], timesteps, "No-flex eff_factor", reference_label)
     df_supim = _align_table_to_timesteps(no_flex_inputs["supim"], timesteps, "No-flex supim", reference_label)
@@ -733,7 +797,12 @@ def _process_no_flex_demands(no_flex_inputs, df_pre_demand_elec, df_pre_demand_r
         df_eff_factor,
         no_flex_inputs["process"],
     )
-    df_ev_elec = _mobility_electricity(df_raw_demand, df_eff_factor, ev_charger_kw)
+    df_ev_elec = _mobility_electricity(
+        no_flex_inputs["ev_sessions"],
+        no_flex_inputs["ev_session_hours"],
+        timesteps,
+        df_raw_demand.index,
+    )
     df_pv_elec = _pv_generation(
         df_supim, df_process, no_flex_inputs["cap_pro"]
     )
@@ -745,7 +814,7 @@ def _process_no_flex_demands(no_flex_inputs, df_pre_demand_elec, df_pre_demand_r
     net_before_battery.columns = pd.MultiIndex.from_tuples(
         [(site, "electricity") for site in net_before_battery.columns]
     )
-    df_post_demand_elec = _apply_no_flex_battery_control(
+    df_post_demand_elec, battery_diagnostics = _apply_no_flex_battery_control(
         net_before_battery,
         no_flex_inputs["storage"],
         hours_per_period=no_flex_inputs.get("tsam_hours_per_period"),
@@ -757,7 +826,7 @@ def _process_no_flex_demands(no_flex_inputs, df_pre_demand_elec, df_pre_demand_r
         df_pv_elec,
     )
     df_react_save = _concat_react_demands(df_pre_demand_react.copy(), df_demand_HP_react, df_prod_PV_react)
-    return df_post_demand_elec, df_post_demand_react, df_react_save
+    return df_post_demand_elec, df_post_demand_react, df_react_save, battery_diagnostics
 
 
 def obtain_pre_demand(SF):
@@ -778,9 +847,6 @@ def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charge
         df_pre_demand_elec, df_pre_demand_react = _process_pre_demands(df_raw_demand)
         df_post_demand_elec, df_post_demand_react, df_react_save = _process_post_demands(df_urbs_demand, df_pre_demand_react)
     else:
-        charger_kw = config.EV_HOME_CHARGER_KW if ev_charger_kw is None else float(ev_charger_kw)
-        if charger_kw <= 0:
-            raise ValueError("ev_charger_kw must be greater than zero.")
         no_flex_inputs = SF.get_no_flex_inputs()
         reference = no_flex_inputs.get("reference")
         timesteps = _reference_timestep_count(reference, no_flex_inputs.get("drop_initial_timestep", False))
@@ -788,13 +854,57 @@ def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charge
             timesteps = len(_use_t_as_index(no_flex_inputs["demand"]))
         reference_label = "urbs output" if reference is not None else "raw no-flex demand"
         df_raw_demand = _align_table_to_timesteps(no_flex_inputs["demand"], timesteps, "No-flex demand", reference_label)
-        df_pre_demand_elec, df_pre_demand_react = _process_pre_demands(df_raw_demand)
-        df_post_demand_elec, df_post_demand_react, df_react_save = _process_no_flex_demands(
-            no_flex_inputs,
-            df_pre_demand_elec,
-            df_pre_demand_react,
-            charger_kw,
+        # Charger power is per vehicle and comes from the session table, which is
+        # validated against the scenario process rows. A run-level override is
+        # accepted only if it agrees with every vehicle's actual rating.
+        sessions = no_flex_inputs["ev_sessions"]
+        validate_sessions(
+            sessions,
+            no_flex_inputs["ev_session_hours"],
+            horizon_hours=timesteps,
+            process_table=no_flex_inputs["process"],
         )
+        if ev_charger_kw is not None and not sessions.empty:
+            mismatched = sessions.loc[
+                ~np.isclose(
+                    sessions["charger_kw"].astype(float),
+                    float(ev_charger_kw),
+                    rtol=0.0,
+                    atol=SESSION_POWER_TOL_KW,
+                )
+            ]
+            if not mismatched.empty:
+                raise ValueError(
+                    f"--no-flex-ev-charger-kw={ev_charger_kw} disagrees with "
+                    f"{len(mismatched)} session charger rating(s), for example "
+                    f"{mismatched['charger_kw'].iloc[0]} kW at site "
+                    f"{mismatched['site'].iloc[0]}."
+                )
+        df_pre_demand_elec, df_pre_demand_react = _process_pre_demands(df_raw_demand)
+        df_post_demand_elec, df_post_demand_react, df_react_save, battery_diagnostics = (
+            _process_no_flex_demands(
+                no_flex_inputs,
+                df_pre_demand_elec,
+                df_pre_demand_react,
+            )
+        )
+        # Component audits are retained regardless of whether the reactive
+        # time-series tables are written: the paired compact-summary paths
+        # disable those, and the database has no matching table.
+        if not battery_diagnostics.empty:
+            saver = getattr(SF, "save_component_audit", None)
+            if saver is None:
+                print(
+                    "No component-audit sink on this adapter; stationary-battery "
+                    "diagnostics were not retained.",
+                    flush=True,
+                )
+            else:
+                location = saver(battery_diagnostics, "no_flex_battery_state")
+                print(
+                    f"No-flex stationary-battery audit retained at {location}.",
+                    flush=True,
+                )
     if save_reactive:
         SF.save_df(df_react_save, "pwrflw/urbs_out/MILP/reactive")
 

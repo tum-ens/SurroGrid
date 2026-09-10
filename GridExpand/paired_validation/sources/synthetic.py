@@ -83,6 +83,11 @@ def run_powerflows(
         "--n_cpu",
         str(args.step4_cpus),
     ]
+    if not args.tsam and not args.pre_only:
+        # A full-year request must never consume a representative-period
+        # result. Pre-only jobs read the Step-2 input, which carries no
+        # Step-3 temporal record.
+        common.extend(["--expect-temporal-method", "full_year_no_tsam"])
     if not args.skip_pre:
         run_command(
             cmd=common

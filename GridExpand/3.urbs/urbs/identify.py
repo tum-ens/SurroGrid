@@ -32,6 +32,7 @@ def identify_mode(data):
         # 'acpf': False,                  # ac power flow
         'tdy': False,                   # type periods
         'tsam': False,                  # time series aggregation method
+        'evs': False,                   # dedicated EV charging sessions
         # 'tsam_season': False,
         # 'onoff': False,                 # on/off processes
         # 'minfraction': False,           # processes with minimum working load
@@ -77,6 +78,13 @@ def identify_mode(data):
         mode['tdy'] = True
     if data['global_prop'].loc[pd.IndexSlice[:,'tsam'],'value'].iloc[0]:
         mode['tsam'] = True
+    # Dedicated EV sessions replace the legacy mobility deadline-demand and
+    # mobility-storage path. The *presence* of the session table declares the
+    # methodology; its row count only decides whether any constraint is
+    # instantiated. A building population with no electric vehicles still uses
+    # the dedicated contract.
+    if 'ev_sessions' in data:
+        mode['evs'] = True
     # if data['global_prop'].loc[pd.IndexSlice[:,'tsam_season'],'value'].iloc[0]:
     #     mode['tsam_season'] = True
     # if 'on-off' in data['process'].keys():

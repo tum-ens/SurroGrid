@@ -74,6 +74,26 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(_json_safe(value), allow_nan=False)
 
 
+# Annual-boundary diagnostic columns shared by both power-flow summary tables.
+BOUNDARY_SUMMARY_COLUMNS = (
+    ("boundary_first_24h_max_percent", "DOUBLE PRECISION"),
+    ("boundary_last_24h_max_percent", "DOUBLE PRECISION"),
+    ("boundary_outside_24h_max_percent", "DOUBLE PRECISION"),
+    ("boundary_24h_excess_percent", "DOUBLE PRECISION"),
+    ("boundary_first_168h_max_percent", "DOUBLE PRECISION"),
+    ("boundary_last_168h_max_percent", "DOUBLE PRECISION"),
+    ("boundary_outside_168h_max_percent", "DOUBLE PRECISION"),
+    ("boundary_168h_excess_percent", "DOUBLE PRECISION"),
+    ("boundary_overall_max_percent", "DOUBLE PRECISION"),
+    ("boundary_peak_t_index", "INTEGER"),
+    ("boundary_peak_in_first_24h", "BOOLEAN"),
+    ("boundary_peak_in_last_24h", "BOOLEAN"),
+    ("boundary_peak_in_first_168h", "BOOLEAN"),
+    ("boundary_peak_in_last_168h", "BOOLEAN"),
+)
+BOUNDARY_SUMMARY_COLUMN_NAMES = tuple(name for name, _type in BOUNDARY_SUMMARY_COLUMNS)
+
+
 class SurroGridDatabase:
     """PostgreSQL/PostGIS read/write helper for SurroGrid pipeline data."""
 
@@ -424,6 +444,19 @@ class SurroGridDatabase:
                     f"ADD COLUMN IF NOT EXISTS {column_name} INTEGER"
                 )
             )
+
+        # Annual-boundary sensitivity of the peak. A cyclic annual boundary can
+        # concentrate flexible load in the first and last hours of the modeled
+        # year; these columns keep that visible in the headline metrics instead
+        # of averaging it away.
+        for table_name in ("powerflow_summary", "real_powerflow_summary"):
+            for column_name, column_type in BOUNDARY_SUMMARY_COLUMNS:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE IF EXISTS surrogrid.{table_name} "
+                        f"ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+                    )
+                )
 
     def _schema_ready(self, conn=None) -> bool:
         query = text(
@@ -1693,6 +1726,10 @@ class SurroGridDatabase:
                     "cable_hours_above_100_p95_asset": grid_summary.get("cable_hours_above_100_p95_asset"),
                     "voltage_p05_load_bus_hour_pu": grid_summary.get("voltage_p05_load_bus_hour_pu"),
                     "voltage_hours_below_0_90_p95_asset": grid_summary.get("voltage_hours_below_0_90_p95_asset"),
+                    **{
+                        name: grid_summary.get(name)
+                        for name in BOUNDARY_SUMMARY_COLUMN_NAMES
+                    },
                 }
             ]
         )
@@ -1860,6 +1897,10 @@ class SurroGridDatabase:
                     "voltage_hours_below_0_90_p95_asset": grid_summary.get("voltage_hours_below_0_90_p95_asset"),
                     "voltage_hours_above_1_03_p95_asset": grid_summary.get("voltage_hours_above_1_03_p95_asset"),
                     "voltage_hours_above_1_10_p95_asset": grid_summary.get("voltage_hours_above_1_10_p95_asset"),
+                    **{
+                        name: grid_summary.get(name)
+                        for name in BOUNDARY_SUMMARY_COLUMN_NAMES
+                    },
                 }
             ]
         )

@@ -900,8 +900,15 @@ def prepare_expansion_analysis(
     include_optimized: bool = False,
     default_stage: str = "post_flex",
     real_plz: int | None = None,
+    require_temporal_method: str | None = None,
+    enforce_provenance: bool = True,
 ) -> dict[str, object]:
-    """Prepare one coherent synthetic/real scenario for the analysis notebook."""
+    """Prepare one coherent synthetic/real scenario for the analysis notebook.
+
+    Provenance is enforced here, on the path the notebook actually calls, rather
+    than left to a helper a reader must remember to invoke. Pass
+    ``enforce_provenance=False`` only to inspect a knowingly mixed selection.
+    """
     labels = dict(
         stage_labels
         or (ALL_MODEL_CASE_STAGE_LABELS if include_optimized else DEFAULT_STAGE_LABELS)
@@ -942,8 +949,15 @@ def prepare_expansion_analysis(
         specs_by_source=specs_by_source,
         expected_grid_counts=expected_grid_counts,
     )
+    provenance = None
+    if enforce_provenance:
+        provenance = assert_consistent_temporal_method(
+            expansion_status, expected=require_temporal_method
+        )
+
     synthetic_context = expansion_context_by_source["Synthetic"]
     return {
+        "temporal_provenance": provenance,
         "scenario_prefix": scenario_prefix,
         "display_label": display_label_from_ags(ags),
         "stage_labels": labels,
@@ -1112,3 +1126,91 @@ def export_scenario_analysis_manifest(
         "powerflow_readiness": status_path,
         "publication_gate": gate_path,
     }
+
+
+def temporal_method_by_run_name(run_names) -> pd.DataFrame:
+    """Read the recorded temporal provenance of each power-flow run.
+
+    Identity, not file name, decides whether a result belongs in a reference
+    comparison. Step 3 writes ``urbs_out/temporal_method`` for every run and both
+    Step-4 entry points copy it into the run assumptions.
+    """
+    names = sorted({str(name) for name in run_names if name})
+    if not names:
+        return pd.DataFrame(
+            columns=[
+                "run_name",
+                "temporal_method",
+                "operating_hours",
+                "storage_boundary_policy",
+                "ev_boundary_policy",
+            ]
+        )
+    query = text(
+        """
+        SELECT run_name,
+               assumptions ->> 'temporal_method' AS temporal_method,
+               assumptions ->> 'operating_hours' AS operating_hours,
+               assumptions ->> 'storage_boundary_policy' AS storage_boundary_policy,
+               assumptions ->> 'ev_boundary_policy' AS ev_boundary_policy
+        FROM surrogrid.powerflow_run
+        WHERE run_name = ANY(:names)
+        UNION
+        SELECT run_name,
+               assumptions ->> 'temporal_method',
+               assumptions ->> 'operating_hours',
+               assumptions ->> 'storage_boundary_policy',
+               assumptions ->> 'ev_boundary_policy'
+        FROM surrogrid.real_powerflow_run
+        WHERE run_name = ANY(:names)
+        """
+    )
+    db = SurroGridDatabase()
+    with db.engine.connect() as conn:
+        rows = conn.execute(query, {"names": names}).mappings().all()
+    return pd.DataFrame([dict(row) for row in rows]).drop_duplicates()
+
+
+def assert_consistent_temporal_method(
+    analysis_status: pd.DataFrame,
+    *,
+    expected: str | None = None,
+) -> pd.DataFrame:
+    """Refuse to compare stages that were not produced the same way.
+
+    Raises if the selected stages mix temporal methods, storage-boundary
+    policies or EV service models, or if any stage lacks provenance. Pass
+    ``expected`` to additionally pin the comparison to one method.
+    """
+    available = analysis_status[analysis_status["available"].astype(bool)]
+    provenance = temporal_method_by_run_name(available["run_name"])
+    merged = available.merge(provenance, on="run_name", how="left")
+
+    # A missing field is never evidence of agreement.
+    for column in (
+        "temporal_method",
+        "operating_hours",
+        "storage_boundary_policy",
+        "ev_boundary_policy",
+    ):
+        absent = merged.loc[merged[column].isna(), "stage_label"].tolist()
+        if absent:
+            raise ValueError(
+                f"These stages record no {column} and cannot be used in a "
+                f"reference comparison: {absent}. They predate the temporal "
+                "provenance record and must be rerun."
+            )
+        distinct = sorted(merged[column].astype(str).unique())
+        if len(distinct) > 1:
+            raise ValueError(
+                f"Selected stages mix {column} values {distinct}; a paired "
+                "comparison requires identical physical inputs and boundary "
+                "treatment. Controller dispatch may differ; these fields may not."
+            )
+    if expected is not None:
+        found = sorted(merged["temporal_method"].astype(str).unique())
+        if found != [str(expected)]:
+            raise ValueError(
+                f"Expected temporal_method={expected!r}, found {found}."
+            )
+    return merged

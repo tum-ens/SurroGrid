@@ -58,6 +58,7 @@ from common.timeframe import (  # noqa: E402
 )
 import src.powerflow as pwrflw  # noqa: E402
 import src.demands as dmnds  # noqa: E402
+import src.save_grid as svgrd  # noqa: E402
 from config import config as pf_config  # noqa: E402
 
 
@@ -111,8 +112,9 @@ URBS_ASSUMPTION_TEXT = (
 class RealUrbsResultAdapter:
     """Small SaveFile-compatible adapter for real-grid URBS result HDFs."""
 
-    def __init__(self, hdf_path: Path):
+    def __init__(self, hdf_path: Path, run_name: str | None = None):
         self.input_path = str(hdf_path)
+        self.run_name = run_name
         self.output_path = str(hdf_path)
         self.filename = hdf_path.name
         self.raw_demand_dir = "urbs_in/demand"
@@ -158,42 +160,30 @@ class RealUrbsResultAdapter:
         return self._hdf_key_exists(self.net_demand_dir)
 
     def get_no_flex_inputs(self) -> dict[str, Any]:
-        if not self.has_urbs_results():
-            raise KeyError(
-                f"No-flex post demand requires {self.net_demand_dir!r} in {self.filename}."
-            )
-        return {
-            "source": "post-flex",
-            "demand": self.get_pre_demand(),
-            "eff_factor": self._read_preferred_hdf(
-                self.reduced_eff_factor_dir, self.raw_eff_factor_dir
-            ),
-            "supim": self._read_preferred_hdf(
-                self.reduced_supim_dir, self.raw_supim_dir
-            ),
-            "process": self._read_preferred_hdf(
-                self.reduced_process_dir, self.raw_process_dir
-            ),
-            "storage": self._read_preferred_hdf(
-                self.reduced_storage_dir, self.raw_storage_dir
-            ),
-            "tsam_hours_per_period": (
-                int(
-                    self._read_required_hdf("urbs_out/tsam/hoursPerPeriod")
-                    .to_numpy()
-                    .reshape(-1)[0]
-                )
-                if self._hdf_key_exists("urbs_out/tsam/hoursPerPeriod")
-                else None
-            ),
-            "cap_pro": self._read_required_hdf(self.cap_pro_dir),
-            "reference": pd.read_hdf(self.input_path, key=self.net_demand_dir),
-            "drop_initial_timestep": False,
-        }
+        """Delegate to the single shared no-flex input contract.
+
+        The real adapter previously maintained its own copy of this dictionary
+        and silently lost the EV session tables when they were introduced.
+        """
+        return svgrd.read_no_flex_inputs(self.input_path)
+
+    def get_ev_sessions(self):
+        return svgrd.read_ev_sessions(self.input_path)
 
     def save_df(self, df: pd.DataFrame, dir: str) -> None:
         # Real-grid compact summary runs do not persist intermediate reactive tables.
         return None
+
+    def audit_path(self) -> str:
+        return svgrd.component_audit_path(self.input_path, self.run_name)
+
+    def save_component_audit(self, df: pd.DataFrame, name: str):
+        """Persist a compact component audit beside the run's result file.
+
+        Reactive time-series tables are deliberately not written for real-grid
+        compact-summary runs, but the component audits must still survive.
+        """
+        return svgrd.write_component_audit(self.audit_path(), df, name)
 
 
 def _read_hdf_metadata(hdf_path: Path) -> dict[str, Any]:
@@ -477,6 +467,7 @@ def run_one_urbs_result(
     max_timesteps: int | None = None,
     no_flex_ev_charger_kw: float | None = None,
     summary_grid_scope: str = "full",
+    expect_temporal_method: str | None = None,
 ) -> dict[str, Any]:
     start = time.perf_counter()
     hdf_path = Path(urbs_result_hdf).resolve()
@@ -508,22 +499,36 @@ def run_one_urbs_result(
         summary_grid_scope,
     )
 
-    adapter = RealUrbsResultAdapter(hdf_path)
+    adapter = RealUrbsResultAdapter(hdf_path, run_name=run_name)
     metadata = _read_hdf_metadata(hdf_path)
+    # Identity, not file name, decides whether this result may be consumed.
+    if expect_temporal_method is not None:
+        temporal_audit = svgrd.require_temporal_method(
+            str(hdf_path), expect_temporal_method
+        )
+    else:
+        temporal_audit = svgrd.read_temporal_method(str(hdf_path))
+    if temporal_audit:
+        metadata = {
+            **metadata,
+            "temporal_method": str(temporal_audit.get("temporal_method")),
+            "operating_hours": temporal_audit.get("operating_hours"),
+            "storage_boundary_policy": temporal_audit.get("storage_boundary_policy"),
+            "ev_boundary_policy": temporal_audit.get("ev_boundary_policy"),
+        }
     if post_demand_mode == "pre-only":
         df_pre_demand = dmnds.obtain_pre_demand(adapter)
         df_post_demand = None
     else:
-        charger_kw = (
-            pf_config.EV_HOME_CHARGER_KW
-            if no_flex_ev_charger_kw is None
-            else float(no_flex_ev_charger_kw)
-        )
+        # Per-vehicle charger ratings come from the EV session table; an
+        # explicit value is only a cross-check.
         df_pre_demand, df_post_demand = dmnds.obtain_demand(
             adapter,
             save_reactive=False,
             post_demand_mode=post_demand_mode,
-            ev_charger_kw=charger_kw,
+            ev_charger_kw=(
+                None if no_flex_ev_charger_kw is None else float(no_flex_ev_charger_kw)
+            ),
         )
 
     if metadata.get("optimization_space") == "scenario_unit":
@@ -639,6 +644,16 @@ def main() -> None:
     parser.add_argument("--run-name", default=DEFAULT_RUN_NAME)
     parser.add_argument("--scenario-key", default=DEFAULT_SCENARIO_KEY)
     parser.add_argument(
+        "--expect-temporal-method",
+        choices=("full_year_no_tsam", "shared_weather_tsam"),
+        default=None,
+        help=(
+            "Reject the Step-3 result unless it records this temporal method. "
+            "Neither the file name nor the presence of the reduced_data group "
+            "proves how a result was produced."
+        ),
+    )
+    parser.add_argument(
         "--profile-seed",
         type=int,
         default=481527,
@@ -727,6 +742,7 @@ def main() -> None:
             args.max_timesteps,
             args.no_flex_ev_charger_kw,
             args.summary_grid_scope,
+            args.expect_temporal_method,
         )
         result["status"] = "ok"
         result["error"] = ""

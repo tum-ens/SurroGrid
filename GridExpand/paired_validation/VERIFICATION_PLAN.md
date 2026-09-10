@@ -24,7 +24,7 @@ paired run without explicit user authorization after reporting the audits.
 ~~~bash
 uv run --project GridExpand/2.demand_allocation \
   python GridExpand/scenario_pipeline/run_scenario.py \
-  --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired.yaml \
+  --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired_full_year.yaml \
   --dry-run
 ~~~
 

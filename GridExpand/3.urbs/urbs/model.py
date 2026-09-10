@@ -53,7 +53,7 @@ def create_model(data, global_settings):
         doc='total process capacity')
 
     ### Advanced Features: 
-    m = pyomo_assign_advanced_features(m, global_settings)
+    m = pyomo_assign_advanced_features(m, global_settings, data)
 
     ### Constraints: 
     m = pyomo_assign_basic_constraints(m, global_settings)
@@ -375,11 +375,12 @@ def pyomo_assign_basic_variables(m, global_settings):
     return m
 
 
-def pyomo_assign_advanced_features(m, global_settings):
+def pyomo_assign_advanced_features(m, global_settings, data=None):
     if m.mode['sto']: m = add_storage(m)
     # if m.mode['dsm']: m = add_dsm(m)
     if m.mode['bsp']: m = add_buy_sell_price(m)
     if m.mode['tdy']: m = add_typeperiod(m, global_settings["hoursPerPeriod"])
+    if m.mode['evs']: m = add_ev_sessions(m, data)
     if (m.mode['tve']): m = add_advanced_processes(m)
     else:
         m.pro_timevar_output_tuples = pyomo.Set(

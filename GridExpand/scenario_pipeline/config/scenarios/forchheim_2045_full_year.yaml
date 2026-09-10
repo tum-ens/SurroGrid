@@ -1,6 +1,10 @@
-# Scientific and methodological assumptions for the Forchheim 2045 scenario.
+# Scientific and methodological assumptions for the Forchheim 2045 full-year
+# chronological reference. Cloned from forchheim_2045.yaml; the only deliberate
+# differences are the scenario id and time_aggregation.enabled. Every physical,
+# economic and technology assumption is byte-identical to the TSAM scenario so
+# the two remain directly comparable.
 scenario:
-  id: forchheim_2045
+  id: forchheim_2045_full_year
   milestone_year: 2045
 
 economics:
@@ -201,8 +205,11 @@ technologies:
       depreciation_years: 20
 
 time_aggregation:
-  # TSAM assumptions are scenario methodology, not machine/run settings.
-  enabled: true
+  # Full-year chronological reference: no TSAM selection, concatenation or
+  # occurrence weighting. Every original operating hour is modeled once with
+  # weight 1. The remaining fields are required by the configuration schema and
+  # are inactive; run_urbs_cluster asserts that TSAM is never invoked.
+  enabled: false
   number_of_typical_periods: 6
   hours_per_period: 168
   extreme_period_method: replace_cluster_center

@@ -364,6 +364,9 @@ def _build_summary_from_raw(
     ).dropna(subset=["voltage_p05_time_pu"])
 
     grid_summary = {
+        # Annual-boundary sensitivity, recomputed here because this summary is
+        # rebuilt from database rows rather than reused from pf_summary.
+        **pwrflw.annual_boundary_diagnostic(transformer_loadings),
         "n_timesteps": int(n_timesteps),
         "n_converged_timesteps": n_converged_timesteps,
         "n_failed_timesteps": n_failed_timesteps,

@@ -62,6 +62,11 @@ def run_powerflows(
         "--summary-grid-scope",
         args.powerflow_grid_scope,
     ]
+    if not args.tsam and not args.pre_only:
+        # A full-year request must never consume a representative-period
+        # result. Pre-only jobs read the Step-2 input, which carries no
+        # Step-3 temporal record.
+        common.extend(["--expect-temporal-method", "full_year_no_tsam"])
     if args.grid_data_path is not None:
         common.extend(["--grid-data-path", str(args.grid_data_path)])
     definitions = {

@@ -205,7 +205,7 @@ The paired runner produces pre electricity-only, post-flex, and post-no-flex pow
 cd <repository-root>
 uv run --project GridExpand/2.demand_allocation \
   python GridExpand/scenario_pipeline/run_scenario.py \
-  --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired.yaml
+  --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired_full_year.yaml
 ```
 
 The paired run YAML is the authoritative dataset, model-case, and

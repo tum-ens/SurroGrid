@@ -1,6 +1,7 @@
 thesis.md
-GridExpand/2.demand_allocation/gridalloc/data/statistics/general/mobility_profile_pool/mobility_availability_pool.csv
-GridExpand/2.demand_allocation/gridalloc/data/statistics/general/mobility_profile_pool/mobility_demand_pool.csv
+GridExpand/2.demand_allocation/gridalloc/data/statistics/general/mobility_profile_pool_old/mobility_availability_pool.csv
+GridExpand/2.demand_allocation/gridalloc/data/statistics/general/mobility_profile_pool_old/mobility_demand_pool.csv
+GridExpand/2.demand_allocation/gridalloc/data/statistics/general/mobility_profile_pool/
 GridExpand/5.postprocessing/plotting/thesis_plots.ipynb
 GridExpand/run_logs/*
 swf_usage.md

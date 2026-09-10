@@ -397,6 +397,24 @@ CREATE TABLE IF NOT EXISTS surrogrid.powerflow_summary (
     CONSTRAINT uq_powerflow_summary_run_stage UNIQUE (powerflow_run_id, stage)
 );
 
+-- Annual-boundary sensitivity of the peak (full-year chronological reference).
+-- A cyclic annual boundary can concentrate flexible load in the first and last
+-- hours of the modeled year; these keep that visible in the headline metrics.
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_first_24h_max_percent DOUBLE PRECISION;
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_last_24h_max_percent DOUBLE PRECISION;
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_outside_24h_max_percent DOUBLE PRECISION;
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_24h_excess_percent DOUBLE PRECISION;
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_first_168h_max_percent DOUBLE PRECISION;
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_last_168h_max_percent DOUBLE PRECISION;
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_outside_168h_max_percent DOUBLE PRECISION;
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_168h_excess_percent DOUBLE PRECISION;
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_overall_max_percent DOUBLE PRECISION;
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_peak_t_index INTEGER;
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_peak_in_first_24h BOOLEAN;
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_peak_in_last_24h BOOLEAN;
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_peak_in_first_168h BOOLEAN;
+ALTER TABLE IF EXISTS surrogrid.powerflow_summary ADD COLUMN IF NOT EXISTS boundary_peak_in_last_168h BOOLEAN;
+
 CREATE INDEX IF NOT EXISTS idx_powerflow_summary_run_stage
     ON surrogrid.powerflow_summary (powerflow_run_id, stage);
 

@@ -43,10 +43,16 @@ scientific reasoning and equations are centralized in SCENARIO_METHOD.md.
 
 ## Ordinary scenario run YAML
 
-The repository keeps `forchheim_2045.yaml` for paired source-inventory
+The repository keeps `forchheim_2045_full_year.yaml` for paired source-inventory
 calibration and `forchheim_2045_synthetic.yaml` for the ordinary deterministic
 synthetic run. This prevents an ordinary run from requiring source-study
 evidence that it does not own.
+
+The paired scenario runs the full chronological year with
+`time_aggregation.enabled: false`. Its remaining TSAM fields are required by the
+configuration schema and are inactive; Step 3 asserts that no type-period weights
+are present and refuses to combine representative periods with the dedicated EV
+session contract.
 
 For run.pipeline: scenario:
 

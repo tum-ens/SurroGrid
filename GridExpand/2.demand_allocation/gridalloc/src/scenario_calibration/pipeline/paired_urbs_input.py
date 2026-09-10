@@ -19,7 +19,7 @@ DEFAULT_PAIRED_DIR = (
 DEFAULT_OUTPUT_DIR = GRIDEXPAND_DIR / "3.urbs" / "Input"
 DEFAULT_SCENARIO_CONFIG = (
     GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
-    / "forchheim_2045.yaml"
+    / "forchheim_2045_full_year.yaml"
 )
 
 for path in (GRIDEXPAND_DIR, GRIDALLOC_DIR):
@@ -31,6 +31,11 @@ from common.electrification import (  # noqa: E402
     assignment_manifest_hash,
     assignment_summary,
     validate_electrification_assignment_config,
+)
+from common.ev_sessions import (  # noqa: E402
+    SESSION_HOUR_OFFSET,
+    validate_sessions,
+    write_sessions,
 )
 from common.timeframe import build_full_year_metadata, write_hdf_metadata  # noqa: E402
 from scenario_pipeline.config_loader import (  # noqa: E402
@@ -534,8 +539,22 @@ def materialize_paired_urbs_input(
             pd.Series(index=sector_inputs.audit.index, dtype=str),
         ).isin(["asset_plan", "battery_asset_plan", "heat_asset_plan"])
     ].copy()
+    session_report = validate_sessions(
+        sector_inputs.ev_sessions,
+        sector_inputs.ev_session_hours,
+        horizon_hours=len(demand),
+        process_table=sector_inputs.process,
+    )
     metadata = {
         **build_full_year_metadata(),
+        "ev_service_model": "dedicated_sessions",
+        "ev_session_hour_offset": SESSION_HOUR_OFFSET,
+        "ev_sessions": session_report["sessions"],
+        "ev_session_hours": session_report["session_hours"],
+        "ev_session_energy_kwh": session_report["energy_kwh"],
+        "ev_session_max_shortfall_kwh": session_report["max_shortfall_kwh"],
+        "ev_offgrid_charging_excluded": True,
+        "ev_pool_id": sector_inputs.ev_pool_id,
         "source": "paired_swf_2045",
         "target_network": target_network,
         "target_grid_id": int(target_grid_id),
@@ -622,6 +641,13 @@ def materialize_paired_urbs_input(
         store.put("urbs_in/demand", demand)
         store.put("urbs_in/supim", sector_inputs.supim)
         store.put("urbs_in/eff_factor", sector_inputs.eff_factor)
+        # Dedicated EV charging sessions: the authoritative EV service contract
+        # for both dispatch controllers. See FULL_YEAR_REFERENCE_DESIGN.md.
+        write_sessions(
+            store,
+            sector_inputs.ev_sessions,
+            sector_inputs.ev_session_hours,
+        )
         store.put(
             "urbs_in/buy_sell_price",
             buy_sell_price(

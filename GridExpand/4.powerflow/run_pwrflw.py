@@ -213,10 +213,20 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--expect-temporal-method",
+        choices=("full_year_no_tsam", "shared_weather_tsam"),
+        default=None,
+        help=(
+            "Reject the Step-3 result unless it records this temporal method. "
+            "Neither the file name nor the presence of the reduced_data group "
+            "proves how a result was produced."
+        ),
+    )
+    parser.add_argument(
         "--no-flex-ev-charger-kw",
         type=float,
         default=None,
-        help="EV home charger cap for --post-demand-mode no-flex. Defaults to powerflow config EV_HOME_CHARGER_KW.",
+        help="Optional cross-check of the per-vehicle EV charger rating for --post-demand-mode no-flex. Ratings come from the EV session table; a value that disagrees with any vehicle is rejected.",
     )
     parser.add_argument(
         "--summary-nonconvergence",
@@ -283,11 +293,10 @@ if __name__ == "__main__":
         f"with {settings['n_cpu']} CPUs!"
     )
 
-    no_flex_ev_charger_kw = (
-        args.no_flex_ev_charger_kw
-        if args.no_flex_ev_charger_kw is not None
-        else pf_config.EV_HOME_CHARGER_KW
-    )
+    # Per-vehicle charger ratings come from the EV session table, which is
+    # validated against the scenario process rows. An explicit CLI value is only
+    # accepted as a cross-check and must agree with every vehicle's own rating.
+    no_flex_ev_charger_kw = args.no_flex_ev_charger_kw
     assumptions_extra = {
         "post_demand_mode": args.post_demand_mode,
         "summary_grid_scope": args.summary_grid_scope,
@@ -296,7 +305,10 @@ if __name__ == "__main__":
     if args.post_demand_mode == "no-flex":
         assumptions_extra.update({
             "no_flex_assumption": "fixed heat and EV profiles; optimized post-flex PV capacity; fixed SWF battery inventory with causal local PV self-consumption control, no grid charging, and no battery export; heat split uses optimized post-flex heatpump_air and heatpump_booster capacities",
-            "no_flex_ev_charger_kw": float(no_flex_ev_charger_kw),
+            "no_flex_ev_charger_kw": (
+                None if no_flex_ev_charger_kw is None else float(no_flex_ev_charger_kw)
+            ),
+            "ev_service_model": "dedicated_sessions",
             "no_flex_capacity_source": "post-flex cap_pro",
         })
     if args.hh_only:
@@ -305,6 +317,28 @@ if __name__ == "__main__":
             "hh_only_filter": "grid_building_component.included_in_lv AND component_category == Residential",
             "hh_annual_demand_scale": float(args.hh_annual_demand_scale),
         })
+
+    # Identity, not file name, decides whether this result may be consumed, and
+    # the decision must precede run registration so the provenance is recorded
+    # with the run's assumptions.
+    urbs_result_path = os.path.join(pf_config.DATA_DIR, settings["file"])
+    if args.expect_temporal_method is not None and not args.pre_only:
+        temporal_audit = svgrd.require_temporal_method(
+            urbs_result_path, args.expect_temporal_method
+        )
+    else:
+        temporal_audit = svgrd.read_temporal_method(urbs_result_path)
+    if temporal_audit:
+        assumptions_extra.update(
+            {
+                "temporal_method": str(temporal_audit.get("temporal_method")),
+                "operating_hours": temporal_audit.get("operating_hours"),
+                "storage_boundary_policy": temporal_audit.get(
+                    "storage_boundary_policy"
+                ),
+                "ev_boundary_policy": temporal_audit.get("ev_boundary_policy"),
+            }
+        )
 
     # Save file handler
     SF = svgrd.SaveFile(

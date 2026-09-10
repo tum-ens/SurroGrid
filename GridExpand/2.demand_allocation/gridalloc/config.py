@@ -115,7 +115,7 @@ class Config:
     #--------------------------------------------------------------#
     # Statistical and input data
     EMOBPY_DATA_PATH = f"{DATA_STAT_DIR}/general/"
-    MOBILITY_PROFILE_POOL_DIR = f"{DATA_STAT_DIR}/general/mobility_profile_pool"
+    MOBILITY_PROFILE_POOL_DIR = f"{DATA_STAT_DIR}/general/mobility_profile_pool_old"
     MOBILITY_PROFILE_POOL_METADATA_PATH = f"{MOBILITY_PROFILE_POOL_DIR}/mobility_profile_pool_metadata.csv"
     MOBILITY_PROFILE_POOL_DEMAND_PATH = f"{MOBILITY_PROFILE_POOL_DIR}/mobility_demand_pool.csv"
     MOBILITY_PROFILE_POOL_AVAILABILITY_PATH = f"{MOBILITY_PROFILE_POOL_DIR}/mobility_availability_pool.csv"

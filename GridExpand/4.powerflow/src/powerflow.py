@@ -586,6 +586,7 @@ def pf_summary(
 
     n_failed_timesteps = int(len(failed_timesteps))
     grid_summary = {
+        **annual_boundary_diagnostic(transformer_loadings),
         "n_timesteps": int(len(df)),
         "n_converged_timesteps": int(len(df) - n_failed_timesteps),
         "n_failed_timesteps": n_failed_timesteps,
@@ -671,6 +672,50 @@ def pf_summary(
         "transformer_diagnostic": transformer_diagnostic,
         "failed_timesteps": failed_timesteps,
     }
+
+
+def annual_boundary_diagnostic(transformer_loadings, *, bands=(24, 168)):
+    """Diagnose sensitivity of the annual peak to the horizon boundary.
+
+    Required by FULL_YEAR_REFERENCE_PLAN.md Phase G. A cyclic annual boundary can
+    concentrate flexible load in the first and last hours of the modeled year.
+    These bands measure that directly: they report the peak inside the leading
+    and trailing windows against the peak outside them, so a boundary artifact is
+    visible instead of being averaged away. The bands diagnose sensitivity; they
+    are not themselves a correction.
+    """
+    values = np.asarray(transformer_loadings, dtype=float)
+    total = len(values)
+    diagnostic = {"boundary_n_timesteps": int(total)}
+    if total == 0:
+        return diagnostic
+    overall_max = _safe_nanmax(values)
+    argmax = int(np.nanargmax(values)) if not np.isnan(values).all() else -1
+    diagnostic["boundary_peak_t_index"] = argmax
+    for band in bands:
+        band = int(band)
+        if total < 2 * band:
+            continue
+        leading = values[:band]
+        trailing = values[-band:]
+        interior = values[band:-band]
+        leading_max = float(_safe_nanmax(leading))
+        trailing_max = float(_safe_nanmax(trailing))
+        interior_max = float(_safe_nanmax(interior))
+        diagnostic.update(
+            {
+                f"boundary_first_{band}h_max_percent": leading_max,
+                f"boundary_last_{band}h_max_percent": trailing_max,
+                f"boundary_outside_{band}h_max_percent": interior_max,
+                f"boundary_peak_in_first_{band}h": bool(0 <= argmax < band),
+                f"boundary_peak_in_last_{band}h": bool(total - band <= argmax < total),
+                f"boundary_{band}h_excess_percent": float(
+                    max(leading_max, trailing_max) - interior_max
+                ),
+            }
+        )
+    diagnostic["boundary_overall_max_percent"] = float(overall_max)
+    return diagnostic
 
 
 def _interp_ldc(values: np.ndarray, duration_percent: np.ndarray) -> np.ndarray:

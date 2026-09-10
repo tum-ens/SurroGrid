@@ -38,6 +38,7 @@ from scenario_pipeline.config_loader import (  # noqa: E402
 
 from .allocation_plan import build_scenario_allocation_plan
 from .ghd_calibration import build_synthetic_ghd_calibration
+from ..profiles.paired_profiles import session_pool_supported_models
 from ..profiles.profile_contract import (
     assert_paired_component_plan_equivalence,
     assert_paired_plan_equivalence,
@@ -828,7 +829,7 @@ def _paired_mobility_ownership(
     owned = mobility.sample_statistics(
         buildings,
         region,
-        allowed_models=mobility.get_pool_supported_models(),
+        allowed_models=session_pool_supported_models(),
         base_seed=int(profile_seed),
     )
     return (
@@ -1001,7 +1002,7 @@ def build_paired_allocation(
     os.environ["PYLOVO_VERSION_ID"] = str(pylovo_version_id)
     scenario_config_path = scenario_config_path or (
         GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
-        / "forchheim_2045.yaml"
+        / "forchheim_2045_full_year.yaml"
     )
     scenario, scenario_hash = load_scenario_config(scenario_config_path)
     pv_adoption_mode = scenario.electrification.pv_battery.adoption_mode

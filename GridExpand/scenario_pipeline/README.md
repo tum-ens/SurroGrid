@@ -30,7 +30,7 @@ postprocessing command, so no separate `--schema-only` setup is required.
 ```bash
 uv run --project GridExpand/2.demand_allocation \
   python GridExpand/scenario_pipeline/run_scenario.py \
-  --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired.yaml
+  --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired_full_year.yaml
 ```
 
 Use `--prepare-only` to rebuild and validate shared inputs without starting

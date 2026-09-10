@@ -6,6 +6,7 @@ from src.external.emobpy import DataBase
 from src.external.emobpy import Consumption, HeatInsulation, BEVspecs
 from src.external.emobpy.tools import set_seed
 
+import random
 import tempfile
 import warnings
 from pathlib import Path
@@ -99,6 +100,12 @@ def _simulate_vehicles(vehicle_configs, weather):
         with tempfile.TemporaryDirectory() as tmpdb:
             # Apply a new seed for each vehicle
             set_seed(seed=cfg['seed'], dir=tmpdb)
+            # emobpy's set_seed is @jit(nopython=True), so it seeds Numba's RNG
+            # state, not the interpreter-level one. Availability draws its
+            # charging points with a Python-level np.random.choice, which would
+            # otherwise stay unseeded and make the pool irreproducible.
+            np.random.seed(int(cfg['seed']) % (2 ** 32))
+            random.seed(int(cfg['seed']))
 
             # ------------- Mobility Profile -----------------
             m = Mobility(config_folder=config_folder)
@@ -128,7 +135,7 @@ def _simulate_vehicles(vehicle_configs, weather):
             HI = HeatInsulation(True)                                 # Creating the heat insulation by copying the default configuration
             ev_model = BEVS.model(("A",cfg["model"],"0"))             # Model instance that contains vehicle parameters
             batteries[idx] = ev_model.parameters["battery_cap"]
-            ev_model.parameters["battery_cap"]=100                    # Add slack to prevent time consuming infeasibilities (this only affects the sampled charging behavior, but as we only intend to charge at home and assign every other location to home later anyways, this does not matter too much - importantly the real battery cap has to be used later in urbs!!!)
+            ev_model.parameters["battery_cap"]=SIMULATION_BATTERY_CAP_KWH                    # Add slack to prevent time consuming infeasibilities (this only affects the sampled charging behavior, but as we only intend to charge at home and assign every other location to home later anyways, this does not matter too much - importantly the real battery cap has to be used later in urbs!!!)
             c = Consumption(mname, ev_model)
             c.load_setting_mobility(DB)
 
@@ -444,7 +451,142 @@ def get_mobility_demand_from_pool(
     return mob_demand, availability, battery_dict
 
 
+# emobpy is run with a deliberately oversized battery so trip sampling never
+# becomes infeasible (see _simulate_vehicles). ``actual_soc`` is a fraction of
+# THIS capacity, not of the vehicle's real one, so converting SOC to energy
+# must use it.
+SIMULATION_BATTERY_CAP_KWH = 100.0
+
+SOURCE_RECORD_COLUMNS = [
+    "state",
+    "charging_point",
+    "charging_cap",
+    "distance",
+    "consumption",
+    "actual_soc",
+    "charge_battery",
+    "charge_grid",
+]
+
+
+def _simulate_vehicles_with_retry(vehicles, weather):
+    """Run emobpy for all vehicles, bumping seeds on sampling failures."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                return _simulate_vehicles(vehicles, weather)
+            except Exception as e:
+                if attempt == max_retries:
+                    # give up: something in the code, not randomness, is broken
+                    raise RuntimeError(
+                        f"Vehicle(s) {vehicles.keys()} failed after {max_retries} attempts: {e}"
+                    )
+                # otherwise bump the seed and retry
+                for key, car in vehicles.items():
+                    car['seed'] += 1
+                print(f"Retry #{attempt} for vehicle(s) {vehicles.keys()}.")
+
+
+def get_mobility_source_records(vehicles, weather):
+    """Return the unmodified emobpy timeseries per vehicle plus battery capacities.
+
+    Nothing is resampled, reallocated, consolidated or clipped here. These are
+    the pre-clipping source records the dedicated-session contract is built from
+    (see FULL_YEAR_REFERENCE_DESIGN.md section 2.5); retaining them is what makes
+    the source-energy ledger measurable rather than assumed.
+    """
+    all_timeseries, all_batteries = _simulate_vehicles_with_retry(vehicles, weather)
+    records = {}
+    for key, timeseries in all_timeseries.items():
+        missing = set(SOURCE_RECORD_COLUMNS) - set(timeseries.columns)
+        if missing:
+            raise ValueError(
+                f"emobpy timeseries for vehicle {key} is missing {sorted(missing)}."
+            )
+        frame = timeseries[SOURCE_RECORD_COLUMNS].copy()
+        # emobpy returns several numeric columns as object dtype, which neither
+        # HDF5 nor the session builder can consume.
+        for column in ("state", "charging_point"):
+            frame[column] = frame[column].astype(str)
+        for column in set(SOURCE_RECORD_COLUMNS) - {"state", "charging_point"}:
+            frame[column] = pd.to_numeric(frame[column], errors="raise").astype(float)
+        frame.insert(0, "source_timestamp", frame.index)
+        records[key] = frame.reset_index(drop=True)
+    return records, all_batteries
+
+
+def source_energy_ledger(records, battery_cap_kwh, source_timestep_hours):
+    """Stage-wise energy ledger for one profile, in kWh (grid side unless noted).
+
+    Implements FULL_YEAR_REFERENCE_DESIGN.md section 2.6. The charging efficiency
+    is reported, never applied: ``charge_grid`` already contains the losses.
+    """
+    step_hours = float(source_timestep_hours)
+    charging_point = records["charging_point"].astype(str)
+    grid = pd.to_numeric(records["charge_grid"], errors="raise").clip(lower=0.0)
+    battery = pd.to_numeric(records["charge_battery"], errors="raise").clip(lower=0.0)
+    consumption = pd.to_numeric(records["consumption"], errors="raise")
+    soc = pd.to_numeric(records["actual_soc"], errors="raise")
+
+    is_home = charging_point == "home"
+    charge_grid_kwh = float(grid.sum() * step_hours)
+    charge_grid_home_kwh = float(grid[is_home].sum() * step_hours)
+    charge_battery_kwh = float(battery.sum() * step_hours)
+    traction_kwh = float(consumption.sum())
+    return {
+        "traction_kwh": traction_kwh,
+        "charge_battery_kwh": charge_battery_kwh,
+        "charge_grid_kwh": charge_grid_kwh,
+        "charge_grid_home_kwh": charge_grid_home_kwh,
+        # Charging that happened away from home is en-route or destination
+        # charging on a public charge point outside the low-voltage grid under
+        # study. It is attributed to that network, not to the household
+        # connection, and is reported here so the exclusion stays auditable.
+        "charge_grid_offhome_kwh": charge_grid_kwh - charge_grid_home_kwh,
+        "offgrid_excluded_kwh": charge_grid_kwh - charge_grid_home_kwh,
+        "offgrid_excluded_share": (
+            (charge_grid_kwh - charge_grid_home_kwh) / charge_grid_kwh
+            if charge_grid_kwh > 0.0
+            else 0.0
+        ),
+        "offgrid_driving_kwh": float(
+            grid[(charging_point != "home") & (records["state"].astype(str) == "driving")]
+            .sum()
+            * step_hours
+        ),
+        "charging_efficiency": (
+            charge_battery_kwh / charge_grid_kwh if charge_grid_kwh > 0.0 else float("nan")
+        ),
+        "battery_cap_kwh": float(battery_cap_kwh),
+        "simulation_battery_cap_kwh": SIMULATION_BATTERY_CAP_KWH,
+        "soc_initial": float(soc.iloc[0]),
+        "soc_final": float(soc.iloc[-1]),
+        "soc_residual": float(soc.iloc[-1] - soc.iloc[0]),
+        "soc_residual_kwh": float(soc.iloc[-1] - soc.iloc[0]) * SIMULATION_BATTERY_CAP_KWH,
+        # Battery-side energy in, minus traction out, equals the change in stored
+        # energy. A year that ends mid-charge leaves a non-zero residual; the
+        # identity must still hold exactly.
+        "battery_balance_residual_kwh": (
+            charge_battery_kwh
+            - traction_kwh
+            - float(soc.iloc[-1] - soc.iloc[0]) * SIMULATION_BATTERY_CAP_KWH
+        ),
+        "source_timestep_h": step_hours,
+        "source_steps": int(len(records)),
+    }
+
+
 def get_mobility_demand(vehicles, weather):
+    """Legacy hourly deadline-demand generator for ``emobpy_pool_v1``.
+
+    Retained only to reproduce the published v1 pool. It reallocates non-home
+    charging, collapses each home block onto its final hour, clips against the
+    charger and battery capacities and overwrites the final hour, so it does not
+    conserve energy. The full-year chronological reference must use
+    ``get_mobility_source_records`` and the dedicated-session contract instead.
+    """
     ### Run emobpy for all grid vehicles
     # print(f"Running mobility generator for {len(vehicles)} vehicles...")
     with warnings.catch_warnings():
