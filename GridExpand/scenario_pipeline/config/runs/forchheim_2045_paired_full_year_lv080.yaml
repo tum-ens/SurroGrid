@@ -1,0 +1,80 @@
+# Focused INFLEX-vs-HEMS dispatch comparison on the largest usable real SWF grid.
+#
+# This is NOT a paired real/synthetic comparison. The two networks partition the
+# same 4,193 buildings along different territory boundaries, so no synthetic grid
+# corresponds to real LV 80: its 217 buildings scatter across 4 synthetic grids.
+# Only the dispatch comparison is meaningful here, because both controllers run on
+# the identical topology, buildings and fixed assets.
+#
+# Regional expansion cost also cannot come from one grid: cost is a sum over grids
+# and the effect of interest is distributional. run_scenario additionally emits no
+# expansion commands when target_grid_id is set.
+# Cloned from forchheim_2045_paired.yaml. Deliberate differences: new run id
+# and output namespace, the full-year scenario, retained intermediates for the
+# reference audit, and no resume of TSAM-era results. Topology version, grid
+# scope, seeds, building assignment and every economic/technology value are
+# unchanged, including the configured exclusion of real LV 113.
+# Repository paths are resolved from paired_dataset_id; the external SWF grid
+# root comes from GRID_DATA_PATH in GridExpand/.env.
+run:
+  # Version-qualified identity prevents results from different PyLoVo topologies
+  # from being combined by the post-processing notebook.
+  id: forchheim_2045_paired_full_year_lv080
+  scenario: ../scenarios/forchheim_2045_full_year.yaml
+  pipeline: paired_validation
+
+resources:
+  # Municipality and postcode whose complete eligible PyLoVo grid set is registered.
+  ags: 9474126
+  plz: 91301
+  # Exact pylovo topology version; never inferred from the environment.
+  pylovo_version_id: 11
+  # Small grids are removed symmetrically after physical-building pairing.
+  min_buildings: 5
+  # Stable shared heat library; paths are derived from repository conventions.
+  heat_profile_set_id: forchheim_2045_infdb_ro_heat_v1
+  # Existing weather source used to create the shared angle-binned PV library.
+  weather_source_hdf: 9474126-00_91301_1_2.h5
+  # Known incomplete SWF grid retained in coverage but omitted from expansion cost.
+  excluded_real_lv_ids: [113]
+  # Prepared allocation/artifact folder name under scenario_calibration outputs.
+  paired_dataset_id: swf_2045_paired_v11_91301_swf_clear
+  # One network only: target_grid_id is an adapter-specific id, and the two
+  # networks do not share an id space.
+  target_network: real_swf
+  # Largest real SWF grid excluding LV 113: 325 EVs, 211 buildings, 1.46 GWh/a.
+  # LV 113 is larger but is the configured exclusion and a known-incomplete grid.
+  target_grid_id: 80
+
+execution:
+  powerflow_grid_scope: full # full or backbone
+  # Requested comparisons. Heuristic cases share one materialization and solve.
+  # Dispatch comparison only. post-hems-optimized is a different model case
+  # (endogenous asset sizing) and cannot speak to the effect of dispatch alone.
+  model_cases:
+    - post-inflex-heuristic
+    - post-hems-heuristic
+  # Full-year models are ~8.7x the timesteps of the TSAM ones, so peak memory is
+  # set by the size of a SINGLE Step-3 model, not by how many run at once.
+  #
+  # step3_cpus is the number of building CLUSTERS the grid is split into; only
+  # step3_cluster_concurrency of them run simultaneously. Raising step3_cpus
+  # therefore SHRINKS each model. LV 80 has 216 sites: at step3_cpus=2 one worker
+  # had to build ~108 buildings x 8760 h and was killed by the OOM killer. At 32
+  # it builds ~7 buildings per model, close to the ~4 that solved comfortably on
+  # LV 28. The clusters run sequentially either way, so this costs little time.
+  workers: 1
+  step3_cpus: 32
+  step3_cluster_concurrency: 1
+  step4_cpus: 2
+  profile_seed: 481527  # Same arbitrary realization seed as the synthetic run.
+  # Retained so component-level URBS output stays available for the reference
+  # audit and the annual-boundary diagnostic.
+  cleanup_intermediates: false
+  # No resume for initial validation; a resumed run must not reuse a TSAM-era
+  # result, which run_urbs_cluster now rejects on temporal-method identity.
+  resume: false
+  # Create analysis-ready expansion tables after all requested runs succeed.
+  # Suppressed anyway for a single-grid run; stated explicitly. Regional cost
+  # requires the complete grid set.
+  materialize_expansion: false

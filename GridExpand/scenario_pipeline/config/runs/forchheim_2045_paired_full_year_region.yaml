@@ -1,0 +1,87 @@
+# Full-region paired INFLEX-vs-HEMS comparison over the complete chronological
+# year, both network models.
+#
+# Complements the single-grid forchheim_2045_paired_full_year_lv080 run. That one
+# established that the machinery is correct and that HEMS is cheaper on the
+# largest real grid; it cannot speak to the median grid or to regional totals,
+# because expansion cost is a sum over grids and the v11 claim it revisits was
+# distributional (38 of 45 grids worsening, a P90 across grids).
+#
+# Both networks are included: the two partition the same 4,193 buildings along
+# different territory boundaries, so real-vs-synthetic is meaningful only in
+# aggregate, never grid to grid. The v11 boundary artifact was also quantified
+# most sharply on the synthetic side (31 of 45 HEMS maxima on a 168-hour period
+# boundary), so that is where its absence is most tellingly demonstrated.
+# Cloned from forchheim_2045_paired.yaml. Deliberate differences: new run id
+# and output namespace, the full-year scenario, retained intermediates for the
+# reference audit, and no resume of TSAM-era results. Topology version, grid
+# scope, seeds, building assignment and every economic/technology value are
+# unchanged, including the configured exclusion of real LV 113.
+# Repository paths are resolved from paired_dataset_id; the external SWF grid
+# root comes from GRID_DATA_PATH in GridExpand/.env.
+run:
+  # Version-qualified identity prevents results from different PyLoVo topologies
+  # from being combined by the post-processing notebook.
+  id: forchheim_2045_paired_full_year_region
+  scenario: ../scenarios/forchheim_2045_full_year.yaml
+  pipeline: paired_validation
+
+resources:
+  # Municipality and postcode whose complete eligible PyLoVo grid set is registered.
+  ags: 9474126
+  plz: 91301
+  # Exact pylovo topology version; never inferred from the environment.
+  pylovo_version_id: 11
+  # Small grids are removed symmetrically after physical-building pairing.
+  min_buildings: 5
+  # Stable shared heat library; paths are derived from repository conventions.
+  heat_profile_set_id: forchheim_2045_infdb_ro_heat_v1
+  # Existing weather source used to create the shared angle-binned PV library.
+  weather_source_hdf: 9474126-00_91301_1_2.h5
+  # Known incomplete SWF grid retained in coverage but omitted from expansion cost.
+  excluded_real_lv_ids: [113]
+  # Prepared allocation/artifact folder name under scenario_calibration outputs.
+  paired_dataset_id: swf_2045_paired_v11_91301_swf_clear
+  # Both adapters over their complete target sets.
+  target_network: both
+  # Null selects every grid in both networks: 49 real and 45 synthetic.
+  target_grid_id: null
+
+execution:
+  powerflow_grid_scope: full # full or backbone
+  # Requested comparisons. Heuristic cases share one materialization and solve.
+  # Dispatch comparison only. post-hems-optimized is a different model case
+  # (endogenous asset sizing) and cannot speak to the effect of dispatch alone.
+  model_cases:
+    - post-inflex-heuristic
+    - post-hems-heuristic
+  # Peak memory is set by the size of a SINGLE Step-3 model, not by how many run
+  # at once. step3_cpus is the number of building CLUSTERS a grid is split into;
+  # only step3_cluster_concurrency of them run simultaneously, so raising
+  # step3_cpus SHRINKS each model.
+  #
+  # LV 80 (216 sites) was killed by the OOM killer at step3_cpus=2 (~108 buildings
+  # per model) and completed in 33 min at 32 (~7 per model). The largest grid here
+  # is real LV 113 at 319 buildings, so 40 keeps it at ~8 per model, just above the
+  # proven size.
+  #
+  # workers is the number of GRIDS in flight, and memory scales with it. 2 is
+  # deliberately conservative: an earlier attempt at 4 exhausted 23 GB. Neither
+  # workers nor step3_cpus is part of the run identity, so if memory proves
+  # comfortable you can stop, raise workers, and restart with resume: true --
+  # completed grids are skipped and the identity guard permits it.
+  workers: 2
+  step3_cpus: 40
+  step3_cluster_concurrency: 1
+  step4_cpus: 2
+  profile_seed: 481527  # Same arbitrary realization seed as the synthetic run.
+  # Retained so component-level URBS output stays available for the reference
+  # audit and the annual-boundary diagnostic.
+  cleanup_intermediates: false
+  # False for the initial launch so the run identity is recorded fresh. Flip to
+  # true to continue after an interruption: finished grids are skipped and the
+  # identity guard rejects reuse across an incompatible scenario or pool.
+  resume: false
+  # Create analysis-ready expansion tables after all requested runs succeed.
+  # Regional expansion cost across the complete grid set: the point of this run.
+  materialize_expansion: true
