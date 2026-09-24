@@ -224,6 +224,9 @@ def _transformer_cost(
     if required_kva <= rated_kva:
         return 0.0, "none_existing_capacity_sufficient"
     for capacity, column in (
+        (100.0, "transformer_replace_100_eur"),
+        (160.0, "transformer_replace_160_eur"),
+        (250.0, "transformer_replace_250_eur"),
         (400.0, "transformer_replace_400_eur"),
         (630.0, "transformer_replace_630_eur"),
         (800.0, "transformer_replace_800_eur"),

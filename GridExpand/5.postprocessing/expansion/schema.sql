@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS surrogrid.expansion_cost_assumption (
     line_reopen_rural_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 90000.0,
     line_reopen_suburban_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 100000.0,
     line_reopen_urban_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 165000.0,
+    transformer_replace_100_eur DOUBLE PRECISION NOT NULL DEFAULT 28000.0,
+    transformer_replace_160_eur DOUBLE PRECISION NOT NULL DEFAULT 28800.0,
+    transformer_replace_250_eur DOUBLE PRECISION NOT NULL DEFAULT 30000.0,
     transformer_replace_400_eur DOUBLE PRECISION NOT NULL DEFAULT 33000.0,
     transformer_replace_630_eur DOUBLE PRECISION NOT NULL DEFAULT 38000.0,
     transformer_replace_800_eur DOUBLE PRECISION NOT NULL DEFAULT 42000.0,
@@ -32,6 +35,9 @@ ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXIS
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_reopen_rural_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 90000.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_reopen_suburban_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 100000.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS line_reopen_urban_eur_per_km DOUBLE PRECISION NOT NULL DEFAULT 165000.0;
+ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS transformer_replace_100_eur DOUBLE PRECISION NOT NULL DEFAULT 28000.0;
+ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS transformer_replace_160_eur DOUBLE PRECISION NOT NULL DEFAULT 28800.0;
+ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS transformer_replace_250_eur DOUBLE PRECISION NOT NULL DEFAULT 30000.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS transformer_replace_400_eur DOUBLE PRECISION NOT NULL DEFAULT 33000.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS transformer_replace_630_eur DOUBLE PRECISION NOT NULL DEFAULT 38000.0;
 ALTER TABLE IF EXISTS surrogrid.expansion_cost_assumption ADD COLUMN IF NOT EXISTS transformer_replace_800_eur DOUBLE PRECISION NOT NULL DEFAULT 42000.0;
@@ -52,6 +58,9 @@ INSERT INTO surrogrid.expansion_cost_assumption (
     line_reopen_rural_eur_per_km,
     line_reopen_suburban_eur_per_km,
     line_reopen_urban_eur_per_km,
+    transformer_replace_100_eur,
+    transformer_replace_160_eur,
+    transformer_replace_250_eur,
     transformer_replace_400_eur,
     transformer_replace_630_eur,
     transformer_replace_800_eur,
@@ -73,13 +82,16 @@ VALUES (
     90000.0,
     100000.0,
     165000.0,
+    28000.0,
+    28800.0,
+    30000.0,
     33000.0,
     38000.0,
     42000.0,
     48000.0,
     100000.0,
     50,
-    'Added LV capacity is selected from NAYY_4_150 (270 A), NAYY_4_185 (313 A), and NAYY_4_240 (357 A). Route costs blend 20% existing-duct cable cost with 80% reopened-route/trenching cost selected by pylovo settlement_type. Transformer costs use all-in replacement bins for 400/630/800/1000 kVA and a 100k EUR station-rebuild boundary case.'
+    'Added LV capacity is selected from NAYY_4_150 (270 A), NAYY_4_185 (313 A), and NAYY_4_240 (357 A). Route costs blend 20% existing-duct cable cost with 80% reopened-route/trenching cost selected by pylovo settlement_type. Transformer costs use all-in replacement bins for 100/160/250/400/630/800/1000 kVA and a 100k EUR station-rebuild boundary case, where the 100/160/250 kVA bins are pylovo equipment costs (3.0k/3.8k/5.0k EUR) plus the 25k EUR installation share implied by the 400/630 kVA all-in bins.'
 )
 ON CONFLICT (assumption_key) DO UPDATE SET
     description = EXCLUDED.description,
@@ -93,6 +105,9 @@ ON CONFLICT (assumption_key) DO UPDATE SET
     line_reopen_rural_eur_per_km = EXCLUDED.line_reopen_rural_eur_per_km,
     line_reopen_suburban_eur_per_km = EXCLUDED.line_reopen_suburban_eur_per_km,
     line_reopen_urban_eur_per_km = EXCLUDED.line_reopen_urban_eur_per_km,
+    transformer_replace_100_eur = EXCLUDED.transformer_replace_100_eur,
+    transformer_replace_160_eur = EXCLUDED.transformer_replace_160_eur,
+    transformer_replace_250_eur = EXCLUDED.transformer_replace_250_eur,
     transformer_replace_400_eur = EXCLUDED.transformer_replace_400_eur,
     transformer_replace_630_eur = EXCLUDED.transformer_replace_630_eur,
     transformer_replace_800_eur = EXCLUDED.transformer_replace_800_eur,

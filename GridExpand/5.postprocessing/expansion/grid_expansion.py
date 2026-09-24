@@ -904,6 +904,9 @@ def _materialize_transformer_results(
             estimated.loading_percent > 100.0,
             CASE
                 WHEN estimated.required_kva <= estimated.rated_kva THEN 0.0
+                WHEN estimated.required_kva <= 100.0 THEN assumption.transformer_replace_100_eur
+                WHEN estimated.required_kva <= 160.0 THEN assumption.transformer_replace_160_eur
+                WHEN estimated.required_kva <= 250.0 THEN assumption.transformer_replace_250_eur
                 WHEN estimated.required_kva <= 400.0 THEN assumption.transformer_replace_400_eur
                 WHEN estimated.required_kva <= 630.0 THEN assumption.transformer_replace_630_eur
                 WHEN estimated.required_kva <= 800.0 THEN assumption.transformer_replace_800_eur
@@ -912,6 +915,9 @@ def _materialize_transformer_results(
             END,
             CASE
                 WHEN estimated.required_kva <= estimated.rated_kva THEN 'none_existing_capacity_sufficient'
+                WHEN estimated.required_kva <= 100.0 THEN 'all_in_replacement_to_100kva'
+                WHEN estimated.required_kva <= 160.0 THEN 'all_in_replacement_to_160kva'
+                WHEN estimated.required_kva <= 250.0 THEN 'all_in_replacement_to_250kva'
                 WHEN estimated.required_kva <= 400.0 THEN 'all_in_replacement_to_400kva'
                 WHEN estimated.required_kva <= 630.0 THEN 'all_in_replacement_to_630kva'
                 WHEN estimated.required_kva <= 800.0 THEN 'all_in_replacement_to_800kva'
