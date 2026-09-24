@@ -63,9 +63,10 @@ def _load_jobs(
     paired_dir: Path,
     target: str,
     target_grid_id: int | None,
+    provider: str = "swf",
 ) -> list[dict[str, Any]]:
     jobs: list[dict[str, Any]] = []
-    for adapter in adapters_for_scope(target):
+    for adapter in adapters_for_scope(target, provider):
         jobs.extend(adapter.load_jobs(paired_dir, target_grid_id))
     return [{**job, "job_index": index} for index, job in enumerate(jobs)]
 
@@ -287,6 +288,12 @@ def _run_identity(args: argparse.Namespace) -> dict[str, Any]:
         "profile_seed": int(args.profile_seed),
         "powerflow_grid_scope": str(args.powerflow_grid_scope),
         "target": str(args.target),
+        "provider": str(args.provider),
+        "powerflow_max_timesteps": args.max_timesteps,
+        "job_subset": (
+            None if args.job_subset is None
+            else json.loads(args.job_subset.read_text(encoding="utf-8"))
+        ),
     }
 
 
@@ -500,6 +507,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--paired-dir", type=Path, default=None)
     parser.add_argument("--grid-data-path", type=Path, default=None)
     parser.add_argument("--target", choices=TARGET_CHOICES, default="both")
+    parser.add_argument(
+        "--provider",
+        choices=("swf", "uzw"),
+        default="swf",
+        help="DSO whose real grids 'both' pairs with the synthetic grids.",
+    )
+    parser.add_argument(
+        "--job-subset",
+        type=Path,
+        default=None,
+        help="JSON {target_network: [grid ids]} restricting the jobs (diagnostic subsets).",
+    )
+    parser.add_argument(
+        "--max-timesteps",
+        type=int,
+        default=None,
+        help="Smoke-test cap on Step-4 power-flow timesteps; results are not for publication.",
+    )
     parser.add_argument("--target-grid-id", type=int, default=None)
     parser.add_argument("--weather-source-hdf", type=Path)
     parser.add_argument("--heat-profile-library", type=Path)
@@ -701,7 +726,15 @@ def main() -> None:
         args.paired_dir,
         args.target,
         args.target_grid_id,
+        args.provider,
     )
+    if args.job_subset is not None:
+        subset = json.loads(args.job_subset.read_text(encoding="utf-8"))
+        jobs = [
+            job for job in jobs
+            if int(job["target_grid_id"]) in {int(value) for value in subset.get(job["target_network"], [])}
+        ]
+        jobs = [{**job, "job_index": index} for index, job in enumerate(jobs)]
     if not jobs:
         raise ValueError("No paired target grids matched the requested scope.")
     _assert_resume_compatible(args)
@@ -742,6 +775,8 @@ def main() -> None:
         result_cases=list(args.result_cases),
         pre_case_emitted=not args.skip_pre,
         pre_only=args.pre_only,
+        provider=args.provider,
+        powerflow_max_timesteps=args.max_timesteps,
     )
     started = time.monotonic()
     results = []

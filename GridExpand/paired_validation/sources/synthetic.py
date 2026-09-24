@@ -83,6 +83,8 @@ def run_powerflows(
         "--n_cpu",
         str(args.step4_cpus),
     ]
+    if getattr(args, "max_timesteps", None) is not None:
+        common.extend(["--max-timesteps", str(args.max_timesteps)])
     if not args.tsam and not args.pre_only:
         # A full-year request must never consume a representative-period
         # result. Pre-only jobs read the Step-2 input, which carries no

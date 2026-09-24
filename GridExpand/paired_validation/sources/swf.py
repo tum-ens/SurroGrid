@@ -14,20 +14,32 @@ TARGET_NETWORK = "real_swf"
 ALLOCATION_PLAN_FILENAME = "paired_real_bus_allocation_plan.csv"
 
 
-def load_jobs(paired_dir: Path, target_grid_id: int | None) -> list[dict[str, Any]]:
+def load_real_jobs(
+    paired_dir: Path, target_grid_id: int | None, target_network: str
+) -> list[dict[str, Any]]:
+    """One job per real grid; aligned plans also name the grid file and PLZ."""
     plan = pd.read_csv(paired_dir / ALLOCATION_PLAN_FILENAME)
-    grid_ids = sorted(
-        pd.to_numeric(plan["target_grid_id"], errors="coerce")
-        .dropna()
-        .astype(int)
-        .unique()
-    )
+    plan["target_grid_id"] = pd.to_numeric(plan["target_grid_id"], errors="coerce")
+    plan = plan.dropna(subset=["target_grid_id"])
+    plan["target_grid_id"] = plan["target_grid_id"].astype(int)
     if target_grid_id is not None:
-        grid_ids = [grid_id for grid_id in grid_ids if grid_id == target_grid_id]
-    return [
-        {"target_network": TARGET_NETWORK, "target_grid_id": int(grid_id)}
-        for grid_id in grid_ids
-    ]
+        plan = plan[plan["target_grid_id"].eq(int(target_grid_id))]
+    jobs = []
+    for grid_id, grid_plan in plan.groupby("target_grid_id", sort=True):
+        job = {"target_network": target_network, "target_grid_id": int(grid_id)}
+        if "real_grid_file" in grid_plan:
+            files = grid_plan["real_grid_file"].dropna().astype(str).unique()
+            if len(files) != 1:
+                raise ValueError(f"Real grid {grid_id} has ambiguous grid files.")
+            job["grid_file"] = files[0]
+            # A real area can span postcodes; the majority names it.
+            job["plz"] = int(grid_plan["postcode"].mode().iloc[0])
+        jobs.append(job)
+    return jobs
+
+
+def load_jobs(paired_dir: Path, target_grid_id: int | None) -> list[dict[str, Any]]:
+    return load_real_jobs(paired_dir, target_grid_id, TARGET_NETWORK)
 
 
 def input_name(job: dict[str, Any], scenario_label: str) -> str:
@@ -44,6 +56,24 @@ def run_powerflows(
     log_path: Path,
     status: StatusLog,
 ) -> None:
+    run_real_powerflows(
+        job=job, args=args, result_hdf=result_hdf, step4_dir=step4_dir,
+        log_path=log_path, status=status,
+        target_network=TARGET_NETWORK, provider="swf",
+    )
+
+
+def run_real_powerflows(
+    *,
+    job: dict[str, Any],
+    args: argparse.Namespace,
+    result_hdf: Path,
+    step4_dir: Path,
+    log_path: Path,
+    status: StatusLog,
+    target_network: str,
+    provider: str,
+) -> None:
     job_index = int(job["job_index"])
     grid_id = int(job["target_grid_id"])
     common = [
@@ -52,9 +82,11 @@ def run_powerflows(
         "python",
         "run_real_swf_scenario_powerflow.py",
         "--plz",
-        str(args.plz),
+        str(job.get("plz", args.plz)),
         "--lv-id",
         str(grid_id),
+        "--provider",
+        provider,
         "--profile-seed",
         str(args.profile_seed),
         "--urbs-result-hdf",
@@ -67,8 +99,12 @@ def run_powerflows(
         # result. Pre-only jobs read the Step-2 input, which carries no
         # Step-3 temporal record.
         common.extend(["--expect-temporal-method", "full_year_no_tsam"])
-    if args.grid_data_path is not None:
+    if "grid_file" in job:
+        common.extend(["--grid-file", str(job["grid_file"])])
+    elif args.grid_data_path is not None:
         common.extend(["--grid-data-path", str(args.grid_data_path)])
+    if getattr(args, "max_timesteps", None) is not None:
+        common.extend(["--max-timesteps", str(args.max_timesteps)])
     definitions = {
         "post-hems-optimized": ("flexible", "optimized HEMS"),
         "post-hems-heuristic": ("flexible", "heuristic-assets HEMS"),
@@ -84,7 +120,7 @@ def run_powerflows(
         else (("pre-only", "pre", "pre electricity-only"), *post_cases)
     )
     for mode, case_name, label in emitted_cases:
-        run_name = f"{args.run_name_prefix}_{TARGET_NETWORK}_{case_name}"
+        run_name = f"{args.run_name_prefix}_{target_network}_{case_name}"
         command = common + [
             "--post-demand-mode",
             mode,
@@ -93,7 +129,7 @@ def run_powerflows(
             "--scenario-key",
             run_name,
             "--scenario-label",
-            f"Paired SWF 2045 {TARGET_NETWORK} {label}",
+            f"Paired 2045 {target_network} {label}",
         ]
         run_command(
             cmd=command,
@@ -101,5 +137,5 @@ def run_powerflows(
             log_path=log_path,
             status=status,
             candidate_index=job_index,
-            stage=f"step4_{TARGET_NETWORK}_{case_name}",
+            stage=f"step4_{target_network}_{case_name}",
         )
