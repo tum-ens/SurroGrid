@@ -52,16 +52,38 @@ def _refresh_qgis_materialized_views(db: SurroGridDatabase) -> None:
         conn.execute(text("REFRESH MATERIALIZED VIEW surrogrid.expansion_transformer_qgis_mv"))
 
 
-def _optional_ags(value: str | int | None) -> int | None:
-    if value is None:
-        return None
-    return normalize_ags(value)
+DATA_SOURCE_LABELS = {
+    "synthetic": "Synthetic",
+    "real_swf": "Real SWF",
+    "real_uzw": "Real ÜZW",
+}
+
+
+def _ags_values(args: argparse.Namespace) -> list[int] | None:
+    return [normalize_ags(value) for value in args.ags] if args.ags else None
+
+
+def _plz_values(args: argparse.Namespace) -> list[int] | None:
+    return [int(value) for value in args.plz] if args.plz else None
+
+
+def _single(values: list[int] | None) -> int | None:
+    return values[0] if values is not None and len(values) == 1 else None
+
+
+def _synthetic_scope_params(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "ags": _ags_values(args),
+        "plz": _plz_values(args),
+        "pylovo_version_id": args.pylovo_version_id,
+    }
 
 
 def _analysis_key(args: argparse.Namespace) -> str:
     if args.analysis_key:
         return args.analysis_key
-    scope = str(args.ags).zfill(8) if args.ags is not None else "all"
+    ags = _single(_ags_values(args))
+    scope = str(ags).zfill(8) if ags is not None else "all"
     run = args.run_name.replace("baseline_static_", "").replace("_powerflow", "")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{scope}_{run}_{args.stage}_{stamp}"
@@ -109,10 +131,10 @@ def _create_analysis_run(
                         "run_name": args.run_name,
                         "stage": args.stage,
                         "scenario_id": args.scenario_id,
-                        "ags": _optional_ags(args.ags),
-                        "plz": args.plz,
+                        "ags": _single(_ags_values(args)),
+                        "plz": _single(_plz_values(args)),
                         "note": args.note,
-                        "data_source": "Real SWF" if args.data_source == "real_swf" else "Synthetic",
+                        "data_source": DATA_SOURCE_LABELS[args.data_source],
                     },
                 ).scalar_one()
             )
@@ -146,8 +168,12 @@ def _audit_unmapped_line_components(db: SurroGridDatabase, *, args: argparse.Nam
             JOIN surrogrid.grid_case gc USING (grid_case_id)
             WHERE pr.run_name = :run_name
               AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
-              AND (:ags IS NULL OR gc.ags = :ags)
-              AND (:plz IS NULL OR gc.plz = :plz)
+              AND (CAST(:ags AS BIGINT[]) IS NULL OR gc.ags = ANY(CAST(:ags AS BIGINT[])))
+              AND (CAST(:plz AS INTEGER[]) IS NULL OR gc.plz = ANY(CAST(:plz AS INTEGER[])))
+              AND (
+                  CAST(:pylovo_version_id AS TEXT) IS NULL
+                  OR gc.pylovo_version_id = CAST(:pylovo_version_id AS TEXT)
+              )
         ),
         pp_source AS (
             SELECT
@@ -270,8 +296,7 @@ def _audit_unmapped_line_components(db: SurroGridDatabase, *, args: argparse.Nam
         "run_name": args.run_name,
         "stage": args.stage,
         "scenario_id": args.scenario_id,
-        "ags": _optional_ags(args.ags),
-        "plz": args.plz,
+        **_synthetic_scope_params(args),
     }
     with db.engine.connect() as conn:
         row = conn.execute(query, params).mappings().one()
@@ -337,8 +362,12 @@ def _materialize_line_results(
              AND pcr.postcode_result_plz = gc.plz
             WHERE pr.run_name = :run_name
               AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
-              AND (:ags IS NULL OR gc.ags = :ags)
-              AND (:plz IS NULL OR gc.plz = :plz)
+              AND (CAST(:ags AS BIGINT[]) IS NULL OR gc.ags = ANY(CAST(:ags AS BIGINT[])))
+              AND (CAST(:plz AS INTEGER[]) IS NULL OR gc.plz = ANY(CAST(:plz AS INTEGER[])))
+              AND (
+                  CAST(:pylovo_version_id AS TEXT) IS NULL
+                  OR gc.pylovo_version_id = CAST(:pylovo_version_id AS TEXT)
+              )
         ),
         pp_source AS (
             SELECT
@@ -737,8 +766,7 @@ def _materialize_line_results(
                 "run_name": args.run_name,
                 "stage": args.stage,
                 "scenario_id": args.scenario_id,
-                "ags": _optional_ags(args.ags),
-                "plz": args.plz,
+                **_synthetic_scope_params(args),
                 "line_existing_duct_share": args.line_existing_duct_share,
             },
         )
@@ -773,8 +801,12 @@ def _materialize_transformer_results(
             JOIN surrogrid.grid_case gc USING (grid_case_id)
             WHERE pr.run_name = :run_name
               AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
-              AND (:ags IS NULL OR gc.ags = :ags)
-              AND (:plz IS NULL OR gc.plz = :plz)
+              AND (CAST(:ags AS BIGINT[]) IS NULL OR gc.ags = ANY(CAST(:ags AS BIGINT[])))
+              AND (CAST(:plz AS INTEGER[]) IS NULL OR gc.plz = ANY(CAST(:plz AS INTEGER[])))
+              AND (
+                  CAST(:pylovo_version_id AS TEXT) IS NULL
+                  OR gc.pylovo_version_id = CAST(:pylovo_version_id AS TEXT)
+              )
         ),
         peak_import AS (
             SELECT
@@ -901,8 +933,7 @@ def _materialize_transformer_results(
                 "run_name": args.run_name,
                 "stage": args.stage,
                 "scenario_id": args.scenario_id,
-                "ags": _optional_ags(args.ags),
-                "plz": args.plz,
+                **_synthetic_scope_params(args),
             },
         )
         return int(result.rowcount or 0)
@@ -947,11 +978,11 @@ def _print_summary(db: SurroGridDatabase, analysis_key: str) -> None:
         SELECT
             selected.analysis_key,
             selected.data_source,
-            CASE WHEN selected.data_source = 'Real SWF' THEN real.grids_with_line_rows ELSE synthetic.grids_with_line_rows END AS grids_with_line_rows,
-            CASE WHEN selected.data_source = 'Real SWF' THEN real.cable_expansion_segments ELSE synthetic.cable_expansion_segments END AS cable_expansion_segments,
-            CASE WHEN selected.data_source = 'Real SWF' THEN real.cable_cost_eur ELSE synthetic.cable_cost_eur END AS cable_cost_eur,
-            CASE WHEN selected.data_source = 'Real SWF' THEN real.transformer_expansion_count ELSE synthetic.transformer_expansion_count END AS transformer_expansion_count,
-            CASE WHEN selected.data_source = 'Real SWF' THEN real.transformer_cost_eur ELSE synthetic.transformer_cost_eur END AS transformer_cost_eur,
+            CASE WHEN selected.data_source <> 'Synthetic' THEN real.grids_with_line_rows ELSE synthetic.grids_with_line_rows END AS grids_with_line_rows,
+            CASE WHEN selected.data_source <> 'Synthetic' THEN real.cable_expansion_segments ELSE synthetic.cable_expansion_segments END AS cable_expansion_segments,
+            CASE WHEN selected.data_source <> 'Synthetic' THEN real.cable_cost_eur ELSE synthetic.cable_cost_eur END AS cable_cost_eur,
+            CASE WHEN selected.data_source <> 'Synthetic' THEN real.transformer_expansion_count ELSE synthetic.transformer_expansion_count END AS transformer_expansion_count,
+            CASE WHEN selected.data_source <> 'Synthetic' THEN real.transformer_cost_eur ELSE synthetic.transformer_cost_eur END AS transformer_cost_eur,
             (SELECT COUNT(*) FROM surrogrid.expansion_real_grid_status s
              WHERE s.expansion_analysis_run_id = selected.expansion_analysis_run_id
                AND s.cost_status = 'incomplete') AS incomplete_grids,
@@ -987,7 +1018,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--data-source",
-        choices=("synthetic", "real_swf"),
+        choices=tuple(DATA_SOURCE_LABELS),
         default="synthetic",
         help="Network model whose compact power-flow summaries are materialized.",
     )
@@ -998,14 +1029,32 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Power-flow stage to analyze.",
     )
     parser.add_argument("--scenario-id", type=int, help="Optional scenario_id filter.")
-    parser.add_argument("--ags", help="Optional AGS filter, for example 09162000 for Munich.")
-    parser.add_argument("--plz", type=int, help="Optional PLZ filter.")
     parser.add_argument(
-        "--exclude-real-lv-id",
+        "--ags",
+        action="append",
+        default=[],
+        help="Optional synthetic AGS filter, for example 09162000 for Munich; repeatable.",
+    )
+    parser.add_argument(
+        "--plz",
         action="append",
         type=int,
         default=[],
-        help="Real SWF LV id to retain in coverage reporting but exclude from costing; repeatable.",
+        help="Optional PLZ filter (synthetic grid PLZ or real majority PLZ); repeatable.",
+    )
+    parser.add_argument(
+        "--pylovo-version-id",
+        help=(
+            "pylovo version of the run. Filters synthetic grid cases and selects the "
+            "real-grid settlement type; real runs otherwise use the version recorded "
+            "in the power-flow run assumptions."
+        ),
+    )
+    parser.add_argument(
+        "--exclude-real-lv-id",
+        action="append",
+        default=[],
+        help="Real grid id (SWF LV or ÜZW area) to retain in coverage reporting but exclude from costing; repeatable.",
     )
     parser.add_argument(
         "--assumption-key",
@@ -1035,21 +1084,15 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
-    parser = _build_parser()
-    args = parser.parse_args()
-
-    db = SurroGridDatabase()
-    _execute_sql_file(db, SCHEMA_SQL_PATH)
-    if args.schema_only:
-        print("Expansion schema and QGIS views are ready.")
-        return
-
+def materialize(
+    db: SurroGridDatabase, args: argparse.Namespace, *, refresh_views: bool = True
+) -> str:
+    """Materialize one expansion analysis and return its analysis key."""
     analysis_key = _analysis_key(args)
     if args.data_source == "synthetic":
         _audit_unmapped_line_components(db, args=args)
     run_id = _create_analysis_run(db, analysis_key=analysis_key, args=args)
-    if args.data_source == "real_swf":
+    if args.data_source != "synthetic":
         result = materialize_real_results(
             db,
             expansion_analysis_run_id=run_id,
@@ -1067,9 +1110,23 @@ def main() -> None:
         )
         print(f"line rows inserted: {line_rows}")
         print(f"transformer rows inserted: {transformer_rows}")
-    _refresh_qgis_materialized_views(db)
-    print("QGIS materialized views refreshed.")
+    if refresh_views:
+        _refresh_qgis_materialized_views(db)
+        print("QGIS materialized views refreshed.")
     _print_summary(db, analysis_key)
+    return analysis_key
+
+
+def main() -> None:
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    db = SurroGridDatabase()
+    _execute_sql_file(db, SCHEMA_SQL_PATH)
+    if args.schema_only:
+        print("Expansion schema and QGIS views are ready.")
+        return
+    materialize(db, args)
 
 
 if __name__ == "__main__":

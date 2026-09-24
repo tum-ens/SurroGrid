@@ -122,25 +122,25 @@ def load_expansion_overview(
                 WHERE expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar)
             )
             SELECT ar.data_source,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rl.grids_with_line_rows ELSE sl.grids_with_line_rows END AS grids_with_line_rows,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rl.cable_segments ELSE sl.cable_segments END AS cable_segments,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rl.cable_segments_requiring_expansion ELSE sl.cable_segments_requiring_expansion END AS cable_segments_requiring_expansion,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rl.cable_segments_overloaded ELSE sl.cable_segments_overloaded END AS cable_segments_overloaded,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rl.reinforcement_150_count ELSE sl.reinforcement_150_count END AS reinforcement_150_count,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rl.reinforcement_185_count ELSE sl.reinforcement_185_count END AS reinforcement_185_count,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rl.reinforcement_240_count ELSE sl.reinforcement_240_count END AS reinforcement_240_count,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rl.reinforcement_added_capacity_ka ELSE sl.reinforcement_added_capacity_ka END AS reinforcement_added_capacity_ka,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rl.cable_cost_eur ELSE sl.cable_cost_eur END AS cable_cost_eur,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rt.transformers ELSE st.transformers END AS transformers,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rt.transformers_requiring_expansion ELSE st.transformers_requiring_expansion END AS transformers_requiring_expansion,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rt.transformers_overloaded ELSE st.transformers_overloaded END AS transformers_overloaded,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rt.transformer_cost_eur ELSE st.transformer_cost_eur END AS transformer_cost_eur,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rs.grids_total ELSE sl.grids_with_line_rows END AS grids_total,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rs.grids_complete ELSE sl.grids_with_line_rows END AS grids_complete,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rs.grids_incomplete ELSE 0 END AS grids_incomplete,
-                   CASE WHEN ar.data_source = 'Real SWF' THEN rs.grids_excluded ELSE 0 END AS grids_excluded,
-                   (CASE WHEN ar.data_source = 'Real SWF' THEN rl.cable_cost_eur ELSE sl.cable_cost_eur END)
-                   + (CASE WHEN ar.data_source = 'Real SWF' THEN rt.transformer_cost_eur ELSE st.transformer_cost_eur END) AS total_cost_eur
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rl.grids_with_line_rows ELSE sl.grids_with_line_rows END AS grids_with_line_rows,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rl.cable_segments ELSE sl.cable_segments END AS cable_segments,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rl.cable_segments_requiring_expansion ELSE sl.cable_segments_requiring_expansion END AS cable_segments_requiring_expansion,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rl.cable_segments_overloaded ELSE sl.cable_segments_overloaded END AS cable_segments_overloaded,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rl.reinforcement_150_count ELSE sl.reinforcement_150_count END AS reinforcement_150_count,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rl.reinforcement_185_count ELSE sl.reinforcement_185_count END AS reinforcement_185_count,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rl.reinforcement_240_count ELSE sl.reinforcement_240_count END AS reinforcement_240_count,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rl.reinforcement_added_capacity_ka ELSE sl.reinforcement_added_capacity_ka END AS reinforcement_added_capacity_ka,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rl.cable_cost_eur ELSE sl.cable_cost_eur END AS cable_cost_eur,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rt.transformers ELSE st.transformers END AS transformers,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rt.transformers_requiring_expansion ELSE st.transformers_requiring_expansion END AS transformers_requiring_expansion,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rt.transformers_overloaded ELSE st.transformers_overloaded END AS transformers_overloaded,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rt.transformer_cost_eur ELSE st.transformer_cost_eur END AS transformer_cost_eur,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rs.grids_total ELSE sl.grids_with_line_rows END AS grids_total,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rs.grids_complete ELSE sl.grids_with_line_rows END AS grids_complete,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rs.grids_incomplete ELSE 0 END AS grids_incomplete,
+                   CASE WHEN ar.data_source <> 'Synthetic' THEN rs.grids_excluded ELSE 0 END AS grids_excluded,
+                   (CASE WHEN ar.data_source <> 'Synthetic' THEN rl.cable_cost_eur ELSE sl.cable_cost_eur END)
+                   + (CASE WHEN ar.data_source <> 'Synthetic' THEN rt.transformer_cost_eur ELSE st.transformer_cost_eur END) AS total_cost_eur
             FROM ar
             CROSS JOIN synthetic_lines sl CROSS JOIN synthetic_trafos st
             CROSS JOIN real_lines rl CROSS JOIN real_trafos rt CROSS JOIN real_status rs
@@ -192,7 +192,8 @@ def load_expansion_overview(
                        COALESCE(t.transformer_cost_eur, 0.0) AS transformer_cost_eur,
                        t.transformer_loading_percent, 'complete'::TEXT AS cost_status,
                        0 AS n_failed_timesteps, NULL::TEXT AS status_reason,
-                       COALESCE(l.cable_cost_eur, 0.0) + COALESCE(t.transformer_cost_eur, 0.0) AS total_cost_eur
+                       COALESCE(l.cable_cost_eur, 0.0) + COALESCE(t.transformer_cost_eur, 0.0) AS total_cost_eur,
+                       NULL::TEXT AS real_source, NULL::TEXT AS lv_id
                 FROM synthetic_lines l FULL OUTER JOIN synthetic_trafos t USING (grid_case_id)
             ), real_lines AS (
                 SELECT real_grid_case_id, MAX(plz) AS plz, MAX(lv_id) AS lv_id,
@@ -219,8 +220,10 @@ def load_expansion_overview(
                 WHERE expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar)
                 GROUP BY real_grid_case_id
             ), real_rows AS (
-                SELECT 'Real SWF'::TEXT AS data_source, s.real_grid_case_id::TEXT AS source_grid_id,
-                       CONCAT('LV_', LPAD(s.lv_id, 3, '0')) AS grid_label,
+                SELECT (SELECT data_source FROM ar) AS data_source, s.real_grid_case_id::TEXT AS source_grid_id,
+                       CASE WHEN rgc.source = 'uzw' THEN CONCAT('ÜZW area-', LPAD(s.lv_id, 4, '0'))
+                            ELSE CONCAT(UPPER(rgc.source), ' LV_', LPAD(s.lv_id, 3, '0'))
+                       END AS grid_label,
                        NULL::BIGINT AS grid_case_id, s.real_grid_case_id,
                        s.plz, NULL::INTEGER AS kcid, NULL::INTEGER AS bcid,
                        l.cable_segments, l.cable_segments_requiring_expansion,
@@ -233,15 +236,17 @@ def load_expansion_overview(
                        CASE WHEN s.cost_status = 'complete' THEN COALESCE(t.transformer_cost_eur, 0.0) END AS transformer_cost_eur,
                        t.transformer_loading_percent, s.cost_status, s.n_failed_timesteps,
                        s.status_reason,
-                       CASE WHEN s.cost_status = 'complete' THEN COALESCE(l.cable_cost_eur, 0.0) + COALESCE(t.transformer_cost_eur, 0.0) END AS total_cost_eur
+                       CASE WHEN s.cost_status = 'complete' THEN COALESCE(l.cable_cost_eur, 0.0) + COALESCE(t.transformer_cost_eur, 0.0) END AS total_cost_eur,
+                       rgc.source AS real_source, s.lv_id
                 FROM surrogrid.expansion_real_grid_status s
+                JOIN surrogrid.real_grid_case rgc USING (real_grid_case_id)
                 LEFT JOIN real_lines l USING (real_grid_case_id)
                 LEFT JOIN real_trafos t USING (real_grid_case_id)
                 WHERE s.expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar)
             )
             SELECT * FROM synthetic_rows WHERE (SELECT data_source FROM ar) = 'Synthetic'
             UNION ALL
-            SELECT * FROM real_rows WHERE (SELECT data_source FROM ar) = 'Real SWF'
+            SELECT * FROM real_rows WHERE (SELECT data_source FROM ar) <> 'Synthetic'
             ORDER BY total_cost_eur DESC NULLS LAST, grid_label
             """
         ),
@@ -258,7 +263,7 @@ def load_expansion_overview(
                        reinforcement_150_count, reinforcement_185_count,
                        reinforcement_240_count, reinforcement_added_capacity_ka,
                        estimated_cost_eur, loading_percent
-                FROM surrogrid.expansion_real_line_result WHERE expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar) AND (SELECT data_source FROM ar) = 'Real SWF'
+                FROM surrogrid.expansion_real_line_result WHERE expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar) AND (SELECT data_source FROM ar) <> 'Synthetic'
             )
             SELECT cable_type AS visible_std_type, COUNT(*) AS cable_segments,
                    COUNT(*) FILTER (WHERE requires_expansion) AS cable_segments_requiring_expansion,
@@ -280,7 +285,7 @@ def load_expansion_overview(
                 FROM surrogrid.expansion_transformer_result WHERE expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar) AND (SELECT data_source FROM ar) = 'Synthetic'
                 UNION ALL
                 SELECT transformer_cost_basis, requires_expansion, additional_transformer_kva, estimated_cost_eur, loading_percent
-                FROM surrogrid.expansion_real_transformer_result WHERE expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar) AND (SELECT data_source FROM ar) = 'Real SWF'
+                FROM surrogrid.expansion_real_transformer_result WHERE expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar) AND (SELECT data_source FROM ar) <> 'Synthetic'
             )
             SELECT transformer_cost_basis, COUNT(*) AS transformers,
                    COUNT(*) FILTER (WHERE requires_expansion) AS transformers_requiring_expansion,
@@ -296,7 +301,7 @@ def load_expansion_overview(
             SELECT s.* FROM surrogrid.expansion_real_grid_status s
             JOIN surrogrid.expansion_analysis_run ar USING (expansion_analysis_run_id)
             WHERE ar.analysis_key = :analysis_key
-            ORDER BY s.cost_status, s.lv_id
+            ORDER BY s.cost_status, LENGTH(s.lv_id), s.lv_id
             """
         ),
     }

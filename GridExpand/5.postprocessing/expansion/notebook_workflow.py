@@ -27,6 +27,46 @@ from plotting.powerflow_transformer import transformer_import_distribution_db  #
 from plotting.powerflow_voltage import voltage_deviation_summary_db  # noqa: E402
 
 
+PROVIDER_LABELS = {"swf": "SWF", "uzw": "ÜZW"}
+REAL_GROUP_SOURCES = {"Real SWF": "swf", "Real ÜZW": "uzw"}
+
+
+def provider_group_label(provider: str, network: str) -> str:
+    """Return the four-group label, e.g. ``Real ÜZW`` or ``Synthetic SWF``."""
+    kind = "Real" if network == "real" else "Synthetic"
+    return f"{kind} {PROVIDER_LABELS[provider]}"
+
+
+def _is_real_group(group: str) -> bool:
+    return str(group).startswith("Real")
+
+
+def _default_specs_by_source(
+    synthetic_specs: Mapping[str, Mapping[str, object]] | None,
+    real_specs: Mapping[str, Mapping[str, object]] | None,
+    specs_by_source: Mapping[str, Mapping[str, Mapping[str, object]]] | None,
+) -> Mapping[str, Mapping[str, Mapping[str, object]]]:
+    if specs_by_source is not None:
+        return specs_by_source
+    return {"Synthetic": synthetic_specs or {}, "Real SWF": real_specs or {}}
+
+
+def _excluded_ids(
+    excluded_real_lv_ids: tuple[int | str, ...] | Mapping[str, tuple[int | str, ...]],
+    group: str,
+) -> set[str]:
+    """Return canonical text grid ids excluded for one real group.
+
+    A plain tuple applies to every real group; a mapping is keyed by group label.
+    """
+    values = (
+        excluded_real_lv_ids.get(group, ())
+        if isinstance(excluded_real_lv_ids, Mapping)
+        else excluded_real_lv_ids
+    )
+    return {str(int(value)) if str(value).isdigit() else str(value) for value in values}
+
+
 def normalize_ags_string(value: str | int) -> str:
     """Return AGS as an eight-character string with leading zero if needed."""
     return str(int(str(value).strip().lstrip("0") or "0")).zfill(8)
@@ -361,68 +401,79 @@ def expansion_cost_coverage_summary(analysis_status: pd.DataFrame) -> pd.DataFra
 
 def load_powerflow_cutoff_comparison(
     *,
-    synthetic_specs: Mapping[str, Mapping[str, object]],
-    real_specs: Mapping[str, Mapping[str, object]],
+    synthetic_specs: Mapping[str, Mapping[str, object]] | None = None,
+    real_specs: Mapping[str, Mapping[str, object]] | None = None,
     stage_order: list[str],
-    ags: str | int,
+    ags: str | int | None = None,
     scenario_id: int | None = None,
     plz: int | None = None,
     real_plz: int | None = None,
-    excluded_real_lv_ids: tuple[int, ...] = (),
+    excluded_real_lv_ids: tuple[int | str, ...] | Mapping[str, tuple] = (),
+    specs_by_source: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> dict[str, object]:
-    """Load compact synthetic and real power-flow summaries for one comparison plot."""
+    """Load compact synthetic and real power-flow summaries for one comparison plot.
+
+    ``specs_by_source`` replaces ``synthetic_specs``/``real_specs`` for more than
+    two groups, e.g. the four groups of ``prepare_expansion_analysis(providers=...)``.
+    """
+    specs_by_source = _default_specs_by_source(synthetic_specs, real_specs, specs_by_source)
     powerflow_profiles = []
-    skipped = {"Synthetic": {}, "Real SWF": {}}
+    skipped = {source: {} for source in specs_by_source}
     excluded_real_grids = []
-    excluded_lv_ids = {str(int(lv_id)) for lv_id in excluded_real_lv_ids}
 
-    for label, spec in synthetic_specs.items():
-        try:
-            profile = load_synthetic_powerflow_cutoff_profile(
-                run_name=str(spec["run_name"]),
-                stage=str(spec["stage"]),
-                scenario_id=scenario_id,
-                ags=ags,
-                plz=plz,
-            )
-        except ValueError as exc:
-            skipped["Synthetic"][label] = str(exc)
+    for source, specs in specs_by_source.items():
+        if _is_real_group(source):
             continue
-        profile["comparison_stage"] = label
-        profile["data_source"] = "Synthetic"
-        powerflow_profiles.append(profile)
-
-    if real_plz is None and normalize_ags_string(ags) == "09474126":
-        real_plz = 91301
-    for label, spec in real_specs.items():
-        try:
-            profile = real_powerflow_percentile_profile_db(
-                run_name=str(spec["run_name"]),
-                stage=str(spec["stage"]),
-                plz=real_plz if real_plz is not None else plz,
-            )
-        except ValueError as exc:
-            skipped["Real SWF"][label] = str(exc)
-            continue
-        if excluded_lv_ids and "lv_id" in profile.columns:
-            excluded = profile[profile["lv_id"].astype(str).isin(excluded_lv_ids)]
-            if not excluded.empty:
-                excluded_real_grids.append(
-                    {
-                        "comparison_stage": label,
-                        "excluded_lv_ids": ", ".join(
-                            f"LV_{int(lv_id):03d}"
-                            for lv_id in sorted(excluded["lv_id"].astype(int).unique())
-                        ),
-                        "excluded_grids": excluded["grid"].nunique(),
-                    }
+        for label, spec in specs.items():
+            try:
+                profile = load_synthetic_powerflow_cutoff_profile(
+                    run_name=str(spec["run_name"]),
+                    stage=str(spec["stage"]),
+                    scenario_id=scenario_id,
+                    ags=ags,
+                    plz=plz,
                 )
-            profile = profile[
-                ~profile["lv_id"].astype(str).isin(excluded_lv_ids)
-            ].copy()
-        profile["comparison_stage"] = label
-        profile["data_source"] = "Real SWF"
-        powerflow_profiles.append(profile)
+            except ValueError as exc:
+                skipped[source][label] = str(exc)
+                continue
+            profile["comparison_stage"] = label
+            profile["data_source"] = source
+            powerflow_profiles.append(profile)
+
+    for source, specs in specs_by_source.items():
+        if not _is_real_group(source):
+            continue
+        excluded_lv_ids = _excluded_ids(excluded_real_lv_ids, source)
+        for label, spec in specs.items():
+            try:
+                profile = real_powerflow_percentile_profile_db(
+                    run_name=str(spec["run_name"]),
+                    stage=str(spec["stage"]),
+                    plz=real_plz if real_plz is not None else plz,
+                    source=REAL_GROUP_SOURCES.get(source),
+                )
+            except ValueError as exc:
+                skipped[source][label] = str(exc)
+                continue
+            if excluded_lv_ids and "lv_id" in profile.columns:
+                excluded = profile[profile["lv_id"].astype(str).isin(excluded_lv_ids)]
+                if not excluded.empty:
+                    excluded_real_grids.append(
+                        {
+                            "data_source": source,
+                            "comparison_stage": label,
+                            "excluded_lv_ids": ", ".join(
+                                sorted(excluded["grid"].astype(str).unique())
+                            ),
+                            "excluded_grids": excluded["grid"].nunique(),
+                        }
+                    )
+                profile = profile[
+                    ~profile["lv_id"].astype(str).isin(excluded_lv_ids)
+                ].copy()
+            profile["comparison_stage"] = label
+            profile["data_source"] = source
+            powerflow_profiles.append(profile)
 
     if not powerflow_profiles:
         raise ValueError(
@@ -498,69 +549,68 @@ def load_voltage_summaries_for_analysis(
 
 def load_voltage_summaries_for_powerflow_comparison(
     *,
-    synthetic_specs: Mapping[str, Mapping[str, object]],
-    real_specs: Mapping[str, Mapping[str, object]],
-    ags: str | int,
+    synthetic_specs: Mapping[str, Mapping[str, object]] | None = None,
+    real_specs: Mapping[str, Mapping[str, object]] | None = None,
+    ags: str | int | None = None,
     scenario_id: int | None = None,
     plz: int | None = None,
     real_plz: int | None = None,
-    excluded_real_lv_ids: tuple[int, ...] = (),
+    excluded_real_lv_ids: tuple[int | str, ...] | Mapping[str, tuple] = (),
+    specs_by_source: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> dict[str, dict[str, pd.DataFrame]]:
     """Load source-separated voltage summaries from one scenario's run specs."""
-    synthetic: dict[str, pd.DataFrame] = {}
-    for label, spec in synthetic_specs.items():
-        try:
-            synthetic[label] = voltage_deviation_summary_db(
-                run_name=str(spec["run_name"]),
-                stages=(str(spec["stage"]),),
-                scenario_id=scenario_id,
-                ags=ags,
-                plz=plz,
-            )
-        except ValueError:
-            continue
-
-    if real_plz is None and normalize_ags_string(ags) == "09474126":
-        real_plz = 91301
-    real: dict[str, pd.DataFrame] = {}
-    excluded_lv_ids = {str(int(lv_id)) for lv_id in excluded_real_lv_ids}
-    for label, spec in real_specs.items():
-        try:
-            summary = real_powerflow_headline_summary_db(
-                run_name=str(spec["run_name"]),
-                stage=str(spec["stage"]),
-                plz=real_plz,
-            )
-        except ValueError:
-            continue
-        if excluded_lv_ids and "lv_id" in summary.columns:
-            summary = summary[
-                ~summary["lv_id"].astype(str).isin(excluded_lv_ids)
-            ].copy()
-        if summary.empty or "voltage_min_asset_time_pu" not in summary.columns:
-            continue
-        real[label] = pd.DataFrame(
-            {
-                "grid": summary["grid"],
-                "stage": summary["stage"],
-                "n_timesteps": summary.get("n_timesteps"),
-                "n_buses": summary.get("n_voltage_buses"),
-                "min_vm_pu": summary["voltage_min_asset_time_pu"],
-                "max_vm_pu": pd.NA,
-            }
-        )
+    specs_by_source = _default_specs_by_source(synthetic_specs, real_specs, specs_by_source)
     result: dict[str, dict[str, pd.DataFrame]] = {}
-    if synthetic:
-        result["Synthetic"] = synthetic
-    if real:
-        result["Real SWF"] = real
+    for source, specs in specs_by_source.items():
+        summaries: dict[str, pd.DataFrame] = {}
+        excluded_lv_ids = _excluded_ids(excluded_real_lv_ids, source)
+        for label, spec in specs.items():
+            if not _is_real_group(source):
+                try:
+                    summaries[label] = voltage_deviation_summary_db(
+                        run_name=str(spec["run_name"]),
+                        stages=(str(spec["stage"]),),
+                        scenario_id=scenario_id,
+                        ags=ags,
+                        plz=plz,
+                    )
+                except ValueError:
+                    pass
+                continue
+            try:
+                summary = real_powerflow_headline_summary_db(
+                    run_name=str(spec["run_name"]),
+                    stage=str(spec["stage"]),
+                    plz=real_plz,
+                    source=REAL_GROUP_SOURCES.get(source),
+                )
+            except ValueError:
+                continue
+            if excluded_lv_ids and "lv_id" in summary.columns:
+                summary = summary[
+                    ~summary["lv_id"].astype(str).isin(excluded_lv_ids)
+                ].copy()
+            if summary.empty or "voltage_min_asset_time_pu" not in summary.columns:
+                continue
+            summaries[label] = pd.DataFrame(
+                {
+                    "grid": summary["grid"],
+                    "stage": summary["stage"],
+                    "n_timesteps": summary.get("n_timesteps"),
+                    "n_buses": summary.get("n_voltage_buses"),
+                    "min_vm_pu": summary["voltage_min_asset_time_pu"],
+                    "max_vm_pu": pd.NA,
+                }
+            )
+        if summaries:
+            result[source] = summaries
     return result
 
 
 def load_transformer_import_distributions_for_specs(
     synthetic_specs: Mapping[str, Mapping[str, object]],
     *,
-    ags: str | int,
+    ags: str | int | None = None,
     scenario_id: int | None = None,
     plz: int | None = None,
 ) -> pd.DataFrame:
@@ -597,51 +647,52 @@ ALL_MODEL_CASE_STAGE_LABELS = {
 }
 
 
-def scenario_powerflow_specs(
-    scenario_prefix: str,
-    stage_labels: Mapping[str, str] | None = None,
-) -> dict[str, dict[str, dict[str, str]]]:
-    """Derive all compact-summary run names from one scenario prefix."""
-    labels = dict(stage_labels or DEFAULT_STAGE_LABELS)
+def _case_specs(run_prefix: str, labels: Mapping[str, str]) -> dict[str, dict[str, str]]:
     specs = {
-        "Synthetic": {
-            labels["pre"]: {
-                "run_name": f"{scenario_prefix}_synthetic_pre",
-                "stage": "pre",
-            },
-            labels["post_inflex"]: {
-                "run_name": f"{scenario_prefix}_synthetic_post-inflex-heuristic",
-                "stage": "post",
-            },
-            labels["post_flex"]: {
-                "run_name": f"{scenario_prefix}_synthetic_post-hems-heuristic",
-                "stage": "post",
-            },
+        labels["pre"]: {"run_name": f"{run_prefix}_pre", "stage": "pre"},
+        labels["post_inflex"]: {
+            "run_name": f"{run_prefix}_post-inflex-heuristic",
+            "stage": "post",
         },
-        "Real SWF": {
-            labels["pre"]: {
-                "run_name": f"{scenario_prefix}_real_swf_pre",
-                "stage": "pre",
-            },
-            labels["post_inflex"]: {
-                "run_name": f"{scenario_prefix}_real_swf_post-inflex-heuristic",
-                "stage": "post",
-            },
-            labels["post_flex"]: {
-                "run_name": f"{scenario_prefix}_real_swf_post-hems-heuristic",
-                "stage": "post",
-            },
+        labels["post_flex"]: {
+            "run_name": f"{run_prefix}_post-hems-heuristic",
+            "stage": "post",
         },
     }
     if "post_optimized" in labels:
-        specs["Synthetic"][labels["post_optimized"]] = {
-            "run_name": f"{scenario_prefix}_synthetic_post-hems-optimized",
+        specs[labels["post_optimized"]] = {
+            "run_name": f"{run_prefix}_post-hems-optimized",
             "stage": "post",
         }
-        specs["Real SWF"][labels["post_optimized"]] = {
-            "run_name": f"{scenario_prefix}_real_swf_post-hems-optimized",
-            "stage": "post",
+    return specs
+
+
+def scenario_powerflow_specs(
+    scenario_prefix: str,
+    stage_labels: Mapping[str, str] | None = None,
+    *,
+    providers: tuple[str, ...] | None = None,
+) -> dict[str, dict[str, dict[str, str]]]:
+    """Derive all compact-summary run names from one scenario prefix.
+
+    Without ``providers`` this returns the SWF-only groups ``Synthetic`` and
+    ``Real SWF``. With providers it returns ``Real <P>``/``Synthetic <P>`` per
+    provider for aligned run names ``{run_id}_{provider}_{network}_{case}``.
+    """
+    labels = dict(stage_labels or DEFAULT_STAGE_LABELS)
+    if providers is None:
+        return {
+            "Synthetic": _case_specs(f"{scenario_prefix}_synthetic", labels),
+            "Real SWF": _case_specs(f"{scenario_prefix}_real_swf", labels),
         }
+    specs = {}
+    for provider in providers:
+        specs[provider_group_label(provider, "real")] = _case_specs(
+            f"{scenario_prefix}_{provider}_real_{provider}", labels
+        )
+        specs[provider_group_label(provider, "synthetic")] = _case_specs(
+            f"{scenario_prefix}_{provider}_synthetic", labels
+        )
     return specs
 
 
@@ -650,19 +701,26 @@ def scenario_analysis_keys(
     stage_labels: Mapping[str, str] | None = None,
     *,
     data_source: str = "Synthetic",
+    provider: str | None = None,
 ) -> dict[str, str]:
-    """Derive stable expansion-analysis keys for one network source."""
+    """Derive stable expansion-analysis keys for one network source.
+
+    With ``provider`` the aligned keys ``{run_id}_{provider}_{real|synthetic}_*``
+    written by ``expansion.aligned_expansion`` are returned.
+    """
     labels = dict(stage_labels or DEFAULT_STAGE_LABELS)
-    source_suffix = "" if data_source == "Synthetic" else "_real"
+    if provider is not None:
+        network = "real" if _is_real_group(data_source) else "synthetic"
+        key_prefix = f"{scenario_prefix}_{provider}_{network}"
+    else:
+        key_prefix = scenario_prefix + ("" if data_source == "Synthetic" else "_real")
     keys = {
-        labels["pre"]: f"{scenario_prefix}{source_suffix}_pre",
-        labels["post_inflex"]: f"{scenario_prefix}{source_suffix}_post_inflex",
-        labels["post_flex"]: f"{scenario_prefix}{source_suffix}_post",
+        labels["pre"]: f"{key_prefix}_pre",
+        labels["post_inflex"]: f"{key_prefix}_post_inflex",
+        labels["post_flex"]: f"{key_prefix}_post",
     }
     if "post_optimized" in labels:
-        keys[labels["post_optimized"]] = (
-            f"{scenario_prefix}{source_suffix}_post_hems_optimized"
-        )
+        keys[labels["post_optimized"]] = f"{key_prefix}_post_hems_optimized"
     return keys
 
 
@@ -670,7 +728,7 @@ def _powerflow_run_readiness(
     *,
     specs_by_source: Mapping[str, Mapping[str, Mapping[str, object]]],
     expected_grid_counts: Mapping[str, int] | None,
-    ags: str | int,
+    ags: str | int | None,
     real_plz: int | None,
 ) -> pd.DataFrame:
     """Audit launched runs, summaries, failures, and temporal contracts."""
@@ -694,7 +752,7 @@ def _powerflow_run_readiness(
           ON pfs.powerflow_run_id = pr.powerflow_run_id
          AND pfs.stage = :stage
         WHERE pr.run_name = :run_name
-          AND gc.ags = :ags
+          AND (CAST(:ags AS BIGINT) IS NULL OR gc.ags = CAST(:ags AS BIGINT))
         """
     )
     real_query = text(
@@ -717,6 +775,7 @@ def _powerflow_run_readiness(
          AND rps.stage = :stage
         WHERE rpr.run_name = :run_name
           AND (:plz IS NULL OR rgc.plz = :plz)
+          AND (CAST(:source AS TEXT) IS NULL OR rgc.source = CAST(:source AS TEXT))
         """
     )
 
@@ -728,11 +787,12 @@ def _powerflow_run_readiness(
                     "run_name": str(spec["run_name"]),
                     "stage": str(spec["stage"]),
                 }
-                if source == "Synthetic":
-                    params["ags"] = int(normalize_ags_string(ags))
+                if not _is_real_group(source):
+                    params["ags"] = None if ags is None else int(normalize_ags_string(ags))
                     result = conn.execute(synthetic_query, params).mappings().one()
                 else:
                     params["plz"] = real_plz
+                    params["source"] = REAL_GROUP_SOURCES.get(source)
                     result = conn.execute(real_query, params).mappings().one()
                 expected = (
                     None
@@ -894,7 +954,7 @@ def _publication_gate(
 def prepare_expansion_analysis(
     *,
     scenario_prefix: str,
-    ags: str | int,
+    ags: str | int | None = None,
     expected_grid_counts: Mapping[str, int] | None = None,
     stage_labels: Mapping[str, str] | None = None,
     include_optimized: bool = False,
@@ -902,25 +962,45 @@ def prepare_expansion_analysis(
     real_plz: int | None = None,
     require_temporal_method: str | None = None,
     enforce_provenance: bool = True,
+    providers: tuple[str, ...] | None = None,
 ) -> dict[str, object]:
     """Prepare one coherent synthetic/real scenario for the analysis notebook.
 
     Provenance is enforced here, on the path the notebook actually calls, rather
     than left to a helper a reader must remember to invoke. Pass
     ``enforce_provenance=False`` only to inspect a knowingly mixed selection.
+
+    Without ``providers`` the SWF-only groups ``Synthetic``/``Real SWF`` of
+    ``ags`` are prepared. With ``providers=("swf", "uzw")`` an aligned run is
+    prepared as four groups (``Real SWF``, ``Synthetic SWF``, ``Real ÜZW``,
+    ``Synthetic ÜZW``); provider scope then comes from the run names, and
+    ``ags``/``real_plz`` are optional extra filters. Pass
+    ``specs_by_source=context["specs_by_source"]`` to the loaders.
     """
     labels = dict(
         stage_labels
         or (ALL_MODEL_CASE_STAGE_LABELS if include_optimized else DEFAULT_STAGE_LABELS)
     )
-    if real_plz is None and normalize_ags_string(ags) == "09474126":
-        real_plz = 91301
-    specs_by_source = scenario_powerflow_specs(scenario_prefix, labels)
+    specs_by_source = scenario_powerflow_specs(
+        scenario_prefix, labels, providers=providers
+    )
     default_label = labels[default_stage]
-    analysis_keys_by_source = {
-        source: scenario_analysis_keys(scenario_prefix, labels, data_source=source)
-        for source in ("Synthetic", "Real SWF")
-    }
+    if providers is None:
+        analysis_keys_by_source = {
+            source: scenario_analysis_keys(scenario_prefix, labels, data_source=source)
+            for source in specs_by_source
+        }
+    else:
+        analysis_keys_by_source = {
+            provider_group_label(provider, network): scenario_analysis_keys(
+                scenario_prefix,
+                labels,
+                data_source=provider_group_label(provider, network),
+                provider=provider,
+            )
+            for provider in providers
+            for network in ("real", "synthetic")
+        }
     expansion_context_by_source = {
         source: load_expansion_stage_context(
             keys,
@@ -955,16 +1035,26 @@ def prepare_expansion_analysis(
             expansion_status, expected=require_temporal_method
         )
 
-    synthetic_context = expansion_context_by_source["Synthetic"]
+    synthetic_source = next(
+        source for source in specs_by_source if not _is_real_group(source)
+    )
+    synthetic_context = expansion_context_by_source[synthetic_source]
+    display_label = (
+        display_label_from_ags(ags)
+        if providers is None
+        else " + ".join(PROVIDER_LABELS[provider] for provider in providers)
+    )
     return {
         "temporal_provenance": provenance,
         "scenario_prefix": scenario_prefix,
-        "display_label": display_label_from_ags(ags),
+        "display_label": display_label,
         "stage_labels": labels,
-        "analysis_keys": analysis_keys_by_source["Synthetic"],
+        "providers": providers,
+        "analysis_keys": analysis_keys_by_source[synthetic_source],
         "analysis_keys_by_source": analysis_keys_by_source,
-        "synthetic_specs": specs_by_source["Synthetic"],
-        "real_specs": specs_by_source["Real SWF"],
+        "specs_by_source": specs_by_source,
+        "synthetic_specs": specs_by_source.get("Synthetic"),
+        "real_specs": specs_by_source.get("Real SWF"),
         "real_plz": real_plz,
         "powerflow_status": powerflow_status,
         "publication_gate": publication_gate,
@@ -989,15 +1079,15 @@ def prepare_expansion_analysis(
 
 def load_cable_loading_decomposition(
     *,
-    synthetic_specs: Mapping[str, Mapping[str, object]],
-    real_specs: Mapping[str, Mapping[str, object]],
-    ags: str | int,
+    synthetic_specs: Mapping[str, Mapping[str, object]] | None = None,
+    real_specs: Mapping[str, Mapping[str, object]] | None = None,
+    ags: str | int | None = None,
     real_plz: int | None = None,
-    excluded_real_lv_ids: tuple[int, ...] = (),
+    excluded_real_lv_ids: tuple[int | str, ...] | Mapping[str, tuple] = (),
+    specs_by_source: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> pd.DataFrame:
-    """Load one annual-maximum row per analyzed cable for both networks."""
-    if real_plz is None and normalize_ags_string(ags) == "09474126":
-        real_plz = 91301
+    """Load one annual-maximum row per analyzed cable for every network group."""
+    specs_by_source = _default_specs_by_source(synthetic_specs, real_specs, specs_by_source)
     db = SurroGridDatabase()
     synthetic_query = text(
         """
@@ -1010,12 +1100,14 @@ def load_cable_loading_decomposition(
         JOIN surrogrid.grid_case gc USING (grid_case_id)
         WHERE pr.run_name = :run_name
           AND pcs.stage = :stage
-          AND gc.ags = :ags
+          AND (CAST(:ags AS BIGINT) IS NULL OR gc.ags = CAST(:ags AS BIGINT))
         """
     )
     real_query = text(
         """
-        SELECT CONCAT('LV_', LPAD(rgc.lv_id::TEXT, 3, '0')) AS grid,
+        SELECT CASE WHEN rgc.source = 'uzw' THEN CONCAT('ÜZW area-', LPAD(rgc.lv_id, 4, '0'))
+                    ELSE CONCAT(UPPER(rgc.source), ' LV_', LPAD(rgc.lv_id, 3, '0'))
+               END AS grid,
                rgc.lv_id,
                rpcs.cable AS asset_id,
                rpcs.cable_installed_capacity_ka,
@@ -1026,26 +1118,28 @@ def load_cable_loading_decomposition(
         WHERE rpr.run_name = :run_name
           AND rpcs.stage = :stage
           AND (:plz IS NULL OR rgc.plz = :plz)
+          AND (CAST(:source AS TEXT) IS NULL OR rgc.source = CAST(:source AS TEXT))
         """
     )
 
     frames = []
-    excluded = {int(value) for value in excluded_real_lv_ids}
     with db.engine.connect() as conn:
-        for source, specs in (("Synthetic", synthetic_specs), ("Real SWF", real_specs)):
+        for source, specs in specs_by_source.items():
+            excluded = _excluded_ids(excluded_real_lv_ids, source)
             for stage_label, spec in specs.items():
                 params = {
                     "run_name": str(spec["run_name"]),
                     "stage": str(spec["stage"]),
                 }
-                if source == "Synthetic":
-                    params["ags"] = int(normalize_ags_string(ags))
+                if not _is_real_group(source):
+                    params["ags"] = None if ags is None else int(normalize_ags_string(ags))
                     frame = pd.read_sql_query(synthetic_query, conn, params=params)
                 else:
                     params["plz"] = real_plz
+                    params["source"] = REAL_GROUP_SOURCES.get(source)
                     frame = pd.read_sql_query(real_query, conn, params=params)
                     if excluded and not frame.empty:
-                        frame = frame[~frame["lv_id"].astype(int).isin(excluded)].copy()
+                        frame = frame[~frame["lv_id"].astype(str).isin(excluded)].copy()
                 if frame.empty:
                     continue
                 frame["data_source"] = source
@@ -1083,7 +1177,7 @@ def export_scenario_analysis_manifest(
     context: Mapping[str, object],
     *,
     output_dir: str | Path,
-    excluded_real_lv_ids: tuple[int, ...] = (),
+    excluded_real_lv_ids: tuple[int | str, ...] | Mapping[str, tuple] = (),
 ) -> dict[str, Path]:
     """Export scenario identity and readiness tables alongside notebook figures."""
     output_dir = Path(output_dir)
@@ -1110,7 +1204,15 @@ def export_scenario_analysis_manifest(
         "analysis_keys_by_source": context.get("analysis_keys_by_source"),
         "synthetic_specs": context["synthetic_specs"],
         "real_specs": context["real_specs"],
-        "excluded_real_lv_ids": [int(value) for value in excluded_real_lv_ids],
+        "specs_by_source": context.get("specs_by_source"),
+        "excluded_real_lv_ids": (
+            {
+                source: sorted(_excluded_ids(excluded_real_lv_ids, source))
+                for source in excluded_real_lv_ids
+            }
+            if isinstance(excluded_real_lv_ids, Mapping)
+            else [int(value) for value in excluded_real_lv_ids]
+        ),
         "publication_checks": publication_gate.to_dict(orient="records"),
     }
     manifest_path = output_dir / "scenario_analysis_manifest.json"

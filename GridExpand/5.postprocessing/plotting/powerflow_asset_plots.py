@@ -749,6 +749,8 @@ def plot_powerflow_asset_cutoff_overview_static(
             return "Synthetic"
         if lowered in {"real swf", "real_swf", "real"}:
             return "Real"
+        if lowered in {"synthetic swf", "synthetic üzw", "real üzw"}:
+            return str(source).replace("Synthetic", "Syn.")
         return str(source)[:6]
 
     title_fontsize = 20
@@ -776,6 +778,9 @@ def plot_powerflow_asset_cutoff_overview_static(
         "Real SWF": {"linestyle": "--", "dashes": (3.0, 2.0), "offset": 0.18, "alpha": 0.18, "marker_alpha": 0.46},
         "synthetic": {"linestyle": "-", "offset": -0.18, "alpha": 0.30, "marker_alpha": 0.42},
         "real_swf": {"linestyle": "--", "dashes": (3.0, 2.0), "offset": 0.18, "alpha": 0.18, "marker_alpha": 0.46},
+        "Synthetic SWF": {"linestyle": "-", "offset": -0.18, "alpha": 0.30, "marker_alpha": 0.42},
+        "Synthetic ÜZW": {"linestyle": "-.", "offset": -0.06, "alpha": 0.30, "marker_alpha": 0.42},
+        "Real ÜZW": {"linestyle": ":", "offset": 0.06, "alpha": 0.18, "marker_alpha": 0.46},
     }
     for key, value in source_style_map.items():
         default_source_styles[str(key)] = {**default_source_styles.get(str(key), {}), **value}
@@ -1284,12 +1289,15 @@ def plot_cable_capacity_current_loading_comparison(
     source_styles = {
         "Synthetic": {"linestyle": "-", "marker": "o"},
         "Real SWF": {"linestyle": "--", "marker": "s"},
+        "Synthetic SWF": {"linestyle": "-", "marker": "o"},
+        "Synthetic ÜZW": {"linestyle": "-.", "marker": "^"},
+        "Real ÜZW": {"linestyle": ":", "marker": "D"},
     }
     stages = [
         stage for stage in stage_order if stage in set(cable_data["comparison_stage"].astype(str))
     ]
     sources = [
-        source for source in ("Synthetic", "Real SWF")
+        source for source in source_styles
         if source in set(cable_data["data_source"].astype(str))
     ]
 

@@ -1,4 +1,4 @@
-"""Materialize the shared expansion-cost heuristic for real SWF grids."""
+"""Materialize the shared expansion-cost heuristic for real SWF and ÜZW grids."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 
 CORRIDOR_LENGTH_RELATIVE_TOLERANCE = 0.05
+REAL_GRID_SOURCES = {"real_swf": "swf", "real_uzw": "uzw"}
 
 
 def _finite(value: Any, default: float | None = None) -> float | None:
@@ -65,8 +66,23 @@ def _point_wkt(net: pp.pandapowerNet) -> str | None:
     return None
 
 
-def _settlement_type(db, plz: int | None) -> int | None:
-    if plz is None:
+def _canonical_lv_id(value: Any) -> str:
+    """Return a real grid id as text without ``LV_``/``area-`` prefix or zero padding."""
+    text_value = str(value).strip()
+    for prefix in ("LV_", "area-", "area_"):
+        text_value = text_value.removeprefix(prefix)
+    return str(int(text_value)) if text_value.isdigit() else text_value
+
+
+def _load_real_net(source_file: Path) -> pp.pandapowerNet:
+    """Reload the stored grid: SWF Excel workbooks or ÜZW pandapower JSON."""
+    if source_file.suffix == ".json":
+        return pp.from_json(source_file)
+    return pp.from_excel(source_file)
+
+
+def _settlement_type(db, plz: int | None, version_id: str | None) -> int | None:
+    if plz is None or version_id is None:
         return None
     query = text(
         """
@@ -81,7 +97,7 @@ def _settlement_type(db, plz: int | None) -> int | None:
     with db.engine.connect() as conn:
         value = conn.execute(
             query,
-            {"plz": int(plz), "version_id": db.pylovo_version_id},
+            {"plz": int(plz), "version_id": str(version_id)},
         ).scalar_one_or_none()
     return None if value is None else int(value)
 
@@ -271,9 +287,11 @@ def _selected_runs(db, args) -> pd.DataFrame:
             rpr.real_powerflow_run_id,
             rpr.real_grid_case_id,
             rpr.scenario_id,
+            rgc.source,
             rgc.plz,
             rgc.lv_id,
             rgc.source_file,
+            rpr.assumptions ->> 'pylovo_version_id' AS pylovo_version_id,
             rps.n_timesteps,
             COALESCE(rps.n_failed_timesteps, 0) AS n_failed_timesteps,
             rps.transformer_s_rated_mva,
@@ -284,8 +302,9 @@ def _selected_runs(db, args) -> pd.DataFrame:
         WHERE rpr.run_name = :run_name
           AND rps.stage = :stage
           AND (:scenario_id IS NULL OR rpr.scenario_id = :scenario_id)
-          AND (:plz IS NULL OR rgc.plz = :plz)
-        ORDER BY rgc.lv_id
+          AND rgc.source = :source
+          AND (CAST(:plz AS INTEGER[]) IS NULL OR rgc.plz = ANY(CAST(:plz AS INTEGER[])))
+        ORDER BY LENGTH(rgc.lv_id), rgc.lv_id
         """
     )
     with db.engine.connect() as conn:
@@ -296,7 +315,8 @@ def _selected_runs(db, args) -> pd.DataFrame:
                 "run_name": args.run_name,
                 "stage": args.stage,
                 "scenario_id": args.scenario_id,
-                "plz": args.plz,
+                "source": REAL_GRID_SOURCES[args.data_source],
+                "plz": [int(value) for value in args.plz] if args.plz else None,
             },
         )
 
@@ -356,12 +376,24 @@ def materialize_real_results(
     runs = _selected_runs(db, args)
     if runs.empty:
         raise RuntimeError(
-            "No real SWF power-flow summaries match the requested expansion scope."
+            f"No {args.data_source} power-flow summaries match the requested expansion scope."
         )
     assumption = _assumption(db, args.assumption_key)
-    excluded = {int(value) for value in (args.exclude_real_lv_id or [])}
+    excluded = {_canonical_lv_id(value) for value in (args.exclude_real_lv_id or [])}
+    recorded_versions = set(runs["pylovo_version_id"].dropna().astype(str))
+    if args.pylovo_version_id is not None:
+        version_id = str(args.pylovo_version_id)
+    elif len(recorded_versions) == 1:
+        version_id = next(iter(recorded_versions))
+    else:
+        version_id = None
+        print(
+            "Warning: no unique pylovo version for the real run "
+            f"(recorded: {sorted(recorded_versions)}); settlement type is unknown "
+            "and the semiurban reopening cost is used. Pass --pylovo-version-id."
+        )
     settlement_by_plz = {
-        int(plz): _settlement_type(db, int(plz))
+        int(plz): _settlement_type(db, int(plz), version_id)
         for plz in runs["plz"].dropna().astype(int).unique()
     }
     status_rows: list[dict[str, Any]] = []
@@ -370,7 +402,7 @@ def materialize_real_results(
 
     for run in runs.to_dict("records"):
         run_id = int(run["real_powerflow_run_id"])
-        lv_id = int(str(run["lv_id"]).removeprefix("LV_"))
+        lv_id = _canonical_lv_id(run["lv_id"])
         failed = int(run["n_failed_timesteps"] or 0)
         if lv_id in excluded:
             cost_status = "excluded"
@@ -388,7 +420,7 @@ def materialize_real_results(
                 "real_grid_case_id": int(run["real_grid_case_id"]),
                 "scenario_id": int(run["scenario_id"]),
                 "plz": None if pd.isna(run["plz"]) else int(run["plz"]),
-                "lv_id": str(lv_id),
+                "lv_id": lv_id,
                 "n_timesteps": int(run["n_timesteps"]),
                 "n_failed_timesteps": failed,
                 "cost_status": cost_status,
@@ -401,9 +433,9 @@ def materialize_real_results(
         source_file = Path(str(run["source_file"]))
         if not source_file.exists():
             raise FileNotFoundError(
-                f"Real SWF grid source does not exist: {source_file}"
+                f"Real grid source does not exist: {source_file}"
             )
-        net = pp.from_excel(source_file)
+        net = _load_real_net(source_file)
         critical = _critical_indices(db, run_id, args.stage)
         settlement_type = (
             settlement_by_plz.get(int(run["plz"])) if not pd.isna(run["plz"]) else None
@@ -526,8 +558,16 @@ def materialize_real_results(
         rated_kva = (_finite(run["transformer_s_rated_mva"]) or 0.0) * 1000.0
         loading_percent = _finite(run["trafo_loading_max_time_percent"])
         if rated_kva <= 0 or loading_percent is None:
+            if run["source"] == "uzw" and rated_kva <= 0:
+                # One ÜZW station (area 113) is delivered without a rating: its
+                # cables are costed, its transformer is not.
+                print(
+                    f"Warning: real uzw grid {lv_id} has no transformer rating; "
+                    "transformer loading and cost are omitted."
+                )
+                continue
             raise ValueError(
-                f"Real grid LV {lv_id} lacks a finite transformer rating or P100 loading."
+                f"Real {run['source']} grid {lv_id} lacks a finite transformer rating or P100 loading."
             )
         max_s_mva = loading_percent / 100.0 * rated_kva / 1000.0
         step = float(assumption["transformer_capacity_step_kva"])

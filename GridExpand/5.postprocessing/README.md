@@ -64,7 +64,8 @@ The entire `output/` tree is generated and ignored by Git. Durable conclusions a
     topology_bottleneck.py                # critical voltage path/bottleneck audit
   expansion/
     grid_expansion.py                     # source-neutral CLI/orchestration for expansion costs
-    real_materialization.py                # real SWF asset adapter for the shared cost heuristic
+    real_materialization.py                # real SWF/ÜZW asset adapter for the shared cost heuristic
+    aligned_expansion.py                  # one-command expansion of all provider groups of an aligned run
     overview.py                           # read-only expansion summary loaders for notebooks
     materialize_powerflow_summary.py      # derive compact summaries from stored raw rows
     schema.sql                            # expansion tables, assumptions, QGIS views
@@ -167,6 +168,19 @@ uv run python -m expansion.grid_expansion \
   --exclude-real-lv-id <LV_ID> \
   --replace
 ```
+
+`--data-source real_uzw` materializes ÜZW areas (pandapower JSON, `real_grid_case.source = 'uzw'`) the same way. Real selection always filters on the source; `--plz`, `--ags` and `--exclude-real-lv-id` are repeatable, grid ids are text, and `--pylovo-version-id` selects the synthetic grid cases and the real settlement type (real runs otherwise use the version recorded in the run assumptions).
+
+Materialize all four groups (SWF real, SWF synthetic, ÜZW real, ÜZW synthetic) of an aligned run (`scenario_pipeline/run_aligned.py`, run names `{run_id}_{provider}_{real_<provider>|synthetic}_{case}`) with one command. Analysis keys are `{run_id}_{provider}_{real|synthetic}_{pre|post_inflex|post}`; `--dry-run` only lists the groups and their summary counts:
+
+```bash
+uv run python -m expansion.aligned_expansion \
+  --run-id <run_id> \
+  --providers swf uzw \
+  --cases pre post-inflex-heuristic post-hems-heuristic
+```
+
+In notebooks, `prepare_expansion_analysis(scenario_prefix=<run_id>, providers=("swf", "uzw"))` returns the four groups in `specs_by_source` and `analysis_keys_by_source`; pass `specs_by_source=...` to the power-flow loaders in `expansion.notebook_workflow`.
 
 Real grids with non-converged timesteps remain in `expansion_real_grid_status` with `cost_status=incomplete`; they are not assigned zero cost. Explicit exclusions remain visible with `cost_status=excluded`. Synthetic and real results use the same row from `expansion_cost_assumption`. Existing cables are retained; added circuits are selected from the shared `NAYY_4_150`, `NAYY_4_185`, and `NAYY_4_240` catalogue.
 

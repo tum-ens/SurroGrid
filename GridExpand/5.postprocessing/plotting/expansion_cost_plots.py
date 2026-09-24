@@ -37,7 +37,13 @@ def plot_expansion_cost_comparison_bar(
         item: (index - (len(series) - 1) / 2) * bar_width
         for index, item in enumerate(series)
     }
-    hatch_map = {"Synthetic": "", "Real SWF": "//"}
+    hatch_map = {
+        "Synthetic": "",
+        "Real SWF": "//",
+        "Synthetic SWF": "",
+        "Synthetic ÜZW": "xx",
+        "Real ÜZW": "\\\\",
+    }
 
     for stage, source in series:
         values_million_eur = []

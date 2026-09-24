@@ -671,8 +671,13 @@ def load_synthetic_powerflow_cutoff_profile(
     profile["comparison_group"] = "Synthetic"
     return profile
 
+REAL_COMPARISON_GROUPS = {"swf": "Real SWF", "uzw": "Real ÜZW"}
+
+
 def _real_grid_label_from_row(row: pd.Series) -> str:
-    return f"SWF LV_{int(row['lv_id']):03d}"
+    if row["source"] == "uzw":
+        return f"ÜZW area-{int(row['lv_id']):04d}"
+    return f"{str(row['source']).upper()} LV_{int(row['lv_id']):03d}"
 
 def real_powerflow_headline_summary_db(
     run_name: str = "baseline_static_pre_powerflow_real_swf_hh_only_backbone",
@@ -680,8 +685,9 @@ def real_powerflow_headline_summary_db(
     scenario_id: int | None = None,
     plz: int | None = None,
     lv_id: str | int | None = None,
+    source: str | None = None,
 ) -> pd.DataFrame:
-    """Read compact real SWF DB-backed headline power-flow metrics."""
+    """Read compact real-grid (SWF or ÜZW) DB-backed headline power-flow metrics."""
     db = SurroGridDatabase()
     lv_id_int = None if lv_id is None else int(str(lv_id).removeprefix("LV_"))
     query = text(
@@ -731,7 +737,8 @@ def real_powerflow_headline_summary_db(
           AND (:scenario_id IS NULL OR rpr.scenario_id = :scenario_id)
           AND (:filter_plz IS NULL OR rgc.plz = :filter_plz)
           AND (:lv_id IS NULL OR rgc.lv_id = CAST(:lv_id AS TEXT))
-        ORDER BY rgc.lv_id::INTEGER, rpr.real_powerflow_run_id, rps.stage
+          AND (CAST(:source AS TEXT) IS NULL OR rgc.source = CAST(:source AS TEXT))
+        ORDER BY rgc.source, LENGTH(rgc.lv_id), rgc.lv_id, rpr.real_powerflow_run_id, rps.stage
         """
     )
     with db.engine.connect() as conn:
@@ -744,6 +751,7 @@ def real_powerflow_headline_summary_db(
                 "scenario_id": scenario_id,
                 "filter_plz": plz,
                 "lv_id": None if lv_id_int is None else str(lv_id_int),
+                "source": source,
             },
         )
 
@@ -758,8 +766,8 @@ def real_powerflow_headline_summary_db(
         run_id_column="real_powerflow_run_id",
     )
     summary["grid"] = summary.apply(_real_grid_label_from_row, axis=1)
-    summary["powerflow_source"] = "real_swf"
-    summary["comparison_group"] = "Real SWF"
+    summary["powerflow_source"] = "real_" + summary["source"].astype(str)
+    summary["comparison_group"] = summary["source"].map(REAL_COMPARISON_GROUPS)
     summary["ags"] = pd.NA
     summary["kcid"] = pd.NA
     summary["bcid"] = pd.NA
@@ -823,14 +831,16 @@ def real_powerflow_percentile_profile_db(
     scenario_id: int | None = None,
     plz: int | None = None,
     lv_id: str | int | None = None,
+    source: str | None = None,
 ) -> pd.DataFrame:
-    """Read real SWF per-asset time-percentiles in long form."""
+    """Read real-grid (SWF or ÜZW) per-asset time-percentiles in long form."""
     grid_summary = real_powerflow_headline_summary_db(
         run_name=run_name,
         stage=stage,
         scenario_id=scenario_id,
         plz=plz,
         lv_id=lv_id,
+        source=source,
     )
     run_ids = grid_summary["powerflow_run_id"].astype(int).tolist()
     if not run_ids:

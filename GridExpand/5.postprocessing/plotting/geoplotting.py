@@ -645,7 +645,7 @@ def load_real_expansion_grid_costs(*, analysis_key: str) -> pd.DataFrame:
             f"found data_source values {sorted(sources)!r}."
         )
 
-    metrics["lv_id"] = metrics["grid_label"].map(_canonical_real_grid_id)
+    metrics["lv_id"] = metrics["lv_id"].map(_canonical_real_grid_id)
     metrics = metrics[metrics["cost_status"].eq("complete")].copy()
     metrics.attrs["analysis_key"] = analysis_key
     return metrics
