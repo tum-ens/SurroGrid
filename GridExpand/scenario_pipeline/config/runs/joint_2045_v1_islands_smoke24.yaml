@@ -1,0 +1,56 @@
+# SMOKE TEST (24 power-flow timesteps, not for publication) of the islands TEST SUBSET of the joint paired SWF + ÜZW full-year comparison on pylovo v1:
+# only the one-real-one-synthetic "islands" (identical building sets), to
+# validate the complete pipeline before the full region is run.
+# One scenario YAML and one pylovo version for both providers; each provider
+# gets its own paired dataset (weather, PV and TEASER heat libraries, adoption
+# selection) built from its alignment bundle. Launch with
+#   uv run --project GridExpand/2.demand_allocation python GridExpand/scenario_pipeline/run_aligned.py \
+#     --run-config GridExpand/scenario_pipeline/config/runs/joint_2045_v1_full_year.yaml
+run:
+  id: joint_2045_v1_islands_smoke24
+  scenario: ../scenarios/joint_2045_full_year.yaml
+  pipeline: paired_aligned
+
+resources:
+  pylovo_version_id: 1
+  alignment_dir: ~/data/alignment
+  # Frozen copy of pylovo validations_new/metrics/v1/comparison.json; its
+  # metric cohort is the compared building population.
+  population: ~/data/joint_paired_v1/pylovo-v1-comparison.json
+  # Frozen, fingerprint-checked copy of the ÜZW delivery (87c5e86c…).
+  uzw_grids_dir: ~/data/uzw-grids-87c5e86c
+  providers:
+    swf:
+      paired_dataset_id: joint_2045_v1_swf
+      weather_source_hdf: weather_joint_swf_91301_v1.h5
+      workers: 1
+    uzw:
+      paired_dataset_id: joint_2045_v1_uzw
+      weather_source_hdf: weather_joint_uzw_84051_v1.h5
+      workers: 2
+  target_network: both # both, real, or synthetic
+
+execution:
+  powerflow_grid_scope: full
+  model_cases:
+    - post-inflex-heuristic
+    - post-hems-heuristic
+  workers: 2
+  step3_cpus: 40
+  step3_cluster_concurrency: 1
+  step4_cpus: 2
+  heat_workers: 6
+  # null = the full 8760 h year; a number caps Step-4 power flow (smoke tests).
+  powerflow_max_timesteps: 24
+  profile_seed: 481527
+  cleanup_intermediates: false
+  resume: false
+  # Run both providers' runners at the same time (each with `workers`).
+  parallel_providers: true
+  # Expansion tables for all four groups after both providers finished.
+  materialize_expansion: true
+  # All 1:1 overlap components (6 SWF, 13 ÜZW; 38 jobs). Assignments stay the
+  # full-population ones, so these results equal the full run's for these grids.
+  grid_subset:
+    method: islands
+    seed: 20260924
