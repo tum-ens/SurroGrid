@@ -1197,7 +1197,8 @@ def _weather_and_postcode(weather_source_hdf: Path, hours: int):
     ambient = ambient.iloc[:hours].reset_index(drop=True)
     try:
         region = pd.read_hdf(weather_source_hdf, key="raw_data/region")
-        postcode = str(region.iloc[0]["plz"]).zfill(5)
+        # Column access keeps the integer dtype; a row of floats would not.
+        postcode = str(int(region["plz"].iloc[0])).zfill(5)
     except KeyError:
         match = re.search(r"_(\d{5})_", weather_source_hdf.name)
         if match is None:
