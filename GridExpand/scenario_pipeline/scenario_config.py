@@ -199,6 +199,9 @@ class HeatSizingConfig:
     heat_pump_design_share: float
     buffer_volume_l_per_kw_th: float
     buffer_usable_temperature_spread_k: float
+    # TABULA variant for the TEASER source: 0 standard (as built),
+    # 1 usual refurbishment, 2 advanced refurbishment.
+    teaser_retrofit_level: int = 0
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "HeatSizingConfig":
@@ -209,9 +212,12 @@ class HeatSizingConfig:
             "heat_pump_design_share", "buffer_volume_l_per_kw_th",
             "buffer_usable_temperature_spread_k",
         }
-        _only(raw, allowed, "asset_sizing.heat")
-        if set(raw) != allowed:
+        _only(raw, allowed | {"teaser_retrofit_level"}, "asset_sizing.heat")
+        if set(raw) - {"teaser_retrofit_level"} != allowed:
             raise ValueError("asset_sizing.heat is incomplete.")
+        retrofit = raw.get("teaser_retrofit_level", 0)
+        if isinstance(retrofit, bool) or retrofit not in (0, 1, 2):
+            raise ValueError("asset_sizing.heat.teaser_retrofit_level must be 0, 1 or 2.")
         source = str(raw["space_heat_source"])
         if source not in {"teaser", "infdb_ro_heat"}:
             raise ValueError(
@@ -231,6 +237,7 @@ class HeatSizingConfig:
             heat_pump_design_share=share,
             buffer_volume_l_per_kw_th=_positive(raw["buffer_volume_l_per_kw_th"], "asset_sizing.heat.buffer_volume_l_per_kw_th"),
             buffer_usable_temperature_spread_k=_positive(raw["buffer_usable_temperature_spread_k"], "asset_sizing.heat.buffer_usable_temperature_spread_k"),
+            teaser_retrofit_level=int(retrofit),
         )
 
 

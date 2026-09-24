@@ -384,7 +384,15 @@ def main() -> None:
     else:
         catalog = pd.read_csv(catalog_path)
     sources = all_sources(catalog) if args.force_all else pending_sources(catalog)
-    status = _StatusWriter(paired_dir / "paired_heat_profile_regeneration_status.csv")
+    status_name = "paired_heat_profile_regeneration_status.csv"
+    if args.scenario_config is not None:
+        # Completion is only valid for the scenario that produced the profiles.
+        scenario, scenario_hash = load_scenario_config(args.scenario_config)
+        status_name = (
+            "paired_heat_profile_regeneration_status_"
+            f"{scenario_identity_key(scenario.scenario_id, scenario_hash)}.csv"
+        )
+    status = _StatusWriter(paired_dir / status_name)
     if args.resume:
         sources = [source for source in sources if source not in status.completed()]
     if args.limit is not None:

@@ -55,6 +55,12 @@ asset_sizing:
     # Building-level space and hot-water heat from TEASER (DistrictGenerator)
     # with the weather of each synthetic grid's transformer location.
     space_heat_source: teaser
+    # TABULA variant for TEASER, applied to every residential building relative
+    # to its own construction-year class: 0 as built, 1 usual refurbishment,
+    # 2 advanced. 1 = 2045 reference: pre-1995 stock with a complete envelope
+    # refurbishment; newer classes barely change (TABULA standard ≈ retrofit).
+    # Rationale and literature: scenario_pipeline/docs/SCENARIO_METHOD.md.
+    teaser_retrofit_level: 1
     # Degree-day reference temperatures used to derive regional full-load hours.
     indoor_design_temperature_c: 20.0
     # DWD/VDI 20/15 convention for the existing residential building stock.

@@ -277,12 +277,101 @@ proxy. The chosen source building, match scope, and scale are stored in the
 catalog and physical library. These are approved pragmatic fallbacks, not
 claims that the borrowed profile is an exact physical-building simulation.
 
-The alternative `teaser` source remains available for a later comparison. For
-that route, pylovo `floor_area` is the LoD2 footprint and is multiplied by
-`floor_number` before being passed as TEASER total net leased area. Neither heat
-source applies an additional blanket heated-area factor such as 0.8. The TEASER
+The alternative `teaser` source is used by the joint SWF + ÜZW scenario
+(`joint_2045_full_year.yaml`), because the INFDB `ro_heat` time series are not
+available for its buildings. For that route, the component's residential
+effective floor area (pylovo footprint × `floor_number`, residential share) is
+passed as TEASER total net leased area. TEASER's `tabula_de` archetypes scale
+the envelope from that area; the number of floors passed to TEASER does not
+change the result. SurroGrid applies no additional blanket heated-area factor
+such as 0.8. (INFDB `ro_heat` does apply one internally; see below.) The TEASER
 envelope design load is not used to size the HP; annual space-heat energy and
 regional full-load hours provide the explicit sizing rule below.
+
+#### TEASER refurbishment level
+
+`asset_sizing.heat.teaser_retrofit_level` selects the TABULA DE variant TEASER
+uses for every residential building. The default 0 is TABULA "standard", i.e.
+the as-built envelope of the building's own construction-year class. Level 1 is
+"retrofit", the usual full-envelope refurbishment of wall, roof, floor and
+windows. Level 2 is "advanced retrofit". The variant is always relative to the
+building's own year class.
+
+Approximate single-family-house U-values in TEASER's TABULA data, computed from
+layer conduction plus 0.17 m²K/W surface resistance, in W/m²K:
+
+| Construction years | Wall standard | Wall retrofit | Roof standard | Roof retrofit |
+|---|---:|---:|---:|---:|
+| 1860–1918 | 1.71 | 0.24 | 1.38 | 0.36 |
+| 1969–1978 | 1.01 | 0.21 | 0.49 | 0.21 |
+| 1984–1994 | 0.48 | 0.17 | 0.36 | 0.36 |
+| 2016+ | 0.15 | 0.15 | 0.15 | 0.11 |
+
+**Choice for the joint 2045 scenario: level 1.**
+
+1. *It matters for the old stock only.* For recent construction classes,
+   standard and retrofit are nearly identical. Level 1 therefore means: every
+   building built before about 1995 has received a complete envelope
+   refurbishment by 2045, and newer buildings keep their as-built envelope.
+2. *It is consistent with climate-neutral 2045 target paths, as an upper bound
+   of refurbishment.*
+   - IWU (2018) observed for 2010–2016 that about 1.4 %/a of old single- and
+     two-family houses and about 1.6 %/a of old multi-family houses (built
+     before 1979) were refurbished, in full-refurbishment equivalents. That is
+     about 1.1–1.2 %/a relative to the whole stock. Windows (about 2.5 %/a) and
+     roofs (about 2.3 %/a) dominate; facades are about 1.1 %/a and floors below
+     1 %/a (as reported by Prognos, Öko-Institut, Wuppertal Institut 2021 and
+     Prognos et al. 2022).
+   - The target scenarios raise the rate to about 1.75 %/a (2030–2045;
+     Prognos, Öko-Institut, Wuppertal Institut 2021), and to 1.6–1.7 % (2030)
+     and 1.8–2.0 % (2045) in the BMWK building-strategy target scenario KNG
+     (Prognos et al. 2022).
+   - In KNG, about 25 % of the 2045 floor area is built from 2000 onwards,
+     about 55 % has been refurbished since 2000, and about 20 % was refurbished
+     before 2000 or remains unrefurbished (full-refurbishment equivalents).
+   - Level 1 for everyone therefore overstates the 2045 refurbished share by up
+     to roughly a fifth of the floor area relative to that target path, and by
+     much more relative to current trends.
+3. *Its refurbishment depth matches the target paths.* On a median SWF grid
+   (67 residential buildings, Forchheim TMY), level 1 gives a median of
+   62 kWh/m² space heat and 36 W/m² peak, against 149 kWh/m² and 74 W/m² for
+   level 0. Klimaneutrales Deutschland 2045 assumes about 60 kWh/m² after a full
+   refurbishment of a single- or two-family house (about KfW-Effizienzhaus 70),
+   and 40–45 kWh/m² for multi-family houses.
+4. *Consequence for the grid results.* Level 1 yields lower heat-pump and
+   heating-rod peaks than a stock refurbished only along today's trend. Grid
+   stress from space heating is therefore a lower-end estimate. A share-based
+   variant is the natural sensitivity: level 1 for about 70–80 % of pre-2000
+   buildings, deterministically selected, and level 0 for the rest.
+
+**Comparison with INFDB `ro_heat`** (checked in `infdb/tools/ro-heat`, September 2026):
+
+- *Refurbishment:* simulated per component (wall, roof, window) from lifespans
+  (40/50/30 a, σ 10 a) up to 2023. It is capped at 33 %, 63 % and 90 % of
+  buildings, respectively.
+- *Envelope:* uses real LoD2 wall and roof areas and applies a heated-area
+  ratio of 0.8.
+- *Model:* the heating-load series come from an EnTiSe RC model with
+  ventilation losses and solar gains set to zero.
+- *Weather:* the actual 2023 Open-Meteo year, not a TMY.
+- *Results:* on 1,203 common SWF buildings, TEASER at level 0 is about 1.9×
+  INFDB in annual space heat and about 3× in peak. The ratio is still about
+  1.65 for buildings from 2010 onwards. Missing ventilation losses are a
+  plausible reason for this residual gap; that is not decomposed.
+- *Consequence:* INFDB is therefore not used as the reference for peaks.
+
+Sources:
+
+- Cischinsky, H.; Diefenbach, N. (2018): *Datenerhebung Wohngebäudebestand
+  2016.* IWU, Darmstadt. Cited here as reported in the two studies below.
+- Prognos, Öko-Institut, Wuppertal Institut (2021): *Klimaneutrales
+  Deutschland 2045. Wie Deutschland seine Klimaziele schon vor 2050 erreichen
+  kann.* Long version, on behalf of Stiftung Klimaneutralität, Agora
+  Energiewende and Agora Verkehrswende.
+- Prognos AG (Thamling, N.; Rau, D.) with FIW München, ITG Dresden, ifeu,
+  Öko-Institut, adelphi, BBH, dena and EY Law (2022): *Hintergrundpapier zur
+  Gebäudestrategie Klimaneutralität 2045.* Expert report on behalf of BMWK,
+  Table 7 and Section 4.
 
 Residential domestic-hot-water demand remains separate from either space-heat
 source and originates from OpenDHW. OpenDHW generates stochastic tapping events

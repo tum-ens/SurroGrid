@@ -33,7 +33,10 @@ from silently selecting another assumption.
   matches inside the joint `pv_battery` manifest row. Deterministic synthetic
   scenarios use the selected `pv_battery` cohort for both PV and battery.
 - asset_sizing.heat: regional heat-pump, auxiliary-heater, and space-heating
-  buffer sizing parameters.
+  buffer sizing parameters. Optional `teaser_retrofit_level` (0 as built,
+  1 usual refurbishment, 2 advanced; default 0) selects the TABULA variant of
+  the `teaser` space-heat source; see SCENARIO_METHOD.md, "TEASER
+  refurbishment level".
 - mobility: emobpy temporal, behavioral, and vehicle-energy assumptions.
 - technologies.processes and technologies.storages: values written into urbs.
 - time_aggregation: complete TSAM method, including typical/extreme periods.

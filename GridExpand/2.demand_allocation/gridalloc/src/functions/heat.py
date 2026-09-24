@@ -142,7 +142,9 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_
     ).to_numpy()
     scenario["floors"] = 1
     scenario["nb_occ"] = scenario["nb_occ"].apply(lambda x: [int(round(y,0)) for y in x])
-    scenario["retrofit"] = 0
+    # TABULA variant applied relative to each building's own year class
+    # (0 standard/as built, 1 retrofit, 2 advanced retrofit), from the scenario.
+    scenario["retrofit"] = int(getattr(config, "TEASER_RETROFIT_LEVEL", 0))
 
     # Extract location data
     zip_code = str(zip)
