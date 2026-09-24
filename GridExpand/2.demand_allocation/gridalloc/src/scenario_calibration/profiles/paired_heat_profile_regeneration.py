@@ -16,7 +16,18 @@ from typing import Any
 import pandas as pd
 
 
-from ..paths import GRIDALLOC_DIR, SYNTHETIC_INPUT_DIR
+from ..paths import GRIDALLOC_DIR, GRIDEXPAND_DIR, SYNTHETIC_INPUT_DIR
+
+import sys
+
+if str(GRIDEXPAND_DIR) not in sys.path:
+    sys.path.insert(0, str(GRIDEXPAND_DIR))
+
+from common.timeframe import scenario_output_directory  # noqa: E402
+from scenario_pipeline.config_loader import (  # noqa: E402
+    load_scenario_config,
+    scenario_identity_key,
+)
 
 DEFAULT_SYNTHETIC_LIBRARY = SYNTHETIC_INPUT_DIR
 RESIDENTIAL_BUILDING_TYPES = {"AB", "MFH", "SFH", "TH"}
@@ -40,18 +51,31 @@ def build_regeneration_catalog(paired_dir: Path) -> pd.DataFrame:
     buildings = pd.read_csv(paired_dir / "paired_building_scenario_plan.csv")
     required = {
         "building_objectid",
-        "residential_wp_rows",
         "synthetic_bridge_filename",
         "synthetic_bus",
     }
     missing = required.difference(allocation.columns)
     if missing:
         raise ValueError(f"Paired allocation misses heat columns: {sorted(missing)}")
-    selected = allocation.loc[
-        pd.to_numeric(allocation["residential_wp_rows"], errors="coerce")
-        .fillna(0.0)
-        .gt(0.0)
-    ].copy()
+    if "residential_wp_rows" in allocation:
+        selected = allocation.loc[
+            pd.to_numeric(allocation["residential_wp_rows"], errors="coerce")
+            .fillna(0.0)
+            .gt(0.0)
+        ].copy()
+    else:
+        # Aligned datasets carry no heat-pump inventory: every heat-eligible
+        # building of the electrification assignment needs a profile.
+        assignment = pd.read_csv(paired_dir / "paired_electrification_assignment.csv")
+        eligible = set(
+            assignment.loc[
+                assignment["technology"].eq("heat") & assignment["eligible"].astype(bool),
+                "building_objectid",
+            ].astype(str)
+        )
+        selected = allocation.loc[
+            allocation["building_objectid"].astype(str).isin(eligible)
+        ].copy()
     if selected.empty:
         raise ValueError("Paired allocation contains no residential heat-pump rows.")
     source_counts = selected.groupby("building_objectid").agg(
@@ -225,6 +249,8 @@ def _regenerate_one(
     result_dir: Path,
     synthetic_library: Path,
     log_dir: Path,
+    scenario_config: Path | None = None,
+    output_directory: Path | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
     log_path = log_dir / f"{Path(source_name).stem}.log"
@@ -253,6 +279,10 @@ def _regenerate_one(
         "--n_cpu",
         str(n_cpu),
     ]
+    if scenario_config is not None:
+        command.extend(["--scenario-config", str(scenario_config)])
+    if output_directory is not None:
+        command.extend(["--output-directory", str(output_directory)])
     try:
         with log_path.open("a", encoding="utf-8") as log:
             log.write(f"COMMAND: {' '.join(command)}\n")
@@ -267,6 +297,15 @@ def _regenerate_one(
         if completed.returncode != 0:
             raise RuntimeError(f"Step 2 returned {completed.returncode}")
         result_hdf = result_dir / source_name
+        if output_directory is not None:
+            scenario, scenario_hash = load_scenario_config(scenario_config)
+            result_hdf = (
+                scenario_output_directory(
+                    output_directory,
+                    scenario_identity_key(scenario.scenario_id, scenario_hash),
+                )
+                / source_name
+            )
         if not result_hdf.exists():
             raise FileNotFoundError(f"Missing Step 2 result {result_hdf}")
         validate_exact_profiles(result_hdf, buses)
@@ -315,6 +354,18 @@ def main() -> None:
             "marked publication-ready. Use this after changing physical heat "
             "profile assumptions."
         ),
+    )
+    parser.add_argument(
+        "--scenario-config",
+        type=Path,
+        default=None,
+        help="Scenario YAML passed to Step 2 (default: Step 2's default scenario).",
+    )
+    parser.add_argument(
+        "--output-directory",
+        type=Path,
+        default=None,
+        help="Step-2 output root; results land in <dir>/<scenario_key>/.",
     )
     parser.add_argument(
         "--synthetic-library",
@@ -374,6 +425,12 @@ def main() -> None:
                 result_dir=result_dir,
                 synthetic_library=synthetic_library,
                 log_dir=log_dir,
+                scenario_config=(
+                    None if args.scenario_config is None else args.scenario_config.resolve()
+                ),
+                output_directory=(
+                    None if args.output_directory is None else args.output_directory.resolve()
+                ),
             )
             futures[future] = source_name
         for future in as_completed(futures):

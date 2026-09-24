@@ -69,7 +69,7 @@ from src.scenario_calibration.profiles.profile_contract import (  # noqa: E402
 def _plan_path(paired_dir: Path, target_network: str) -> Path:
     filename = (
         "paired_real_bus_allocation_plan.csv"
-        if target_network == "real_swf"
+        if target_network.startswith("real_")
         else "paired_synthetic_bus_allocation_plan.csv"
     )
     return paired_dir / filename
@@ -92,7 +92,7 @@ def _target_component_plan(
         )
     combined = pd.read_csv(path)
     assert_paired_component_plan_equivalence(combined)
-    if target_network == "real_swf":
+    if target_network.startswith("real_"):
         mask = pd.to_numeric(
             combined["real_target_grid_id"], errors="coerce"
         ).eq(int(target_grid_id))
@@ -145,6 +145,8 @@ def _output_name(
 ) -> str:
     if target_network == "real_swf":
         prefix = f"paired_real_swf_LV_{int(target_grid_id):03d}"
+    elif target_network == "real_uzw":
+        prefix = f"paired_real_uzw_area_{int(target_grid_id):04d}"
     else:
         bridge_names = (
             allocation["synthetic_bridge_filename"].dropna().astype(str).unique()
@@ -555,7 +557,7 @@ def materialize_paired_urbs_input(
         "ev_session_max_shortfall_kwh": session_report["max_shortfall_kwh"],
         "ev_offgrid_charging_excluded": True,
         "ev_pool_id": sector_inputs.ev_pool_id,
-        "source": "paired_swf_2045",
+        "source": "paired_2045",
         "target_network": target_network,
         "target_grid_id": int(target_grid_id),
         "scenario_label": scenario_label,
@@ -675,7 +677,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument(
         "--target-network",
-        choices=["real_swf", "synthetic"],
+        choices=["real_swf", "real_uzw", "synthetic"],
         required=True,
     )
     parser.add_argument("--target-grid-id", type=int, required=True)
