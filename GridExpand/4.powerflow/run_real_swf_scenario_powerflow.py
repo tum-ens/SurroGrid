@@ -19,6 +19,7 @@ flex/inflex sector-coupling layer is added.
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import os
 import sys
 import time
@@ -88,6 +89,7 @@ from run_real_swf_powerflow import (  # noqa: E402
     _grid_ref,
     _prepare_real_grid,
     _select_manifest_rows,
+    transformer_rating_mva,
 )
 
 DEFAULT_RUN_NAME = "real_swf_2045_full_local_base_electricity"
@@ -219,14 +221,64 @@ def _lv_id_from_hdf(hdf_path: Path) -> int | None:
     return None
 
 
+def load_real_net(source_file: Path) -> tuple[pp.pandapowerNet, float]:
+    """Load one real LV grid and its station rating in MVA.
+
+    SWF workbooks keep an out-of-service trafo row for the rating. ÜZW nets
+    have no trafo; their bank rating is the root row of ``uzw_roots``.
+    """
+    if source_file.suffix == ".json":
+        net = pp.from_json(source_file)
+        roots = net["uzw_roots"]
+        root = roots[roots["disposition"].astype(str).eq("root")]
+        if len(root) != 1:
+            raise ValueError(f"{source_file} must have exactly one uzw_roots root row.")
+        rating_kva = pd.to_numeric(root["rating_kva_total"], errors="coerce").iloc[0]
+        return net, float(rating_kva) / 1000.0
+    net = pp.from_excel(source_file)
+    return net, transformer_rating_mva(net)
+
+
 def _prepare_real_grid_for_allocation(
     net: pp.pandapowerNet,
     allocation_buses: list[int],
     summary_grid_scope: str = "full",
+    transformer_s_rated_mva: float = float("nan"),
 ):
-    grid, transformer_s_rated_mva, cable_max_i_ka, _, _, _, load_scope = (
-        _prepare_real_grid(net)
+    """Prepare a real grid whose DSO loads are replaced by scenario loads.
+
+    The ext_grid sits on the station LV busbar in both DSO models, so the
+    transformer is represented by its rating only.
+    """
+    grid = deepcopy(net)
+    pp.replace_zero_branches_with_switches(
+        grid,
+        elements=("line", "impedance"),
+        zero_length=True,
+        zero_impedance=True,
+        in_service_only=True,
+        drop_affected=False,
     )
+    cable_max_i_ka = pd.to_numeric(grid.line["max_i_ka"], errors="coerce")
+    if "in_service" in grid.line.columns:
+        cable_max_i_ka = cable_max_i_ka.where(
+            grid.line["in_service"].fillna(True).astype(bool)
+        )
+    if not grid.line.empty:
+        grid.line["max_i_ka"] = 1000.0
+    for element in ("sgen", "gen", "storage"):
+        if hasattr(grid, element) and not grid[element].empty:
+            table = grid[element]
+            table["in_service"] = False
+            # pandapower reads disabled rows too; NaN values break the solver.
+            for column in ("p_mw", "q_mvar"):
+                if column in table.columns:
+                    table[column] = table[column].fillna(0.0)
+            if "scaling" in table.columns:
+                table["scaling"] = table["scaling"].fillna(1.0)
+    if not grid.bus.empty:
+        grid.bus[["min_vm_pu", "max_vm_pu"]] = (0.0, 10.0)
+    load_scope: dict[str, Any] = {}
     allocation_buses = sorted({int(bus) for bus in allocation_buses})
     missing_buses = sorted(
         set(allocation_buses).difference(set(map(int, grid.bus.index)))
@@ -240,7 +292,7 @@ def _prepare_real_grid_for_allocation(
     existing_load = grid.load.copy() if hasattr(grid, "load") else pd.DataFrame()
     template_columns = (
         list(existing_load.columns)
-        if not existing_load.empty
+        if len(existing_load.columns)
         else ["bus", "p_mw", "q_mvar", "name"]
     )
     rows = []
@@ -485,7 +537,7 @@ def run_one_urbs_result(
         )
 
     source_file = Path(row["source_file"])
-    net = pp.from_excel(source_file)
+    net, rating_mva = load_real_net(source_file)
     (
         grid,
         transformer_s_rated_mva,
@@ -497,6 +549,7 @@ def run_one_urbs_result(
         net,
         allocation["allocation_bus"].astype(int).tolist(),
         summary_grid_scope,
+        rating_mva,
     )
 
     adapter = RealUrbsResultAdapter(hdf_path, run_name=run_name)
@@ -640,6 +693,21 @@ def main() -> None:
     )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--lv-id", default=None)
+    parser.add_argument(
+        "--provider",
+        choices=["swf", "uzw"],
+        default="swf",
+        help="Real-grid source recorded in real_grid_case.source.",
+    )
+    parser.add_argument(
+        "--grid-file",
+        type=Path,
+        default=None,
+        help=(
+            "Aligned mode: the real grid file (SWF .xlsx or ÜZW .json) named by the "
+            "alignment bundle. Bypasses the SWF split manifest; requires --lv-id."
+        ),
+    )
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--run-name", default=DEFAULT_RUN_NAME)
     parser.add_argument("--scenario-key", default=DEFAULT_SCENARIO_KEY)
@@ -720,7 +788,19 @@ def main() -> None:
             raise ValueError(
                 "--urbs-result-hdf requires --lv-id when the LV id cannot be inferred from raw_data/allocation_plan."
             )
-        rows = _select_manifest_rows(root, args.plz, limit=1, lv_id=lv_id)
+        if args.grid_file is not None:
+            rows = [
+                {
+                    "source": args.provider,
+                    "lv_id": str(int(lv_id)),
+                    "plz": int(args.plz),
+                    "source_file": str(args.grid_file.resolve()),
+                    "variant": "aligned",
+                    "status": "exported",
+                }
+            ]
+        else:
+            rows = _select_manifest_rows(root, args.plz, limit=1, lv_id=lv_id)
         if not rows:
             raise ValueError(f"No SWF real-grid manifest row matched LV {lv_id}.")
         scenario_label = (

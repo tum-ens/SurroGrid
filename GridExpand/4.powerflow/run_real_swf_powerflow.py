@@ -552,7 +552,7 @@ def _prepare_real_grid(
 
 def _grid_ref(row: dict[str, Any]) -> dict[str, Any]:
     return {
-        "source": "swf",
+        "source": str(row.get("source", "swf")),
         "plz": int(row["plz"]),
         "lv_id": str(row["lv_id"]),
         "variant": row.get("variant"),
