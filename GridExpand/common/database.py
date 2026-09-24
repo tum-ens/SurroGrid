@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import json
 import math
 import numbers
@@ -111,12 +113,26 @@ class SurroGridDatabase:
         )
 
     def ensure_schema(self) -> None:
+        # The DDL below takes exclusive locks, so concurrent pipeline processes
+        # deadlock against each other's reads if every call re-runs it. It runs
+        # once per schema/code change, recorded by a content hash.
+        marker = hashlib.sha256(
+            SCHEMA_SQL_PATH.read_bytes()
+            + GRID_BUILDING_BUS_VIEW_SQL_PATH.read_bytes()
+            + Path(__file__).read_bytes()
+        ).hexdigest()
+        with self.engine.connect() as conn:
+            if conn.execute(text("SELECT to_regclass('surrogrid.schema_marker')")).scalar() and conn.execute(
+                text("SELECT 1 FROM surrogrid.schema_marker WHERE hash = :hash"), {"hash": marker}
+            ).first():
+                return
         with self.engine.begin() as conn:
             conn.execute(text("SELECT pg_advisory_xact_lock(916200005)"))
             if self._schema_ready(conn):
                 self._ensure_powerflow_summary_columns(conn)
                 self._ensure_real_powerflow_schema(conn)
                 self._ensure_grid_building_bus_view(conn)
+                self._write_schema_marker(conn, marker)
                 return
             sql = SCHEMA_SQL_PATH.read_text(encoding="utf-8")
             statements = [statement.strip() for statement in sql.split(";") if statement.strip()]
@@ -129,6 +145,12 @@ class SurroGridDatabase:
             self._ensure_powerflow_summary_columns(conn)
             self._ensure_real_powerflow_schema(conn)
             self._ensure_grid_building_bus_view(conn)
+            self._write_schema_marker(conn, marker)
+
+    def _write_schema_marker(self, conn, marker: str) -> None:
+        conn.execute(text("CREATE TABLE IF NOT EXISTS surrogrid.schema_marker (hash TEXT PRIMARY KEY)"))
+        conn.execute(text("DELETE FROM surrogrid.schema_marker"))
+        conn.execute(text("INSERT INTO surrogrid.schema_marker (hash) VALUES (:hash)"), {"hash": marker})
 
     def _ensure_grid_building_bus_view(self, conn) -> None:
         """Keep the building-to-bus view compatible with multi-load buildings."""
