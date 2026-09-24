@@ -2,15 +2,15 @@
 
 The weather is a PVGIS SARAH3 TMY at the centroid of the dataset's buildings.
 The file carries ``raw_data/weather`` and ``raw_data/region`` for the PV
-profile library and ``urbs_in/weather`` for Step 3. Its name must contain the
-five-digit postcode used for the heat-pump design outdoor temperature.
+profile library and ``urbs_in/weather`` for Step 3. ``raw_data/region.plz`` is
+the dataset's most common building postcode; heat sizing takes the design
+outdoor temperature from it.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -27,10 +27,9 @@ from common.timeframe import build_full_year_metadata, write_hdf_metadata  # noq
 import src.functions.weather as weather_functions  # noqa: E402
 
 
-def write_aligned_weather(paired_dir: Path, plz: int, output: Path, reference_year: int) -> Path:
-    if re.search(rf"_{int(plz):05d}_", output.name) is None:
-        raise ValueError(f"The weather filename must contain _{plz:05d}_.")
+def write_aligned_weather(paired_dir: Path, output: Path, reference_year: int) -> Path:
     plan = pd.read_csv(paired_dir / "paired_real_bus_allocation_plan.csv")
+    plz = int(plan["postcode"].mode().iloc[0])
     database = SurroGridDatabase()
     with database.engine.connect() as conn:
         centroid = conn.execute(
@@ -80,11 +79,10 @@ def _version(paired_dir: Path) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--paired-dir", type=Path, required=True)
-    parser.add_argument("--plz", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--reference-year", type=int, default=2009)
     args = parser.parse_args()
-    print(write_aligned_weather(args.paired_dir.resolve(), args.plz, args.output.resolve(), args.reference_year))
+    print(write_aligned_weather(args.paired_dir.resolve(), args.output.resolve(), args.reference_year))
 
 
 if __name__ == "__main__":

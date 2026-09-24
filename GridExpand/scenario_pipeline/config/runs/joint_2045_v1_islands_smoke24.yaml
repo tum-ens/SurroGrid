@@ -22,11 +22,11 @@ resources:
   providers:
     swf:
       paired_dataset_id: joint_2045_v1_swf
-      weather_source_hdf: weather_joint_swf_91301_v1.h5
+      weather_source_hdf: weather_joint_swf_v1.h5
       workers: 1
     uzw:
       paired_dataset_id: joint_2045_v1_uzw
-      weather_source_hdf: weather_joint_uzw_84051_v1.h5
+      weather_source_hdf: weather_joint_uzw_v1.h5
       workers: 2
   target_network: both # both, real, or synthetic
 

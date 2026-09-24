@@ -261,7 +261,6 @@ def preparation_commands(run: AlignedRunConfig, provider: ProviderResources) -> 
         ("weather", module + [
             "src.scenario_calibration.profiles.aligned_weather",
             "--paired-dir", paired_dir,
-            "--plz", _weather_postcode(provider),
             "--output", str(provider.weather_hdf),
         ]),
         ("heat_regeneration", module + [
@@ -296,15 +295,6 @@ def preparation_commands(run: AlignedRunConfig, provider: ProviderResources) -> 
             "--reference-year", "2009",
         ]),
     ]
-
-
-def _weather_postcode(provider: ProviderResources) -> str:
-    import re
-
-    match = re.search(r"_(\d{5})_", provider.weather_source_hdf)
-    if match is None:
-        raise ValueError(f"{provider.weather_source_hdf} must contain a five-digit postcode.")
-    return match.group(1)
 
 
 def validate_prepared(run: AlignedRunConfig, provider: ProviderResources, scenario_hash: str) -> dict[str, Any]:

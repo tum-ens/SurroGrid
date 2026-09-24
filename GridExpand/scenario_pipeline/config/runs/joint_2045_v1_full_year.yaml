@@ -20,11 +20,11 @@ resources:
   providers:
     swf:
       paired_dataset_id: joint_2045_v1_swf
-      weather_source_hdf: weather_joint_swf_91301_v1.h5
+      weather_source_hdf: weather_joint_swf_v1.h5
       workers: 2 # fewer, larger grids
     uzw:
       paired_dataset_id: joint_2045_v1_uzw
-      weather_source_hdf: weather_joint_uzw_84051_v1.h5
+      weather_source_hdf: weather_joint_uzw_v1.h5
       workers: 3 # T3: ~1.8 GB per job; 5 jobs fit the 23 GB with the host's other load
   target_network: both # both, real, or synthetic
 

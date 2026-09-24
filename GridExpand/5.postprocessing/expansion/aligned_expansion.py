@@ -27,11 +27,6 @@ except ImportError:
 
 from common.database import SurroGridDatabase  # noqa: E402
 
-# Synthetic pylovo v1 grids of each provider, selected by postcode.
-PROVIDER_SYNTHETIC_PLZ = {
-    "swf": (91301,),
-    "uzw": (84030, 84051, 84061, 84092, 84100, 84103, 84109, 84183, 84187),
-}
 CASE_STAGES = {
     "pre": ("pre", "pre"),
     "post-inflex-heuristic": ("post", "post_inflex"),
@@ -70,10 +65,9 @@ def aligned_groups(
                     f"aligned run {run_id}; provider {provider}",
                     "--replace",
                 ]
-                if network == "synthetic":
-                    for plz in PROVIDER_SYNTHETIC_PLZ[provider]:
-                        argv.extend(["--plz", str(plz)])
-                else:
+                # The run name already names the provider, so synthetic grids
+                # need no postcode filter.
+                if network == "real":
                     for lv_id in excluded_real_grids.get(provider, ()):
                         argv.extend(["--exclude-real-lv-id", str(lv_id)])
                 commands.append(argv)
