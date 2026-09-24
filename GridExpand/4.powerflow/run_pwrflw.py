@@ -229,6 +229,12 @@ if __name__ == "__main__":
         help="Optional cross-check of the per-vehicle EV charger rating for --post-demand-mode inflex. Ratings come from the EV session table; a value that disagrees with any vehicle is rejected.",
     )
     parser.add_argument(
+        "--max-timesteps",
+        type=int,
+        default=None,
+        help="Optional smoke-test limit; omit for the full horizon.",
+    )
+    parser.add_argument(
         "--summary-nonconvergence",
         choices=["auto", "raise", "nan"],
         default="auto",
@@ -385,6 +391,11 @@ if __name__ == "__main__":
 
     if args.hh_annual_demand_scale != 1.0:
         df_pre_demand = _scale_hh_annual_demand(df_pre_demand, args.hh_annual_demand_scale, "pre")
+
+    if args.max_timesteps is not None:
+        df_pre_demand = df_pre_demand.iloc[: int(args.max_timesteps)].copy()
+        if df_post_demand is not None:
+            df_post_demand = df_post_demand.iloc[: int(args.max_timesteps)].copy()
 
     # Save to be retrieved later by ML model unless this run is intentionally summary-only.
     if not args.summary_only:
