@@ -94,6 +94,8 @@ BOUNDARY_SUMMARY_COLUMNS = (
 BOUNDARY_SUMMARY_COLUMN_NAMES = tuple(name for name, _type in BOUNDARY_SUMMARY_COLUMNS)
 
 
+MEAN_HOUSEHOLD_SIZE = 2.03  # persons, mean of gridalloc hh_size_distribution.csv
+
 class SurroGridDatabase:
     """PostgreSQL/PostGIS read/write helper for SurroGrid pipeline data."""
 
@@ -1080,6 +1082,19 @@ class SurroGridDatabase:
         if "connection_point" in df_buildings.columns:
             df_buildings["bus"] = df_buildings["bus"].fillna(df_buildings["connection_point"])
 
+        # pylovo fills missing households but not occupants (58 ÜZW buildings in
+        # v1). Use the mean household size of Step 2's household-size
+        # statistics (hh_size_distribution.csv) and flag the rows.
+        missing_occupants = (
+            pd.to_numeric(df_buildings["residential_floor_area"], errors="coerce").gt(0)
+            & pd.to_numeric(df_buildings["households"], errors="coerce").gt(0)
+            & df_buildings["occupants"].isna()
+        )
+        df_buildings["occupants_imputed"] = missing_occupants
+        df_buildings.loc[missing_occupants, "occupants"] = (
+            pd.to_numeric(df_buildings.loc[missing_occupants, "households"])
+            * MEAN_HOUSEHOLD_SIZE
+        )
         validate_physical_buildings(df_buildings, require_grid_identity=True)
 
         cols = df_buildings.columns.tolist()
