@@ -465,6 +465,13 @@ def _build_real_electric_demand(
     return demand
 
 
+def transformer_rating_mva(grid: pp.pandapowerNet) -> float:
+    """Station rating: sn_mva is per unit, so parallel units multiply it."""
+    sn_mva = pd.to_numeric(grid.trafo["sn_mva"], errors="coerce")
+    parallel = pd.to_numeric(grid.trafo.get("parallel", 1), errors="coerce").fillna(1)
+    return float((sn_mva * parallel).sum())
+
+
 def _prepare_real_grid(
     net: pp.pandapowerNet,
 ) -> tuple[pp.pandapowerNet, float, pd.Series, list[int], list[int], pd.DataFrame, dict[str, int]]:
@@ -479,7 +486,7 @@ def _prepare_real_grid(
     )
     transformer_s_rated_mva = float("nan")
     if hasattr(grid, "trafo") and not grid.trafo.empty and "sn_mva" in grid.trafo.columns:
-        transformer_s_rated_mva = float(pd.to_numeric(grid.trafo["sn_mva"], errors="coerce").sum())
+        transformer_s_rated_mva = transformer_rating_mva(grid)
 
     if "max_i_ka" in grid.line.columns:
         cable_max_i_ka = pd.to_numeric(grid.line["max_i_ka"], errors="coerce")

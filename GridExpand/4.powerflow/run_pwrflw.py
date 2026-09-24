@@ -410,7 +410,12 @@ if __name__ == "__main__":
         f"with {len(grid.load)} zeroed scenario-bus rows.",
         flush=True,
     )
-    transformer_s_rated_mva = float(grid.trafo["sn_mva"].sum()) if "sn_mva" in grid.trafo.columns else float("nan")
+    # A trafo row with parallel units rates sn_mva per unit.
+    transformer_s_rated_mva = (
+        float((grid.trafo["sn_mva"] * grid.trafo.get("parallel", 1)).sum())
+        if "sn_mva" in grid.trafo.columns
+        else float("nan")
+    )
     cable_max_i_ka = grid.line.get("max_i_ka")
     if cable_max_i_ka is None:
         cable_max_i_ka = grid.line.assign(max_i_ka=float("nan"))["max_i_ka"]
