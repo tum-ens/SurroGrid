@@ -928,6 +928,8 @@ class Grid:
 
         # Electricity is shifted here even when a grid has no residential heat.
         df_wth_input = self._add_input_data_daylight_saving_shift(self.df_weather_raw)
+        # A residential building whose sampled annual demand is 0 kWh has no
+        # electricity column; its internal gains are then zero.
         df_elec_input = self._add_input_data_daylight_saving_shift(self.df_demand_elec)
         self.align_electricity_output_time()
         if residential.empty:
@@ -976,7 +978,7 @@ class Grid:
             job_args = [
                 (
                     subset.reset_index(drop=True),
-                    df_elec_input[column_subsets[index]],
+                    df_elec_input.reindex(columns=column_subsets[index], fill_value=0.0),
                     [np.array(df_wth_input[column]) for column in ("dni", "dhi", "temp_air")],
                     self.plz,
                     self.profile_seed,
@@ -995,7 +997,7 @@ class Grid:
             columns = [(bus, "electricity") for bus in residential["bus"].values]
             self.df_demand_heat_space, self.df_demand_heat_water = heat.generate_heat_demands(
                 residential,
-                df_elec_input[columns],
+                df_elec_input.reindex(columns=columns, fill_value=0.0),
                 [np.array(df_wth_input[column]) for column in ("dni", "dhi", "temp_air")],
                 self.plz,
                 self.profile_seed,
