@@ -2,32 +2,26 @@
 
 This is the entrypoint for GridExpand step 4 (powerflow).
 
-It selects one input `.h5` file from `Input/` based on the provided `inputfile_id`:
-the script matches the prefix before the first underscore, e.g. `0_... .h5`.
+It selects one input `.h5` file from `work/powerflow/input/` based on the provided
+`inputfile_id`: the script matches the prefix before the first underscore, e.g. `0_... .h5`.
 
-The selected file is copied to `Output/` and augmented with:
+The selected file is copied to `work/powerflow/output/` and augmented with:
 
 - `/pwrflw/input/*` demand tables (pre/post expansion)
 - `/pwrflw/output/pre/*` and `/pwrflw/output/post/*` power-flow results
 
-See `README.md` in this folder for required HDF5 keys and expected outputs.
+See `docs/steps/4_powerflow.md` for required HDF5 keys and expected outputs.
 """
 
-import sys
-from pathlib import Path
-
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-import src.save_grid as svgrd
-import src.demands as dmnds
-import src.powerflow as pwrflw
-from config import config as pf_config
+import gridexpand.powerflow.save_grid as svgrd
+import gridexpand.powerflow.demands as dmnds
+import gridexpand.powerflow.powerflow as pwrflw
+from gridexpand.powerflow.config import config as pf_config
 import argparse
 import os
 from sqlalchemy import text
-from src.resource_report import resource_report
+from gridexpand.common.resource_report import resource_report
+from gridexpand.paths import POWERFLOW_INPUT_DIR
 
 
 
@@ -139,9 +133,12 @@ def _demand_buses(*demand_frames) -> set[int]:
     return buses
 
 
-if __name__ == "__main__":
+def main(argv: list[str] | None = None) -> None:
+    """Run Step 4 for one input file; see ``gridexpand powerflow --help``."""
     ##### Read args + Obtain relevant input_files #####:
-    parser = argparse.ArgumentParser(description="Low voltage grid DER allocation.")
+    parser = argparse.ArgumentParser(
+        prog="gridexpand powerflow", description="Low voltage grid DER allocation."
+    )
     parser.add_argument("inputfile_id", help="Input file name (no path)")
     parser.add_argument("--n_cpu", default=1, help="Number of CPUs available for parallel generation")
     parser.add_argument(
@@ -254,7 +251,7 @@ if __name__ == "__main__":
             "observations one bus upstream."
         ),
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.summary_only and args.storage != "db":
         parser.error("--summary-only requires --storage db.")
     if args.hh_only and args.storage != "db":
@@ -276,7 +273,7 @@ if __name__ == "__main__":
     protect_summary_grid_state = summary_nonconvergence == "nan"
 
     # list all .h5 files in your directory
-    all_entries = os.listdir("Input/")
+    all_entries = os.listdir(POWERFLOW_INPUT_DIR)
     h5_files = [fname for fname in all_entries if fname.endswith(".h5")]
     # find file with correct id prefix
     input_id_str = str(args.inputfile_id)
@@ -488,3 +485,7 @@ if __name__ == "__main__":
                 SF.save_df(line_loads_post, "/pwrflw/output/post/line_loads")
 
     print("Done!")
+
+
+if __name__ == "__main__":
+    main()

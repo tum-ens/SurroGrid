@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 import os
-import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -31,40 +30,29 @@ import pandas as pd
 import pandapower as pp
 from dotenv import load_dotenv
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
-STEP4_DIR = Path(__file__).resolve().parent
-STEP2_DIR = GRIDEXPAND_DIR / "2.demand_allocation"
-DEMAND_DIR = STEP2_DIR / "gridalloc"
-ENV_PATH = GRIDEXPAND_DIR / ".env"
-DEFAULT_ALLOCATION_PLAN = (
-    GRIDEXPAND_DIR
-    / "2.demand_allocation"
-    / "gridalloc"
-    / "outputs"
-    / "scenario_calibration"
-    / "swf_2045_building_match_91301"
-    / "swf_2045_full_local_demand_bus_allocation_plan.csv"
-)
-
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-if str(STEP4_DIR) not in sys.path:
-    sys.path.insert(0, str(STEP4_DIR))
-if str(STEP2_DIR) not in sys.path:
-    sys.path.insert(0, str(STEP2_DIR))
-from common.database import SurroGridDatabase  # noqa: E402
-from common.timeframe import (  # noqa: E402
+from gridexpand.db.database import SurroGridDatabase
+from gridexpand.common.timeframe import (
     build_full_year_metadata,
     read_hdf_metadata as read_timeframe_metadata,
 )
-import src.powerflow as pwrflw  # noqa: E402
-import src.demands as dmnds  # noqa: E402
-import src.save_grid as svgrd  # noqa: E402
-from config import config as pf_config  # noqa: E402
-
-
-from gridalloc.src.scenario_calibration.profiles import (  # noqa: E402
+import gridexpand.powerflow.powerflow as pwrflw
+import gridexpand.powerflow.demands as dmnds
+import gridexpand.powerflow.save_grid as svgrd
+from gridexpand.paths import ENV_FILE, SCENARIO_CALIBRATION_OUTPUT_DIR
+from gridexpand.allocation.scenario_calibration.profiles import (
     real_swf_electricity_profiles as _electricity_profiles,
+)
+from gridexpand.powerflow.run_real_swf_powerflow import (
+    _grid_ref,
+    _select_manifest_rows,
+    transformer_rating_mva,
+)
+
+ENV_PATH = ENV_FILE
+DEFAULT_ALLOCATION_PLAN = (
+    SCENARIO_CALIBRATION_OUTPUT_DIR
+    / "swf_2045_building_match_91301"
+    / "swf_2045_full_local_demand_bus_allocation_plan.csv"
 )
 
 DEFAULT_MEASURED_PROFILE_BAND_PCT = (
@@ -84,13 +72,6 @@ build_scenario_base_electric_demand = (
 )
 profile_selection_summary = _electricity_profiles.profile_selection_summary
 read_allocation_plan = _electricity_profiles.read_allocation_plan
-
-from run_real_swf_powerflow import (  # noqa: E402
-    _grid_ref,
-    _prepare_real_grid,
-    _select_manifest_rows,
-    transformer_rating_mva,
-)
 
 DEFAULT_RUN_NAME = "real_swf_2045_full_local_base_electricity"
 DEFAULT_SCENARIO_KEY = "real_swf_2045_full_local_base_electricity"
@@ -678,7 +659,7 @@ def run_one_urbs_result(
     }
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Run real SWF scenario-plan base-electricity power-flow summaries."
     )
@@ -777,7 +758,7 @@ def main() -> None:
         default="full",
         help="Include service lines/terminal buses (full) or evaluate the upstream backbone only.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     load_dotenv(ENV_PATH, override=True)
     root = args.grid_data_path or Path(os.environ["GRID_DATA_PATH"])

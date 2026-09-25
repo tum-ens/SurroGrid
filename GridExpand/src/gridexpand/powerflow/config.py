@@ -1,7 +1,10 @@
+from gridexpand.paths import POWERFLOW_INPUT_DIR, POWERFLOW_OUTPUT_DIR
+
+
 class Config():
-    ### Data directories
-    DATA_DIR = "Input/"
-    STORAGE_DIR = "Output/"
+    ### Data directories (absolute; see gridexpand.paths)
+    DATA_DIR = f"{POWERFLOW_INPUT_DIR}/"
+    STORAGE_DIR = f"{POWERFLOW_OUTPUT_DIR}/"
 
     ### Power factors
     # Assumed PV compensation bound: |Q| <= P_PV * tan(arccos(PF_PV_MIN)).

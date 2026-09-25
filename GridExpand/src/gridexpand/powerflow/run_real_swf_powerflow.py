@@ -9,12 +9,10 @@ pandapower load bus before running the compact p99/p01 power-flow summary.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import math
 import random
 import os
 import re
-import sys
 import time
 from copy import deepcopy
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -27,18 +25,11 @@ import pandapower as pp
 import pandapower.topology as pp_top
 from dotenv import load_dotenv
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
-STEP4_DIR = Path(__file__).resolve().parent
-DEMAND_DIR = GRIDEXPAND_DIR / "2.demand_allocation" / "gridalloc"
-ENV_PATH = GRIDEXPAND_DIR / ".env"
+from gridexpand.db.database import DEFAULT_SCENARIO_KEY, SurroGridDatabase
+from gridexpand.paths import ENV_FILE
+import gridexpand.powerflow.powerflow as pwrflw
 
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-if str(STEP4_DIR) not in sys.path:
-    sys.path.insert(0, str(STEP4_DIR))
-
-from common.database import DEFAULT_SCENARIO_KEY, SurroGridDatabase
-import src.powerflow as pwrflw
+ENV_PATH = ENV_FILE
 
 PF_ELC = 0.959
 RUN_NAME = "baseline_real"
@@ -65,33 +56,10 @@ ANNUAL_DEMAND_PATTERN = re.compile(r"2022:\s*([0-9]+(?:[.,][0-9]+)?)\s*kWh", re.
 
 
 def _load_electricity_module():
-    demand_dir = DEMAND_DIR.resolve()
-    old_cwd = Path.cwd()
-    sys.path.insert(0, str(demand_dir))
-    previous_config = sys.modules.pop("config", None)
-    try:
-        os.chdir(demand_dir)
-        spec = importlib.util.spec_from_file_location(
-            "gridalloc_electricity",
-            demand_dir / "src" / "functions" / "electricity.py",
-        )
-        if spec is None or spec.loader is None:
-            raise ImportError("Could not load gridalloc electricity module.")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    finally:
-        os.chdir(old_cwd)
-        try:
-            sys.path.remove(str(demand_dir))
-        except ValueError:
-            pass
-        if previous_config is not None:
-            sys.modules["config"] = previous_config
+    """Return Step 2's electricity helper (its statistics paths are absolute)."""
+    import gridexpand.allocation.functions.electricity as electricity
 
-    stat_dir = demand_dir / "data" / "statistics"
-    module.config.ELEC_LPS_PATH = str(stat_dir / "inhabited_buildings" / "elec_lps.h5")
-    module.config.ELEC_GHD_PATH = str(stat_dir / "uninhabited_buildings" / "elec_ghd_per_m2.csv")
-    return module
+    return electricity
 
 
 def _comparison_manifest(root: Path) -> pd.DataFrame:
@@ -672,7 +640,7 @@ def run_one(
     }
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run compact SWF real-grid power-flow summaries.")
     parser.add_argument("--plz", type=int, default=91301)
     parser.add_argument("--grid-data-path", type=Path, default=None)
@@ -720,7 +688,7 @@ def main() -> None:
         help="Minimum candidate profiles before falling back to nearest measured profiles.",
     )
     parser.add_argument("--skip-existing", action="store_true", help="Skip grids that already have a compact real summary for this run/stage.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     load_dotenv(ENV_PATH, override=True)
     SurroGridDatabase().ensure_schema()

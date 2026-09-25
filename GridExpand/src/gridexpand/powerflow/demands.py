@@ -26,11 +26,11 @@ Important conventions:
   negative Q to this net-load representation.
 """
 
-from config import config
+from gridexpand.powerflow.config import config
 import pandas as pd
 import numpy as np
 
-from common.ev_sessions import (
+from gridexpand.common.ev_sessions import (
     ENERGY_TOL_KWH as SESSION_ENERGY_TOL_KWH,
     POWER_TOL_KW as SESSION_POWER_TOL_KW,
     earliest_feasible_schedule,

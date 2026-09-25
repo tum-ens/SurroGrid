@@ -1,29 +1,24 @@
 """I/O helper for scenario HDF5 files used in the powerflow step."""
 
-from config import config
+from gridexpand.powerflow.config import config
 
 import os
 import pandas as pd
 import shutil
 import h5py
 import pandapower as pp
-import sys
 from sqlalchemy import text
 from pathlib import Path
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.database import SurroGridDatabase
-from common.ev_sessions import (
+from gridexpand.db.database import SurroGridDatabase
+from gridexpand.common.ev_sessions import (
     SESSION_HOURS_HDF_KEY,
     SESSIONS_HDF_KEY,
     SESSION_HOUR_COLUMNS,
     SESSION_COLUMNS,
     SessionError,
 )
-from common.timeframe import read_hdf_metadata, scenario_key_for_timeframe
+from gridexpand.common.timeframe import read_hdf_metadata, scenario_key_for_timeframe
 
 
 def hdf_key_exists(path, key):

@@ -67,7 +67,7 @@ def prepare_grid(grid):
         et      = "b",
         closed  = True,
         type    = "CB",
-        name    = f"SW_replacing_T0"
+        name    = "SW_replacing_T0"
     )
 
     return grid
