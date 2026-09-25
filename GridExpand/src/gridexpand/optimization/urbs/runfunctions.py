@@ -1,19 +1,18 @@
+import multiprocessing as mp
+import os
+import time
+import traceback
+import warnings
+
 import pandas as pd
 from pyomo.environ import SolverFactory
+
+from .features.typeperiod import run_tsam, select_predefined_timesteps
+from .identify import get_parallel_building_clusters, identify_mode
+from .input import get_cluster_data, read_input_h5
 from .model import create_model
-from .report import *
-from .plot import *
-from .input import *
-from .validation import *
-from .saveload import *
-from .features import *
-from .scenarios import *
+from .saveload import create_result_cache, save, save_reduced_data
 from .scenarios import insert_scenario, read_scenario_name
-import os
-import multiprocessing as mp
-import time
-import warnings
-import traceback
 
 def run_worker(data_cluster, global_settings, log_dir, scenario_name, return_dict=None, i=""):
     """ run 
@@ -73,22 +72,9 @@ def _run_worker(data_cluster, global_settings, log_dir, scenario_name, return_di
     ################### Extract and return results ####################
     model_results = create_result_cache(prob_cluster)
 
-    if global_settings["parallel"]:
-        return_dict[i] = model_results   # Insert this workers pyomo model instance
-        return None
-    else:
-        return model_results
+    return_dict[i] = model_results   # Insert this workers pyomo model instance
+    return None
    
-
-# def prepare_result_directory(input_file, script_name):
-#     # timestamp for result directory
-#     now = datetime.now().strftime('%Y%m%dT%H%MS%S%f')
-
-#     # create result directory if not existent
-#     result_dir = os.path.join('result', '{}-{}-{}'.format(now, input_file, script_name))
-#     if not os.path.exists(result_dir): os.makedirs(result_dir)
-
-#     return result_dir
 
 def prepare_result_directory(input_file, script_name, scenario_key=None, result_root="result"):
     """Create and return ``result_root/<scenario_key>`` (``result_root`` if no key)."""
@@ -116,11 +102,6 @@ def setup_solver_mip(optim, logfile='solver.log'):
         optim.set_options("MIPGap=0.05")
         optim.set_options("Presolve=2")
         optim.set_options("Threads=4")
-
-    ### Other solvers:
-    if optim.name == 'cplexdirect' or optim.name == 'cplex_direct':
-        optim.options['threads'] = 32
-        optim.options['mip_tolerances_mipgap'] = 0.05
 
     return optim
 
@@ -158,9 +139,7 @@ def run_lvds_opt(input_path,        # path to input file
 
     ### Read out, validate and modify input_file data: ###
     print("Reading and validating input data...")
-    if os.path.splitext(global_settings["input_file"])[1] == ".h5": data = read_input_h5(input_path)
-    else: data = read_input(input_path)    # standard Excel readout: read out support timeframes, commodities, commodity-process, processes, demand, weight typeperiod, intermediate supply, transmission, storage, DSM, buy-sell-price, timevareff, availability, uhp
-    # validate_input(data)          # check vertex rules, no duplicates, infeasible capacities, check if sites/processes/commodities/storage/dsm if present in each others sheets 
+    data = read_input_h5(input_path)
 
     max_timestep = int(data["demand"].index.get_level_values("t").max())
     global_settings["timesteps"] = range(0, max_timestep + 1)
@@ -256,12 +235,6 @@ def run_lvds_opt(input_path,        # path to input file
     print(f"Temporal method: {temporal_audit.to_dict()}\n")
 
 
-    ##### Variable Tariff: #####
-    if global_settings["vartariff"]!=0: raise NotImplementedError("Variable Tariff: Any values different from 0 are currently not safely implemented!") 
-
-    ##### Power Price: #####
-    if global_settings["power_price_kw"]!=0: raise NotImplementedError("Power price: Any values different from 0 are currently not safely implemented!") 
-
     if global_settings.get("reduce_only"):
         print("Reduce-only mode active: saving TSAM/reduced input data and skipping optimization.")
         start_time = time.time()
@@ -307,7 +280,6 @@ def run_lvds_opt(input_path,        # path to input file
             model_results[worker_i] = result
 
         for i, cluster in enumerate(clusters):
-            print(i)
             data_cluster = get_cluster_data(data, cluster)  # only data for selected buildings for this thread
 
             proc = mp.Process(target=run_worker,
@@ -324,11 +296,6 @@ def run_lvds_opt(input_path,        # path to input file
 
         for i, proc in running:
             collect_worker(i, proc)
-    else:
-        model_results = run_worker(data,                   # whole data
-                                global_settings,        # settings of the run
-                                str(log_dir),       # output directory in which to save logfiles
-                                scenario_name)          # name of the scenario for saving files
 
     time_B=time.time()
     print(f"Solving process took {(time_B-time_A)/60:.2f} minutes to run!\n")

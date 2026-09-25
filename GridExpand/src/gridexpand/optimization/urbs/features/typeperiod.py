@@ -4,7 +4,6 @@ import tsam.timeseriesaggregation as tsam
 from datetime import datetime, timedelta
 import numpy as np
 from sklearn.metrics import mean_squared_error
-from ..identify import *
 import re
 
 
@@ -215,11 +214,6 @@ def run_tsam(data, noTypicalPeriods, hoursPerPeriod, extremePeriodMethod="replac
         return group
 
     # Select obtained tsam periods from input data
-    # data_to_adjust = ["demand", "supim", "buy_sell_price", "eff_factor", "weather"]
-    # for data_name in data_to_adjust:
-    #     data[data_name] = data[data_name].reindex(indices_to_keep, level='t')
-    #     data[data_name] = data[data_name].groupby(level='support_timeframe', group_keys=False).apply(reset_hour_counter)
-
     data_to_adjust = ["demand", "supim", "buy_sell_price", "eff_factor", "weather"]
     for data_name in data_to_adjust:
         data_base = data[data_name].reindex(indices_to_keep, axis=0, level='t')
@@ -295,7 +289,6 @@ def select_predefined_timesteps(data, timesteps):
     data['demand'] = data['demand'][data['demand'].index.get_level_values(1).isin(timesteps)]
     data['supim'] = data['supim'][data['supim'].index.get_level_values(1).isin(timesteps)]
     data['eff_factor'] = data['eff_factor'][data['eff_factor'].index.get_level_values(1).isin(timesteps)]
-    # data['availability'] = data['availability'][data['availability'].index.get_level_values(1).isin(timesteps)]
     data['buy_sell_price'] = data['buy_sell_price'][data['buy_sell_price'].index.get_level_values(1).isin(timesteps)]
     data['weather'] = data['weather'][data['weather'].index.get_level_values(1).isin(timesteps)]
 
@@ -306,6 +299,7 @@ def select_predefined_timesteps(data, timesteps):
 
 
 def add_typeperiod(m, hoursPerPeriod):
+    """Replace the annual weight by type-period weights and close storages per period."""
     ### change weight parameter to 1, since the whole year is representated by weight_typeperiod
     m.del_component(m.weight)
     m.weight = pyomo.Param(
@@ -313,113 +307,20 @@ def add_typeperiod(m, hoursPerPeriod):
         doc='Pre-factor for variable costs and emissions for annual result for type period = 1')
     ### create list with all period ends
     t_endofperiod_list = [i * hoursPerPeriod * m.dt for i in list(range(1,1+int(len(m.timesteps) / m.dt / hoursPerPeriod)))]
-
-    # if m.mode['tsam'] and m.mode['tsam_season']:
-    #     ### prepare time lists for set tuples
-    #     start_end_typeperiods_list = []
-    #     t_startofperiod_list = []
-    #     for hour in t_endofperiod_list:
-    #         start_end_typeperiods_list.append((hour + 1 - m.hoursPerPeriod, hour))
-    #         t_startofperiod_list.append(hour + 1 - m.hoursPerPeriod)
-    #     subsequent_typeperiods_list = []
-    #     t_endofperiod_list_without_last = t_endofperiod_list[0:-1]
-    #     for hour in t_endofperiod_list_without_last:
-    #         subsequent_typeperiods_list.append((hour,hour+1))
-
-    #     ### allocate weights to the specific period with a dict
-    #     m.typeperiod_weights = dict(zip(t_endofperiod_list, m.weighting_order))
-
-    #     ### define timeperiod sets
-    #     m.t_startofperiod = pyomo.Set(
-    #         within=m.t,
-    #         initialize=t_startofperiod_list,
-    #         ordered=True,
-    #         doc='timestep at the start of each timeperiod')
-    #     m.t_endofperiod = pyomo.Set(
-    #         within=m.t,
-    #         initialize=t_endofperiod_list,
-    #         ordered=True,
-    #         doc='timestep at the end of each timeperiod')
-    #     m.subsequent_typeperiods = pyomo.Set(
-    #         within=m.t * m.t,
-    #         initialize=subsequent_typeperiods_list,
-    #         ordered=True,
-    #         doc='subsequent timesteps between two typeperiods')
-    #     m.start_end_typeperiods = pyomo.Set(
-    #         within=m.t * m.t,
-    #         initialize=start_end_typeperiods_list,
-    #         ordered=True,
-    #         doc='start and end of each modeled typeperiod as tuple')
-
-    #     ### enable seasonal storage with SOC variable and two constraints
-    #     ### SOC variable
-    #     if m.mode['sto']:
-    #         m.deltaSOC = pyomo.Var(
-    #             m.t_endofperiod, m.sto_tuples,
-    #             within=pyomo.Reals,
-    #             doc='Variable to describe the delta of a storage within each period')
-    #         ### constraint to describe the SOC difference of a storage within a repeating period A
-    #         m.res_delta_SOC = pyomo.Constraint(
-    #             m.start_end_typeperiods, m.sto_tuples,
-    #             rule=res_delta_SOC,
-    #             doc='delta_SOC_A = weight * (SOC_A_tN - SOC_A_t0)')
-    #         ### SOC constraint for two consecutive typeperiods A and B
-    #         m.res_typeperiod_delta_SOC = pyomo.Constraint(
-    #             m.subsequent_typeperiods, m.sto_tuples,
-    #             rule=res_typeperiod_deltaSOC_rule,
-    #             doc='SOC_B_t0 = SOC_A_t0 + delta_SOC_A')
-
-    #         ### delete old ciclycity rule to enable typeperiod simulation
-    #         del m.res_storage_state_cyclicity
-
-    #         ### new ciclycity constraint for typeperiods
-    #         m.res_storage_state_cyclicity_typeperiod = pyomo.Constraint(
-    #             m.sto_tuples,
-    #             rule=res_storage_state_cyclicity_rule_typeperiod,
-    #             doc='storage content end >= storage content start - deltaSOC[last_typeperiod]')
-    if False: pass
-    else:
-        # t_startofperiod_list = []
-        # for hour in t_endofperiod_list:
-        #     t_startofperiod_list.append(hour + 1 - m.hoursPerPeriod)
-        # ### if tsam is not active classical
-        # ### original timeset for cyclicity rule
-        # m.t_startofperiod = pyomo.Set(
-        #     within=m.t,
-        #     initialize=t_startofperiod_list,
-        #     ordered=True,
-        #     doc='timestep at the start of each timeperiod')
-        m.t_endofperiod = pyomo.Set(
-            within=m.t,
-            initialize=t_endofperiod_list,
-            ordered=True,
-            doc='timestep at the end of each timeperiod')
-        # if not m.grid_plan_model:
-        if not False:
-            ### cyclicity contraint
-            if m.mode['sto']:
-                m.res_storage_state_cyclicity_typeperiod = pyomo.Constraint(
-                    m.t_endofperiod, m.sto_tuples,
-                    rule=res_storage_state_cyclicity_typeperiod_rule,
-                doc='storage content initial == storage content at the end of each timeperiod')
+    m.t_endofperiod = pyomo.Set(
+        within=m.t,
+        initialize=t_endofperiod_list,
+        ordered=True,
+        doc='timestep at the end of each timeperiod')
+    ### cyclicity contraint
+    if m.mode['sto']:
+        m.res_storage_state_cyclicity_typeperiod = pyomo.Constraint(
+            m.t_endofperiod, m.sto_tuples,
+            rule=res_storage_state_cyclicity_typeperiod_rule,
+        doc='storage content initial == storage content at the end of each timeperiod')
     return m
 
 ### cyclicity rule without tsam
 def res_storage_state_cyclicity_typeperiod_rule(m, t, stf, sit, sto, com):
     return (m.e_sto_con[m.t.at(1), stf, sit, sto, com] ==      # Indexing in pyomo starts at 1 not 0!
             m.e_sto_con[t, stf, sit, sto, com])
-
-### SOC rule for each repeating typeperiod
-def res_delta_SOC(m, t_0, t_end, stf, sit, sto, com):
-    return ( m.deltaSOC[t_end, stf, sit, sto, com] ==
-             (m.typeperiod_weights[t_end] - 1) * (m.e_sto_con[t_end, stf, sit, sto, com] - m.e_sto_con[t_0, stf, sit, sto, com]))
-
-### new storage rule using tsam considering the delta SOC per repeating typeperiod
-def res_typeperiod_deltaSOC_rule(m, t_A, t_B, stf, sit, sto, com):
-    return (m.e_sto_con[t_B, stf, sit, sto, com] ==
-            m.e_sto_con[t_A, stf, sit, sto, com] + m.deltaSOC[t_A, stf, sit, sto, com])
-
-### new ciclycity rule for typeperiods
-def res_storage_state_cyclicity_rule_typeperiod(m, stf, sit, sto, com):
-    return (m.e_sto_con[m.t[len(m.t)], stf, sit, sto, com] >=
-            m.e_sto_con[m.t[1], stf, sit, sto, com] - m.deltaSOC[m.t[len(m.t)], stf, sit, sto, com])  # Indexing in pyomo starts at 1 not 0!

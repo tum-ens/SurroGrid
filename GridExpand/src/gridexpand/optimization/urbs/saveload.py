@@ -2,13 +2,6 @@ import pandas as pd
 from .pyomoio import get_entity, list_entities
 import warnings
 
-def rename_duplicate_columns(df):
-    cols = pd.Series(df.columns)
-    for dup in cols[cols.duplicated()].unique():
-        cols[cols[cols == dup].index.values.tolist()] = [dup + '.' + str(i) if i != 0 else dup for i in range(sum(cols == dup))]
-    df.columns = cols
-    return df
-
 def create_result_cache(prob):
     entity_types = ['set', 'par', 'var', 'exp']
     if hasattr(prob, 'dual'):
@@ -86,30 +79,3 @@ def save(data, model_results, save_file_name, manyprob=False):
                     store['urbs_out/MILP/'+name] = results_all[name]
             else: 
                 store['urbs_out/MILP/'+name] = results_all[name]
-
-class ResultContainer(object):
-    """ Result/input data container for reporting functions. """
-    def __init__(self, data, result):
-        self._data = data
-        self._result = result
-
-
-def load(filename):
-    """Load a urbs model result container from a HDF5 store file.
-
-    Args:
-        filename: an existing HDF5 store file
-
-    Returns:
-        prob: the modified instance containing the result cache
-    """
-    with pd.HDFStore(filename, mode='r') as store:
-        data_cache = {}
-        for group in store.get_node('data'):
-            data_cache[group._v_name] = store[group._v_pathname]
-
-        result_cache = {}
-        for group in store.get_node('result'):
-            result_cache[group._v_name] = store[group._v_pathname]
-
-    return ResultContainer(data_cache, result_cache)

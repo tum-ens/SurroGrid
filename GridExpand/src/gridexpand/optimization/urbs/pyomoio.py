@@ -1,7 +1,6 @@
+import numpy as np
 import pandas as pd
 import pyomo.environ as pyomo
-#import pyomo.core as pyomo
-import numpy as np
 
 def get_entity(instance, name):
     """ Retrieve values (or duals) for an entity in a model instance.
@@ -125,37 +124,6 @@ def get_entity(instance, name):
         # return empty Series
         results = pd.Series(name=name, dtype = np.float64)
     return results
-
-
-def get_entities(instance, names):
-    """ Return one DataFrame with entities in columns and a common index.
-
-    Works only on entities that share a common domain (set or set_tuple), which
-    is used as index of the returned DataFrame.
-
-    Args:
-        instance: a Pyomo ConcreteModel instance
-        names: list of entity names (as returned by list_entities)
-
-    Returns:
-        a Pandas DataFrame with entities as columns and domains as index
-    """
-
-    df = pd.DataFrame()
-    for name in names:
-        other = get_entity(instance, name)
-
-        if df.empty:
-            df = other.to_frame()
-        else:
-            index_names_before = df.index.names
-
-            df = df.join(other, how='outer')
-
-            if index_names_before != df.index.names:
-                df.index.names = index_names_before
-
-    return df
 
 
 def list_entities(instance, entity_type):
