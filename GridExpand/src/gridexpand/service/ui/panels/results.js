@@ -13,7 +13,8 @@ export function createResultsPanel(ctx) {
     name: 'GridExpandResults',
     components: { EChart: charts.EChart },
     data() {
-      return { analyses: [], loading: false, error: null, groupKey: null, selectedKey: null, gridRows: {}, powerflow: [], pfLoading: false };
+      return { analyses: [], loading: false, error: null, groupKey: null, selectedKey: null, gridRows: {}, powerflow: [], pfLoading: false,
+        assets: null };
     },
     computed: {
       s() { return state; },
@@ -86,6 +87,17 @@ export function createResultsPanel(ctx) {
           series,
         });
       },
+      assetKpi() {
+        const a = this.assets;
+        if (!a || a.stage !== 'post' || !a.buildings) return null;
+        const t = a.totals || {};
+        const parts = [];
+        if (t.pv) parts.push(`PV ${t.pv.power_kw >= 1000 ? format.num(t.pv.power_kw / 1000, 2) + ' MWp' : format.num(t.pv.power_kw, 0) + ' kWp'}`);
+        if (t.battery) parts.push(`${format.num(t.battery.energy_kwh, 0)} kWh batteries`);
+        if (t.heat_pump) parts.push(`${format.num(t.heat_pump.buildings)} heat pumps`);
+        if (t.ev) parts.push(`${format.num(t.ev.units)} EVs`);
+        return { value: `${format.num(a.buildings)} buildings`, sub: parts.join(' · ') };
+      },
       layerOn: {
         get() { return state.layer.on; },
         set(v) { state.layer.on = v; state.layer.key = this.selectedKey; },
@@ -97,6 +109,7 @@ export function createResultsPanel(ctx) {
       's.focusAnalysis'(key) { if (key && this.analyses.some((a) => a.analysis_key === key)) this.select(key); else if (key) this.load(); },
       groupKey() { this.loadGroup(); },
       selectedKey(key) {
+        this.loadAssets(key);
         state.layer.key = key;
         const a = this.analyses.find((x) => x.analysis_key === key);
         state.layer.label = a ? analysisLabel(a) : key;
@@ -153,6 +166,16 @@ export function createResultsPanel(ctx) {
           this.pfLoading = false;
         }
       },
+      async loadAssets(key) {
+        this.assets = null;
+        const a = this.analyses.find((x) => x.analysis_key === key);
+        if (!a || a.stage !== 'post') return;
+        const r = this.region;
+        try {
+          const data = await host.api(`results/analyses/${encodeURIComponent(key)}/assets`, { params: { plz: r.plz, pylovo_version_id: r.version, features: false } });
+          if (this.selectedKey === key) this.assets = markRaw(data);
+        } catch (err) { /* the map legend shows asset errors */ }
+      },
       select(key) {
         const a = this.analyses.find((x) => x.analysis_key === key);
         if (!a) return;
@@ -186,6 +209,7 @@ export function createResultsPanel(ctx) {
             <Kpi label="Expansion cost" icon="bolt" :value="euro(selected.total_cost_eur)" :sub="'cables ' + euro(selected.line_cost_eur) + ' · transformers ' + euro(selected.transformer_cost_eur)"/>
             <Kpi label="Cables to reinforce" icon="cable" :value="num(selected.lines_to_reinforce)" :sub="km(selected.km_to_reinforce) + ' · +' + num(selected.additional_cables) + ' parallel'"/>
             <Kpi label="Transformers to reinforce" icon="transformer" :value="num(selected.transformers_to_reinforce) + ' / ' + num(selected.transformers_total)" :sub="'+' + num(selected.additional_transformer_kva) + ' kVA'"/>
+            <Kpi v-if="assetKpi" label="Building assets" icon="building" :value="assetKpi.value" :sub="assetKpi.sub" title="Buildings with PV, battery, heat pump or EV in this case (installed capacities of Step 3)"/>
             <Kpi label="P99 transformer loading" icon="gauge" :value="p99.length ? num(p99[0].value, 0) + ' %' : '–'" :title="'Maximum over the grids of the 99th percentile of the hourly transformer loading'">
               <span>status quo<template v-for="x in p99.slice(1)" :key="x.label"> · <strong>{{ num(x.value, 0) }} %</strong> {{ x.label }}</template></span>
             </Kpi>

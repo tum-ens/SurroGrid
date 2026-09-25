@@ -32,7 +32,10 @@ export function createContext(host) {
     jobs: [], activeJobId: null, logTick: 0,
     resultsTick: 0,           // bumped when a job finished: result panels reload
     focusAnalysis: null,      // analysis key the results panel should select
-    layer: { on: false, key: null, label: null, data: null, loading: false, error: null, hover: null },
+    focusScenario: null,      // scenario file the runs panel should select (set after saving a scenario)
+    editScenario: null,       // scenario file the scenario editor should open (set by the runs panel)
+    layer: { on: false, key: null, label: null, data: null, loading: false, error: null, hover: null,
+      assets: null, gridOn: true, assetsOn: { pv: true, battery: true, heat_pump: true, ev: true } },
   });
   const lines = new Map();    // job id -> log lines (kept outside Vue reactivity)
   const streams = new Map();
