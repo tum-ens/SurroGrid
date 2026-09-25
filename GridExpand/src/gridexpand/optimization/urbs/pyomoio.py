@@ -199,48 +199,39 @@ def _get_onset_names(entity):
     labels = []
 
     if isinstance(entity, pyomo.Set):
-        try:
-            if entity.dimen > 1:
-                # N-dimensional set tuples, possibly with nested set tuples within
-                if not entity.domain.name == 'Any':
-                    # retreive list of domain sets, which itself could be nested
-                    domains = entity.domain.subsets(expand_all_set_operators=True)#set_tuple
-                else:
-                    try:
-                        # if no domain attribute exists, some
-                        domains = entity.subsets(expand_all_set_operators=True)#set_tuple
-                    except AttributeError:
-                        # if that fails, too, a constructed (union, difference,
-                        # intersection, ...) set exists. In that case, the
-                        # attribute _setA holds the domain for the base set
-                        try:
-                            domains = entity._setA.domain.subsets(expand_all_set_operators=True)#set_tuple
-                        except AttributeError:
-                            # if that fails, too, a constructed (union, difference,
-                            # intersection, ...) set exists. In that case, the
-                            # attribute _setB holds the domain for the base set
-                            domains = entity._setB.domain.subsets(expand_all_set_operators=True)#set_tuple
-
-                for domain_set in domains:
-                    labels.extend(_get_onset_names(domain_set))
-
-            elif entity.dimen == 1:
-                if not entity.domain.name == 'Any':
-                    # 1D subset; add domain name
-                    labels.append(entity.domain.name)
-                else:
-                    # unrestricted set; add entity name
-                    labels.append(entity.name)
+        if entity.dimen > 1:
+            # N-dimensional set tuples, possibly with nested set tuples within
+            if not entity.domain.name == 'Any':
+                # retreive list of domain sets, which itself could be nested
+                domains = entity.domain.subsets(expand_all_set_operators=True)
             else:
-                # no domain, so no labels needed
-                pass
-        except:
-            import pdb;pdb.set_trace()
+                try:
+                    # if no domain attribute exists, some
+                    domains = entity.subsets(expand_all_set_operators=True)
+                except AttributeError:
+                    # if that fails, too, a constructed (union, difference,
+                    # intersection, ...) set exists. In that case, the
+                    # attribute _setA holds the domain for the base set
+                    try:
+                        domains = entity._setA.domain.subsets(expand_all_set_operators=True)
+                    except AttributeError:
+                        # _setB holds the domain for the base set
+                        domains = entity._setB.domain.subsets(expand_all_set_operators=True)
+
+            for domain_set in domains:
+                labels.extend(_get_onset_names(domain_set))
+
+        elif entity.dimen == 1:
+            if not entity.domain.name == 'Any':
+                # 1D subset; add domain name
+                labels.append(entity.domain.name)
+            else:
+                # unrestricted set; add entity name
+                labels.append(entity.name)
+        # else: no domain, so no labels needed
     elif isinstance(entity, (pyomo.Param, pyomo.Var, pyomo.Expression,
                     pyomo.Constraint, pyomo.Objective)):
 
-        # if entity.dim() > 0 and entity._index:
-        #     labels = _get_onset_names(entity._index)
         if entity.dim() > 0 and entity.index_set():
             labels = _get_onset_names(entity.index_set())
         else:

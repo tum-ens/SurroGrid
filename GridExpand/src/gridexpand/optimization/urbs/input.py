@@ -1,7 +1,6 @@
 """Read the Step 2 urbs input HDF5 and prepare the data of one pyomo model."""
 
 import copy
-from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -11,6 +10,12 @@ from .features.modelhelper import invcost_factor
 from .identify import identify_mode
 
 EV_SESSION_KEYS = ("ev_sessions", "ev_session_hours")
+
+# The single support timeframe of every table (a relic of intertemporal urbs). It
+# labels the `stf` index level of all urbs_out results. It used to be the
+# calendar year of the run (date.today().year); it is fixed to the year the
+# existing results were produced with, so reruns do not depend on the calendar.
+SUPPORT_TIMEFRAME = 2026
 
 
 def read_input_h5(input_path):
@@ -58,7 +63,7 @@ def read_input_h5(input_path):
         raw_data_dict[key] = table.set_index(index_columns)
 
     ### Add support_timeframe to Multiindex
-    support_timeframe = date.today().year    # Used to assign support time frame in data frames (relict from earlier urbs versions)
+    support_timeframe = SUPPORT_TIMEFRAME
     for key in raw_data_dict.keys():
         # The EV session tables are flat relational tables keyed by session_id;
         # they carry their own model-hour column and must not be reindexed.
@@ -153,15 +158,13 @@ def pyomo_model_prep(data, timesteps):
             m.sto_ep_ratio_dict = {}
 
     # derive annuity factors from WACC and depreciation duration (one year problem)
-    try:
-        process['invcost-factor'] = (
-            process.apply(
-            lambda x: invcost_factor(
-                x['depreciation'],
-                x['wacc']),
-            axis=1))
-    except:
-        process['invcost-factor'] = 1
+    # (no fallback: a failing annuity must not silently become the full capex)
+    process['invcost-factor'] = (
+        process.apply(
+        lambda x: invcost_factor(
+            x['depreciation'],
+            x['wacc']),
+        axis=1))
 
     # cost factor will be set to 1 for non intertemporal problems
     commodity['cost_factor'] = 1
