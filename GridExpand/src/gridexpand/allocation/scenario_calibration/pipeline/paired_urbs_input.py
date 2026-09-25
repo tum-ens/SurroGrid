@@ -7,17 +7,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..paths import OUTPUT_DIR, SCENARIO_CONFIG_DIR, SYNTHETIC_INPUT_DIR
+from ..paths import OUTPUT_DIR, SYNTHETIC_INPUT_DIR
 
 DEFAULT_PAIRED_DIR = (
     OUTPUT_DIR
     / "swf_2045_paired_v5_91301_station_hybrid_v2"
 )
 DEFAULT_OUTPUT_DIR = SYNTHETIC_INPUT_DIR
-DEFAULT_SCENARIO_CONFIG = (
-    SCENARIO_CONFIG_DIR
-    / "forchheim_2045_full_year.yaml"
-)
 
 from gridexpand.allocation.config import config
 from gridexpand.common.electrification import (
@@ -340,7 +336,7 @@ def materialize_paired_urbs_input(
     heat_profile_library: Path | None,
     allow_diagnostic_heat_fallback: bool,
     model_case: str = "post-hems-heuristic",
-    scenario_config_path: Path = DEFAULT_SCENARIO_CONFIG,
+    scenario_config_path: Path,
 ) -> Path:
     """Write one paired full-year Step-3 input HDF."""
     scenario, scenario_hash = load_scenario_config(scenario_config_path)
@@ -687,7 +683,8 @@ def main() -> None:
         choices=POST_MODEL_CASES,
         default="post-hems-heuristic",
     )
-    parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
+    parser.add_argument("--scenario-config", type=Path, required=True,
+                        help="Scenario YAML (config/scenarios; no default).")
     parser.add_argument(
         "--allow-diagnostic-heat-fallback",
         action="store_true",

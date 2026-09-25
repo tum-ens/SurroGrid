@@ -145,13 +145,16 @@ def test_write_outputs_order_and_empty_rules():
 
 
 def test_parse_args_rejects_inconsistent_cases():
+    scenario = ["--scenario-config", "config/scenarios/schweinfurt_2045.yaml"]
     with pytest.raises(SystemExit):
-        main.parse_args(["1", "--model-case", "pre", "--profiles", "all"])
+        main.parse_args(["1", "--model-case", "pre", "--profiles", "all", *scenario])
     with pytest.raises(SystemExit):
-        main.parse_args(["1", "--profiles", "status_quo"])
+        main.parse_args(["1", "--profiles", "status_quo", *scenario])
     with pytest.raises(SystemExit):
-        main.parse_args(["1", "--timeframe-mode", "min_temperature_week"])
-    args = main.parse_args(["1", "--model-case", "pre", "--profiles", "status_quo"])
+        main.parse_args(["1", "--timeframe-mode", "min_temperature_week", *scenario])
+    with pytest.raises(SystemExit):  # no silent default scenario
+        main.parse_args(["1", "--model-case", "pre", "--profiles", "status_quo"])
+    args = main.parse_args(["1", "--model-case", "pre", "--profiles", "status_quo", *scenario])
     assert args.storage == "h5" and args.mobility_source == "emobpy" and args.timeseries_storage == "db"
 
 

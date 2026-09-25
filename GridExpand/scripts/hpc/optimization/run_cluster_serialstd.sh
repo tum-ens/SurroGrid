@@ -2,7 +2,10 @@
 #
 # TEMPLATE Slurm job for Step 3 (urbs optimization) of one input file:
 #
-#   sbatch scripts/hpc/optimization/run_cluster_serialstd.sh <inputfile_id>
+#   SCENARIO_CONFIG=config/scenarios/<scenario>.yaml \
+#     sbatch scripts/hpc/optimization/run_cluster_serialstd.sh <inputfile_id>
+#
+# SCENARIO_CONFIG is required (no default scenario); sbatch exports it to the job.
 #
 # Submit from GridExpand/ (or use scripts/hpc/start_batch_jobs.sh). The Python
 # environment comes from `uv sync`; adapt cluster, partition and resources to
@@ -28,8 +31,10 @@ echo "Script started at: $start_time"
 
 INDEX="$1"
 echo "Fileindex: $INDEX"
+: "${SCENARIO_CONFIG:?set SCENARIO_CONFIG to the scenario YAML (config/scenarios/<scenario>.yaml)}"
+echo "Scenario: $SCENARIO_CONFIG"
 
-srun uv run --frozen gridexpand optimize "$INDEX" --n_cpu "$SLURM_CPUS_PER_TASK"
+srun uv run --frozen gridexpand optimize "$INDEX" --n_cpu "$SLURM_CPUS_PER_TASK" --scenario-config "$SCENARIO_CONFIG"
 wait
 
 ### Delete error log file at end of run if it is empty
