@@ -4,7 +4,7 @@ import tsam.timeseriesaggregation as tsam
 from datetime import datetime, timedelta
 import numpy as np
 from sklearn.metrics import mean_squared_error
-from urbs.identify import *
+from ..identify import *
 import re
 
 

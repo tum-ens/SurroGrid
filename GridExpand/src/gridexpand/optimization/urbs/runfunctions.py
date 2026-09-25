@@ -1,6 +1,5 @@
 import pandas as pd
 from pyomo.environ import SolverFactory
-import urbs
 from .model import create_model
 from .report import *
 from .plot import *
@@ -9,6 +8,7 @@ from .validation import *
 from .saveload import *
 from .features import *
 from .scenarios import *
+from .scenarios import insert_scenario, read_scenario_name
 import os
 import multiprocessing as mp
 import time
@@ -90,7 +90,8 @@ def _run_worker(data_cluster, global_settings, log_dir, scenario_name, return_di
 
 #     return result_dir
 
-def prepare_result_directory(input_file, script_name, scenario_key=None):
+def prepare_result_directory(input_file, script_name, scenario_key=None, result_root="result"):
+    """Create and return ``result_root/<scenario_key>`` (``result_root`` if no key)."""
     key = str(scenario_key).strip() if scenario_key is not None else ""
     if scenario_key is not None and (
         not key
@@ -100,7 +101,8 @@ def prepare_result_directory(input_file, script_name, scenario_key=None):
         raise ValueError(
             f"scenario_key must be one directory-safe path component: {scenario_key!r}"
         )
-    result_dir = os.path.join("result", key) if key else "result"
+    result_root = str(result_root)
+    result_dir = os.path.join(result_root, key) if key else result_root
     os.makedirs(result_dir, exist_ok=True)
     return result_dir
 
@@ -126,7 +128,8 @@ def setup_solver_mip(optim, logfile='solver.log'):
 def run_lvds_opt(input_path,        # path to input file  
                  result_path,        # path to output directory
                  result_dir,
-                 global_settings):  # global input settings
+                 global_settings,   # global input settings
+                 log_dir="logs"):   # directory for solver log files
     """ Run an urbs model for given input path, result directory and global settings
     
     Args:
@@ -166,8 +169,8 @@ def run_lvds_opt(input_path,        # path to input file
 
     ### Insert settings into data and read out modes/name: ###
     print("\nReading running modes...")
-    scenario_name = urbs.read_scenario_name(global_settings, data)
-    data = urbs.insert_scenario(data, global_settings)             # insert global settings as df into input data
+    scenario_name = read_scenario_name(global_settings, data)
+    data = insert_scenario(data, global_settings)             # insert global settings as df into input data
 
     mode = identify_mode(data)   # check whether intertemporal, transmission, storage, dsm, bsp, tve, availability, acpf/dcpf, type period weight, tsam, tsam season, onoff, minfraction, power_price, uncoordinated, transdist, 14a, uhp
     print(f"Identified running modes: {mode}")               # for us should be present: sto, bsp, tve, ava, tsam, exp(pro, sto-c, sto-p), uncoordinated
@@ -310,7 +313,7 @@ def run_lvds_opt(input_path,        # path to input file
             proc = mp.Process(target=run_worker,
                                 args=(data_cluster,
                                     global_settings,        # settings of the run
-                                    "logs/gurobi",                 # output directory in which to save logfiles
+                                    os.path.join(str(log_dir), "gurobi"),  # output directory in which to save logfiles
                                     scenario_name,          # name of the scenario for saving files
                                     return_dict,            # shared dict in which to save data 
                                     i))                     # location in dict in which to save    
@@ -324,7 +327,7 @@ def run_lvds_opt(input_path,        # path to input file
     else:
         model_results = run_worker(data,                   # whole data
                                 global_settings,        # settings of the run
-                                "logs",             # output directory in which to save logfiles
+                                str(log_dir),       # output directory in which to save logfiles
                                 scenario_name)          # name of the scenario for saving files
 
     time_B=time.time()

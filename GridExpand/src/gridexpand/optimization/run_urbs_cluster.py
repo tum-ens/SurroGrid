@@ -1,31 +1,30 @@
 # -*- coding: utf-8 -*-
-import urbs
+"""Step 3 entry point: run the urbs building optimization for one Step 2 HDF5 file."""
 import os
 import shutil
-import time
 import argparse
 import pandas as pd
-import sys
 from pathlib import Path
-from urbs.resource_report import resource_report
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-DEFAULT_SCENARIO_CONFIG = (
-    GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
-    / "forchheim_2045_synthetic.yaml"
+from gridexpand.common.resource_report import resource_report
+from gridexpand.optimization import urbs
+from gridexpand.paths import (
+    OPTIMIZATION_INPUT_DIR,
+    OPTIMIZATION_LOGS_DIR,
+    OPTIMIZATION_RESULT_DIR,
+    SCENARIO_CONFIG_DIR,
 )
-
-from scenario_pipeline.config_loader import (
+from gridexpand.scenario.config_loader import (
     load_scenario_config,
     scenario_identity_key,
 )
-from common.electrification import (
+from gridexpand.common.electrification import (
     assignment_manifest_hash,
     validate_electrification_assignment_config,
 )
-from common.timeframe import read_hdf_metadata, scenario_key_for_timeframe
+from gridexpand.common.timeframe import read_hdf_metadata, scenario_key_for_timeframe
+
+DEFAULT_SCENARIO_CONFIG = SCENARIO_CONFIG_DIR / "forchheim_2045_synthetic.yaml"
 
 # Note - this urbs version is deviating in the following ways from urbs-lvds (04 Feb 2025):
 # :: removed grid optimization, 14a/bui-react, uhp, coordination, curtailment
@@ -39,10 +38,13 @@ from common.timeframe import read_hdf_metadata, scenario_key_for_timeframe
 # :: removed reactive power support
 
 
-if __name__ == '__main__':
-    with resource_report(include_children=True, name="Urbs Script") as rr_main:
+def main(argv: list[str] | None = None) -> None:
+    """Run Step 3 for one input file; see ``gridexpand optimize --help``."""
+    with resource_report(include_children=True, name="Urbs Script"):
         ### Read args:
-        parser = argparse.ArgumentParser(description="Low voltage grid DER allocation.")
+        parser = argparse.ArgumentParser(
+            prog="gridexpand optimize", description="Low voltage grid DER allocation."
+        )
         parser.add_argument("inputfile_id", help="Input file name (no path)")
         parser.add_argument("--n_cpu", default=1, help="Number of CPUs available for parallel generation")
         parser.add_argument("--tsam", action="store_true", help="Optional enable override; scenario YAML is the default.")
@@ -60,7 +62,7 @@ if __name__ == '__main__':
             action="store_true",
             help="Run preprocessing and TSAM reduction, write reduced_data/tsam outputs, and skip the URBS optimization solve.",
         )
-        args = parser.parse_args()
+        args = parser.parse_args(argv)
         scenario, scenario_hash = load_scenario_config(args.scenario_config)
         time_aggregation = scenario.time_aggregation
         tsam_enabled = bool(args.tsam or time_aggregation.enabled)
@@ -69,7 +71,7 @@ if __name__ == '__main__':
 
         ### Obtain relevant input_files
         # list all .h5 files in your directory
-        all_entries = os.listdir("Input/")
+        all_entries = os.listdir(OPTIMIZATION_INPUT_DIR)
         h5_files = [fname for fname in all_entries if fname.endswith(".h5")]
         # find file with correct id prefix
         input_id_str = str(args.inputfile_id)
@@ -78,9 +80,11 @@ if __name__ == '__main__':
         else:
             matched_files = [fname for fname in h5_files if fname.split('_', 1)[0] == input_id_str]
         if not matched_files:
-            raise FileNotFoundError(f"No Step 3 input file matches {input_id_str} in Input/.")
+            raise FileNotFoundError(
+                f"No Step 3 input file matches {input_id_str} in {OPTIMIZATION_INPUT_DIR}."
+            )
         input_file = matched_files[0]
-        input_path = Path("Input") / input_file
+        input_path = OPTIMIZATION_INPUT_DIR / input_file
         input_metadata = read_hdf_metadata(input_path)
         if input_metadata.get("scenario_hash") not in {None, scenario_hash}:
             raise ValueError(
@@ -184,8 +188,7 @@ if __name__ == '__main__':
         ### Input and result handling
         # Extract input path
         input_file = global_settings['input_file']
-        input_dir = 'Input'
-        input_path = os.path.join(input_dir, input_file)
+        input_path = os.path.join(OPTIMIZATION_INPUT_DIR, input_file)
 
         # Create result directory (format: datetime-inputfile-resultname), copy input and runfile into it 
         script_name = os.path.basename(__file__)
@@ -193,6 +196,7 @@ if __name__ == '__main__':
             input_file=input_file.replace(".h5", ""),
             script_name=script_name[:-3],
             scenario_key=scenario_key,
+            result_root=OPTIMIZATION_RESULT_DIR,
         )
         result_path = os.path.join(result_dir, input_file) 
         shutil.copyfile(input_path, result_path)
@@ -202,4 +206,9 @@ if __name__ == '__main__':
         urbs.run_lvds_opt(input_path,      # path to input files
                         result_path,     # path to store results
                         result_dir,
-                        global_settings) # all input settings  
+                        global_settings, # all input settings
+                        log_dir=OPTIMIZATION_LOGS_DIR)  
+
+
+if __name__ == "__main__":
+    main()

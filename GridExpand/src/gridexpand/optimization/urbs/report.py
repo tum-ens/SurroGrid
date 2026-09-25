@@ -84,7 +84,7 @@ def report(instance, filename, report_tuples=None, report_sites_name={}):
                     timeseries[(stf, report_sites_name[sit], com)] = \
                         timeseries[(stf, report_sites_name[sit], com)].add(
                         help_ts[(stf, lv, com)], axis=1, fill_value=0)
-                    sums = sums.add(help_sums, fill_value=0)
+                    sums = sums.add(help_sums, fill_value=0)  # noqa: F821 - NameError on first pass is intended
                 except BaseException:
                     timeseries[(stf, report_sites_name[sit], com)] = help_ts[
                         (stf, lv, com)]
