@@ -1,10 +1,16 @@
 # Copy to config/runs/<name>.yaml and replace every CHANGE_ME value.
-# This template is for run.pipeline: scenario (ordinary synthetic/DB-backed run).
+# This template is for run.pipeline: synthetic (ordinary DB-backed synthetic grids):
+# Steps 2-4 and the expansion analyses, one `gridexpand synthetic` batch per
+# execution group. Launch with `uv run gridexpand run config/runs/<name>.yaml`;
+# check it first with `uv run gridexpand config check config/runs/<name>.yaml`.
 # Fields marked UPDATE are mandatory identity edits for a new run.
+# post-inflex-heuristic is refused by the synthetic pipeline for now (the
+# synthetic Step 2 writes no EV sessions for the INFLEX power flow); remove it
+# from model_cases before launching.
 run:
   id: CHANGE_ME_run_id # UPDATE: unique directory-safe run identifier.
   scenario: ../scenarios/CHANGE_ME_scenario.yaml # UPDATE: copied scenario file.
-  pipeline: scenario
+  pipeline: synthetic
 
 resources:
   # UPDATE: exact PyLoVo topology version used by this run; never inferred.
@@ -15,11 +21,13 @@ resources:
   plz: null
   kcid: null
   bcid: null
-  storage: db # db or h5; structured selectors are for db.
-  # For storage: h5, remove the DB selector fields above and use instead:
-  # pylovo_grid_id: "CHANGE_ME_h5_filename_prefix"
-  # storage: h5
-  # Optional output override. Null uses the standard Step-2 results directory.
+  # Optional: minimum buildings per candidate grid (default 5; changes the
+  # candidate numbering) and a candidate range like `gridexpand synthetic`.
+  # min_buildings: 5
+  # start_index: 0
+  # limit: 10
+  storage: db # the synthetic pipeline reads grids from the database only
+  # Must stay null: the synthetic pipeline uses the standard Step-2 directory.
   output_directory: null
 
 execution:
@@ -33,8 +41,21 @@ execution:
     - post-inflex-heuristic
     - post-hems-heuristic
     - post-hems-optimized
-  # Machine-specific settings.
+  # Machine-specific settings. n_cpu is the Step 2 CPU count (alias of step2_cpus).
   n_cpu: 1
-  mobility_source: pool
+  mobility_source: pool # the synthetic pipeline uses the mobility profile pool
   demand_scope: all
   timeframe_mode: full_year
+  # Optional execution keys (the `gridexpand synthetic` flags, defaults shown):
+  # workers: 1                    # grids in parallel
+  # step3_cpus: 16                # minimum Step 3 building clusters
+  # step3_max_cpus: 32
+  # step3_target_columns: 35
+  # step3_cluster_concurrency: 1  # Step 3 clusters solved at the same time
+  # step4_cpus: 4
+  # solver: gurobi                # or appsi_highs; default $GRIDEXPAND_SOLVER
+  # powerflow_output: summary     # summary, raw or both (raw = full time series)
+  # cleanup_intermediates: never  # or success
+  # materialize_expansion: true
+  # pilot_gate: true              # stop if the first grid fails
+  # resume: false                 # skip grids already done (also --resume)
