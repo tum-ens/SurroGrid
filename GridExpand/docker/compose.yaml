@@ -1,0 +1,52 @@
+# GridExpand service in a container next to an existing database (e.g. InfDB):
+#   GRIDEXPAND_UID=$(id -u) GRIDEXPAND_GID=$(id -g) docker compose -f docker/compose.yaml up --build
+# Then http://127.0.0.1:18766/docs. Uses this checkout's .env, config/, work/ and the large inputs
+# under data/ (symlinks are fine). For the whole GridPlanner stack see the GridPlanner repository.
+services:
+  gridexpand:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: ${GRIDEXPAND_IMAGE:-gridexpand}:${GRIDEXPAND_TAG:-dev}
+    # Host networking: the service keeps listening on 127.0.0.1 only, and a database on the host
+    # (DB_HOST=localhost or the host's address in .env) is reachable as it is for the CLI.
+    network_mode: host
+    # Files in work/ belong to you, not to root.
+    user: "${GRIDEXPAND_UID:-1000}:${GRIDEXPAND_GID:-1000}"
+    command: ["gridexpand", "serve", "--host", "127.0.0.1", "--port", "${GRIDEXPAND_PORT:-18766}"]
+    environment:
+      GRIDEXPAND_ENV_FILE: /run/gridexpand/.env
+      GRIDEXPAND_WORK_DIR: /work
+      GRIDEXPAND_PORT: ${GRIDEXPAND_PORT:-18766}
+      # Step 3 solver. Without a Gurobi licence only the 'pre' case can run. For a Gurobi WLS
+      # licence mount its gurobi.lic (WLSACCESSID, WLSSECRET, LICENSEID lines) read-only, e.g. at
+      # /run/gurobi/gurobi.lic, and add GRB_LICENSE_FILE: /run/gurobi/gurobi.lic here.
+      GRIDEXPAND_SOLVER: ${GRIDEXPAND_SOLVER:-gurobi}
+    volumes:
+      - type: bind
+        source: ${GRIDEXPAND_ENV_FILE_HOST:-../.env}
+        target: /run/gridexpand/.env
+        read_only: true
+        bind: {create_host_path: false}
+      - ../work:/work
+      - ../config:/app/config:ro
+      - type: bind
+        source: ${GRIDEXPAND_ELEC_LPS_H5:-../data/statistics/inhabited_buildings/elec_lps.h5}
+        target: /app/data/statistics/inhabited_buildings/elec_lps.h5
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${GRIDEXPAND_MOBILITY_DEMAND_POOL:-../data/statistics/general/mobility_profile_pool_old/mobility_demand_pool.csv}
+        target: /app/data/statistics/general/mobility_profile_pool_old/mobility_demand_pool.csv
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${GRIDEXPAND_MOBILITY_AVAILABILITY_POOL:-../data/statistics/general/mobility_profile_pool_old/mobility_availability_pool.csv}
+        target: /app/data/statistics/general/mobility_profile_pool_old/mobility_availability_pool.csv
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('GRIDEXPAND_PORT', '18766') + '/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
