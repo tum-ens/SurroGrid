@@ -53,7 +53,7 @@ The run YAML holds the region (`ags`, `pylovo_version_id`, `min_buildings`, opti
   runner's numbering, `gridexpand.db.grids.list_grid_candidates`); the first selected grid is the pilot.
 - Model cases: `pre`, `post-hems-heuristic`, `post-hems-optimized`. `post-inflex-heuristic` is not
   offered (the synthetic Step 2 writes no EV sessions). Post cases need Step 3 with the solver of
-  `GRIDEXPAND_SOLVER` (`gurobi` default, or `appsi_highs`): the service refuses them when it is not
+  `GRIDEXPAND_SOLVER` (`gurobi` outside containers, `appsi_highs` in both compose files): the service refuses them when it is not
   usable (Gurobi: licence check with a model above the size limit of the licence bundled with
   gurobipy; HiGHS: `highspy` importable).
 - At most `--max-running-jobs` (default 1) jobs run; later jobs wait in a queue.

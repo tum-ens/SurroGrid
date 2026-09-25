@@ -18,10 +18,11 @@ services:
       GRIDEXPAND_ENV_FILE: /run/gridexpand/.env
       GRIDEXPAND_WORK_DIR: /work
       GRIDEXPAND_PORT: ${GRIDEXPAND_PORT:-18766}
-      # Step 3 solver. Without a Gurobi licence only the 'pre' case can run. For a Gurobi WLS
-      # licence mount its gurobi.lic (WLSACCESSID, WLSSECRET, LICENSEID lines) read-only, e.g. at
-      # /run/gurobi/gurobi.lic, and add GRB_LICENSE_FILE: /run/gurobi/gurobi.lic here.
-      GRIDEXPAND_SOLVER: ${GRIDEXPAND_SOLVER:-gurobi}
+      # Step 3 solver: HiGHS is in the image and needs no licence (same default as GridPlanner).
+      # For Gurobi set GRIDEXPAND_SOLVER=gurobi, mount a WLS gurobi.lic (WLSACCESSID, WLSSECRET,
+      # LICENSEID lines) read-only, e.g. at /run/gurobi/gurobi.lic, and add
+      # GRB_LICENSE_FILE: /run/gurobi/gurobi.lic here.
+      GRIDEXPAND_SOLVER: ${GRIDEXPAND_SOLVER:-appsi_highs}
     volumes:
       - type: bind
         source: ${GRIDEXPAND_ENV_FILE_HOST:-../.env}
