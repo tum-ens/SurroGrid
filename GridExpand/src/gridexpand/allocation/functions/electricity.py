@@ -133,8 +133,10 @@ def _get_occupancy_distribution(prob:dict, n_hh:int, n_occ:int, rng=None)->list:
                 return _sample_sequence_with_tolerance(
                     n_hh, n_occ, prob, allowed_x, tol=0.95, rng=rng
                 )
-            except: 
-                return [_closest_allowed(allowed_x, n_occ/n_hh)]*n_hh
+            except ValueError:
+                # No continuation within the tolerance: give every household
+                # the allowed size closest to the building mean.
+                return [_closest_allowed(n_occ / n_hh, allowed_x)] * n_hh
 
 def _assign_household_occupancy(df_buildings, base_seed):
     df_buildings["occ_list"] = pd.NA
