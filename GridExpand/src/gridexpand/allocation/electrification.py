@@ -10,10 +10,17 @@ own copies, because their assignment hashes are stored in prepared datasets.
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
 from gridexpand.allocation.functions.infdb_ro_heat import validate_space_heat_coverage
+from gridexpand.common.electrification import TECHNOLOGIES, assignment_manifest_hash
 
 INVENTORY_COLUMNS = (
     "heat_eligible",
@@ -105,3 +112,88 @@ def check_heat_profile_source(source: str, heat_buildings: pd.DataFrame, *, engi
     if heat_buildings.empty:
         return
     validate_space_heat_coverage(heat_buildings, engine=engine)
+
+
+def file_sha256(path: Path) -> str:
+    """Return the SHA-256 hex digest of a file's bytes."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def load_prepared_assignment(
+    path: Path,
+    building_ids: Iterable[object],
+    *,
+    scenario_hash: str,
+    profile_seed: int,
+) -> tuple[pd.DataFrame, str | None, list[dict[str, Any]] | None]:
+    """Return the rows of one grid from a prepared (regional) assignment.
+
+    The sidecar ``<path>.json`` written by ``electrification_preparation``
+    pins the scenario, the profile seed and the content: its
+    ``assignment_file_sha256`` is compared with the file (one pass over the
+    bytes). Sidecars without that key fall back to recomputing the manifest
+    hash of all rows, which costs a Python loop over the whole region.
+
+    Args:
+        path: Assignment CSV (or HDF with ``raw_data/electrification_assignment``).
+        building_ids: Physical buildings of the current grid.
+        scenario_hash: Hash of the active scenario YAML.
+        profile_seed: Seed of the active run.
+
+    Returns:
+        The grid's assignment rows (one per building and technology), the
+        sidecar's ``assignment_hash`` and its ``assignment_summary``.
+
+    Raises:
+        ValueError: If the sidecar is missing, the content, scenario or seed
+            differ, or the rows do not cover the grid exactly.
+    """
+    path = Path(path)
+    if path.suffix.lower() in {".csv", ".txt"}:
+        existing = pd.read_csv(path)
+    else:
+        existing = pd.read_hdf(path, key="raw_data/electrification_assignment")
+    metadata_path = path.with_suffix(".json")
+    if not metadata_path.exists():
+        raise ValueError(
+            f"Prepared electrification assignment is missing sidecar: {metadata_path}"
+        )
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    source_hash = metadata.get("assignment_hash")
+    expected_file_hash = metadata.get("assignment_file_sha256")
+    if expected_file_hash is not None:
+        if file_sha256(path) != expected_file_hash:
+            raise ValueError(
+                "Prepared electrification assignment file differs from the file "
+                "recorded in its sidecar."
+            )
+    elif source_hash != assignment_manifest_hash(existing):
+        raise ValueError(
+            "Prepared electrification assignment sidecar hash does not "
+            "match the assignment rows."
+        )
+    ids = {str(value) for value in building_ids}
+    existing["building_objectid"] = existing["building_objectid"].astype(str)
+    existing = existing.loc[existing["building_objectid"].isin(ids)].copy()
+    if len(existing) != len(ids) * len(TECHNOLOGIES) or existing.duplicated(
+        ["building_objectid", "technology"]
+    ).any():
+        raise ValueError(
+            "The supplied electrification assignment is not one row per "
+            "current physical building and technology."
+        )
+    if metadata.get("scenario_hash") != scenario_hash:
+        raise ValueError(
+            "Prepared electrification assignment scenario_hash differs "
+            "from the active Step-2 scenario."
+        )
+    if int(metadata.get("profile_seed", -1)) != int(profile_seed):
+        raise ValueError(
+            "Prepared electrification assignment profile_seed differs "
+            "from the active Step-2 run."
+        )
+    return existing.reset_index(drop=True), source_hash, metadata.get("assignment_summary")

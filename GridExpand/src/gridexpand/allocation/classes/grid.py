@@ -1,8 +1,5 @@
 from gridexpand.allocation.config import config
 
-import json
-from pathlib import Path
-
 import pandas as pd
 import numpy as np
 from multiprocessing import Pool
@@ -39,6 +36,7 @@ from gridexpand.allocation.electrification import (
     check_heat_profile_source,
     electrification_inventory,
     has_household,
+    load_prepared_assignment,
 )
 from gridexpand.common.electrification import (
     assignment_manifest_hash,
@@ -294,51 +292,14 @@ class Grid:
         assignment_source_hash = None
         assignment_source_summary = None
         if assignment_path:
-            path = Path(assignment_path)
-            if path.suffix.lower() in {".csv", ".txt"}:
-                existing = pd.read_csv(path)
-            else:
-                existing = pd.read_hdf(
-                    path, key="raw_data/electrification_assignment"
+            assignment, assignment_source_hash, assignment_source_summary = (
+                load_prepared_assignment(
+                    assignment_path,
+                    self.df_buildings["objectid"],
+                    scenario_hash=self.settings.get("scenario_hash"),
+                    profile_seed=self.profile_seed,
                 )
-            full_assignment_hash = assignment_manifest_hash(existing)
-            ids = set(self.df_buildings["objectid"].astype(str))
-            existing["building_objectid"] = existing["building_objectid"].astype(str)
-            existing = existing.loc[
-                existing["building_objectid"].isin(ids)
-            ].copy()
-            expected = len(ids) * 3
-            if len(existing) != expected or existing.duplicated(
-                ["building_objectid", "technology"]
-            ).any():
-                raise ValueError(
-                    "The supplied electrification assignment is not one row per "
-                    "current physical building and technology."
-                )
-            assignment = existing.reset_index(drop=True)
-            metadata_path = path.with_suffix(".json")
-            if not metadata_path.exists():
-                raise ValueError(
-                    f"Prepared electrification assignment is missing sidecar: {metadata_path}"
-                )
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            assignment_source_hash = metadata.get("assignment_hash")
-            if assignment_source_hash != full_assignment_hash:
-                raise ValueError(
-                    "Prepared electrification assignment sidecar hash does not "
-                    "match the assignment rows."
-                )
-            if metadata.get("scenario_hash") != self.settings.get("scenario_hash"):
-                raise ValueError(
-                    "Prepared electrification assignment scenario_hash differs "
-                    "from the active Step-2 scenario."
-                )
-            if int(metadata.get("profile_seed", -1)) != int(self.profile_seed):
-                raise ValueError(
-                    "Prepared electrification assignment profile_seed differs "
-                    "from the active Step-2 run."
-                )
-            assignment_source_summary = metadata.get("assignment_summary")
+            )
         else:
             self._prepare_mobility_ownership()
             physical = self.df_buildings.copy()

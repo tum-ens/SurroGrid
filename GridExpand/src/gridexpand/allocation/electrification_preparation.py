@@ -31,6 +31,7 @@ from gridexpand.allocation.electrification import (
     INVENTORY_COLUMNS,
     check_heat_profile_source,
     electrification_inventory,
+    file_sha256,
     has_household,
 )
 import gridexpand.allocation.functions.electricity as electricity
@@ -256,6 +257,8 @@ def prepare_regional_electrification_assignment(
     assignment.to_csv(output_path, index=False)
     # Hash the CSV as consumers read it: empty strings become NaN on reload.
     manifest_hash = assignment_manifest_hash(pd.read_csv(output_path))
+    # Step 2 verifies this digest instead of re-hashing every row per grid.
+    file_hash = file_sha256(output_path)
     summary.to_csv(
         output_path.with_name("electrification_assignment_summary.csv"),
         index=False,
@@ -284,6 +287,7 @@ def prepare_regional_electrification_assignment(
         "physical_building_count": int(inventory["building_objectid"].nunique()),
         "roof_section_count": int(len(roofs)),
         "assignment_hash": manifest_hash,
+        "assignment_file_sha256": file_hash,
         "assignment_summary": summary.to_dict("records"),
         "candidate_grid_manifest": [
             _candidate_identity(candidate) for candidate in candidates
