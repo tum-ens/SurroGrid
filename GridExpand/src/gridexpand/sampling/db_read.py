@@ -14,7 +14,10 @@ Connection credentials are taken from environment variables loaded in
 from gridexpand.common.building_components import validate_physical_buildings
 from gridexpand.sampling.config import config
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+from sqlalchemy.engine import URL
+
+from gridexpand.db.engine import get_engine
 import pandapower as pp
 from pyproj import Transformer
 
@@ -35,19 +38,18 @@ class DataBase:
 
 
     def _get_engine(self):
-        """ Establish connection engine to database """
-        # Access the database settings
-        host = self.connection_settings["host"]
-        port = self.connection_settings["port"]
-        name = self.connection_settings["name"]
-        user = self.connection_settings["user"]
-        password = self.connection_settings["password"]
-
-        # Create a database engine using SQLAlchemy.
-        # This connection string uses psycopg2 as the driver.
-        engine = create_engine(f'postgresql+psycopg2://{user}:{password}@{host}:{port}/{name}')
-
-        return engine
+        """Engine for the configured database (escaped URL, shared per process)."""
+        s = self.connection_settings
+        return get_engine(
+            URL.create(
+                "postgresql+psycopg2",
+                username=s["user"],
+                password=s["password"],
+                host=s["host"],
+                port=s["port"],
+                database=s["name"],
+            )
+        )
 
 
     def show_contents(self):

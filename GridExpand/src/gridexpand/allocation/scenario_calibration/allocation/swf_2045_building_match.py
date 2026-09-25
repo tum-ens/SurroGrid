@@ -25,7 +25,7 @@ import pandas as pd
 import pandapower as pp
 from dotenv import load_dotenv
 from scipy.spatial import cKDTree
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 from ..paths import (
     DEMAND_STATISTICS_DIR,
@@ -34,6 +34,7 @@ from ..paths import (
 )
 
 from gridexpand.db.database import get_pylovo_version_id
+from gridexpand.db.engine import get_engine
 from .ghd_calibration import build_synthetic_ghd_calibration
 from .scope_filters import build_grid_scope_summary, summarize_grid_scope_filters
 from .sector_asset_calibration import (
@@ -59,12 +60,8 @@ class MatchConfig:
 
 
 def _database_engine():
-    load_dotenv(ENV_PATH, override=True)
-    return create_engine(
-        "postgresql+psycopg2://"
-        f"{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
-        f"@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT', 5432)}/{os.getenv('DB_NAME')}"
-    )
+    """The configured database engine (shared, see gridexpand.db.engine)."""
+    return get_engine()
 
 
 def _normalize_text(value: Any) -> str:
