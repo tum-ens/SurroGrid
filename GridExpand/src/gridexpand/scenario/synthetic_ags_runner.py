@@ -332,8 +332,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--expansion-analysis-prefix",
         help=(
-            "Optional prefix for automatic expansion analysis keys. "
-            "Defaults to '<timeframe_mode>_<profiles>[_hh_only][_tsam]'."
+            "Optional prefix for automatic expansion analysis keys. Defaults to "
+            "'<ags:08d>_<timeframe_mode>_<profiles>[_hh_only][_tsam][_<model_case>]' "
+            "(the model case with --case-qualified-output)."
         ),
     )
     return parser
@@ -467,11 +468,24 @@ def step2_filename(candidate: dict[str, object], settings: BatchSettings) -> str
 
 
 def expansion_analysis_prefix(settings: BatchSettings) -> str:
+    """Prefix of the batch's expansion analysis keys.
+
+    ``<ags:08d>_<timeframe>_<profiles>[_hh_only][_tsam][_<model_case>]``. The
+    AGS keeps two regions apart (review-post B7) and, with
+    ``case_qualified_output``, the model case keeps the heuristic and optimized
+    batches apart (review-orch B2); before, a later batch replaced the earlier
+    one's analyses (``grid_expansion --replace`` deletes by key).
+    """
     if settings.expansion_analysis_prefix:
         return settings.expansion_analysis_prefix
     scope_suffix = "_hh_only" if settings.demand_scope == "residential" else ""
     tsam_suffix = "_tsam" if settings.tsam else ""
-    return f"{settings.timeframe_mode}_{run_name_profile_token(settings.profiles)}{scope_suffix}{tsam_suffix}"
+    case_suffix = f"_{settings.model_case}" if settings.case_qualified_output else ""
+    ags = str(int(str(settings.ags).strip() or "0")).zfill(8)
+    return (
+        f"{ags}_{settings.timeframe_mode}_{run_name_profile_token(settings.profiles)}"
+        f"{scope_suffix}{tsam_suffix}{case_suffix}"
+    )
 
 
 # Step 4 passes and validation ------------------------------------------------------------
