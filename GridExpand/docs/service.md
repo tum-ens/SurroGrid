@@ -22,16 +22,18 @@ The plugin loader of pylovo-ui (`--plugin NAME=BASE`) is on the pylovo branch `f
 For the cross-origin development setup above start the service with
 `GRIDEXPAND_UI_CORS_ORIGINS=http://127.0.0.1:8765`. Behind a reverse proxy (GridPlanner) use
 `--root-path /gridexpand --allowed-host 127.0.0.1:18780`. Options: `--host`, `--port`, `--root-path`,
-`--allowed-host` (repeatable), `--scenario-dir` (repeatable), `--max-running-jobs`, `--log-level`.
-Environment: `GRIDEXPAND_SOLVER` (passed to the jobs), `GRIDEXPAND_SERVICE_SCENARIO_DIRS`
-(`os.pathsep`-separated extra scenario folders), `GRIDEXPAND_UI_CORS_ORIGINS` (development only), and
-the usual `GRIDEXPAND_ENV_FILE` / `GRIDEXPAND_WORK_DIR`.
+`--allowed-host` (repeatable), `--scenario-dir` (repeatable), `--user-scenario-dir`, `--max-running-jobs`,
+`--log-level`. Environment: `GRIDEXPAND_SOLVER` (passed to the jobs), `GRIDEXPAND_SERVICE_SCENARIO_DIRS`
+(`os.pathsep`-separated extra scenario folders), `GRIDEXPAND_SERVICE_USER_SCENARIO_DIR` (where the scenario
+editor saves, default `WORK_DIR/scenarios`), `GRIDEXPAND_UI_CORS_ORIGINS` (development only), and the usual
+`GRIDEXPAND_ENV_FILE` / `GRIDEXPAND_WORK_DIR`.
 
 **Safety.** The service starts jobs that write to the database of GridExpand's `.env`. It binds to
 `127.0.0.1`, accepts only the `Host` headers `127.0.0.1:<port>`, `localhost:<port>` and the
 `--allowed-host` values (DNS rebinding), and refuses every state-changing request without the header
 `X-GridExpand-UI: 1` (CSRF). Its own database reads use read-only transactions with a 5 s connect
-and 60 s statement timeout. There is no destructive endpoint.
+and 60 s statement timeout. The scenario editor writes only into the user scenario directory, and its
+delete renames the file to a backup; there is no other destructive endpoint.
 
 ## Jobs
 
@@ -72,7 +74,11 @@ The run YAML holds the region (`ags`, `pylovo_version_id`, `min_buildings`, opti
 | --- | --- | --- |
 | GET | `/api/health` | liveness (no database) |
 | GET | `/api/status` | database, schema, pylovo versions with grid counts, solvers, large inputs, disk, jobs |
-| GET | `/api/scenarios` · `/api/scenarios/{name}` | scenario YAMLs (id, year, heat source, adoption shares, hash, scenario key) · text |
+| GET | `/api/scenarios` · `/api/scenarios/{name}` | scenario YAMLs (id, year, heat source, adoption shares, hash, scenario key, `user`) · text |
+| GET | `/api/scenarios/{name}/form` | editable fields with values and YAML help, text, `text_sha256`, `writable`, `user_dir`, `proposal` (scenario editor) |
+| POST | `/api/scenarios/preview` | `{base, changes?, text?, scenario_id?, file_name?, base_sha256?}` → `{ok, issues, text, diff, changes, values, id, configuration_hash, scenario_key, unchanged, target}`; writes nothing |
+| POST | `/api/scenarios` | the same body with `file_name`, `scenario_id`, `overwrite` → new file in the user scenario directory; returns its `/api/scenarios` entry with `backup` |
+| DELETE | `/api/scenarios/{name}` | one of the user's files: renamed to `<name>.bak-<time>` |
 | GET | `/api/grids?ags=&plz=&pylovo_version_id=&min_buildings=` | candidate grids with the runner's numbering and existing results |
 | POST | `/api/jobs/pipeline` | queue a pipeline job (`plz`/`ags`, `pylovo_version_id`, `scenario`, `model_cases`, `timeframe_mode`, `min_buildings`, `candidate_indexes`, `workers`, `powerflow_output`) |
 | GET | `/api/jobs` · `/api/jobs/{id}` · `/api/jobs/{id}/log[?format=text]` · `/api/jobs/{id}/events` (SSE) | observe jobs |
@@ -88,15 +94,52 @@ Reads use plain SQL on stable names (`pylovo.version`, `grid_result`, `municipal
 views `expansion_line_qgis_mv` / `expansion_transformer_qgis_mv` for geometry). The model case of a
 result is taken from its power-flow run name (`<scenario key>_<profile>_<case>_<mode>_powerflow`).
 
+## Scenario editor
+
+The panel **Scenario editor** edits a copy of a scenario YAML. The *Form* tab shows a curated subset of
+fields (`gridexpand.service.scenario_form.SECTIONS`: electrification selection and shares, economics, PV,
+battery, heat, mobility, TSAM), each with unit, range, a changed marker, a reset button and the comment
+lines directly above the key in the base file as help (a short catalogue text otherwise). The *YAML* tab
+edits the whole text with highlighting. Every edit is previewed with `load_scenario_config` (the loader of
+the runs, on a temporary file): readable issues with key and line, the list of changed values, the
+unified diff, the configuration hash and the scenario key the copy gets.
+
+![Scenario editor: changed fields, the list of changes and the new scenario key](img/service-scenario-editor.png)
+
+- **Comments and layout stay.** Form edits go through ruamel.yaml's round trip (indentation taken from
+  the file); only the edited lines change, and a value equal to the current one (also `2` for `2.0`) is
+  no change, so a no-op edit keeps the hash. Dependent keys follow the loader's rules:
+  `building_share` is removed for `source_inventory` and inserted after `adoption_mode` for
+  `deterministic_share`; `teaser_retrofit_level` (optional, default 0) is inserted after
+  `space_heat_source` when it is set to 1 or 2; the home-charger power writes `installed_capacity_kw`
+  and `capacity_upper_kw` (Step 2 and urbs use both; the charger is not sized). A result that PyYAML
+  would read differently from the intended values is refused.
+- **Save as new scenario** asks for a file name and a scenario id (proposal `<base id>_custom`,
+  `_2`, `_3`, … while taken). The file goes into the **user scenario directory**
+  (`GRIDEXPAND_SERVICE_USER_SCENARIO_DIR` or `--user-scenario-dir`, default `WORK_DIR/scenarios`,
+  created on the first save), which is always the last listed scenario directory; `GET /api/scenarios`
+  marks its files `user: true`. Names must match `^[A-Za-z0-9_][A-Za-z0-9_.-]*\.ya?ml$` (at most 100
+  characters). Shipped names (any other listed directory) are refused, as is the repository's
+  `config/scenarios` as user directory. Replacing an own file needs `overwrite: true` and keeps
+  `<name>.bak-<YYYYmmdd-HHMMSS>`; a file that a queued or running job uses is never replaced or deleted.
+- **Scenario key.** Results are keyed by `scenario_<id>_<hash[:12]>` (plus the timeframe suffix of the
+  week runs), so an edited copy never mixes with the results of its base; the preview warns when another
+  listed file has the same id or the same key (identical content).
+- `source_inventory` needs the source evidence of paired DSO data; synthetic runs fail with it, so the
+  preview shows a warning. Shipped files and scientific defaults are never changed by the editor.
+- `state.editScenario = <file>` (set by the runs panel's *Edit…*) opens a file in the editor; after a save
+  the editor sets `state.focusScenario = <new file>` for the runs panel.
+
 ## Plugin panels
 
 `ui/manifest.json` = `{"schema": 1, "name": "gridexpand", "entry": "ui/plugin.js", "api": "api/",
-"csrf_header": "X-GridExpand-UI", …}`; `plugin.js` registers two panels with pylovo-ui's host API 1
+"csrf_header": "X-GridExpand-UI", …}`; `plugin.js` registers three panels with pylovo-ui's host API 1
 (see pylovo's `frontend/README.md`, section Plugins) and a map layer:
 
 - **GridExpand runs** — region from pylovo's selection (PLZ, pylovo version, the inspector's grid),
   candidate grids, scenario, model cases, timeframe; jobs with per-case and per-grid progress, the
   live log (SSE) and cancel.
+- **Scenario editor** — form and YAML editor for a copy of a scenario file (see above).
 - **Expansion results** — analyses of the region, KPIs (cost, cables and transformers to reinforce,
   P99 transformer loading per case), cost and P99 loading per grid and case (ECharts), per-grid
   table (click: pylovo's grid inspector), and the **map layer** on pylovo's MapLibre map: cables
