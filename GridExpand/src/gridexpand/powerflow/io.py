@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -301,9 +302,16 @@ _DB_WRITERS = {
 
 
 class DbRunSink:
-    """One ``surrogrid.powerflow_run`` row and its tables (registered on creation)."""
+    """One ``surrogrid.powerflow_run`` row and its tables.
+
+    Rows are written to a staging run; :meth:`promote` replaces the previous run of the
+    same name in one transaction, :meth:`discard` drops the staging run after a failure.
+    A cancelled or crashed Step 4 therefore never deletes the previous results.
+    """
 
     def __init__(self, db, grid_ref, *, urbs_input_file, pre_only, scenario_key, run_name, assumptions):
+        from gridexpand.db.runs import staging_run_name
+
         self.db = db
         self.run_name = run_name
         self.powerflow_run_id = db.create_powerflow_run(
@@ -311,9 +319,16 @@ class DbRunSink:
             urbs_input_file=urbs_input_file,
             pre_only=pre_only,
             scenario_key=scenario_key,
-            run_name=run_name,
+            run_name=staging_run_name(run_name, uuid.uuid4().hex[:12]),
             assumptions=assumptions,
         )
+
+    def promote(self):
+        self.db.promote_powerflow_run(self.powerflow_run_id, self.run_name)
+        print(f"Stored powerflow_run_id={self.powerflow_run_id} as {self.run_name}", flush=True)
+
+    def discard(self):
+        self.db.discard_powerflow_run(self.powerflow_run_id)
 
     def save_df(self, df, key):
         clean = str(key).strip("/")

@@ -11,6 +11,8 @@ the compact summary (database only). See ``docs/steps/4_powerflow.md``.
 from __future__ import annotations
 
 import argparse
+import signal
+import sys
 from dataclasses import dataclass
 
 import pandas as pd
@@ -511,20 +513,34 @@ def main(argv: list[str] | None = None) -> None:
             )
             print(f"INFLEX stationary-battery audit retained at {location}.", flush=True)
 
-    if "raw" in args.outputs:
-        if reactive is not None:
-            raw_sink.save_df(reactive, "pwrflw/urbs_out/MILP/reactive")
-        raw_sink.save_df(pre, "/pwrflw/input/demand_pre")
-        if post is not None:
-            raw_sink.save_df(post, "/pwrflw/input/demand_post")
+    db_sinks = list(dict.fromkeys(s for s in (raw_sink, summary_sink) if isinstance(s, DbRunSink)))
+    # Job runners cancel with SIGTERM; turn it into SystemExit so the staging runs are dropped.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
+    try:
+        if "raw" in args.outputs:
+            if reactive is not None:
+                raw_sink.save_df(reactive, "pwrflw/urbs_out/MILP/reactive")
+            raw_sink.save_df(pre, "/pwrflw/input/demand_pre")
+            if post is not None:
+                raw_sink.save_df(post, "/pwrflw/input/demand_post")
 
-    stages = [("pre", pre)] + ([] if args.pre_only else [("post", post)])
-    for stage, demand in stages:
-        run_stage(
-            context, demand, stage,
-            outputs=args.outputs, raw_sink=raw_sink, summary_sink=summary_sink,
-            n_workers=args.n_cpu, on_nonconvergence=args.summary_nonconvergence,
-        )
+        stages = [("pre", pre)] + ([] if args.pre_only else [("post", post)])
+        for stage, demand in stages:
+            run_stage(
+                context, demand, stage,
+                outputs=args.outputs, raw_sink=raw_sink, summary_sink=summary_sink,
+                n_workers=args.n_cpu, on_nonconvergence=args.summary_nonconvergence,
+            )
+    except BaseException:
+        # Keep the previous results: drop the half-written staging runs.
+        for sink in db_sinks:
+            try:
+                sink.discard()
+            except Exception as exc:  # the original error matters more
+                print(f"Could not discard staging run {sink.powerflow_run_id}: {exc}", flush=True)
+        raise
+    for sink in db_sinks:
+        sink.promote()
     print("Done!")
 
 

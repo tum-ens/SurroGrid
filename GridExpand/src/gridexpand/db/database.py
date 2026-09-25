@@ -175,6 +175,14 @@ class SurroGridDatabase:
         self._timestamps = RunTimestamps(self.engine)
         return run_id
 
+    def promote_powerflow_run(self, staging_run_id: int, run_name: str) -> None:
+        """Swap a completed staging run in; see :func:`gridexpand.db.runs.promote_powerflow_run`."""
+        runs.promote_powerflow_run(self.engine, staging_run_id, run_name)
+
+    def discard_powerflow_run(self, run_id: int) -> None:
+        """Delete a (staging) Step 4 run; see :func:`gridexpand.db.runs.discard_powerflow_run`."""
+        runs.discard_powerflow_run(self.engine, run_id)
+
     def get_or_create_real_grid_case(self, grid_ref: dict[str, Any]) -> int:
         return runs.get_or_create_real_grid_case(self.engine, grid_ref)
 
