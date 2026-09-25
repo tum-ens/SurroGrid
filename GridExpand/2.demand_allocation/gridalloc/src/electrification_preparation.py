@@ -343,11 +343,12 @@ def prepare_regional_electrification_assignment(
             for technology in ("heat", "mobility", "pv_battery")
         },
     )
-    manifest_hash = assignment_manifest_hash(assignment)
     summary = assignment_summary(assignment)
     output_path = output_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     assignment.to_csv(output_path, index=False)
+    # Hash the CSV as consumers read it: empty strings become NaN on reload.
+    manifest_hash = assignment_manifest_hash(pd.read_csv(output_path))
     summary.to_csv(
         output_path.with_name("electrification_assignment_summary.csv"),
         index=False,
