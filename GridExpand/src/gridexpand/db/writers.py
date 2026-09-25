@@ -365,6 +365,15 @@ def write_allocated_vehicles(engine: Engine, run_id: int, df_buildings: pd.DataF
             copy_frame(conn, "allocated_vehicle", frame)
 
 
+def write_powerflow_assets(engine: Engine, run_id: int, df: pd.DataFrame) -> None:
+    """Persist the installed building assets of a power-flow run (see ``powerflow.assets``)."""
+    if df is None or df.empty:
+        return
+    frame = df.assign(powerflow_run_id=int(run_id))
+    with engine.begin() as conn:
+        copy_frame(conn, "powerflow_asset", frame)
+
+
 # Step 4 summaries --------------------------------------------------------------------
 
 SYNTHETIC_GRID_SUMMARY_COLUMNS = (

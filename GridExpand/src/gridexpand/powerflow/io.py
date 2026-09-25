@@ -21,6 +21,8 @@ HDF_KEYS = {
     "reduced_demand": "urbs_out/reduced_data/demand",
     "net_demand": "urbs_out/MILP/tau_pro",
     "cap_pro": "urbs_out/MILP/cap_pro",
+    "cap_sto_c": "urbs_out/MILP/cap_sto_c",
+    "cap_sto_p": "urbs_out/MILP/cap_sto_p",
     "raw_eff_factor": "urbs_in/eff_factor",
     "reduced_eff_factor": "urbs_out/reduced_data/eff_factor",
     "raw_supim": "urbs_in/supim",
@@ -153,6 +155,20 @@ class ScenarioResultReader:
 
     def solver_audit(self):
         return self.read(HDF_KEYS["solver_audit"]) if self.has(HDF_KEYS["solver_audit"]) else None
+
+    def installed_assets(self):
+        """Building assets chosen by Step 3 (:func:`gridexpand.powerflow.assets.installed_assets`).
+
+        ``None`` for a file without urbs results (Step 2 input of the ``pre`` case).
+        """
+        if not self.has(HDF_KEYS["cap_pro"]):
+            return None
+        from gridexpand.powerflow.assets import installed_assets
+
+        def optional(key):
+            return self.read(HDF_KEYS[key]) if self.has(HDF_KEYS[key]) else None
+
+        return installed_assets(self.read(HDF_KEYS["cap_pro"]), optional("cap_sto_c"), optional("cap_sto_p"))
 
     def get_inflex_inputs(self):
         """The single inflex input contract shared by every Step-4 front end.
@@ -337,6 +353,11 @@ class DbRunSink:
         else:
             writer(self.powerflow_run_id, stage, df)
         print(f"Finished saving {clean} to DB for powerflow_run_id={self.powerflow_run_id}", flush=True)
+
+    def save_assets(self, assets):
+        """Installed building assets of this run (``surrogrid.powerflow_asset``)."""
+        self.db.write_powerflow_assets(self.powerflow_run_id, assets)
+        print(f"Saved {len(assets)} building asset rows for powerflow_run_id={self.powerflow_run_id}", flush=True)
 
     def save_summary(self, summary, stage):
         grid_summary = summary.get("grid_summary", summary)

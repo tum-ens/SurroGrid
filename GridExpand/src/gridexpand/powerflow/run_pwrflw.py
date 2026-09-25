@@ -517,6 +517,10 @@ def main(argv: list[str] | None = None) -> None:
     # Job runners cancel with SIGTERM; turn it into SystemExit so the staging runs are dropped.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
     try:
+        assets = reader.installed_assets() if db_sinks else None
+        if assets is not None:
+            for sink in db_sinks:
+                sink.save_assets(assets)
         if "raw" in args.outputs:
             if reactive is not None:
                 raw_sink.save_df(reactive, "pwrflw/urbs_out/MILP/reactive")
