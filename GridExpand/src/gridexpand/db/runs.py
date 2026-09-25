@@ -56,7 +56,7 @@ POWERFLOW_RAW_TABLES = (
     "powerflow_import",
     "powerflow_demand",
 )
-POWERFLOW_CHILDREN = POWERFLOW_SUMMARY_TABLES + POWERFLOW_RAW_TABLES
+POWERFLOW_CHILDREN = ("powerflow_asset", *POWERFLOW_SUMMARY_TABLES, *POWERFLOW_RAW_TABLES)
 REAL_POWERFLOW_CHILDREN = (
     "real_powerflow_tail_value",
     "real_powerflow_cable_summary",

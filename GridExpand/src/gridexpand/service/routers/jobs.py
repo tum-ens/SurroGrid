@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import mimetypes
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,12 +16,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gridexpand.common.timeframe import TIMEFRAME_MODES
 from gridexpand.service import environment, queries, runlog, scenarios
+from gridexpand.paths import PROJECT_DIR, RUNS_DIR
 from gridexpand.service.commands import (
     MODEL_CASES,
     POST_CASES,
     PipelineSpec,
     contiguous_range,
     pipeline_steps,
+    run_yaml_text,
+    terminal_commands,
 )
 from gridexpand.service.jobs import Job, JobManager, JobNotFound
 from gridexpand.service.routers.meta import resolve_ags, settings_of
@@ -40,6 +45,7 @@ class PipelineBody(BaseModel):
     timeframe_mode: str = "max_base_electricity_demand_week"
     min_buildings: int = Field(5, ge=1, le=100_000)
     candidate_indexes: list[int] | None = Field(None, description="consecutive candidate numbers of the AGS")
+    grid_result_id: int | None = Field(None, ge=1, description="exactly this pylovo grid (ignores min_buildings)")
     workers: int = Field(1, ge=1, le=16)
     powerflow_output: str = Field("summary", pattern=r"^(summary|both)$")
 
@@ -74,9 +80,19 @@ def _summary(request: Request, job: Job) -> dict[str, Any]:
     return job.summary() | {"queue_position": jobs_of(request).queue_position(job.id)}
 
 
-@router.post("/pipeline", status_code=202)
-def start_pipeline(body: PipelineBody, request: Request) -> dict[str, Any]:
-    """Queue ``gridexpand synthetic`` for each selected model case (one after another)."""
+@dataclass(frozen=True)
+class PipelinePlan:
+    """A validated pipeline request: the run spec and what it selects."""
+
+    spec: PipelineSpec
+    scenario: dict[str, Any]
+    ags: int
+    selected: list[dict[str, Any]]
+    title: str
+
+
+def plan_pipeline(body: PipelineBody, request: Request) -> PipelinePlan:
+    """Resolve scenario, solver, AGS and grids of a request (HTTP errors for bad requests)."""
     settings = settings_of(request)
     try:
         scenario_path = scenarios.resolve(settings.scenario_dirs, body.scenario)
@@ -91,6 +107,20 @@ def start_pipeline(body: PipelineBody, request: Request) -> dict[str, Any]:
             raise HTTPException(409, f"Post cases need Step 3 but the solver is not usable ({solvers['post_cases_reason']}). "
                                      "Run the pre case only, or configure a licence / GRIDEXPAND_SOLVER.")
     ags, _ = resolve_ags(body.ags, body.plz)
+    common = dict(ags=ags, pylovo_version_id=body.pylovo_version_id, scenario_config=scenario_path,
+                  model_cases=tuple(body.model_cases), timeframe_mode=body.timeframe_mode,
+                  workers=body.workers, powerflow_output=body.powerflow_output)
+    cases = ", ".join(body.model_cases)
+    if body.grid_result_id is not None:
+        # One grid by identity: plz/kcid/bcid in the run YAML (no candidate numbering involved).
+        selected = [c for c in queries.grid_candidates(ags, body.pylovo_version_id, 1)
+                    if int(c["grid_result_id"]) == body.grid_result_id]
+        if not selected:
+            raise HTTPException(400, f"Grid {body.grid_result_id} is not a grid of AGS {ags} in pylovo v{body.pylovo_version_id}")
+        grid = selected[0]
+        spec = PipelineSpec(**common, min_buildings=1, plz=int(grid["plz"]), kcid=int(grid["kcid"]), bcid=int(grid["bcid"]))
+        title = f"Grid {grid['kcid']}/{grid['bcid']} · PLZ {grid['plz']} · v{body.pylovo_version_id} · {cases}"
+        return PipelinePlan(spec, scenario, ags, selected, title)
     candidates = queries.grid_candidates(ags, body.pylovo_version_id, body.min_buildings)
     selected = [c for c in candidates if body.plz is None or int(c["plz"]) == body.plz]
     if body.candidate_indexes is not None:
@@ -104,26 +134,91 @@ def start_pipeline(body: PipelineBody, request: Request) -> dict[str, Any]:
             start_index, limit = contiguous_range([int(c["candidate_index"]) for c in selected])
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-    spec = PipelineSpec(ags=ags, pylovo_version_id=body.pylovo_version_id, scenario_config=scenario_path,
-                        model_cases=tuple(body.model_cases), timeframe_mode=body.timeframe_mode,
-                        min_buildings=body.min_buildings, start_index=start_index, limit=limit,
-                        workers=body.workers, powerflow_output=body.powerflow_output)
+    spec = PipelineSpec(**common, min_buildings=body.min_buildings, start_index=start_index, limit=limit)
+    region = f"PLZ {body.plz}" if body.plz else f"AGS {ags}"
+    title = f"{region} · v{body.pylovo_version_id} · {len(selected)} grid(s) · {cases}"
+    return PipelinePlan(spec, scenario, ags, selected, title)
+
+
+@router.post("/pipeline", status_code=202)
+def start_pipeline(body: PipelineBody, request: Request) -> dict[str, Any]:
+    """Queue ``gridexpand run`` for each selected model case (one after another)."""
+    settings = settings_of(request)
+    plan = plan_pipeline(body, request)
     manager = jobs_of(request)
     job_id = manager.new_id()
-    steps = pipeline_steps(spec, settings.runs_dir / job_id, settings.python)
-    region = f"PLZ {body.plz}" if body.plz else f"AGS {ags}"
-    title = f"{region} · v{body.pylovo_version_id} · {len(selected)} grid(s) · {', '.join(body.model_cases)}"
+    steps = pipeline_steps(plan.spec, settings.runs_dir / job_id, settings.python)
     params = body.model_dump() | {
-        "ags": ags, "grids": len(selected), "start_index": start_index, "limit": limit,
-        "grid_result_ids": [int(c["grid_result_id"]) for c in selected],
-        "scenario_key": scenario["scenario_key"], "scenario_id": scenario["id"],
+        "ags": plan.ags, "grids": len(plan.selected), "start_index": plan.spec.start_index, "limit": plan.spec.limit,
+        "grid_result_ids": [int(c["grid_result_id"]) for c in plan.selected],
+        "scenario_key": plan.scenario["scenario_key"], "scenario_id": plan.scenario["id"],
         "run_dir": str(settings.runs_dir / job_id),
     }
     try:
-        job = manager.submit("pipeline", title, steps, params, job_id=job_id)
+        job = manager.submit("pipeline", plan.title, steps, params, job_id=job_id)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     return _summary(request, job)
+
+
+TERMINAL_DIR = "terminal"
+
+
+def _terminal_dir(request: Request) -> Path:
+    return settings_of(request).state_dir / TERMINAL_DIR
+
+
+@router.post("/terminal", status_code=201)
+def prepare_terminal_run(body: PipelineBody, request: Request) -> dict[str, Any]:
+    """Write the run YAML of a request for a run in a terminal (``tmux``) instead of a job.
+
+    Returns the YAML, the commands to start and follow it, and a portable copy of the YAML
+    (scenario referenced as ``../scenarios/<file>``) for another GridExpand checkout.
+    """
+    plan = plan_pipeline(body, request)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    region = f"{plan.spec.plz}-{plan.spec.kcid}-{plan.spec.bcid}" if plan.spec.kcid is not None else (
+        str(body.plz) if body.plz else str(plan.ags))
+    run_id = f"ui_{region}_{plan.scenario['id']}_{stamp}"
+    header = (f"{plan.title}\nPrepared by the GridExpand UI for a terminal run ({len(plan.selected)} grid(s)).\n"
+              f"Results go to the database of the service; the UI shows them when the run has finished.")
+    directory = _terminal_dir(request)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{run_id}.yaml"
+    path.write_text(run_yaml_text(plan.spec, run_id, header), encoding="utf-8")
+    portable = run_yaml_text(plan.spec, run_id, header + "\nCopy to config/runs/ of a GridExpand checkout; the scenario "
+                             f"file {body.scenario} must be in config/scenarios/.", scenario=f"../scenarios/{body.scenario}")
+    in_container = Path("/.dockerenv").exists()
+    return {"run_id": run_id, "path": str(path), "title": plan.title, "grids": len(plan.selected),
+            "model_cases": list(body.model_cases), "run_yaml": path.read_text(encoding="utf-8"),
+            "portable_run_yaml": portable, "scenario": body.scenario, "in_container": in_container,
+            "commands": terminal_commands(path, run_id, in_container=in_container, project_dir=PROJECT_DIR),
+            "run_dir": str(RUNS_DIR / run_id)}
+
+
+@router.get("/terminal")
+def terminal_runs(request: Request) -> list[dict[str, Any]]:
+    """Runs prepared for a terminal (newest first) with the state of their run directory."""
+    from gridexpand.scenario.rundir import load_state, process_alive
+
+    out = []
+    directory = _terminal_dir(request)
+    for path in sorted(directory.glob("*.yaml"), key=lambda p: p.stat().st_mtime, reverse=True)[:50]:
+        run_id = path.stem
+        state = load_state(RUNS_DIR / run_id)
+        title = next((line[2:].strip() for line in path.read_text(encoding="utf-8").splitlines()[:1]
+                      if line.startswith("# ")), run_id)
+        entry: dict[str, Any] = {"run_id": run_id, "title": title, "path": str(path),
+                                 "prepared_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds"),
+                                 "status": "not started"}
+        if state is not None:
+            status = state.get("status")
+            if status == "running" and not process_alive(state.get("pid")):
+                status = "interrupted"
+            entry |= {"status": status, "stage": state.get("stage"), "jobs": state.get("jobs", {}),
+                      "updated_at": state.get("updated_at"), "exit_code": state.get("exit_code")}
+        out.append(entry)
+    return out
 
 
 @router.get("")

@@ -59,7 +59,7 @@ def test_views_sql_is_rerunnable() -> None:
 
 
 def _references() -> dict[str, set[str]]:
-    sql = schema.migrations()[0].sql
+    sql = "\n".join(migration.sql for migration in schema.migrations())
     return {
         match.group(1): set(re.findall(r"REFERENCES surrogrid\.(\w+)", match.group(2)))
         for match in re.finditer(r"^CREATE TABLE surrogrid\.(\w+) \(\n(.*?)\n\);", sql, re.M | re.S)

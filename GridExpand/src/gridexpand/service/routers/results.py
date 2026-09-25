@@ -46,6 +46,20 @@ def analysis_geojson(analysis_key: str, plz: int | None = PLZ_QUERY,
     return data
 
 
+@router.get("/analyses/{analysis_key}/assets")
+def analysis_assets(analysis_key: str, plz: int | None = PLZ_QUERY,
+                    pylovo_version_id: str | None = VERSION_QUERY, features: bool = True) -> dict[str, Any]:
+    """Building assets of the analysed power-flow runs: one point per building (EPSG:4326)
+    with PV, battery, heat pump, heating rod, heat storage and EV capacities, plus totals
+    (``features=false``: totals only)."""
+    data = queries.analysis_assets(analysis_key, plz, pylovo_version_id)
+    if data is None:
+        raise HTTPException(404, f"Analysis '{analysis_key}' not found")
+    if not features:
+        data = data | {"buildings": len(data["features"]), "features": []}
+    return data
+
+
 @router.get("/powerflow")
 def powerflow(ags: str | None = None, plz: int | None = PLZ_QUERY, pylovo_version_id: str | None = VERSION_QUERY,
               scenario_key: str | None = Query(None, max_length=200)) -> list[dict[str, Any]]:

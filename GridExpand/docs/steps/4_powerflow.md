@@ -67,6 +67,7 @@ uv run gridexpand powerflow <inputfile_id> --storage db --pre-only --outputs sum
 | line flow and current | `pwrflw/output/<stage>/line_loads` | `powerflow_line_result` |
 | reactive components (household, heat pump, PV) | `pwrflw/urbs_out/MILP/reactive` | `powerflow_reactive_component` |
 | summary (database only) | | `powerflow_summary`, `powerflow_cable_summary`, `powerflow_bus_voltage_summary`, `powerflow_tail_value`, `powerflow_transformer_diagnostic` |
+| installed building assets (database only, post cases) | (the input's `urbs_out/MILP/cap_*`) | `powerflow_asset` |
 
 `<stage>` is `pre` or `post`. The HDF5 output is a copy of the input with these keys appended (an existing output
 of the same name is replaced). In the database each run is one `powerflow_run` row with the run assumptions

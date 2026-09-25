@@ -28,6 +28,7 @@ in order and recorded in `surrogrid.schema_migration`, plus the re-runnable
 | `0002_index_cleanup.sql` | drops indexes of the pre-migration schema that no query uses; adds the foreign-key indexes |
 | `0003_constraints.sql` | composite run keys, CHECKs and the RESTRICT key to pylovo, all `NOT VALID`; removes the unused `baseline_static` seed row; fills `expansion_analysis_run.scenario_id` |
 | `0004_validate_constraints.sql` | validates the 0003 constraints (no write lock), then drops the single-column keys they replace |
+| `0005_powerflow_asset.sql` | adds `powerflow_asset` (building assets simulated by a power-flow run) |
 | `views.sql` | `grid_building_bus`, `grid_building_component`, the two QGIS materialized views |
 
 0002–0004 only change databases created by the pre-migration code; on a
@@ -185,6 +186,12 @@ and the expansion `critical_ts` columns.
   (deleting the previous run of that name, grid case and scenario) in one transaction at
   the end; a failed or cancelled pass discards the staging run and keeps the
   previous results.
+- `powerflow_asset`: the building assets a post-case run simulated, one row per
+  bus and technology (`pv` per building with `building_objectid`, `battery`,
+  `heat_pump`, `heating_rod`, `heat_storage`, `ev` with `units` = vehicles),
+  `power_kw` / `energy_kwh` from the Step 3 capacities (`cap_pro`, `cap_sto_c`,
+  `cap_sto_p`) that the power flow used; capacities below 1 W / 1 Wh are left out.
+  Runs of the `pre` case and runs from before migration 0005 have no rows.
 - Raw hourly results (`--powerflow-output raw|both`; TimescaleDB hypertables on
   `ts`, index `(run, stage, t_index)`): `powerflow_demand` (p_kw, q_kvar per bus),
   `powerflow_import` (p_mw, q_mvar), `powerflow_bus_voltage` (vm_pu per bus),

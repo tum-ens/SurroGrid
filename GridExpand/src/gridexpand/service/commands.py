@@ -9,6 +9,7 @@ electrification assignment; each case's batch writes ``<run dir>/<case>/``.
 
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +42,10 @@ class PipelineSpec:
         limit: Number of candidates from ``start_index`` (``None``: all).
         workers: Grids processed in parallel by the runner.
         powerflow_output: ``summary`` (compact metrics) or ``both`` (plus raw time series).
+        plz: Only the grids of this PLZ (``resources.plz``).
+        kcid: With ``plz`` and ``bcid``: exactly one grid (also the scope of the
+            electrification assignment).
+        bcid: See ``kcid``.
     """
 
     ags: int
@@ -53,6 +58,9 @@ class PipelineSpec:
     limit: int | None = None
     workers: int = 1
     powerflow_output: str = "summary"
+    plz: int | None = None
+    kcid: int | None = None
+    bcid: int | None = None
 
 
 def profiles_for_case(case: str) -> str:
@@ -60,13 +68,22 @@ def profiles_for_case(case: str) -> str:
     return ALL_MODEL_CASES[case].profiles
 
 
-def run_yaml(spec: PipelineSpec, run_id: str) -> dict[str, Any]:
-    """The ``pipeline: synthetic`` run YAML of a request."""
+def run_yaml(spec: PipelineSpec, run_id: str, scenario: str | None = None) -> dict[str, Any]:
+    """The ``pipeline: synthetic`` run YAML of a request.
+
+    ``scenario`` replaces the absolute scenario path (e.g. ``../scenarios/<file>`` for a
+    run YAML that is copied to another checkout's ``config/runs/``).
+    """
     resources: dict[str, Any] = {
         "pylovo_version_id": str(spec.pylovo_version_id),
         "ags": int(spec.ags),
         "min_buildings": int(spec.min_buildings),
     }
+    if spec.plz is not None:
+        resources["plz"] = int(spec.plz)
+    if spec.kcid is not None:
+        resources["kcid"] = int(spec.kcid)
+        resources["bcid"] = int(spec.bcid)
     execution: dict[str, Any] = {
         "model_cases": list(spec.model_cases),
         "timeframe_mode": spec.timeframe_mode,
@@ -80,10 +97,16 @@ def run_yaml(spec: PipelineSpec, run_id: str) -> dict[str, Any]:
     if spec.limit is not None:
         resources["limit"] = int(spec.limit)
     return {
-        "run": {"id": run_id, "scenario": str(Path(spec.scenario_config).resolve()), "pipeline": "synthetic"},
+        "run": {"id": run_id, "scenario": scenario or str(Path(spec.scenario_config).resolve()), "pipeline": "synthetic"},
         "resources": resources,
         "execution": execution,
     }
+
+
+def run_yaml_text(spec: PipelineSpec, run_id: str, header: str, scenario: str | None = None) -> str:
+    """The run YAML as text with a comment header."""
+    comment = "".join(f"# {line}\n" if line else "#\n" for line in header.splitlines())
+    return comment + yaml.safe_dump(run_yaml(spec, run_id, scenario), sort_keys=False)
 
 
 def write_run_yaml(spec: PipelineSpec, job_run_dir: Path) -> Path:
@@ -92,12 +115,33 @@ def write_run_yaml(spec: PipelineSpec, job_run_dir: Path) -> Path:
     job_run_dir.mkdir(parents=True, exist_ok=True)
     path = job_run_dir / RUN_YAML
     run_id = f"service_{job_run_dir.name}"
-    path.write_text(
-        "# Written by the GridExpand service for one pipeline job.\n"
-        + yaml.safe_dump(run_yaml(spec, run_id), sort_keys=False),
-        encoding="utf-8",
-    )
+    path.write_text(run_yaml_text(spec, run_id, "Written by the GridExpand service for one pipeline job."),
+                    encoding="utf-8")
     return path
+
+
+def terminal_commands(run_yaml_path: Path, run_id: str, *, in_container: bool, project_dir: Path) -> list[dict[str, str]]:
+    """Shell commands that run a prepared run YAML in a ``tmux`` session and follow it.
+
+    Long runs (a whole PLZ, full years) belong in a terminal: they survive a closed browser
+    and a restarted service. In a container (GridPlanner) the commands go through
+    ``docker compose exec`` from the GridPlanner folder.
+    """
+    session = re.sub(r"[^\w-]", "-", run_id)[:40]
+    if in_container:
+        run = f"docker compose exec gridexpand gridexpand run {run_yaml_path}"
+        status = f"docker compose exec gridexpand gridexpand status {run_id}"
+        where = "in the GridPlanner folder"
+    else:
+        run = f"uv run gridexpand run {run_yaml_path}"
+        status = f"uv run gridexpand status {run_id}"
+        where = f"in {project_dir}"
+    return [
+        {"label": f"Start in tmux ({where})", "command": f"tmux new-session -d -s {session} '{run}; exec bash'"},
+        {"label": "Watch the live log", "command": f"tmux attach -t {session}"},
+        {"label": "Status (also shown in this panel)", "command": status},
+        {"label": "Resume after an interruption", "command": f"{run} --resume"},
+    ]
 
 
 def run_command(run_yaml_path: Path, job_run_dir: Path, case: str, python: str = sys.executable) -> list[str]:

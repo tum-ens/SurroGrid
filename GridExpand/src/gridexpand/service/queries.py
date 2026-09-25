@@ -400,6 +400,122 @@ ORDER BY gc.plz, gc.kcid, gc.bcid, pr.run_name, ps.stage
 """
 
 
+_ANALYSIS_RUNS_SQL = """
+SELECT DISTINCT powerflow_run_id, grid_case_id FROM surrogrid.{table}
+WHERE expansion_analysis_run_id = :id
+  AND (CAST(:plz AS integer) IS NULL OR plz = CAST(:plz AS integer))
+  AND (CAST(:version AS text) IS NULL OR pylovo_version_id = CAST(:version AS text))
+"""
+ASSET_TECHNOLOGIES = ("pv", "battery", "heat_pump", "heating_rod", "heat_storage", "ev")
+# powerflow_asset row -> building feature properties (power, energy)
+_ASSET_PROPERTIES = {
+    "pv": ("pv_kw", None),
+    "battery": ("battery_kw", "battery_kwh"),
+    "heat_pump": ("heat_pump_kw", None),
+    "heating_rod": ("heating_rod_kw", None),
+    "heat_storage": ("heat_storage_kw", "heat_storage_kwh"),
+    "ev": ("charger_kw", "ev_kwh"),
+}
+
+
+def _add(props: dict[str, Any], key: str | None, value: Any) -> None:
+    if key and value is not None and not (isinstance(value, float) and math.isnan(value)):
+        props[key] = (props.get(key) or 0.0) + float(value)
+
+
+def analysis_assets(analysis_key: str, plz: int | None = None, pylovo_version_id: str | None = None) -> dict[str, Any] | None:
+    """Building assets (PV, battery, heat pump, EVs, ...) of the power-flow runs of one analysis.
+
+    One point feature per building with at least one asset, at the building centroid
+    (EPSG:4326). PV belongs to its building; assets sized per bus go to the bus's building
+    (the first one by id if several buildings share the bus, flagged ``shared_bus``).
+    Pre-stage analyses (status quo) have no assets. ``None`` if the analysis does not exist.
+    """
+    empty = {"type": "FeatureCollection", "features": [], "totals": {}, "unplaced": 0}
+    with connect() as conn:
+        if not surrogrid_ready(conn):
+            return None
+        row = fetch_one("SELECT expansion_analysis_run_id AS id, stage FROM surrogrid.expansion_analysis_run "
+                        "WHERE analysis_key = :key", conn, key=analysis_key)
+        if row is None:
+            return None
+        if row["stage"] != "post":
+            return empty | {"stage": row["stage"]}
+        present = relations(conn, ("surrogrid.powerflow_asset", "surrogrid.grid_building_bus"))
+        if not all(present.values()):
+            missing = ", ".join(name for name, ok in present.items() if not ok)
+            return empty | {"stage": "post", "error": f"{missing} missing: run `gridexpand db migrate` "
+                                                       "(and `gridexpand db relink-pylovo` for the views)"}
+        params = {"id": row["id"], "plz": plz, "version": pylovo_version_id}
+        runs = {(r["powerflow_run_id"], r["grid_case_id"]) for table in ("expansion_line_result",
+                                                                         "expansion_transformer_result")
+                for r in fetch_all(_ANALYSIS_RUNS_SQL.format(table=table), conn, **params)}
+        if not runs:
+            return empty | {"stage": "post"}
+        assets = fetch_all(
+            """SELECT a.powerflow_run_id, a.bus, a.technology, a.building_objectid, a.units, a.power_kw, a.energy_kwh
+               FROM surrogrid.powerflow_asset a WHERE a.powerflow_run_id = ANY(CAST(:runs AS bigint[]))
+               ORDER BY a.powerflow_run_id, a.bus, a.technology, a.building_objectid""",
+            conn, runs=sorted({run for run, _ in runs}))
+        buildings = fetch_all(
+            """SELECT grid_case_id, plz, kcid, bcid, pylovo_grid_result_id, objectid, bus, building_use, building_type,
+                      households, floor_area, street, house_number, lat, lon
+               FROM surrogrid.grid_building_bus WHERE grid_case_id = ANY(CAST(:cases AS bigint[]))
+               ORDER BY grid_case_id, bus, objectid""",
+            conn, cases=sorted({case for _, case in runs}))
+    grid_of_run = dict(runs)
+    by_object = {(b["grid_case_id"], b["objectid"]): b for b in buildings}
+    by_bus: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for b in buildings:
+        if b["bus"] is not None:
+            by_bus.setdefault((b["grid_case_id"], int(b["bus"])), []).append(b)
+    features: dict[tuple[int, str], dict[str, Any]] = {}
+    totals: dict[str, dict[str, float]] = {}
+    unplaced = 0
+    for a in assets:
+        case = grid_of_run[a["powerflow_run_id"]]
+        building = by_object.get((case, a["building_objectid"])) if a["building_objectid"] else None
+        shared = len(by_bus.get((case, a["bus"]), []))
+        if building is None:
+            candidates = by_bus.get((case, a["bus"]), [])
+            building = candidates[0] if candidates else None
+        if building is None or building["lat"] is None:
+            unplaced += 1
+            continue
+        key = (case, building["objectid"])
+        if key not in features:
+            address = " ".join(str(v) for v in (building["street"], building["house_number"]) if v)
+            features[key] = {"objectid": building["objectid"], "grid_case_id": case, "plz": building["plz"],
+                             "kcid": building["kcid"], "bcid": building["bcid"],
+                             "grid_result_id": building["pylovo_grid_result_id"], "bus": a["bus"],
+                             "use": building["building_use"], "type": building["building_type"],
+                             "households": building["households"], "floor_area": building["floor_area"],
+                             "address": address or None, "lon": building["lon"], "lat": building["lat"]}
+        props = features[key]
+        if shared > 1 and not a["building_objectid"]:
+            props["shared_bus"] = shared
+        power_key, energy_key = _ASSET_PROPERTIES[a["technology"]]
+        _add(props, power_key, a["power_kw"])
+        _add(props, energy_key, a["energy_kwh"])
+        if a["technology"] == "ev":
+            props["ev_count"] = props.get("ev_count", 0) + int(a["units"])
+        props[f"has_{a['technology']}"] = True
+        total = totals.setdefault(a["technology"], {"buildings": 0, "units": 0, "power_kw": 0.0, "energy_kwh": 0.0})
+        total["units"] += int(a["units"])
+        total["power_kw"] += float(a["power_kw"] or 0.0)
+        total["energy_kwh"] += float(a["energy_kwh"] or 0.0)
+    for props in features.values():
+        for tech in ASSET_TECHNOLOGIES:
+            if props.get(f"has_{tech}"):
+                totals[tech]["buildings"] += 1
+    out = []
+    for index, props in enumerate(features.values(), start=1):
+        lon, lat = props.pop("lon"), props.pop("lat")
+        out.append({"type": "Feature", "id": index, "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
+                    "properties": {key: _clean(value) for key, value in props.items()}})
+    return {"type": "FeatureCollection", "features": out, "stage": "post", "totals": totals, "unplaced": unplaced}
+
+
 def powerflow_summaries(ags: int | None = None, plz: int | None = None, pylovo_version_id: str | None = None,
                         scenario_key: str | None = None) -> list[dict[str, Any]]:
     """``powerflow_summary`` rows per grid, run and stage, with the model case of the run."""

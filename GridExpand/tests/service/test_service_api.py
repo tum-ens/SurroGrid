@@ -113,3 +113,23 @@ def test_root_path_with_and_without_the_prefix(settings, fake_solvers):
             assert c.post(f"{prefix}/api/jobs/pipeline", json={}).status_code == 403  # no CSRF bypass
         assert "/gridexpand/openapi.json" in c.get("/docs").text
         assert c.get("/openapi.json").json()["servers"] == [{"url": "/gridexpand"}]
+
+
+def test_terminal_run_for_one_grid(client, monkeypatch):
+    from gridexpand.service import queries
+
+    grid = {"grid_result_id": 7, "plz": 85653, "kcid": 1, "bcid": 3, "candidate_index": 2, "n_buildings": 3, "results": []}
+    monkeypatch.setattr(queries, "ags_for_plz", lambda plz: [9184137])
+    monkeypatch.setattr(queries, "grid_candidates", lambda ags, version, min_buildings, plz=None: [grid])
+    body = {"plz": 85653, "pylovo_version_id": "1", "scenario": "schweinfurt_2045.yaml", "model_cases": ["pre"],
+            "grid_result_id": 7}
+    response = client.post("/api/jobs/terminal", json=body)
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data["title"].startswith("Grid 1/3 · PLZ 85653") and data["grids"] == 1
+    assert "kcid: 1" in data["run_yaml"] and "bcid: 3" in data["run_yaml"] and "min_buildings: 1" in data["run_yaml"]
+    assert "scenario: ../scenarios/schweinfurt_2045.yaml" in data["portable_run_yaml"]
+    assert data["commands"][0]["command"].startswith("tmux new-session -d -s ui_85653-1-3_schweinfurt_2045_")
+    runs = client.get("/api/jobs/terminal").json()
+    assert [r["run_id"] for r in runs] == [data["run_id"]] and runs[0]["status"] == "not started"
+    assert client.post("/api/jobs/terminal", json=body | {"grid_result_id": 8}).status_code == 400

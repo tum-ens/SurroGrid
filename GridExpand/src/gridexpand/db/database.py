@@ -246,6 +246,9 @@ class SurroGridDatabase:
 
     # Step 4 writers ---------------------------------------------------------------
 
+    def write_powerflow_assets(self, run_id: int, df: pd.DataFrame) -> None:
+        writers.write_powerflow_assets(self.engine, run_id, df)
+
     def write_powerflow_summary(self, run_id: int, stage: str, summary: dict[str, Any]) -> None:
         writers.write_summary(self.engine, self._timestamps, run_id, stage, summary)
 
