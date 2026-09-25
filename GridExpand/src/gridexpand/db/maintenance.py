@@ -399,21 +399,21 @@ def relink_plan(conn: Connection, *, accept_unverified: bool = False) -> list[di
     """
     rows = [dict(row) for row in conn.execute(text(RELINK_PLAN_SQL)).mappings()]
     for row in rows:
-        reason = None
-        if row["new_id"] is None:
-            reason = "no pylovo grid with this version/plz/kcid/bcid"
-        elif row["n_natural"] > 1:
-            reason = "several grid cases share this (ags, version, plz, kcid, bcid)"
-        elif row["has_audit"] and not row["buildings_match"]:
-            reason = "building set differs from the grid case's Step 2 audit"
-        elif not row["has_audit"] and row["has_runs"] and not accept_unverified:
-            reason = "runs exist but no Step 2 component audit to verify the building set"
-        if reason:
-            row["status"], row["reason"] = "rejected", reason
-        else:
-            row["status"] = "unchanged" if int(row["old_id"]) == int(row["new_id"]) else "relink"
-            row["reason"] = ""
+        row["status"], row["reason"] = classify_relink(row, accept_unverified=accept_unverified)
     return rows
+
+
+def classify_relink(row: dict[str, Any], *, accept_unverified: bool = False) -> tuple[str, str]:
+    """``(status, reason)`` of one grid case of :data:`RELINK_PLAN_SQL`."""
+    if row["new_id"] is None:
+        return "rejected", "no pylovo grid with this version/plz/kcid/bcid"
+    if row["n_natural"] > 1:
+        return "rejected", "several grid cases share this (ags, version, plz, kcid, bcid)"
+    if row["has_audit"] and not row["buildings_match"]:
+        return "rejected", "building set differs from the grid case's Step 2 audit"
+    if not row["has_audit"] and row["has_runs"] and not accept_unverified:
+        return "rejected", "runs exist but no Step 2 component audit to verify the building set"
+    return ("unchanged" if int(row["old_id"]) == int(row["new_id"]) else "relink"), ""
 
 
 def _constraint(conn: Connection, table: str, name: str) -> tuple[bool, bool]:
