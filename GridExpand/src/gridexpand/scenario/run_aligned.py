@@ -21,18 +21,14 @@ from typing import Any
 
 import yaml
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
+from gridexpand.paths import ALLOCATION_RESULTS_DIR, RUNS_DIR, SCENARIO_CALIBRATION_OUTPUT_DIR
+from gridexpand.scenario.config_loader import configuration_hash
+from gridexpand.scenario.model_cases import POST_MODEL_CASES
+from gridexpand.scenario.scenario_config import _mapping, _only, _positive
 
-from scenario_pipeline.config_loader import configuration_hash  # noqa: E402
-from scenario_pipeline.model_cases import POST_MODEL_CASES  # noqa: E402
-from scenario_pipeline.scenario_config import _mapping, _only, _positive  # noqa: E402
-
-GRIDALLOC_DIR = GRIDEXPAND_DIR / "2.demand_allocation" / "gridalloc"
-DATASET_ROOT = GRIDALLOC_DIR / "outputs" / "scenario_calibration"
+DATASET_ROOT = SCENARIO_CALIBRATION_OUTPUT_DIR
 HEAT_LIBRARY_ROOT = DATASET_ROOT / "profile_libraries"
-WEATHER_ROOT = GRIDALLOC_DIR / "results"
+WEATHER_ROOT = ALLOCATION_RESULTS_DIR
 HEURISTIC_CASES = ("post-inflex-heuristic", "post-hems-heuristic")
 
 
@@ -140,7 +136,7 @@ def load_aligned_run_config(path: Path) -> tuple[AlignedRunConfig, str]:
     max_steps = execution.get("powerflow_max_timesteps")
     scenario = Path(str(run["scenario"]))
     scenario_file = (scenario if scenario.is_absolute() else path.parent / scenario).resolve()
-    from scenario_pipeline.config_loader import load_scenario_config
+    from gridexpand.scenario.config_loader import load_scenario_config
 
     scenario_tag = load_scenario_config(scenario_file)[1][:12]
     providers = [dataclasses.replace(item, scenario_tag=scenario_tag) for item in providers]
@@ -240,11 +236,11 @@ def select_grid_subset(run: AlignedRunConfig, provider: ProviderResources) -> di
 
 
 def preparation_commands(run: AlignedRunConfig, provider: ProviderResources) -> list[tuple[str, list[str]]]:
-    """Commands, run in gridalloc, that build one provider's paired dataset."""
-    module = ["uv", "run", "--project", "..", "python", "-m"]
+    """Commands that build one provider's paired dataset."""
+    module = [sys.executable, "-m"]
     paired_dir = str(provider.paired_dir)
     allocation = [
-        "src.scenario_calibration.allocation.aligned_allocation",
+        "gridexpand.allocation.scenario_calibration.allocation.aligned_allocation",
         "--provider", provider.provider,
         "--alignment-dir", str(run.alignment_dir),
         "--population", str(run.population),
@@ -259,12 +255,12 @@ def preparation_commands(run: AlignedRunConfig, provider: ProviderResources) -> 
     return [
         ("allocation", module + allocation),
         ("weather", module + [
-            "src.scenario_calibration.profiles.aligned_weather",
+            "gridexpand.allocation.scenario_calibration.profiles.aligned_weather",
             "--paired-dir", paired_dir,
             "--output", str(provider.weather_hdf),
         ]),
         ("heat_regeneration", module + [
-            "src.scenario_calibration.profiles.paired_heat_profile_regeneration",
+            "gridexpand.allocation.scenario_calibration.profiles.paired_heat_profile_regeneration",
             "--paired-dir", paired_dir, "--refresh-catalog", "--resume",
             "--workers", str(run.heat_workers), "--n-cpu", "1",
             "--scenario-config", str(run.scenario_path),
@@ -272,23 +268,23 @@ def preparation_commands(run: AlignedRunConfig, provider: ProviderResources) -> 
             "--synthetic-library", heat_sources,
         ]),
         ("heat_readiness_sources", module + [
-            "src.scenario_calibration.profiles.paired_profile_readiness",
+            "gridexpand.allocation.scenario_calibration.profiles.paired_profile_readiness",
             "--paired-dir", paired_dir, "--synthetic-input-dir", heat_sources,
         ]),
         ("heat_library", module + [
-            "src.scenario_calibration.profiles.physical_heat_profile_library",
+            "gridexpand.allocation.scenario_calibration.profiles.physical_heat_profile_library",
             "--source-catalog", str(provider.paired_dir / "paired_heat_profile_catalog.csv"),
             "--source-hdf-dir", heat_sources, "--source-mode", "exact",
             "--output", str(provider.heat_library),
             "--profile-set-id", provider.heat_profile_set_id,
         ]),
         ("heat_readiness_library", module + [
-            "src.scenario_calibration.profiles.paired_profile_readiness",
+            "gridexpand.allocation.scenario_calibration.profiles.paired_profile_readiness",
             "--paired-dir", paired_dir, "--synthetic-input-dir", heat_sources,
             "--heat-profile-library", str(provider.heat_library),
         ]),
         ("pv_library", module + [
-            "src.scenario_calibration.profiles.pv_profile_library",
+            "gridexpand.allocation.scenario_calibration.profiles.pv_profile_library",
             "--roof-catalog", str(provider.paired_dir / "paired_roof_sections.csv"),
             "--weather-source-hdf", str(provider.weather_hdf),
             "--output", str(provider.paired_dir / "paired_pv_profile_library.h5"),
@@ -300,8 +296,8 @@ def preparation_commands(run: AlignedRunConfig, provider: ProviderResources) -> 
 def validate_prepared(run: AlignedRunConfig, provider: ProviderResources, scenario_hash: str) -> dict[str, Any]:
     import pandas as pd
 
-    from common.electrification import assignment_manifest_hash
-    from paired_validation.datasets import resolve_paired_dataset
+    from gridexpand.common.electrification import assignment_manifest_hash
+    from gridexpand.paired.datasets import resolve_paired_dataset
 
     dataset = resolve_paired_dataset(
         provider.paired_dataset_id, expected_pylovo_version_id=run.pylovo_version_id
@@ -350,9 +346,7 @@ def runner_commands(
         run.target_network
     ]
     base = [
-        "uv", "run", "--project", "GridExpand/2.demand_allocation", "python",
-        "GridExpand/paired_validation/runner.py",
-        "--repo-root", str(GRIDEXPAND_DIR.parent),
+        sys.executable, "-m", "gridexpand.paired.runner",
         "--paired-dataset-id", provider.paired_dataset_id,
         "--pylovo-version-id", run.pylovo_version_id,
         "--provider", provider.provider,
@@ -369,7 +363,7 @@ def runner_commands(
     ]
     if run.powerflow_max_timesteps is not None:
         base += ["--max-timesteps", str(run.powerflow_max_timesteps)]
-    run_root = GRIDEXPAND_DIR / "run_logs" / run.run_id / provider.provider
+    run_root = RUNS_DIR / run.run_id / provider.provider
     if run.grid_subset is not None:
         subset_path = run_root / "grid_subset.json"
         subset_path.parent.mkdir(parents=True, exist_ok=True)
@@ -401,8 +395,8 @@ def runner_commands(
     return commands
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="gridexpand run-aligned", description=__doc__)
     parser.add_argument("--run-config", type=Path, required=True)
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--skip-prepare", action="store_true", help="Use existing prepared datasets.")
@@ -410,14 +404,14 @@ def main() -> None:
     parser.add_argument("--provider", choices=("swf", "uzw"), default=None, help="Limit to one provider.")
     parser.add_argument("--target-grid-id", type=int, default=None, help="Diagnostic single-grid filter.")
     parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    from scenario_pipeline.config_loader import load_scenario_config
+    from gridexpand.scenario.config_loader import load_scenario_config
 
     run, run_hash = load_aligned_run_config(args.run_config)
     scenario, scenario_hash = load_scenario_config(run.scenario_path)
     providers = [p for p in run.providers if args.provider in (None, p.provider)]
-    manifest_path = GRIDEXPAND_DIR / "run_logs" / run.run_id / "run_manifest.json"
+    manifest_path = RUNS_DIR / run.run_id / "run_manifest.json"
     manifest: dict[str, Any] = {
         "run_id": run.run_id,
         "run_hash": run_hash,
@@ -450,7 +444,7 @@ def main() -> None:
     for provider in providers:
         for stage, command in (preparation_commands(run, provider) if prepare else []):
             print(f"[{provider.provider}:{stage}] {' '.join(command)}", flush=True)
-            subprocess.run(command, cwd=GRIDALLOC_DIR, check=True, env=_env(run))
+            subprocess.run(command, check=True, env=_env(run))
         readiness = validate_prepared(run, provider, scenario_hash)
         manifest["providers"][provider.provider]["readiness"] = readiness
         print(f"[{provider.provider}:validate] {json.dumps(readiness, sort_keys=True)}", flush=True)
@@ -462,7 +456,7 @@ def main() -> None:
         code = 0
         for command in manifest["providers"][provider.provider]["execution"]:
             print(f"[{provider.provider}:execute] {' '.join(command)}", flush=True)
-            code = max(code, subprocess.run(command, cwd=GRIDEXPAND_DIR.parent, env=_env(run)).returncode)
+            code = max(code, subprocess.run(command, env=_env(run)).returncode)
         return code
 
     if run.parallel_providers:
@@ -476,14 +470,14 @@ def main() -> None:
         raise SystemExit(1)
     if run.materialize_expansion and not args.pre_only and args.target_grid_id is None:
         command = [
-            "uv", "run", "python", "-m", "expansion.aligned_expansion",
+            sys.executable, "-m", "gridexpand.analysis.expansion.aligned_expansion",
             "--run-id", run.run_id,
             "--providers", *(provider.provider for provider in providers),
             "--cases", "pre", *run.model_cases,
             "--pylovo-version-id", run.pylovo_version_id,
         ]
         print(f"[postprocess_expansion] {' '.join(command)}", flush=True)
-        subprocess.run(command, cwd=GRIDEXPAND_DIR / "5.postprocessing", check=True)
+        subprocess.run(command, check=True)
 
 
 def _env(run: AlignedRunConfig) -> dict[str, str]:

@@ -14,41 +14,29 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import text
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
-SURROGRID_DIR = GRIDEXPAND_DIR.parent
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.database import SurroGridDatabase  # noqa: E402
-from common.orchestration import command_env, utc_now  # noqa: E402
-from common.timeframe import (  # noqa: E402
+from gridexpand.db.database import SurroGridDatabase
+from gridexpand.paths import ALLOCATION_RESULTS_DIR, OPTIMIZATION_RESULT_DIR, RUN_CONFIG_DIR, RUNS_DIR
+from gridexpand.common.orchestration import command_env, utc_now
+from gridexpand.common.timeframe import (
     output_filename_for_timeframe,
     read_hdf_metadata,
     scenario_key_for_timeframe,
     scenario_output_directory,
 )
-from scenario_pipeline.config_loader import (  # noqa: E402
+from gridexpand.scenario.config_loader import (
     load_run_config,
     load_scenario_config,
     scenario_identity_key,
 )
-from scenario_pipeline.synthetic_ags_runner import (  # noqa: E402
+from gridexpand.scenario.synthetic_ags_runner import (
     case_qualified_filename,
     get_candidates,
     powerflow_run_name,
     scenario_suffix_from_hdf,
 )
 
-DEFAULT_RUN_CONFIG = (
-    GRIDEXPAND_DIR
-    / "scenario_pipeline"
-    / "config"
-    / "runs"
-    / "forchheim_2045_synthetic.yaml"
-)
-DEFAULT_OUTPUT_DIR = (
-    GRIDEXPAND_DIR / "run_logs" / "forchheim_2045_synthetic_smoke_grid20"
-)
+DEFAULT_RUN_CONFIG = RUN_CONFIG_DIR / "forchheim_2045_synthetic.yaml"
+DEFAULT_OUTPUT_DIR = RUNS_DIR / "forchheim_2045_synthetic_smoke_grid20"
 
 SELECTED_GRID = {
     "ags": "9474126",
@@ -95,7 +83,7 @@ CASE_SPECS = (
 )
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-config", type=Path, default=DEFAULT_RUN_CONFIG)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
@@ -109,12 +97,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Keep completed cases and continue at the first incomplete case.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def selected_candidate(version_id: str) -> dict[str, object]:
     candidates = get_candidates(
-        SURROGRID_DIR,
         SELECTED_GRID["ags"],
         min_buildings=5,
         demand_scope="all",
@@ -191,14 +178,7 @@ def archive_case(
         str(candidate["bridge_filename"]), "full_year"
     )
     step2_filename = case_qualified_filename(base_filename, runner_args)
-    step2_path = (
-        GRIDEXPAND_DIR
-        / "2.demand_allocation"
-        / "gridalloc"
-        / "results"
-        / runner_args.scenario_key
-        / step2_filename
-    )
+    step2_path = ALLOCATION_RESULTS_DIR / runner_args.scenario_key / step2_filename
     if not step2_path.exists():
         raise FileNotFoundError(step2_path)
 
@@ -220,7 +200,7 @@ def archive_case(
         suffix = scenario_suffix_from_hdf(step2_path)
         powerflow_input_filename = step2_filename.replace(".h5", f"_{suffix}.h5")
         step3_path = scenario_output_directory(
-            GRIDEXPAND_DIR / "3.urbs" / "result", runner_args.scenario_key
+            OPTIMIZATION_RESULT_DIR, runner_args.scenario_key
         ) / powerflow_input_filename
         if not step3_path.exists():
             raise FileNotFoundError(step3_path)
@@ -437,8 +417,8 @@ def audit_capacity_plausibility(manifest: dict[str, Any]) -> dict[str, Any]:
     return {"status": "passed", "cases": summaries}
 
 
-def main() -> int:
-    args = parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
     args.run_config = args.run_config.resolve()
     args.output_dir = args.output_dir.resolve()
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -489,14 +469,9 @@ def main() -> int:
                 continue
         case_run_dir = args.output_dir / "runs" / model_case
         command = [
-            "uv",
-            "run",
-            "--project",
-            "GridExpand/2.demand_allocation",
-            "python",
-            "GridExpand/scenario_pipeline/synthetic_ags_runner.py",
-            "--repo-root",
-            str(SURROGRID_DIR),
+            sys.executable,
+            "-m",
+            "gridexpand.scenario.synthetic_ags_runner",
             "--ags",
             SELECTED_GRID["ags"],
             "--pylovo-version-id",
@@ -563,7 +538,6 @@ def main() -> int:
 
         completed = subprocess.run(
             command,
-            cwd=SURROGRID_DIR,
             env=command_env(),
             check=False,
         )

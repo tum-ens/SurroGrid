@@ -21,41 +21,37 @@ import h5py
 import pandas as pd
 from dotenv import load_dotenv
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.electrification import assignment_manifest_hash  # noqa: E402
-from common.orchestration import (  # noqa: E402
+from gridexpand.common.electrification import assignment_manifest_hash
+from gridexpand.common.orchestration import (
     StatusLog,
     latest_step3_result,
     run_batch_command,
     run_command,
     utc_now,
 )
-from common.timeframe import FULL_YEAR_HOURS, read_hdf_metadata  # noqa: E402
-from paired_validation.comparison import (  # noqa: E402
+from gridexpand.common.timeframe import FULL_YEAR_HOURS, read_hdf_metadata
+from gridexpand.paired.comparison import (
     read_tsam_signature,
     validate_full_year_result,
     validate_shared_tsam,
 )
-from paired_validation.datasets import resolve_paired_dataset  # noqa: E402
-from paired_validation.sources import (  # noqa: E402
+from gridexpand.paired.datasets import resolve_paired_dataset
+from gridexpand.paired.sources import (
     TARGET_ADAPTERS,
     adapters_for_scope,
 )
-from paired_validation.sources.swf import (  # noqa: E402
-    ALLOCATION_PLAN_FILENAME as SWF_ALLOCATION_PLAN_FILENAME,
+from gridexpand.scenario.config_loader import load_scenario_config
+from gridexpand.paths import (
+    ENV_FILE,
+    OPTIMIZATION_INPUT_DIR,
+    PROJECT_DIR,
+    SCENARIO_CONFIG_DIR,
+    STATISTICS_DIR,
 )
-from scenario_pipeline.config_loader import load_scenario_config  # noqa: E402
-from scenario_pipeline.model_cases import POST_MODEL_CASES  # noqa: E402
+from gridexpand.scenario.model_cases import POST_MODEL_CASES
 
-ENV_PATH = GRIDEXPAND_DIR / ".env"
-REPO_ROOT_DEFAULT = GRIDEXPAND_DIR.parent
-DEFAULT_SCENARIO_CONFIG = (
-    GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
-    / "forchheim_2045_full_year.yaml"
-)
+ENV_PATH = ENV_FILE
+DEFAULT_SCENARIO_CONFIG = SCENARIO_CONFIG_DIR / "forchheim_2045_full_year.yaml"
 TARGET_CHOICES = (*TARGET_ADAPTERS, "both")
 
 
@@ -79,13 +75,9 @@ def _input_name(job: dict[str, Any], scenario_label: str) -> str:
 
 def _materialize_command(job: dict[str, Any], args: argparse.Namespace) -> list[str]:
     command = [
-        "uv",
-        "run",
-        "--project",
-        "..",
-        "python",
+        sys.executable,
         "-m",
-        "src.scenario_calibration.pipeline.paired_urbs_input",
+        "gridexpand.allocation.scenario_calibration.pipeline.paired_urbs_input",
         "--paired-dir",
         str(args.paired_dir),
         "--target-network",
@@ -123,7 +115,6 @@ def _prepare_shared_tsam_reference(
     *,
     args: argparse.Namespace,
     jobs: list[dict[str, Any]],
-    repo_root: Path,
     status: StatusLog,
 ) -> dict[str, Any] | None:
     if not args.tsam:
@@ -151,13 +142,10 @@ def _prepare_shared_tsam_reference(
         return signature
 
     reference_job = jobs[0]
-    gridalloc_dir = repo_root / "GridExpand" / "2.demand_allocation" / "gridalloc"
-    step3_dir = repo_root / "GridExpand" / "3.urbs"
-    input_hdf = step3_dir / "Input" / _input_name(reference_job, args.scenario_label)
+    input_hdf = OPTIMIZATION_INPUT_DIR / _input_name(reference_job, args.scenario_label)
     log_path = args.run_dir / "logs" / "shared_tsam_reference.log"
     run_batch_command(
         cmd=_materialize_command(reference_job, args),
-        cwd=gridalloc_dir,
         log_path=log_path,
         status=status,
         stage="shared_tsam_materialize_reference",
@@ -165,22 +153,20 @@ def _prepare_shared_tsam_reference(
     )
     run_batch_command(
         cmd=[
-            "uv",
-            "run",
-            "python",
-            "run_urbs_cluster.py",
+            sys.executable,
+            "-m",
+            "gridexpand.optimization.run_urbs_cluster",
             input_hdf.name,
             "--n_cpu",
             "1",
             *_tsam_arguments(args, reduce_only=True),
         ],
-        cwd=step3_dir,
         log_path=log_path,
         status=status,
         stage="shared_tsam_select_periods",
         env_extra={"PYLOVO_VERSION_ID": str(args.pylovo_version_id)},
     )
-    result_hdf = latest_step3_result(step3_dir, input_hdf)
+    result_hdf = latest_step3_result(input_hdf)
     signature = read_tsam_signature(result_hdf)
     signature.update(
         {
@@ -201,21 +187,15 @@ def _prepare_shared_tsam_reference(
 def _prepare_shared_pv_profiles(
     *,
     args: argparse.Namespace,
-    repo_root: Path,
     status: StatusLog,
 ) -> Path:
     """Build the angle-binned pvlib profiles once before parallel grid jobs."""
-    gridalloc_dir = repo_root / "GridExpand" / "2.demand_allocation" / "gridalloc"
     output = args.paired_dir / "paired_pv_profile_library.h5"
     run_batch_command(
         cmd=[
-            "uv",
-            "run",
-            "--project",
-            "..",
-            "python",
+            sys.executable,
             "-m",
-            "src.scenario_calibration.profiles.pv_profile_library",
+            "gridexpand.allocation.scenario_calibration.profiles.pv_profile_library",
             "--roof-catalog",
             str(args.paired_dir / "paired_roof_sections.csv"),
             "--weather-source-hdf",
@@ -225,7 +205,6 @@ def _prepare_shared_pv_profiles(
             "--reference-year",
             str(args.reference_year),
         ],
-        cwd=gridalloc_dir,
         log_path=args.run_dir / "logs" / "shared_pv_profile_library.log",
         status=status,
         stage="shared_pv_profile_library",
@@ -344,7 +323,6 @@ def _run_powerflows(
     job: dict[str, Any],
     args: argparse.Namespace,
     result_hdf: Path,
-    step4_dir: Path,
     log_path: Path,
     status: StatusLog,
 ) -> None:
@@ -352,7 +330,6 @@ def _run_powerflows(
         job=job,
         args=args,
         result_hdf=result_hdf,
-        step4_dir=step4_dir,
         log_path=log_path,
         status=status,
     )
@@ -362,7 +339,6 @@ def _run_one(
     job: dict[str, Any],
     args: argparse.Namespace,
     status: StatusLog,
-    repo_root: Path,
 ) -> dict[str, Any]:
     job_index = int(job["job_index"])
     target = str(job["target_network"])
@@ -380,14 +356,10 @@ def _run_one(
         started_at=utc_now(),
         log_file=str(log_path),
     )
-    gridalloc_dir = repo_root / "GridExpand" / "2.demand_allocation" / "gridalloc"
-    step3_dir = repo_root / "GridExpand" / "3.urbs"
-    step4_dir = repo_root / "GridExpand" / "4.powerflow"
-    input_hdf = step3_dir / "Input" / _input_name(job, args.scenario_label)
+    input_hdf = OPTIMIZATION_INPUT_DIR / _input_name(job, args.scenario_label)
     try:
         run_command(
             cmd=_materialize_command(job, args),
-            cwd=gridalloc_dir,
             log_path=log_path,
             status=status,
             candidate_index=job_index,
@@ -403,16 +375,14 @@ def _run_one(
         else:
             run_command(
                 cmd=[
-                    "uv",
-                    "run",
-                    "python",
-                    "run_urbs_cluster.py",
+                    sys.executable,
+                    "-m",
+                    "gridexpand.optimization.run_urbs_cluster",
                     input_hdf.name,
                     "--n_cpu",
                     str(args.step3_cpus),
                     *_tsam_arguments(args),
                 ],
-                cwd=step3_dir,
                 log_path=log_path,
                 status=status,
                 candidate_index=job_index,
@@ -426,7 +396,7 @@ def _run_one(
                     "PYLOVO_VERSION_ID": str(args.pylovo_version_id),
                 },
             )
-            result_hdf = latest_step3_result(step3_dir, input_hdf)
+            result_hdf = latest_step3_result(input_hdf)
             if args.tsam:
                 validate_shared_tsam(result_hdf, args.shared_tsam_signature)
             else:
@@ -443,7 +413,6 @@ def _run_one(
             job=job,
             args=args,
             result_hdf=result_hdf,
-            step4_dir=step4_dir,
             log_path=log_path,
             status=status,
         )
@@ -489,9 +458,13 @@ def _run_one(
         }
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=Path, default=REPO_ROOT_DEFAULT)
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        help="Deprecated and ignored; directories come from gridexpand.paths.",
+    )
     parser.add_argument(
         "--paired-dataset-id",
         help="Resolve paired artifacts by repository-local dataset convention.",
@@ -575,13 +548,12 @@ def parse_args() -> argparse.Namespace:
             "for the strict comparison run."
         ),
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
     load_dotenv(ENV_PATH, override=True)
-    repo_root = args.repo_root.resolve()
     if args.paired_dataset_id is not None:
         dataset = resolve_paired_dataset(
             args.paired_dataset_id,
@@ -652,15 +624,7 @@ def main() -> None:
     # The EV session pool's pinned content identity is part of the run identity:
     # a pool that gained profiles would otherwise re-pair buildings silently.
     pool_manifest_path = (
-        repo_root
-        / "GridExpand"
-        / "2.demand_allocation"
-        / "gridalloc"
-        / "data"
-        / "statistics"
-        / "general"
-        / "mobility_profile_pool"
-        / "mobility_pool_manifest.json"
+        STATISTICS_DIR / "general" / "mobility_profile_pool" / "mobility_pool_manifest.json"
     )
     args.ev_pool_id = (
         str(json.loads(pool_manifest_path.read_text(encoding="utf-8")).get("pool_id", ""))
@@ -678,7 +642,7 @@ def main() -> None:
                 f"Physical heat-profile library not found: {args.heat_profile_library}"
             )
     args.run_dir = (
-        (GRIDEXPAND_DIR.parent / args.run_dir).resolve()
+        (PROJECT_DIR.parent / args.run_dir).resolve()
         if not args.run_dir.is_absolute()
         else args.run_dir.resolve()
     )
@@ -741,14 +705,13 @@ def main() -> None:
     status = StatusLog(args.run_dir, resume=args.resume)
     args.pv_profile_library = _prepare_shared_pv_profiles(
         args=args,
-        repo_root=repo_root,
         status=status,
     )
     args.shared_tsam_signature = (
         None
         if args.pre_only
         else _prepare_shared_tsam_reference(
-            args=args, jobs=jobs, repo_root=repo_root, status=status
+            args=args, jobs=jobs, status=status
         )
     )
     status.event(
@@ -782,11 +745,11 @@ def main() -> None:
     results = []
     if args.workers == 1:
         for job in jobs:
-            results.append(_run_one(job, args, status, repo_root))
+            results.append(_run_one(job, args, status))
     else:
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             futures = {
-                pool.submit(_run_one, job, args, status, repo_root): job for job in jobs
+                pool.submit(_run_one, job, args, status): job for job in jobs
             }
             for future in as_completed(futures):
                 results.append(future.result())

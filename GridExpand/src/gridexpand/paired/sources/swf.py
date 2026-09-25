@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 from typing import Any
 
 import pandas as pd
 
-from common.orchestration import StatusLog, run_command
+from gridexpand.common.orchestration import StatusLog, run_command
 
 TARGET_NETWORK = "real_swf"
 ALLOCATION_PLAN_FILENAME = "paired_real_bus_allocation_plan.csv"
@@ -52,12 +53,11 @@ def run_powerflows(
     job: dict[str, Any],
     args: argparse.Namespace,
     result_hdf: Path,
-    step4_dir: Path,
     log_path: Path,
     status: StatusLog,
 ) -> None:
     run_real_powerflows(
-        job=job, args=args, result_hdf=result_hdf, step4_dir=step4_dir,
+        job=job, args=args, result_hdf=result_hdf,
         log_path=log_path, status=status,
         target_network=TARGET_NETWORK, provider="swf",
     )
@@ -68,7 +68,6 @@ def run_real_powerflows(
     job: dict[str, Any],
     args: argparse.Namespace,
     result_hdf: Path,
-    step4_dir: Path,
     log_path: Path,
     status: StatusLog,
     target_network: str,
@@ -77,10 +76,9 @@ def run_real_powerflows(
     job_index = int(job["job_index"])
     grid_id = int(job["target_grid_id"])
     common = [
-        "uv",
-        "run",
-        "python",
-        "run_real_swf_scenario_powerflow.py",
+        sys.executable,
+        "-m",
+        "gridexpand.powerflow.run_real_swf_scenario_powerflow",
         "--plz",
         str(job.get("plz", args.plz)),
         "--lv-id",
@@ -133,7 +131,6 @@ def run_real_powerflows(
         ]
         run_command(
             cmd=command,
-            cwd=step4_dir,
             log_path=log_path,
             status=status,
             candidate_index=job_index,

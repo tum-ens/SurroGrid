@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import shutil
+import sys
 from typing import Any
 
 import pandas as pd
 
-from common.orchestration import StatusLog, run_command
+from gridexpand.common.orchestration import StatusLog, run_command
+from gridexpand.paths import POWERFLOW_INPUT_DIR, ensure_dir
 
 TARGET_NETWORK = "synthetic"
 ALLOCATION_PLAN_FILENAME = "paired_synthetic_bus_allocation_plan.csv"
@@ -57,19 +59,17 @@ def run_powerflows(
     job: dict[str, Any],
     args: argparse.Namespace,
     result_hdf: Path,
-    step4_dir: Path,
     log_path: Path,
     status: StatusLog,
 ) -> None:
     job_index = int(job["job_index"])
     grid_id = int(job["target_grid_id"])
-    step4_input = step4_dir / "Input" / result_hdf.name
+    step4_input = ensure_dir(POWERFLOW_INPUT_DIR) / result_hdf.name
     shutil.copy2(result_hdf, step4_input)
     common = [
-        "uv",
-        "run",
-        "python",
-        "run_pwrflw.py",
+        sys.executable,
+        "-m",
+        "gridexpand.powerflow.run_pwrflw",
         step4_input.name,
         "--grid-case-id",
         str(grid_id),
@@ -98,7 +98,6 @@ def run_powerflows(
                 "--run-name",
                 f"{args.run_name_prefix}_{TARGET_NETWORK}_pre",
             ],
-            cwd=step4_dir,
             log_path=log_path,
             status=status,
             candidate_index=job_index,
@@ -122,7 +121,6 @@ def run_powerflows(
         ]
         run_command(
             cmd=command,
-            cwd=step4_dir,
             log_path=log_path,
             status=status,
             candidate_index=job_index,

@@ -9,23 +9,22 @@ import subprocess
 import sys
 from pathlib import Path
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.electrification import (  # noqa: E402
+from gridexpand.common.electrification import (
     assignment_manifest_hash,
     validate_electrification_assignment_config,
 )
-from scenario_pipeline.config_loader import load_run_config, load_scenario_config  # noqa: E402
-from scenario_pipeline.model_cases import MODEL_CASES, get_model_case  # noqa: E402
+from gridexpand.paths import (
+    ALLOCATION_RESULTS_DIR,
+    RUNS_DIR,
+    SCENARIO_CALIBRATION_OUTPUT_DIR,
+)
+from gridexpand.scenario.config_loader import load_run_config, load_scenario_config
+from gridexpand.scenario.model_cases import MODEL_CASES, get_model_case
 
 HEURISTIC_CASES = ("post-inflex-heuristic", "post-hems-heuristic")
-GRIDALLOC_DIR = GRIDEXPAND_DIR / "2.demand_allocation" / "gridalloc"
-PAIRED_DATASET_ROOT = GRIDALLOC_DIR / "outputs" / "scenario_calibration"
+PAIRED_DATASET_ROOT = SCENARIO_CALIBRATION_OUTPUT_DIR
 HEAT_LIBRARY_ROOT = PAIRED_DATASET_ROOT / "profile_libraries"
-WEATHER_RESULT_ROOT = GRIDALLOC_DIR / "results"
-POSTPROCESSING_DIR = GRIDEXPAND_DIR / "5.postprocessing"
+WEATHER_RESULT_ROOT = ALLOCATION_RESULTS_DIR
 
 
 def _write_manifest(path: Path, values: dict[str, object]) -> None:
@@ -40,15 +39,15 @@ def _paired_artifact_paths(run) -> tuple[Path, Path, Path]:
     return paired_dir, heat_library, weather_hdf
 
 
-def _paired_preparation_commands(run, scenario) -> list[tuple[str, list[str], Path]]:
+def _paired_preparation_commands(run, scenario) -> list[tuple[str, list[str]]]:
     paired_dir, heat_library, weather_hdf = _paired_artifact_paths(run)
-    common = ["uv", "run", "--project", "..", "python", "-m"]
+    common = [sys.executable, "-m"]
     return [
         (
             "prepare_allocation",
             common
             + [
-                "src.scenario_calibration.allocation.paired_allocation",
+                "gridexpand.allocation.scenario_calibration.allocation.paired_allocation",
                 "--ags",
                 str(run.ags),
                 "--plz",
@@ -66,25 +65,23 @@ def _paired_preparation_commands(run, scenario) -> list[tuple[str, list[str], Pa
                 "--output-dir",
                 str(paired_dir),
             ],
-            GRIDALLOC_DIR,
         ),
         (
             "prepare_heat_profiles",
             common
             + [
-                "src.scenario_calibration.profiles.paired_profile_readiness",
+                "gridexpand.allocation.scenario_calibration.profiles.paired_profile_readiness",
                 "--paired-dir",
                 str(paired_dir),
                 "--heat-profile-library",
                 str(heat_library),
             ],
-            GRIDALLOC_DIR,
         ),
         (
             "prepare_pv_profiles",
             common
             + [
-                "src.scenario_calibration.profiles.pv_profile_library",
+                "gridexpand.allocation.scenario_calibration.profiles.pv_profile_library",
                 "--roof-catalog",
                 str(paired_dir / "paired_roof_sections.csv"),
                 "--weather-source-hdf",
@@ -94,7 +91,6 @@ def _paired_preparation_commands(run, scenario) -> list[tuple[str, list[str], Pa
                 "--reference-year",
                 str(scenario.mobility.reference_year),
             ],
-            GRIDALLOC_DIR,
         ),
     ]
 
@@ -102,7 +98,7 @@ def _paired_preparation_commands(run, scenario) -> list[tuple[str, list[str], Pa
 def _validate_prepared_paired(
     run, scenario, scenario_hash: str
 ) -> dict[str, object]:
-    from paired_validation.datasets import resolve_paired_dataset
+    from gridexpand.paired.datasets import resolve_paired_dataset
 
     dataset = resolve_paired_dataset(
         str(run.paired_dataset_id),
@@ -165,9 +161,7 @@ def _validate_prepared_paired(
     }
 
 
-def _expansion_commands(
-    run, model_cases: tuple[str, ...]
-) -> list[tuple[list[str], Path]]:
+def _expansion_commands(run, model_cases: tuple[str, ...]) -> list[list[str]]:
     if not run.materialize_expansion or run.target_grid_id is not None:
         return []
     network_pairs = (
@@ -178,7 +172,7 @@ def _expansion_commands(
         else [("synthetic", "synthetic"), ("real_swf", "real_swf")]
     )
     cases = ("pre", *model_cases)
-    commands: list[tuple[list[str], Path]] = []
+    commands: list[list[str]] = []
     for target, data_source in network_pairs:
         source_suffix = "" if target == "synthetic" else "_real"
         for model_case in cases:
@@ -195,11 +189,9 @@ def _expansion_commands(
                 analysis_suffix = model_case.replace("-", "_")
                 stage = "post"
             command = [
-                "uv",
-                "run",
-                "python",
+                sys.executable,
                 "-m",
-                "expansion.grid_expansion",
+                "gridexpand.analysis.expansion.grid_expansion",
                 "--run-name",
                 f"{run.run_id}_{target}_{model_case}",
                 "--data-source",
@@ -216,26 +208,19 @@ def _expansion_commands(
                 command.extend(["--plz", str(run.plz)])
                 for lv_id in run.excluded_real_lv_ids:
                     command.extend(["--exclude-real-lv-id", str(lv_id)])
-            commands.append((command, POSTPROCESSING_DIR))
+            commands.append(command)
     return commands
 
 
 def _regional_assignment_path(run) -> Path:
-    return GRIDEXPAND_DIR / "run_logs" / run.run_id / "electrification_assignment.csv"
+    return RUNS_DIR / run.run_id / "electrification_assignment.csv"
 
 
-def _electrification_preparation_command(
-    run, output_path: Path
-) -> tuple[list[str], Path]:
-    workdir = GRIDEXPAND_DIR / "2.demand_allocation" / "gridalloc"
+def _electrification_preparation_command(run, output_path: Path) -> list[str]:
     command = [
-        "uv",
-        "run",
-        "--project",
-        "..",
-        "python",
+        sys.executable,
         "-m",
-        "src.electrification_preparation",
+        "gridexpand.allocation.electrification_preparation",
         "--ags",
         str(run.ags),
         "--min-buildings",
@@ -255,7 +240,7 @@ def _electrification_preparation_command(
     ]
     if run.plz is not None:
         command.extend(["--plz", str(run.plz)])
-    return command, workdir
+    return command
 
 
 def _scenario_command(
@@ -264,18 +249,14 @@ def _scenario_command(
     *,
     grid_id: str | None = None,
     assignment_path: Path | None = None,
-) -> tuple[list[str], Path]:
+) -> list[str]:
     case = get_model_case(model_case)
-    workdir = GRIDEXPAND_DIR / "2.demand_allocation" / "gridalloc"
     profiles = "status_quo" if case.name == "pre" else "all"
     selected_grid_id = grid_id or run.pylovo_grid_id or str(run.ags)
     command = [
-        "uv",
-        "run",
-        "--project",
-        "..",
-        "python",
-        "main.py",
+        sys.executable,
+        "-m",
+        "gridexpand.allocation.main",
         selected_grid_id,
         "--storage",
         run.storage,
@@ -311,7 +292,7 @@ def _scenario_command(
         command.extend(["--output-directory", str(run.output_directory)])
     if assignment_path is not None:
         command.extend(["--electrification-assignment", str(assignment_path)])
-    return command, workdir
+    return command
 
 
 def _selected_scenario_grid_ids(run) -> list[str | None]:
@@ -321,10 +302,9 @@ def _selected_scenario_grid_ids(run) -> list[str | None]:
     if run.kcid is not None:
         return [None]
 
-    from scenario_pipeline.synthetic_ags_runner import get_candidates
+    from gridexpand.scenario.synthetic_ags_runner import get_candidates
 
     candidates = get_candidates(
-        GRIDEXPAND_DIR.parent,
         str(run.ags),
         run.min_buildings,
         run.demand_scope,
@@ -347,17 +327,11 @@ def _paired_command(
     result_cases: tuple[str, ...],
     group_name: str,
     skip_pre: bool,
-) -> tuple[list[str], Path]:
-    workdir = GRIDEXPAND_DIR.parent
+) -> list[str]:
     command = [
-        "uv",
-        "run",
-        "--project",
-        "GridExpand/2.demand_allocation",
-        "python",
-        "GridExpand/paired_validation/runner.py",
-        "--repo-root",
-        str(workdir),
+        sys.executable,
+        "-m",
+        "gridexpand.paired.runner",
         "--paired-dataset-id",
         str(run.paired_dataset_id),
         "--pylovo-version-id",
@@ -387,7 +361,7 @@ def _paired_command(
         "--run-name-prefix",
         run.run_id,
         "--run-dir",
-        str(GRIDEXPAND_DIR / "run_logs" / run.run_id / group_name),
+        str(RUNS_DIR / run.run_id / group_name),
     ]
     if run.target_grid_id is not None:
         command.extend(["--target-grid-id", str(run.target_grid_id)])
@@ -397,10 +371,10 @@ def _paired_command(
         command.append("--resume")
     if skip_pre:
         command.append("--skip-pre")
-    return command, workdir
+    return command
 
 
-def build_commands(run, model_cases: tuple[str, ...]) -> list[tuple[list[str], Path]]:
+def build_commands(run, model_cases: tuple[str, ...]) -> list[list[str]]:
     if run.pipeline == "scenario":
         grid_ids = _selected_scenario_grid_ids(run)
         assignment_path = None
@@ -421,7 +395,7 @@ def build_commands(run, model_cases: tuple[str, ...]) -> list[tuple[list[str], P
             for grid_id in grid_ids
         ]
 
-    commands: list[tuple[list[str], Path]] = []
+    commands: list[list[str]] = []
     requested_heuristic = tuple(case for case in HEURISTIC_CASES if case in model_cases)
     if requested_heuristic:
         commands.append(
@@ -446,8 +420,8 @@ def build_commands(run, model_cases: tuple[str, ...]) -> list[tuple[list[str], P
     return commands
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="gridexpand run", description=__doc__)
     parser.add_argument("--run-config", type=Path, required=True)
     parser.add_argument(
         "--model-case",
@@ -461,7 +435,7 @@ def main() -> None:
         help="Prepare and validate paired shared artifacts, then stop.",
     )
     parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     run, run_hash = load_run_config(args.run_config)
     scenario, scenario_hash = load_scenario_config(run.scenario_path)
@@ -479,7 +453,7 @@ def main() -> None:
         preparation.append(
             (
                 "prepare_electrification_assignment",
-                *_electrification_preparation_command(
+                _electrification_preparation_command(
                     run, _regional_assignment_path(run)
                 ),
             )
@@ -494,15 +468,12 @@ def main() -> None:
     staged_commands = [
         *preparation,
         *(
-            ("execute", command, workdir)
-            for command, workdir in (() if args.prepare_only else execution_commands)
+            ("execute", command)
+            for command in (() if args.prepare_only else execution_commands)
         ),
-        *(
-            ("postprocess_expansion", command, workdir)
-            for command, workdir in postprocessing
-        ),
+        *(("postprocess_expansion", command) for command in postprocessing),
     ]
-    manifest_dir = GRIDEXPAND_DIR / "run_logs" / run.run_id
+    manifest_dir = RUNS_DIR / run.run_id
     manifest_path = manifest_dir / "run_manifest.json"
     manifest = {
         "run_id": run.run_id,
@@ -528,8 +499,8 @@ def main() -> None:
         ),
         "model_cases": list(model_cases),
         "stages": [
-            {"stage": stage, "command": command, "working_directory": str(workdir)}
-            for stage, command, workdir in staged_commands
+            {"stage": stage, "command": command}
+            for stage, command in staged_commands
         ],
         "prepare_only": bool(args.prepare_only),
         "dry_run": bool(args.dry_run),
@@ -537,13 +508,13 @@ def main() -> None:
     _write_manifest(manifest_path, manifest)
 
     if args.dry_run:
-        for stage, command, _ in staged_commands:
+        for stage, command in staged_commands:
             print(f"[{stage}] {' '.join(command)}")
         return
 
-    for stage, command, workdir in preparation:
+    for stage, command in preparation:
         print(f"[{stage}] {' '.join(command)}", flush=True)
-        subprocess.run(command, cwd=workdir, check=True)
+        subprocess.run(command, check=True)
 
     if run.pipeline == "paired_validation":
         readiness = _validate_prepared_paired(run, scenario, scenario_hash)
@@ -553,12 +524,12 @@ def main() -> None:
         if args.prepare_only:
             return
 
-    for command, workdir in execution_commands:
+    for command in execution_commands:
         print(f"[execute] {' '.join(command)}", flush=True)
-        subprocess.run(command, cwd=workdir, check=True)
-    for command, workdir in postprocessing:
+        subprocess.run(command, check=True)
+    for command in postprocessing:
         print(f"[postprocess_expansion] {' '.join(command)}", flush=True)
-        subprocess.run(command, cwd=workdir, check=True)
+        subprocess.run(command, check=True)
 
 
 if __name__ == "__main__":

@@ -25,15 +25,11 @@ import h5py
 import pandas as pd
 from sqlalchemy import text
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.electrification import (  # noqa: E402
+from gridexpand.common.electrification import (
     assignment_manifest_hash,
     validate_electrification_assignment_config,
 )
-from common.timeframe import (  # noqa: E402
+from gridexpand.common.timeframe import (
     TIMEFRAME_MODES,
     build_initial_metadata,
     horizon_hours_from_hdf,
@@ -42,18 +38,26 @@ from common.timeframe import (  # noqa: E402
     scenario_output_directory,
     scenario_key_for_timeframe,
 )
-from common.orchestration import (  # noqa: E402
+from gridexpand.common.orchestration import (
     StatusLog,
     run_batch_command,
     run_command,
     utc_now,
 )
-from scenario_pipeline.config_loader import load_scenario_config, scenario_identity_key  # noqa: E402
-
-DEFAULT_SCENARIO_CONFIG = (
-    GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
-    / "forchheim_2045_synthetic.yaml"
+from gridexpand.db import SurroGridDatabase
+from gridexpand.paths import (
+    ALLOCATION_RESULTS_DIR,
+    OPTIMIZATION_INPUT_DIR,
+    OPTIMIZATION_RESULT_DIR,
+    POWERFLOW_INPUT_DIR,
+    PROJECT_DIR,
+    SCENARIO_CONFIG_DIR,
+    WORK_DIR,
+    ensure_dir,
 )
+from gridexpand.scenario.config_loader import load_scenario_config, scenario_identity_key
+
+DEFAULT_SCENARIO_CONFIG = SCENARIO_CONFIG_DIR / "forchheim_2045_synthetic.yaml"
 
 
 EXPECTED_POWERFLOW_TABLES = {
@@ -80,11 +84,16 @@ def run_name_profile_token(profile: str) -> str:
     return "post_electrification" if profile == "all" else profile
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run DB-backed synthetic GridExpand pipeline batch for one AGS."
+        prog="gridexpand synthetic",
+        description="Run DB-backed synthetic GridExpand pipeline batch for one AGS.",
     )
-    parser.add_argument("--repo-root", type=Path, required=True)
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        help="Deprecated and ignored; directories come from gridexpand.paths.",
+    )
     parser.add_argument(
         "--ags",
         required=True,
@@ -222,7 +231,7 @@ def parse_args() -> argparse.Namespace:
             "Defaults to '<timeframe_mode>_<profiles>[_hh_only][_tsam]'."
         ),
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     args.scenario_config = args.scenario_config.resolve()
     scenario, args.scenario_hash = load_scenario_config(args.scenario_config)
     args.scenario = scenario
@@ -257,22 +266,12 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def step_paths(repo_root: Path, scenario_key: str) -> dict[str, Path]:
-    gridexpand = repo_root / "GridExpand"
+def step_paths(scenario_key: str) -> dict[str, Path]:
     return {
-        "step2_results": scenario_output_directory(
-            gridexpand / "2.demand_allocation" / "gridalloc" / "results",
-            scenario_key,
-        ),
-        "step3_input": gridexpand / "3.urbs" / "Input",
-        "step4_input": gridexpand / "4.powerflow" / "Input",
+        "step2_results": scenario_output_directory(ALLOCATION_RESULTS_DIR, scenario_key),
+        "step3_input": OPTIMIZATION_INPUT_DIR,
+        "step4_input": POWERFLOW_INPUT_DIR,
     }
-
-
-def configure_imports(repo_root: Path) -> None:
-    gridexpand_dir = repo_root / "GridExpand"
-    if str(gridexpand_dir) not in sys.path:
-        sys.path.insert(0, str(gridexpand_dir))
 
 
 def normalize_ags(value: str) -> int:
@@ -280,15 +279,11 @@ def normalize_ags(value: str) -> int:
 
 
 def get_candidates(
-    repo_root: Path,
     ags: str,
     min_buildings: int,
     demand_scope: str = "all",
     pylovo_version_id: str | None = None,
 ) -> list[dict[str, object]]:
-    configure_imports(repo_root)
-    from common.database import SurroGridDatabase
-
     db = SurroGridDatabase()
     db.pylovo_version_id = pylovo_version_id
     count_column = (
@@ -396,7 +391,6 @@ def expansion_analysis_prefix(args: argparse.Namespace) -> str:
 
 def materialize_expansion_analyses(
     *,
-    repo_root: Path,
     args: argparse.Namespace,
     status: StatusLog,
 ) -> list[dict[str, str]]:
@@ -408,7 +402,6 @@ def materialize_expansion_analyses(
 
     summary_pre_only = args.profiles == "status_quo"
     prefix = expansion_analysis_prefix(args)
-    postprocessing_dir = repo_root / "GridExpand" / "5.postprocessing"
     log_path = args.run_dir / "expansion_materialization.log"
     materialized = []
 
@@ -416,11 +409,9 @@ def materialize_expansion_analyses(
         run_name: str, stage: str, analysis_key: str, note: str, log_stage: str
     ) -> None:
         cmd = [
-            "uv",
-            "run",
-            "python",
+            sys.executable,
             "-m",
-            "expansion.grid_expansion",
+            "gridexpand.analysis.expansion.grid_expansion",
             "--run-name",
             run_name,
             "--stage",
@@ -435,7 +426,6 @@ def materialize_expansion_analyses(
         ]
         run_batch_command(
             cmd=cmd,
-            cwd=postprocessing_dir,
             log_path=log_path,
             status=status,
             stage=log_stage,
@@ -579,7 +569,6 @@ def choose_step3_settings(
 
 
 def validate_powerflow_db(
-    repo_root: Path,
     scenario_filename: str,
     *,
     summary_only: bool = False,
@@ -587,10 +576,7 @@ def validate_powerflow_db(
     run_name: str | None = None,
     expected_summary_stages: tuple[str, ...] = ("pre",),
 ) -> dict[str, Any]:
-    configure_imports(repo_root)
-    scenario_path = (
-        repo_root / "GridExpand" / "4.powerflow" / "Input" / scenario_filename
-    )
+    scenario_path = POWERFLOW_INPUT_DIR / scenario_filename
     with pd.HDFStore(scenario_path, mode="r") as store:
         if "/urbs_out/MILP/tau_pro" in store:
             tau_pro = store["/urbs_out/MILP/tau_pro"]
@@ -599,8 +585,6 @@ def validate_powerflow_db(
         else:
             expected_horizon = horizon_hours_from_hdf(scenario_path)
     expected_max_t = expected_horizon - 1
-    from common.database import SurroGridDatabase
-
     db = SurroGridDatabase()
     with db.engine.connect() as conn:
         run = (
@@ -759,9 +743,9 @@ def candidate_failed_payload(
 
 
 def candidate_intermediate_files(
-    repo_root: Path, candidate: dict[str, object], args: argparse.Namespace
+    candidate: dict[str, object], args: argparse.Namespace
 ) -> list[Path]:
-    paths = step_paths(repo_root, pipeline_scenario_key(args))
+    paths = step_paths(pipeline_scenario_key(args))
     step2_filename = case_qualified_filename(
         output_filename_for_timeframe(
             str(candidate["bridge_filename"]), args.timeframe_mode
@@ -786,7 +770,6 @@ def candidate_intermediate_files(
 
 
 def cleanup_candidate_intermediates(
-    repo_root: Path,
     candidate: dict[str, object],
     args: argparse.Namespace,
     status: StatusLog,
@@ -795,7 +778,7 @@ def cleanup_candidate_intermediates(
 ) -> dict[str, object]:
     removed_files = []
     removed_bytes = 0
-    for file_path in candidate_intermediate_files(repo_root, candidate, args):
+    for file_path in candidate_intermediate_files(candidate, args):
         if not file_path.exists() or not file_path.is_file():
             continue
         size = file_path.stat().st_size
@@ -838,7 +821,6 @@ def completed_candidate_indexes(status: StatusLog) -> set[int]:
 
 
 def cleanup_completed_intermediates(
-    repo_root: Path,
     candidates: list[dict[str, object]],
     args: argparse.Namespace,
     status: StatusLog,
@@ -854,7 +836,6 @@ def cleanup_completed_intermediates(
             continue
         cleanup_results.append(
             cleanup_candidate_intermediates(
-                repo_root,
                 candidate,
                 args,
                 status,
@@ -878,16 +859,11 @@ def cleanup_completed_intermediates(
 
 def run_candidate(
     *,
-    repo_root: Path,
     ags: str,
     candidate: dict[str, object],
     args: argparse.Namespace,
     status: StatusLog,
 ) -> dict[str, object]:
-    gridexpand = repo_root / "GridExpand"
-    step2_dir = gridexpand / "2.demand_allocation" / "gridalloc"
-    step3_dir = gridexpand / "3.urbs"
-    step4_dir = gridexpand / "4.powerflow"
     candidate_index = int(candidate["candidate_index"])
     bridge_filename = str(candidate["bridge_filename"])
     step2_filename = case_qualified_filename(
@@ -927,12 +903,9 @@ def run_candidate(
     try:
         current_stage = "step2_demand_allocation"
         step2_cmd = [
-                "uv",
-                "run",
-                "--project",
-                "..",
-                "python",
-                "main.py",
+                sys.executable,
+                "-m",
+                "gridexpand.allocation.main",
                 ags,
                 "--storage",
                 "db",
@@ -967,14 +940,13 @@ def run_candidate(
             step2_cmd.append("--case-qualified-output")
         run_command(
             cmd=step2_cmd,
-            cwd=step2_dir,
             log_path=log_file,
             status=status,
             candidate_index=candidate_index,
             stage=current_stage,
         )
         step2_output = scenario_output_directory(
-            step2_dir / "results", pipeline_scenario_key(args)
+            ALLOCATION_RESULTS_DIR, pipeline_scenario_key(args)
         ) / step2_filename
         if not step2_output.exists():
             raise FileNotFoundError(f"Missing Step 2 output {step2_output}")
@@ -999,17 +971,16 @@ def run_candidate(
                     sort_keys=True,
                 ),
             )
-            shutil.copy2(step2_output, step4_dir / "Input" / step2_filename)
+            shutil.copy2(step2_output, ensure_dir(POWERFLOW_INPUT_DIR) / step2_filename)
             validations = []
 
             if args.powerflow_output in {"raw", "both"}:
                 current_stage = "step4_powerflow_raw_pre_only"
                 raw_run_name = powerflow_run_name(args, "raw")
                 raw_cmd = [
-                    "uv",
-                    "run",
-                    "python",
-                    "run_pwrflw.py",
+                    sys.executable,
+                    "-m",
+                    "gridexpand.powerflow.run_pwrflw",
                     step2_filename,
                     "--storage",
                     "db",
@@ -1025,7 +996,6 @@ def run_candidate(
                     raw_cmd.append("--hh-only")
                 run_command(
                     cmd=raw_cmd,
-                    cwd=step4_dir,
                     log_path=log_file,
                     status=status,
                     candidate_index=candidate_index,
@@ -1034,7 +1004,6 @@ def run_candidate(
                 current_stage = "step4_validate_raw_pre_only"
                 validations.append(
                     validate_powerflow_db(
-                        repo_root,
                         step2_filename,
                         summary_only=False,
                         pre_only=True,
@@ -1046,10 +1015,9 @@ def run_candidate(
                 current_stage = "step4_powerflow_summary_pre_only"
                 summary_run_name = powerflow_run_name(args, "summary")
                 summary_cmd = [
-                    "uv",
-                    "run",
-                    "python",
-                    "run_pwrflw.py",
+                    sys.executable,
+                    "-m",
+                    "gridexpand.powerflow.run_pwrflw",
                     step2_filename,
                     "--storage",
                     "db",
@@ -1066,7 +1034,6 @@ def run_candidate(
                     summary_cmd.append("--hh-only")
                 run_command(
                     cmd=summary_cmd,
-                    cwd=step4_dir,
                     log_path=log_file,
                     status=status,
                     candidate_index=candidate_index,
@@ -1075,7 +1042,6 @@ def run_candidate(
                 current_stage = "step4_validate_summary_pre_only"
                 validations.append(
                     validate_powerflow_db(
-                        repo_root,
                         step2_filename,
                         summary_only=True,
                         pre_only=True,
@@ -1102,7 +1068,7 @@ def run_candidate(
             )
             if args.cleanup_intermediates == "success":
                 cleanup_candidate_intermediates(
-                    repo_root, candidate, args, status, reason="success"
+                    candidate, args, status, reason="success"
                 )
             return {
                 "candidate_index": candidate_index,
@@ -1112,7 +1078,7 @@ def run_candidate(
 
         if args.inflex_only:
             validations = []
-            shutil.copy2(step2_output, step3_dir / "Input" / step2_filename)
+            shutil.copy2(step2_output, ensure_dir(OPTIMIZATION_INPUT_DIR) / step2_filename)
 
             step3_cpus, cluster_concurrency, step3_stats = choose_step3_settings(
                 step2_output, args
@@ -1130,10 +1096,9 @@ def run_candidate(
 
             current_stage = "step3_urbs_for_inflex"
             step3_cmd = [
-                "uv",
-                "run",
-                "python",
-                "run_urbs_cluster.py",
+                sys.executable,
+                "-m",
+                "gridexpand.optimization.run_urbs_cluster",
                 step2_filename,
                 "--n_cpu",
                 str(step3_cpus),
@@ -1141,7 +1106,6 @@ def run_candidate(
             step3_cmd.extend(["--scenario-config", str(args.scenario_config)])
             run_command(
                 cmd=step3_cmd,
-                cwd=step3_dir,
                 log_path=log_file,
                 status=status,
                 candidate_index=candidate_index,
@@ -1149,21 +1113,20 @@ def run_candidate(
                 env_extra={"URBS_CLUSTER_CONCURRENCY": str(cluster_concurrency)},
             )
             step3_output = scenario_output_directory(
-                step3_dir / "result", pipeline_scenario_key(args)
+                OPTIMIZATION_RESULT_DIR, pipeline_scenario_key(args)
             ) / scenario_filename
             if not step3_output.exists():
                 raise FileNotFoundError(f"Missing Step 3 output {step3_output}")
             powerflow_filename = scenario_filename
-            shutil.copy2(step3_output, step4_dir / "Input" / powerflow_filename)
+            shutil.copy2(step3_output, ensure_dir(POWERFLOW_INPUT_DIR) / powerflow_filename)
 
             if args.powerflow_output in {"raw", "both"}:
                 current_stage = "step4_powerflow_raw_inflex"
                 raw_inflex_run_name = powerflow_run_name(args, "raw_inflex")
                 raw_inflex_cmd = [
-                    "uv",
-                    "run",
-                    "python",
-                    "run_pwrflw.py",
+                    sys.executable,
+                    "-m",
+                    "gridexpand.powerflow.run_pwrflw",
                     powerflow_filename,
                     "--storage",
                     "db",
@@ -1184,7 +1147,6 @@ def run_candidate(
                     raw_inflex_cmd.append("--hh-only")
                 run_command(
                     cmd=raw_inflex_cmd,
-                    cwd=step4_dir,
                     log_path=log_file,
                     status=status,
                     candidate_index=candidate_index,
@@ -1193,7 +1155,6 @@ def run_candidate(
                 current_stage = "step4_validate_raw_inflex"
                 validations.append(
                     validate_powerflow_db(
-                        repo_root,
                         powerflow_filename,
                         summary_only=False,
                         pre_only=False,
@@ -1205,10 +1166,9 @@ def run_candidate(
                 current_stage = "step4_powerflow_summary_inflex"
                 summary_inflex_run_name = powerflow_run_name(args, "summary_inflex")
                 summary_inflex_cmd = [
-                    "uv",
-                    "run",
-                    "python",
-                    "run_pwrflw.py",
+                    sys.executable,
+                    "-m",
+                    "gridexpand.powerflow.run_pwrflw",
                     powerflow_filename,
                     "--storage",
                     "db",
@@ -1230,7 +1190,6 @@ def run_candidate(
                     summary_inflex_cmd.append("--hh-only")
                 run_command(
                     cmd=summary_inflex_cmd,
-                    cwd=step4_dir,
                     log_path=log_file,
                     status=status,
                     candidate_index=candidate_index,
@@ -1239,7 +1198,6 @@ def run_candidate(
                 current_stage = "step4_validate_summary_inflex"
                 validations.append(
                     validate_powerflow_db(
-                        repo_root,
                         powerflow_filename,
                         summary_only=True,
                         pre_only=False,
@@ -1266,7 +1224,7 @@ def run_candidate(
             )
             if args.cleanup_intermediates == "success":
                 cleanup_candidate_intermediates(
-                    repo_root, candidate, args, status, reason="success"
+                    candidate, args, status, reason="success"
                 )
             return {
                 "candidate_index": candidate_index,
@@ -1274,7 +1232,7 @@ def run_candidate(
                 "seconds": seconds,
             }
 
-        shutil.copy2(step2_output, step3_dir / "Input" / step2_filename)
+        shutil.copy2(step2_output, ensure_dir(OPTIMIZATION_INPUT_DIR) / step2_filename)
 
         step3_cpus, cluster_concurrency, step3_stats = choose_step3_settings(
             step2_output, args
@@ -1288,10 +1246,9 @@ def run_candidate(
 
         current_stage = "step3_urbs"
         step3_cmd = [
-            "uv",
-            "run",
-            "python",
-            "run_urbs_cluster.py",
+            sys.executable,
+            "-m",
+            "gridexpand.optimization.run_urbs_cluster",
             step2_filename,
             "--n_cpu",
             str(step3_cpus),
@@ -1299,7 +1256,6 @@ def run_candidate(
         step3_cmd.extend(["--scenario-config", str(args.scenario_config)])
         run_command(
             cmd=step3_cmd,
-            cwd=step3_dir,
             log_path=log_file,
             status=status,
             candidate_index=candidate_index,
@@ -1307,21 +1263,20 @@ def run_candidate(
             env_extra={"URBS_CLUSTER_CONCURRENCY": str(cluster_concurrency)},
         )
         step3_output = scenario_output_directory(
-            step3_dir / "result", pipeline_scenario_key(args)
+            OPTIMIZATION_RESULT_DIR, pipeline_scenario_key(args)
         ) / scenario_filename
         if not step3_output.exists():
             raise FileNotFoundError(f"Missing Step 3 output {step3_output}")
-        shutil.copy2(step3_output, step4_dir / "Input" / scenario_filename)
+        shutil.copy2(step3_output, ensure_dir(POWERFLOW_INPUT_DIR) / scenario_filename)
 
         validations = []
         if args.powerflow_output in {"raw", "both"}:
             current_stage = "step4_powerflow_raw"
             raw_run_name = powerflow_run_name(args, "raw")
             raw_cmd = [
-                "uv",
-                "run",
-                "python",
-                "run_pwrflw.py",
+                sys.executable,
+                "-m",
+                "gridexpand.powerflow.run_pwrflw",
                 scenario_filename,
                 "--storage",
                 "db",
@@ -1336,7 +1291,6 @@ def run_candidate(
                 raw_cmd.append("--hh-only")
             run_command(
                 cmd=raw_cmd,
-                cwd=step4_dir,
                 log_path=log_file,
                 status=status,
                 candidate_index=candidate_index,
@@ -1346,7 +1300,6 @@ def run_candidate(
             current_stage = "step4_validate_raw"
             validations.append(
                 validate_powerflow_db(
-                    repo_root,
                     scenario_filename,
                     summary_only=False,
                     pre_only=False,
@@ -1358,10 +1311,9 @@ def run_candidate(
             current_stage = "step4_powerflow_raw_inflex"
             raw_inflex_run_name = powerflow_run_name(args, "raw_inflex")
             raw_inflex_cmd = [
-                "uv",
-                "run",
-                "python",
-                "run_pwrflw.py",
+                sys.executable,
+                "-m",
+                "gridexpand.powerflow.run_pwrflw",
                 scenario_filename,
                 "--storage",
                 "db",
@@ -1382,7 +1334,6 @@ def run_candidate(
                 raw_inflex_cmd.append("--hh-only")
             run_command(
                 cmd=raw_inflex_cmd,
-                cwd=step4_dir,
                 log_path=log_file,
                 status=status,
                 candidate_index=candidate_index,
@@ -1392,7 +1343,6 @@ def run_candidate(
             current_stage = "step4_validate_raw_inflex"
             validations.append(
                 validate_powerflow_db(
-                    repo_root,
                     scenario_filename,
                     summary_only=False,
                     pre_only=False,
@@ -1406,10 +1356,9 @@ def run_candidate(
             expected_summary_stages = ("pre",) if summary_pre_only else ("pre", "post")
             summary_run_name = powerflow_run_name(args, "summary")
             summary_cmd = [
-                "uv",
-                "run",
-                "python",
-                "run_pwrflw.py",
+                sys.executable,
+                "-m",
+                "gridexpand.powerflow.run_pwrflw",
                 scenario_filename,
                 "--storage",
                 "db",
@@ -1427,7 +1376,6 @@ def run_candidate(
                 summary_cmd.append("--hh-only")
             run_command(
                 cmd=summary_cmd,
-                cwd=step4_dir,
                 log_path=log_file,
                 status=status,
                 candidate_index=candidate_index,
@@ -1437,7 +1385,6 @@ def run_candidate(
             current_stage = "step4_validate_summary"
             validations.append(
                 validate_powerflow_db(
-                    repo_root,
                     scenario_filename,
                     summary_only=True,
                     pre_only=summary_pre_only,
@@ -1453,10 +1400,9 @@ def run_candidate(
             current_stage = "step4_powerflow_summary_inflex"
             summary_inflex_run_name = powerflow_run_name(args, "summary_inflex")
             summary_inflex_cmd = [
-                "uv",
-                "run",
-                "python",
-                "run_pwrflw.py",
+                sys.executable,
+                "-m",
+                "gridexpand.powerflow.run_pwrflw",
                 scenario_filename,
                 "--storage",
                 "db",
@@ -1478,7 +1424,6 @@ def run_candidate(
                 summary_inflex_cmd.append("--hh-only")
             run_command(
                 cmd=summary_inflex_cmd,
-                cwd=step4_dir,
                 log_path=log_file,
                 status=status,
                 candidate_index=candidate_index,
@@ -1488,7 +1433,6 @@ def run_candidate(
             current_stage = "step4_validate_summary_inflex"
             validations.append(
                 validate_powerflow_db(
-                    repo_root,
                     scenario_filename,
                     summary_only=True,
                     pre_only=False,
@@ -1514,7 +1458,7 @@ def run_candidate(
         )
         if args.cleanup_intermediates == "success":
             cleanup_candidate_intermediates(
-                repo_root, candidate, args, status, reason="success"
+                candidate, args, status, reason="success"
             )
         return {
             "candidate_index": candidate_index,
@@ -1657,9 +1601,8 @@ def validate_prepared_electrification_assignment(
         )
 
 
-def main() -> int:
-    args = parse_args()
-    repo_root = args.repo_root.resolve()
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
     run_dir = args.run_dir.resolve()
     args.run_dir = run_dir
     (run_dir / "logs").mkdir(parents=True, exist_ok=True)
@@ -1673,7 +1616,8 @@ def main() -> int:
     )
     status.event(
         event="batch_start",
-        repo_root=str(repo_root),
+        project_dir=str(PROJECT_DIR),
+        work_dir=str(WORK_DIR),
         ags=args.ags,
         pylovo_version_id=args.pylovo_version_id,
         min_buildings=args.min_buildings,
@@ -1699,7 +1643,6 @@ def main() -> int:
     )
 
     candidates = get_candidates(
-        repo_root,
         args.ags,
         args.min_buildings,
         args.demand_scope,
@@ -1717,7 +1660,7 @@ def main() -> int:
         return 1
 
     if args.cleanup_completed_only:
-        summary = cleanup_completed_intermediates(repo_root, candidates, args, status)
+        summary = cleanup_completed_intermediates(candidates, args, status)
         (run_dir / "cleanup_summary.json").write_text(
             json.dumps(summary, indent=2, default=str), encoding="utf-8"
         )
@@ -1727,13 +1670,9 @@ def main() -> int:
         if not args.electrification_assignment.exists():
             preparation_log = run_dir / "logs" / "electrification_preparation.log"
             preparation_command = [
-                "uv",
-                "run",
-                "--project",
-                "..",
-                "python",
+                sys.executable,
                 "-m",
-                "src.electrification_preparation",
+                "gridexpand.allocation.electrification_preparation",
                 "--ags",
                 str(args.ags),
                 "--min-buildings",
@@ -1762,7 +1701,6 @@ def main() -> int:
             with preparation_log.open("w", encoding="utf-8") as handle:
                 subprocess.run(
                     preparation_command,
-                    cwd=repo_root / "GridExpand" / "2.demand_allocation" / "gridalloc",
                     stdout=handle,
                     stderr=subprocess.STDOUT,
                     check=True,
@@ -1813,7 +1751,6 @@ def main() -> int:
     if pilot_candidate is not None:
         status.event(event="pilot_start", candidate_index=args.pilot_index)
         pilot_result = run_candidate(
-            repo_root=repo_root,
             ags=args.ags,
             candidate=pilot_candidate,
             args=args,
@@ -1853,7 +1790,6 @@ def main() -> int:
         future_map = {
             executor.submit(
                 run_candidate,
-                repo_root=repo_root,
                 ags=args.ags,
                 candidate=candidate,
                 args=args,
@@ -1887,7 +1823,7 @@ def main() -> int:
     expansion_failure = None
     try:
         materialized_expansion = materialize_expansion_analyses(
-            repo_root=repo_root, args=args, status=status
+            args=args, status=status
         )
     except Exception as exc:
         expansion_failure = str(exc)

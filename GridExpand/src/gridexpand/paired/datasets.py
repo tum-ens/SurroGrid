@@ -10,13 +10,11 @@ import re
 import h5py
 import pandas as pd
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
-GRIDALLOC_DIR = GRIDEXPAND_DIR / "2.demand_allocation" / "gridalloc"
-PAIRED_DATASET_ROOT = (
-    GRIDALLOC_DIR / "outputs" / "scenario_calibration"
-)
+from gridexpand.paths import ALLOCATION_RESULTS_DIR, SCENARIO_CALIBRATION_OUTPUT_DIR
+
+PAIRED_DATASET_ROOT = SCENARIO_CALIBRATION_OUTPUT_DIR
 HEAT_LIBRARY_ROOT = PAIRED_DATASET_ROOT / "profile_libraries"
-WEATHER_RESULT_ROOT = GRIDALLOC_DIR / "results"
+WEATHER_RESULT_ROOT = ALLOCATION_RESULTS_DIR
 
 
 @dataclass(frozen=True)

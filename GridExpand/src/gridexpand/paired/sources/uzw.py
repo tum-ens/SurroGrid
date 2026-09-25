@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from common.orchestration import StatusLog
+from gridexpand.common.orchestration import StatusLog
 
 from .swf import load_real_jobs, run_real_powerflows
 
@@ -26,12 +26,11 @@ def run_powerflows(
     job: dict[str, Any],
     args: argparse.Namespace,
     result_hdf: Path,
-    step4_dir: Path,
     log_path: Path,
     status: StatusLog,
 ) -> None:
     run_real_powerflows(
-        job=job, args=args, result_hdf=result_hdf, step4_dir=step4_dir,
+        job=job, args=args, result_hdf=result_hdf,
         log_path=log_path, status=status,
         target_network=TARGET_NETWORK, provider="uzw",
     )
