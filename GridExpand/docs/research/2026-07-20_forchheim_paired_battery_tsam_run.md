@@ -1,14 +1,16 @@
+> **Historical record** (not maintained). Run: `forchheim_paired_battery_tsam` (runner directory `forchheim_paired_v2_tsam_20260720T105015Z`). pylovo version: 3. Written: 2026-07-20. Moved from `docs/expansion/assumptions_scenario.md` on 2026-09-25. Paths, commands and module names below are those of the code at that time; see [the documentation index](../README.md) for the current code.
+
 # Scenario Run Summary
 
 This document is the concise source of truth for GridExpand scenario runs. It records which runs are authoritative, the assumptions shared between scenarios, database names used by postprocessing, known limitations, and the commands needed to reproduce or resume the analysis.
 
 Detailed methodology remains in:
 
-- [Paired SWF scenario contract](../PAIRED_SCENARIO.md)
+- [Paired SWF scenario contract](../method.md#paired-validation-contract) (current version)
 - [Pipeline runner documentation](../../README.md)
 - [Power-flow methodology](../steps/4_powerflow.md)
 - [Postprocessing and expansion analysis](../steps/5_postprocessing.md)
-- [Expansion cost assumptions](assumptions_costs.md)
+- [Expansion cost assumptions](../expansion_costs.md)
 
 ## Current Source of Truth
 
@@ -128,7 +130,7 @@ The completed paired run is computationally complete, but LV 113 is not yet publ
 - Radialization and station partitioning do not create this particular bottleneck: with source switch states respected, line 23963 is already the only active power-cable supply to the branch.
 - The remaining ambiguity is therefore in the source model itself: the cable type or topology may be incomplete, the recorded switch state may not represent the relevant operating condition, or an additional supply asset may be absent.
 
-Until the LV 113 source topology has been clarified or an explicit sensitivity has been defined, critical-tail real-grid voltage and cable results must be presented as provisional. LV 113 should not be silently repaired by reassignment. It is currently excluded explicitly from the real-SWF power-flow distribution and voltage analyses in `analysis_expansion.ipynb`; synthetic grids are unaffected. The technical findings and DSO clarification questions are documented in [`failed_grids_analyisis.md`](../audits/failed_grids_analyisis.md). The paired demand totals and optimization comparison remain valid.
+Until the LV 113 source topology has been clarified or an explicit sensitivity has been defined, critical-tail real-grid voltage and cable results must be presented as provisional. LV 113 should not be silently repaired by reassignment. It is currently excluded explicitly from the real-SWF power-flow distribution and voltage analyses in `analysis_expansion.ipynb`; synthetic grids are unaffected. The technical findings and DSO clarification questions are documented in [`2026-07-21_failed_real_swf_grids.md`](2026-07-21_failed_real_swf_grids.md). The paired demand totals and optimization comparison remain valid.
 
 ## Reproduction Command
 

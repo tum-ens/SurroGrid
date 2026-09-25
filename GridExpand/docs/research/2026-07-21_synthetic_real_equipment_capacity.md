@@ -1,3 +1,5 @@
+> **Historical record** (not maintained). Run: the paired Forchheim power-flow runs of July 2026 (83 synthetic, 87 real SWF grids, LV 113 excluded). pylovo version: not recorded in the note. Written: 2026-07-21. Moved from `docs/audits/synthetic_real_equipment_capacity_comparison.md` on 2026-09-25. Paths, commands and module names below are those of the code at that time; see [the documentation index](../README.md) for the current code.
+
 # Synthetic and Real SWF Equipment Capacity Comparison
 
 This audit compares the equipment represented in the current paired power-flow runs. Cable statistics cover the demand-carrying backbone, exclude final service connections, and omit real LV 113 consistently with the analysis notebook.

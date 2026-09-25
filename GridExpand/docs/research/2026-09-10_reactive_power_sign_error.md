@@ -1,3 +1,5 @@
+> **Historical record** (not maintained). Run: none (code inspection of commit `7228308`). pylovo version: not applicable. Written: 2026-09-10. Moved from `docs/powerflow_summary.md` on 2026-09-25. Paths, commands and module names below are those of the code at that time; see [the documentation index](../README.md) for the current code.
+
 # Original reactive-power sign error and implications for voltage results
 
 ## Scope and conclusion

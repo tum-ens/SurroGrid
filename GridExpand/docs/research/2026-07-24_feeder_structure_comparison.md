@@ -1,3 +1,5 @@
+> **Historical record** (not maintained). Run: `forchheim_paired_battery_tsam`. pylovo version: 3 (paired run) and 4 (topology comparison), see the text. Written: 2026-07-24. Moved from `docs/audits/feeder_structure_comparison.md` on 2026-09-25. Paths, commands and module names below are those of the code at that time; see [the documentation index](../README.md) for the current code.
+
 # Synthetic and Real Feeder-Structure Comparison
 
 This audit explains the remaining synthetic/real cable-loading difference for the paired `forchheim_paired_battery_tsam` scenario. It covers 83 synthetic grids and 87 real SWF grids after excluding `LV 113`. Annual demand is the paired household plus calibrated GHD demand. Terminal service connections are excluded consistently.
