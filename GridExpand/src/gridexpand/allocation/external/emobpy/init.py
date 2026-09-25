@@ -4,7 +4,6 @@ import glob
 import os
 import shutil
 from gridexpand.allocation.external.emobpy.constants import (
-    CWD,
     DEFAULT_DATA_DIR,
     USER_PATH,
     MODULE_DATA_PATH,
@@ -13,35 +12,6 @@ from gridexpand.allocation.external.emobpy.constants import (
 from .logger import get_logger
 
 logger = get_logger(__name__)
-
-
-def _find_files_oswalk(root, templates_search_dir, search=None):
-    """
-    Finds all files via os.walk.
-
-    Args:
-        root (str): Root path.
-        templates_search_dir (str): Dictionary of the templates.
-        search ([type], optional): Search index. Defaults to None.
-
-    Yields:
-        file, root, section, basefile, exists
-    """
-    for file in glob.glob(os.path.join(root, templates_search_dir, f"**/*.*"), recursive=True):
-        exists = False
-        section = ""
-        basefile = os.path.basename(file)
-        inbetween = file[len(root) + 1: -len(basefile) - 1].split(os.sep)
-        newsection = inbetween[:]
-        if search is not None:
-            if search in inbetween:
-                exists = True
-                newsection.remove(search)
-            if templates_search_dir in inbetween:
-                newsection.remove(templates_search_dir)
-        if newsection:
-            section = os.path.join(*newsection)
-        yield file, root, section, basefile, exists
 
 
 def _overwrite_sys_files_in_user_data_dir(location=None):
@@ -192,39 +162,3 @@ def copy_to_user_data_dir():
     """
     _overwrite_sys_files_in_user_data_dir()
     _merge_user_files_with_sys_files()
-
-
-def create_project(project_name, template):
-    """
-    Creates project based on selected template and copies these files.
-
-    Args:
-        project_name (str): Chosen project name.
-        template (str): Chosen template.
-
-    Raises:
-        Exception: Template arguments not valid.
-        Exception: Chosen folder does not exist.
-    """
-    
-    if os.path.isdir(os.path.join(MODULE_DATA_PATH,template)):
-        pass
-    else:
-        raise Exception(f"--template argument '{template}' not in {MODULE_DATA_PATH}")
-
-    template_dir_path = os.path.join(MODULE_DATA_PATH, template)
-    if not os.path.exists(template_dir_path):
-        msg = "from emobpy.init import copy_to_user_data_dir; copy_to_user_data_dir()"
-        raise Exception(
-            f"Directory '{template_dir_path}' does not exist. Make sure you call copy_to_user_data_dir function first '{msg}'"
-        )
-
-    logger.info(f"Copy files from {template_dir_path}")
-    for file, _, section, basefile, _ in _find_files_oswalk(template_dir_path, ""):
-        destination_file_abspath = os.path.join(CWD, project_name, section, basefile)
-        os.makedirs(os.path.split(destination_file_abspath)[0], exist_ok=True)
-        shutil.copyfile(file, destination_file_abspath)
-        logger.info(f"   {destination_file_abspath}")
-    logger.info("Done!")
-
-
