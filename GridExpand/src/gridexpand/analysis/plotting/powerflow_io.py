@@ -78,7 +78,7 @@ def save_plotly_figure(
         except ValueError as exc:
             raise RuntimeError(
                 "Static Plotly export failed. Make sure the Step 5 environment "
-                "contains kaleido by running `uv sync` in GridExpand/5.postprocessing."
+                "contains kaleido by running `uv sync --extra notebooks` in GridExpand."
             ) from exc
         saved_paths.append(target)
     return saved_paths

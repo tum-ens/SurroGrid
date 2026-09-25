@@ -8,31 +8,21 @@ per transformer position.
 from __future__ import annotations
 
 import argparse
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import text
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
-SCHEMA_SQL_PATH = Path(__file__).with_name("schema.sql")
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
+from gridexpand.db.database import SurroGridDatabase, normalize_ags
+from gridexpand.paths import SQL_DIR
 
-from common.database import SurroGridDatabase, normalize_ags  # noqa: E402
+from .overview import (  # noqa: F401
+    latest_expansion_analysis_key,
+    load_expansion_overview,
+)
+from .real_materialization import materialize_real_results
 
-try:
-    from .overview import (  # noqa: F401
-        latest_expansion_analysis_key,
-        load_expansion_overview,
-    )
-    from .real_materialization import materialize_real_results
-except ImportError:
-    from overview import (  # noqa: F401
-        latest_expansion_analysis_key,
-        load_expansion_overview,
-    )
-    from real_materialization import materialize_real_results
+SCHEMA_SQL_PATH = SQL_DIR / "expansion_schema.sql"
 
 
 def _execute_sql_file(db: SurroGridDatabase, path: Path) -> None:
@@ -1123,9 +1113,9 @@ def materialize(
     return analysis_key
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     db = SurroGridDatabase()
     _execute_sql_file(db, SCHEMA_SQL_PATH)

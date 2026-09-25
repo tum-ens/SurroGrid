@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
@@ -16,11 +15,7 @@ from matplotlib.colors import LinearSegmentedColormap, LogNorm, Normalize
 from scipy.spatial import ConvexHull
 from sqlalchemy import text
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.database import SurroGridDatabase  # noqa: E402
+from gridexpand.db.database import SurroGridDatabase
 
 COST_CMAP = LinearSegmentedColormap.from_list(
     "cost_green_red",
@@ -59,8 +54,8 @@ def _add_osm_basemap(
         import contextily as ctx
     except ImportError as exc:
         raise ImportError(
-            "OSM basemap support requires contextily. Install/sync the "
-            "GridExpand/5.postprocessing uv environment first."
+            "OSM basemap support requires contextily. Run `uv sync` in "
+            "GridExpand first."
         ) from exc
 
     if source is None:
@@ -630,7 +625,7 @@ def _canonical_real_grid_id(value: object) -> str:
 def load_real_expansion_grid_costs(*, analysis_key: str) -> pd.DataFrame:
     """Load cost-complete real-grid metrics for one expansion analysis key."""
 
-    from expansion.grid_expansion import load_expansion_overview
+    from gridexpand.analysis.expansion.grid_expansion import load_expansion_overview
 
     overview = load_expansion_overview(analysis_key=analysis_key)
     metrics = overview["grid_cost_summary"].copy()

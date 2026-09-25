@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -13,24 +11,13 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from sqlalchemy import text
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
+from gridexpand.db.database import SurroGridDatabase
 
-from common.database import SurroGridDatabase
-
-try:
-    from .powerflow_heatmaps import (
-        _normalize_optional_ags,
-        _resolve_db_grid,
-        _resolve_powerflow_run,
-    )
-except ImportError:
-    from powerflow_heatmaps import (
-        _normalize_optional_ags,
-        _resolve_db_grid,
-        _resolve_powerflow_run,
-    )
+from .powerflow_heatmaps import (
+    _normalize_optional_ags,
+    _resolve_db_grid,
+    _resolve_powerflow_run,
+)
 
 
 

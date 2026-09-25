@@ -1,6 +1,6 @@
 """Materialize expansion costs for every provider group of one aligned run.
 
-An aligned run (``scenario_pipeline/run_aligned.py``) writes power-flow
+An aligned run (``gridexpand run-aligned``) writes power-flow
 summaries named ``{run_id}_{provider}_{network}_{case}`` with network
 ``real_<provider>`` or ``synthetic``. This entry point materializes the four
 groups (SWF real, SWF synthetic, ÜZW real, ÜZW synthetic) under the analysis
@@ -8,7 +8,7 @@ keys ``{run_id}_{provider}_{real|synthetic}_{pre|post_inflex|post}``.
 
 Example::
 
-    uv run python -m expansion.aligned_expansion \\
+    uv run python -m gridexpand.analysis.expansion.aligned_expansion \\
         --run-id joint_2045_v1_smoke24 --providers swf uzw \\
         --cases pre post-inflex-heuristic post-hems-heuristic
 """
@@ -20,13 +20,12 @@ import sys
 
 from sqlalchemy import text
 
-try:
-    from . import grid_expansion
-except ImportError:
-    import grid_expansion
+from gridexpand.db.database import SurroGridDatabase
 
-from common.database import SurroGridDatabase  # noqa: E402
+from . import grid_expansion
 
+# DSO providers of an aligned run.
+PROVIDERS = ("swf", "uzw")
 CASE_STAGES = {
     "pre": ("pre", "pre"),
     "post-inflex-heuristic": ("post", "post_inflex"),
@@ -37,7 +36,7 @@ CASE_STAGES = {
 def aligned_groups(
     run_id: str,
     *,
-    providers: tuple[str, ...] = ("swf", "uzw"),
+    providers: tuple[str, ...] = PROVIDERS,
     cases: tuple[str, ...] = tuple(CASE_STAGES),
     pylovo_version_id: str = "1",
     excluded_real_grids: dict[str, tuple[str, ...]] | None = None,
@@ -112,17 +111,17 @@ def _parse_exclusions(values: list[str]) -> dict[str, tuple[str, ...]]:
     excluded: dict[str, list[str]] = {}
     for value in values:
         provider, separator, lv_id = value.partition(":")
-        if not separator or provider not in PROVIDER_SYNTHETIC_PLZ or not lv_id:
+        if not separator or provider not in PROVIDERS or not lv_id:
             raise SystemExit(f"--exclude-real-grid expects PROVIDER:ID, got {value!r}.")
         excluded.setdefault(provider, []).append(lv_id)
     return {provider: tuple(ids) for provider, ids in excluded.items()}
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--run-id", required=True)
     parser.add_argument(
-        "--providers", nargs="+", choices=tuple(PROVIDER_SYNTHETIC_PLZ), default=["swf", "uzw"]
+        "--providers", nargs="+", choices=PROVIDERS, default=list(PROVIDERS)
     )
     parser.add_argument(
         "--cases", nargs="+", choices=tuple(CASE_STAGES), default=list(CASE_STAGES)
@@ -139,12 +138,12 @@ def main() -> None:
         action="store_true",
         help="Only list each group's run name, analysis key and matching summaries.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     expansion_parser = grid_expansion._build_parser()
     group_args = [
-        expansion_parser.parse_args(argv)
-        for argv in aligned_groups(
+        expansion_parser.parse_args(group_argv)
+        for group_argv in aligned_groups(
             args.run_id,
             providers=tuple(args.providers),
             cases=tuple(args.cases),

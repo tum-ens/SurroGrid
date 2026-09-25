@@ -11,23 +11,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
-POWERFLOW_DIR = GRIDEXPAND_DIR / "4.powerflow"
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-if str(POWERFLOW_DIR) not in sys.path:
-    sys.path.insert(0, str(POWERFLOW_DIR))
-
-from common.database import SurroGridDatabase, normalize_ags
-from src import powerflow as pwrflw
+from gridexpand.db.database import SurroGridDatabase, normalize_ags
+from gridexpand.powerflow import powerflow as pwrflw
 
 
 def _optional_ags(value: str | int | None) -> int | None:
@@ -496,8 +487,8 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
-    args = _build_parser().parse_args()
+def main(argv: list[str] | None = None) -> None:
+    args = _build_parser().parse_args(argv)
     materialize_powerflow_summaries(args)
 
 

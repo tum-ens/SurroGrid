@@ -2,32 +2,19 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from scipy.stats import wasserstein_distance
 from sqlalchemy import text
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
+from gridexpand.db.database import SurroGridDatabase
 
-from common.database import SurroGridDatabase
-
-try:
-    from plotting.powerflow_heatmaps import (
-        _normalize_optional_ags,
-        _resolve_db_grid,
-        _resolve_powerflow_run,
-    )
-except ImportError:
-    from powerflow_heatmaps import (
-        _normalize_optional_ags,
-        _resolve_db_grid,
-        _resolve_powerflow_run,
-    )
+from gridexpand.analysis.plotting.powerflow_heatmaps import (
+    _normalize_optional_ags,
+    _resolve_db_grid,
+    _resolve_powerflow_run,
+)
 
 def _grid_label_from_row(row: pd.Series) -> str:
     ags = str(int(row["ags"])).zfill(8)

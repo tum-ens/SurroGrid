@@ -10,9 +10,7 @@ feeder paths, small attachment cables, and overloaded critical-path cables.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import math
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -22,28 +20,14 @@ import pandapower as pp
 import pandas as pd
 from sqlalchemy import text
 
-POSTPROCESSING_DIR = Path(__file__).resolve().parents[1]
-GRIDEXPAND_DIR = POSTPROCESSING_DIR.parents[0]
-STEP4_DIR = GRIDEXPAND_DIR / "4.powerflow"
-
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-if str(STEP4_DIR) not in sys.path:
-    sys.path.insert(0, str(STEP4_DIR))
-
-from common.database import SurroGridDatabase  # noqa: E402
+from gridexpand.db.database import SurroGridDatabase
+from gridexpand.paths import ANALYSIS_OUTPUT_DIR
 
 
 def _load_real_runner():
-    spec = importlib.util.spec_from_file_location(
-        "run_real_swf_powerflow_topology_audit",
-        STEP4_DIR / "run_real_swf_powerflow.py",
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError("Could not load run_real_swf_powerflow.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    import gridexpand.powerflow.run_real_swf_powerflow as real_runner
+
+    return real_runner
 
 
 def critical_real_grids(*, real_run_name: str, plz: int, stage: str, voltage_threshold: float) -> pd.DataFrame:
@@ -591,7 +575,7 @@ def audit_critical_topology(
     return summary_df, path_df
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Audit topology bottlenecks in critical real-grid voltage cases.")
     parser.add_argument("--real-run-name", default="real_hybrid")
     parser.add_argument("--plz", type=int, default=91301)
@@ -600,9 +584,9 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=POSTPROCESSING_DIR / "output" / "audits" / "topology",
+        default=ANALYSIS_OUTPUT_DIR / "audits" / "topology",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     summary, path_lines = audit_critical_topology(
         real_run_name=args.real_run_name,

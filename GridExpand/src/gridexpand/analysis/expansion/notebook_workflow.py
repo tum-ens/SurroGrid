@@ -7,24 +7,20 @@ from datetime import UTC, datetime
 import json
 import subprocess
 from pathlib import Path
-import sys
 
 import pandas as pd
 from sqlalchemy import text
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.database import SurroGridDatabase  # noqa: E402
-from expansion import grid_expansion  # noqa: E402
-from powerflow.comparison_data import (  # noqa: E402
+from gridexpand.db.database import SurroGridDatabase
+from gridexpand.paths import PROJECT_DIR
+from gridexpand.analysis.expansion import grid_expansion
+from gridexpand.analysis.powerflow.comparison_data import (
     load_synthetic_powerflow_cutoff_profile,
     real_powerflow_headline_summary_db,
     real_powerflow_percentile_profile_db,
 )
-from plotting.powerflow_transformer import transformer_import_distribution_db  # noqa: E402
-from plotting.powerflow_voltage import voltage_deviation_summary_db  # noqa: E402
+from gridexpand.analysis.plotting.powerflow_transformer import transformer_import_distribution_db
+from gridexpand.analysis.plotting.powerflow_voltage import voltage_deviation_summary_db
 
 
 PROVIDER_LABELS = {"swf": "SWF", "uzw": "ÜZW"}
@@ -1185,7 +1181,7 @@ def export_scenario_analysis_manifest(
     try:
         git_revision = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=GRIDEXPAND_DIR.parent,
+            cwd=PROJECT_DIR,
             check=True,
             capture_output=True,
             text=True,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import h5py
@@ -15,11 +14,7 @@ from pandapower.plotting import create_generic_coordinates
 from pandapower.plotting import plotly as pp_plotly
 from sqlalchemy import text
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.database import SurroGridDatabase  # noqa: E402
+from gridexpand.db.database import SurroGridDatabase
 
 
 def _read_net(h5_path: Path) -> pp.pandapowerNet:
@@ -320,7 +315,7 @@ def plot_powerflow_heatmap(
     except ImportError as exc:
         raise ImportError(
             "pandapower plotly backend is unavailable. Run `uv sync` in "
-            "GridExpand/5.postprocessing to install plotly."
+            "GridExpand to install plotly."
         ) from exc
     if show:
         fig.show()
@@ -531,7 +526,7 @@ def plot_powerflow_heatmap_db(
     except ImportError as exc:
         raise ImportError(
             "pandapower plotly backend is unavailable. Run `uv sync` in "
-            "GridExpand/5.postprocessing to install plotly."
+            "GridExpand to install plotly."
         ) from exc
     if show:
         fig.show()
@@ -888,9 +883,9 @@ def _write_html_if_requested(fig, output_html: Path | None) -> None:
     output_html.parent.mkdir(parents=True, exist_ok=True)
     fig.write_html(output_html)
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = _build_arg_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     show = not args.no_show
 
     if args.storage == "db" and args.compare_max_loading:

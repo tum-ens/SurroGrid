@@ -13,7 +13,6 @@ from collections.abc import Mapping
 import json
 import math
 from pathlib import Path
-import sys
 from typing import Any
 
 import networkx as nx
@@ -22,11 +21,7 @@ import pandas as pd
 import pandapower as pp
 from sqlalchemy import text
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.database import SurroGridDatabase  # noqa: E402
+from gridexpand.db.database import SurroGridDatabase
 
 
 def _normalized_ags(value: str | int) -> int:
