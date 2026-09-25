@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-import sys
 import time
 from typing import Any
 
@@ -23,7 +23,9 @@ from dotenv import load_dotenv
 
 from gridexpand.common.electrification import assignment_manifest_hash
 from gridexpand.common.orchestration import (
+    Cancelled,
     StatusLog,
+    install_cancel_handlers,
     latest_step3_result,
     run_batch_command,
     run_command,
@@ -40,19 +42,54 @@ from gridexpand.paired.sources import (
     TARGET_ADAPTERS,
     adapters_for_scope,
 )
-from gridexpand.scenario.config_loader import load_scenario_config
 from gridexpand.paths import (
     ENV_FILE,
     OPTIMIZATION_INPUT_DIR,
     PROJECT_DIR,
-    SCENARIO_CONFIG_DIR,
     STATISTICS_DIR,
 )
-from gridexpand.scenario.model_cases import POST_MODEL_CASES
+from gridexpand.scenario import commands
+from gridexpand.scenario.config_loader import load_scenario_config
+from gridexpand.scenario.model_cases import (
+    MATERIALIZATION_CASE,
+    POST_MODEL_CASES,
+    compatible_result_cases,
+    get_model_case,
+)
 
 ENV_PATH = ENV_FILE
-DEFAULT_SCENARIO_CONFIG = SCENARIO_CONFIG_DIR / "forchheim_2045_full_year.yaml"
 TARGET_CHOICES = (*TARGET_ADAPTERS, "both")
+# status.tsv of a paired run: one row per target grid, keyed by "<target>:<grid id>".
+STATUS_COLUMNS = (
+    "job",
+    "target_network",
+    "target_grid_id",
+    "job_index",
+    "status",
+    "stage",
+    "started_at",
+    "finished_at",
+    "seconds",
+    "log_file",
+    "message",
+)
+_LEGACY_LOG_NAME = re.compile(r"^(?P<target>.+)_(?P<grid>\d+)\.log$")
+
+
+def job_key(target_network: str, target_grid_id: int) -> str:
+    """Resume key of one paired job (review-orch B4: never the list position)."""
+    return f"{target_network}:{int(target_grid_id)}"
+
+
+def _legacy_job_key(row: dict[str, str]) -> str | None:
+    """Job key of a status.tsv row written before job keys (from its log file name)."""
+    match = _LEGACY_LOG_NAME.match(Path(row.get("log_file") or "").name)
+    return job_key(match["target"], int(match["grid"])) if match else None
+
+
+def open_status(run_dir: Path, *, resume: bool) -> StatusLog:
+    """The status log of a paired run directory (rows keyed by :func:`job_key`)."""
+    return StatusLog(run_dir, resume=resume, key_column="job", columns=STATUS_COLUMNS, legacy_key=_legacy_job_key)
 
 
 def _load_jobs(
@@ -64,7 +101,14 @@ def _load_jobs(
     jobs: list[dict[str, Any]] = []
     for adapter in adapters_for_scope(target, provider):
         jobs.extend(adapter.load_jobs(paired_dir, target_grid_id))
-    return [{**job, "job_index": index} for index, job in enumerate(jobs)]
+    return _number_jobs(jobs)
+
+
+def _number_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {**job, "job_index": index, "job": job_key(job["target_network"], job["target_grid_id"])}
+        for index, job in enumerate(jobs)
+    ]
 
 
 def _input_name(job: dict[str, Any], scenario_label: str) -> str:
@@ -74,41 +118,18 @@ def _input_name(job: dict[str, Any], scenario_label: str) -> str:
 
 
 def _materialize_command(job: dict[str, Any], args: argparse.Namespace) -> list[str]:
-    command = [
-        sys.executable,
-        "-m",
-        "gridexpand.allocation.scenario_calibration.pipeline.paired_urbs_input",
-        "--paired-dir",
-        str(args.paired_dir),
-        "--target-network",
-        str(job["target_network"]),
-        "--target-grid-id",
-        str(job["target_grid_id"]),
-        "--scenario-label",
-        args.scenario_label,
-        "--profile-seed",
-        str(args.profile_seed),
-        "--weather-source-hdf",
-        str(args.weather_source_hdf),
-        "--model-case",
-        args.model_case,
-        "--scenario-config",
-        str(args.scenario_config),
-    ]
-    if args.heat_profile_library is not None:
-        command.extend(["--heat-profile-library", str(args.heat_profile_library)])
-    if args.allow_diagnostic_heat_fallback:
-        command.append("--allow-diagnostic-heat-fallback")
-    return command
-
-
-def _tsam_arguments(
-    args: argparse.Namespace, *, reduce_only: bool = False
-) -> list[str]:
-    arguments = ["--scenario-config", str(args.scenario_config)]
-    if reduce_only:
-        arguments.append("--reduce-only")
-    return arguments
+    return commands.paired_materialize_command(
+        paired_dir=args.paired_dir,
+        target_network=str(job["target_network"]),
+        target_grid_id=int(job["target_grid_id"]),
+        scenario_label=args.scenario_label,
+        profile_seed=args.profile_seed,
+        weather_source_hdf=args.weather_source_hdf,
+        model_case=args.model_case,
+        scenario_config=args.scenario_config,
+        heat_profile_library=args.heat_profile_library,
+        allow_diagnostic_heat_fallback=args.allow_diagnostic_heat_fallback,
+    )
 
 
 def _prepare_shared_tsam_reference(
@@ -152,15 +173,9 @@ def _prepare_shared_tsam_reference(
         env_extra={"PYLOVO_VERSION_ID": str(args.pylovo_version_id)},
     )
     run_batch_command(
-        cmd=[
-            sys.executable,
-            "-m",
-            "gridexpand.optimization.run_urbs_cluster",
-            input_hdf.name,
-            "--n_cpu",
-            "1",
-            *_tsam_arguments(args, reduce_only=True),
-        ],
+        cmd=commands.optimization_command(
+            input_hdf.name, n_cpu=1, scenario_config=args.scenario_config, reduce_only=True
+        ),
         log_path=log_path,
         status=status,
         stage="shared_tsam_select_periods",
@@ -192,19 +207,12 @@ def _prepare_shared_pv_profiles(
     """Build the angle-binned pvlib profiles once before parallel grid jobs."""
     output = args.paired_dir / "paired_pv_profile_library.h5"
     run_batch_command(
-        cmd=[
-            sys.executable,
-            "-m",
-            "gridexpand.allocation.scenario_calibration.profiles.pv_profile_library",
-            "--roof-catalog",
-            str(args.paired_dir / "paired_roof_sections.csv"),
-            "--weather-source-hdf",
-            str(args.weather_source_hdf),
-            "--output",
-            str(output),
-            "--reference-year",
-            str(args.reference_year),
-        ],
+        cmd=commands.pv_profile_library_command(
+            roof_catalog=args.paired_dir / "paired_roof_sections.csv",
+            weather_source_hdf=args.weather_source_hdf,
+            output=output,
+            reference_year=args.reference_year,
+        ),
         log_path=args.run_dir / "logs" / "shared_pv_profile_library.log",
         status=status,
         stage="shared_pv_profile_library",
@@ -267,6 +275,7 @@ def _run_identity(args: argparse.Namespace) -> dict[str, Any]:
         "profile_seed": int(args.profile_seed),
         "powerflow_grid_scope": str(args.powerflow_grid_scope),
         "target": str(args.target),
+        "target_grid_id": args.target_grid_id,
         "provider": str(args.provider),
         "powerflow_max_timesteps": args.max_timesteps,
         "job_subset": (
@@ -340,17 +349,19 @@ def _run_one(
     args: argparse.Namespace,
     status: StatusLog,
 ) -> dict[str, Any]:
-    job_index = int(job["job_index"])
+    key = str(job["job"])
     target = str(job["target_network"])
     grid_id = int(job["target_grid_id"])
-    if args.resume and status.status_for(job_index) == "done":
+    if args.resume and status.status_for(key) == "done":
         return {**job, "status": "skipped"}
 
     started = time.monotonic()
     log_path = args.run_dir / "logs" / f"{target}_{grid_id}.log"
     status.update(
-        job_index,
-        lv_id=f"{target}:{grid_id}",
+        key,
+        target_network=target,
+        target_grid_id=grid_id,
+        job_index=int(job["job_index"]),
         status="running",
         stage="start",
         started_at=utc_now(),
@@ -362,7 +373,7 @@ def _run_one(
             cmd=_materialize_command(job, args),
             log_path=log_path,
             status=status,
-            candidate_index=job_index,
+            job=key,
             stage=f"step2_materialize_{target}",
             env_extra={"PYLOVO_VERSION_ID": str(args.pylovo_version_id)},
         )
@@ -374,27 +385,21 @@ def _run_one(
             result_hdf = input_hdf
         else:
             run_command(
-                cmd=[
-                    sys.executable,
-                    "-m",
-                    "gridexpand.optimization.run_urbs_cluster",
+                cmd=commands.optimization_command(
                     input_hdf.name,
-                    "--n_cpu",
-                    str(args.step3_cpus),
-                    *_tsam_arguments(args),
-                ],
+                    n_cpu=args.step3_cpus,
+                    scenario_config=args.scenario_config,
+                    cluster_concurrency=args.step3_cluster_concurrency,
+                ),
                 log_path=log_path,
                 status=status,
-                candidate_index=job_index,
+                job=key,
                 stage=(
                     f"step3_{target}_shared_tsam"
                     if args.tsam
                     else f"step3_{target}_full_year"
                 ),
-                env_extra={
-                    "URBS_CLUSTER_CONCURRENCY": str(args.step3_cluster_concurrency),
-                    "PYLOVO_VERSION_ID": str(args.pylovo_version_id),
-                },
+                env_extra={"PYLOVO_VERSION_ID": str(args.pylovo_version_id)},
             )
             result_hdf = latest_step3_result(input_hdf)
             if args.tsam:
@@ -421,7 +426,7 @@ def _run_one(
             result_hdf.unlink(missing_ok=True)
         seconds = round(time.monotonic() - started, 1)
         status.update(
-            job_index,
+            key,
             status="done",
             stage="complete",
             finished_at=utc_now(),
@@ -434,10 +439,14 @@ def _run_one(
             "seconds": seconds,
             "electrification_assignment_hash": assignment_hash,
         }
+    except Cancelled as exc:
+        seconds = round(time.monotonic() - started, 1)
+        status.update(key, status="cancelled", finished_at=utc_now(), seconds=seconds, message=str(exc))
+        return {**job, "status": "cancelled", "seconds": seconds, "error": str(exc)}
     except Exception as exc:
         seconds = round(time.monotonic() - started, 1)
         status.update(
-            job_index,
+            key,
             status="failed",
             stage="failed",
             finished_at=utc_now(),
@@ -445,6 +454,7 @@ def _run_one(
             message=str(exc),
         )
         status.failed_grid(
+            job=key,
             target_network=target,
             target_grid_id=grid_id,
             error=str(exc),
@@ -502,7 +512,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--weather-source-hdf", type=Path)
     parser.add_argument("--heat-profile-library", type=Path)
     parser.add_argument("--scenario-label", default=None)
-    parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
+    parser.add_argument("--scenario-config", type=Path, required=True, help="Scenario YAML (config/scenarios).")
     parser.add_argument(
         "--model-case",
         choices=POST_MODEL_CASES,
@@ -553,6 +563,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    install_cancel_handlers()
     load_dotenv(ENV_PATH, override=True)
     if args.paired_dataset_id is not None:
         dataset = resolve_paired_dataset(
@@ -595,11 +606,9 @@ def main(argv: list[str] | None = None) -> None:
         result_cases = args.result_cases or [requested_model_case]
         if len(result_cases) != len(set(result_cases)):
             raise ValueError("--result-cases contains duplicates.")
-        if requested_model_case in {"post-inflex-heuristic", "post-hems-heuristic"}:
-            allowed_results = {"post-inflex-heuristic", "post-hems-heuristic"}
-            args.model_case = "post-hems-heuristic"
-        else:
-            allowed_results = {"post-hems-optimized"}
+        # Heuristic cases share one asset plan, materialized as post-hems-heuristic.
+        allowed_results = set(compatible_result_cases(requested_model_case))
+        args.model_case = MATERIALIZATION_CASE[get_model_case(requested_model_case).asset_plan]
     incompatible = set(result_cases).difference(allowed_results)
     if incompatible:
         raise ValueError(
@@ -698,15 +707,12 @@ def main(argv: list[str] | None = None) -> None:
             job for job in jobs
             if int(job["target_grid_id"]) in {int(value) for value in subset.get(job["target_network"], [])}
         ]
-        jobs = [{**job, "job_index": index} for index, job in enumerate(jobs)]
+        jobs = _number_jobs(jobs)
     if not jobs:
         raise ValueError("No paired target grids matched the requested scope.")
     _assert_resume_compatible(args)
-    status = StatusLog(args.run_dir, resume=args.resume)
-    args.pv_profile_library = _prepare_shared_pv_profiles(
-        args=args,
-        status=status,
-    )
+    status = open_status(args.run_dir, resume=args.resume)
+    _prepare_shared_pv_profiles(args=args, status=status)
     args.shared_tsam_signature = (
         None
         if args.pre_only
@@ -775,12 +781,16 @@ def main(argv: list[str] | None = None) -> None:
         )
     result.to_csv(args.run_dir / "results.csv", index=False)
     failures = int(result["status"].eq("failed").sum())
+    cancelled = int(result["status"].eq("cancelled").sum())
     status.event(
         event="batch_finish",
-        status="ok" if failures == 0 else "partial_failure",
+        status="cancelled" if cancelled else "ok" if failures == 0 else "partial_failure",
         failures=failures,
+        cancelled=cancelled,
         seconds=round(time.monotonic() - started, 1),
     )
+    if cancelled:
+        raise SystemExit(143)
     if failures:
         raise SystemExit(1)
 
