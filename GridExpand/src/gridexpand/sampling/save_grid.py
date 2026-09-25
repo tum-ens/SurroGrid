@@ -10,8 +10,8 @@ The notebooks in `gridreadout/` use `SaveFile` to create the output that is
 consumed by downstream pipeline steps.
 """
 
-from config import config
-from src.grid_topol import get_consumers
+from gridexpand.sampling.config import config
+from gridexpand.sampling.grid_topol import get_consumers
 
 import pandapower as pp
 
@@ -37,8 +37,8 @@ class SaveFile:
 
     def _create_empty_savefile(self):
         if os.path.exists(self.path):
-            print(f"Warning: The grid file already existed and will be overwritten.")
-        with h5py.File(self.path, 'w') as f:
+            print("Warning: The grid file already existed and will be overwritten.")
+        with h5py.File(self.path, 'w'):
             print(f"File {self.path} created!")
 
 

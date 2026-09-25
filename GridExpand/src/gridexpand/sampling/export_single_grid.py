@@ -10,8 +10,8 @@ from typing import Optional
 
 import pandas as pd
 
-import src.db_read as dbrd
-import src.export_grid as expgrd
+import gridexpand.sampling.db_read as dbrd
+import gridexpand.sampling.export_grid as expgrd
 
 
 def _select_grid_for_plz(
@@ -66,7 +66,7 @@ def _select_grid_for_plz(
 
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Export one pylovo grid for pilot runs.")
     parser.add_argument("--plz", required=True, help="Target German PLZ (e.g. 80803).")
     parser.add_argument("--kcid", type=int, help="Optional KCID to pin one exact grid.")
@@ -98,7 +98,7 @@ def main() -> None:
         default=5,
         help="Minimum number of buildings required for candidate grids (default: 5).",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     db = dbrd.DataBase()
 

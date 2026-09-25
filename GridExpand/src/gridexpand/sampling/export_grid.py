@@ -1,11 +1,11 @@
 """Shared pylovo grid export helpers for Step 1."""
 
-from common.building_components import build_building_components
+from gridexpand.common.building_components import build_building_components
 import pandas as pd
 
-import src.grid_topol as grdtpl
-import src.save_grid as svgrd
-import src.weather as wth
+import gridexpand.sampling.grid_topol as grdtpl
+import gridexpand.sampling.save_grid as svgrd
+import gridexpand.sampling.weather as wth
 
 
 def build_region_row(db, plz: int, kcid: int, bcid: int) -> pd.DataFrame:

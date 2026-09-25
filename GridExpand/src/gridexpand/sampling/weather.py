@@ -9,7 +9,7 @@ The sampling notebook stores the returned DataFrames into the grid `.h5` under
 `/raw_data/weather`.
 """
 
-from config import config
+from gridexpand.sampling.config import config
 
 import requests
 import numpy as np

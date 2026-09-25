@@ -41,7 +41,7 @@ def remove_limits(net):
     hv_bus = int(net.trafo.loc[0, "hv_bus"])
     lv_bus = int(net.trafo.loc[0, "lv_bus"])
     pp.drop_trafos(net, [0])
-    switch_idx = pp.create_switch(net, bus=hv_bus, element=lv_bus, et="b", closed=True, type="CB")
+    pp.create_switch(net, bus=hv_bus, element=lv_bus, et="b", closed=True, type="CB")
 
     df_buses.loc[hv_bus, "vn_kv"] = df_buses.loc[lv_bus, "vn_kv"]
     net.bus = df_buses

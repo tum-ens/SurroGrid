@@ -8,17 +8,11 @@ PostgreSQL database that stores:
 - building attributes used to map buildings to consumer buses
 
 Connection credentials are taken from environment variables loaded in
-`gridreadout/config.py`.
+`gridexpand.sampling.config`.
 """
 
-from pathlib import Path
-import sys
-
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[3]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-from common.building_components import validate_physical_buildings
-from config import config
+from gridexpand.common.building_components import validate_physical_buildings
+from gridexpand.sampling.config import config
 
 from sqlalchemy import create_engine, text
 import pandapower as pp

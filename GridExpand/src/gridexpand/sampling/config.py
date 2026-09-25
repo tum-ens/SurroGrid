@@ -5,11 +5,12 @@ environment variables and are commonly provided via the GridExpand-level `.env` 
 """
 
 import os
-from pathlib import Path
 from dotenv import load_dotenv
 
+from gridexpand.paths import ENV_FILE, SAMPLING_DATA_DIR, SAMPLING_RESULTS_DIR
+
 # Load .env file for environment-specific settings (DB credentials, etc.)
-load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=True)
+load_dotenv(ENV_FILE, override=True)
 
 class Config:
     #--------------------------------------------------------------#
@@ -36,7 +37,8 @@ class Config:
     #----------------- Paths/Dataset Readout ----------------------#
     #--------------------------------------------------------------#
     # Important paths
-    STORAGE_DIR = "results"                # Directory in which to store results
+    STORAGE_DIR = str(SAMPLING_RESULTS_DIR)   # Directory in which to store results
+    INPUT_DATA_DIR = str(SAMPLING_DATA_DIR)   # Static inputs of the sampling notebooks (shapefiles, census, RegioStaR)
     PYLOVO_COORD_FORMAT = "EPSG:3035"
     TARGET_COORD_FORMAT = "EPSG:4326"
 
