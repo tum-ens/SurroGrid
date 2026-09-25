@@ -162,6 +162,18 @@ def _represent_null(representer, _data):
     return representer.represent_scalar("tag:yaml.org,2002:null", "null")
 
 
+def _represent_float(representer, data: float):
+    """New floats in the shortest form that PyYAML (the loader) also reads as floats (``1.0e-05``)."""
+    if not math.isfinite(data):
+        return representer.represent_float(data)
+    text = repr(float(data))
+    if "e" in text:
+        mantissa, exponent = text.split("e")
+        mantissa = mantissa if "." in mantissa else f"{mantissa}.0"
+        text = f"{mantissa}e{'-' if exponent.startswith('-') else '+'}{exponent.lstrip('+-').zfill(2)}"
+    return representer.represent_scalar("tag:yaml.org,2002:float", text)
+
+
 def _guess_indent(text: str) -> tuple[int, int, int]:
     """``(mapping, sequence, offset)`` indentation of a YAML text (default: that of the shipped files)."""
     mapping = sequence = offset = None
@@ -191,6 +203,7 @@ def _round_trip(text: str) -> tuple[YAML, Any]:
     rt.width = 4096
     rt.indent(mapping=mapping, sequence=sequence, offset=offset)
     rt.representer.add_representer(type(None), _represent_null)
+    rt.representer.add_representer(float, _represent_float)
     return rt, rt.load(text)
 
 
@@ -404,7 +417,7 @@ def apply_changes(text: str, changes: dict[str, Any], scenario_id: str | None = 
         if _active(field, doc):
             if key in typed:
                 put(key, typed[key], field)
-        elif leaf in mapping:
+        elif leaf in mapping and field["requires"]["key"] in typed:
             _delete(mapping, leaf)
             del get_value(expected, key.rsplit(".", 1)[0])[leaf]
             changed = True

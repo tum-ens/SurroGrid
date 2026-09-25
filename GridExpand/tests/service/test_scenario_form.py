@@ -150,6 +150,24 @@ def test_dependent_and_optional_keys_keep_the_comments_around_them():
     assert sf.apply_changes(text, {"asset_sizing.heat.teaser_retrofit_level": 0}) == text
 
 
+def test_small_and_large_floats_stay_floats_for_the_loader():
+    text = text_of(SCHWEINFURT)
+    new = sf.apply_changes(text, {"economics.electricity.pv_feed_in_tariff_eur_per_kwh": 1e-05,
+                                  "asset_sizing.pv.fallback_capacity_kwp": 2e16})
+    assert "pv_feed_in_tariff_eur_per_kwh: 1.0e-05\n" in new and "fallback_capacity_kwp: 2.0e+16\n" in new
+    pv = yaml.safe_load(new)
+    assert pv["economics"]["electricity"]["pv_feed_in_tariff_eur_per_kwh"] == 1e-05
+
+
+def test_dependent_keys_are_only_removed_when_their_rule_field_changes():
+    broken = text_of(INVENTORY).replace("    adoption_mode: source_inventory\n  mobility:",
+                                        "    adoption_mode: source_inventory\n    building_share: 0.5\n  mobility:")
+    new = sf.apply_changes(broken, {"asset_sizing.pv.demand_multiplier": 2.5})
+    assert "building_share: 0.5" in new  # the loader reports it; the editor does not repair unasked
+    fixed = sf.apply_changes(broken, {"electrification.heat.adoption_mode": "source_inventory"})
+    assert "building_share" not in fixed.split("mobility:")[0]
+
+
 def test_the_home_charger_power_writes_both_capacities():
     text = text_of(SCHWEINFURT)
     new = yaml.safe_load(sf.apply_changes(text, {"technologies.processes.home_charger.installed_capacity_kw": 7.4}))
