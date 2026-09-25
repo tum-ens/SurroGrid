@@ -15,6 +15,16 @@ def py(code: str) -> list[str]:
     return [sys.executable, "-c", code]
 
 
+def _alive(pid: int) -> bool:
+    """Whether a process exists and is not a zombie."""
+    try:
+        os.kill(pid, 0)
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except (ProcessLookupError, FileNotFoundError):
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"
+
+
 def wait(job, timeout: float = 30.0):
     deadline = time.time() + timeout
     while job.active and time.time() < deadline:
@@ -80,13 +90,10 @@ def test_cancel_stops_the_process_group(tmp_path):
     manager.cancel(job.id)
     wait(job)
     assert job.status == "cancelled" and [s.status for s in job.steps] == ["cancelled", "cancelled"]
-    time.sleep(0.5)
-    try:
-        os.kill(child, 0)
-        alive = open(f"/proc/{child}/stat").read().split()[2] != "Z"
-    except (ProcessLookupError, FileNotFoundError):
-        alive = False
-    assert not alive, "the grandchild survived the cancel"
+    deadline = time.time() + 10
+    while _alive(child) and time.time() < deadline:
+        time.sleep(0.1)
+    assert not _alive(child), "the grandchild survived the cancel"
 
 
 def test_history_survives_a_restart(tmp_path):
