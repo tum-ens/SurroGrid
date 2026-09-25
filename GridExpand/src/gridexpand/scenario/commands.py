@@ -242,9 +242,14 @@ def expansion_command(
     exclude_real_lv_ids: Iterable[int] = (),
     note: str | None = None,
     replace: bool = True,
+    refresh: bool = False,
     python: str | None = None,
 ) -> list[str]:
-    """Materialize one expansion analysis from the summaries of ``run_name``."""
+    """Materialize one expansion analysis from the summaries of ``run_name``.
+
+    The QGIS materialized views are not refreshed per analysis (``--no-refresh``);
+    batch callers refresh them once at the end (``gridexpand.db.refresh_qgis_views``).
+    """
     argv = module_command(GRID_EXPANSION, "--run-name", run_name, python=python)
     _flag(argv, "--data-source", data_source)
     argv += ["--stage", stage]
@@ -256,6 +261,8 @@ def expansion_command(
     _flag(argv, "--note", note)
     if replace:
         argv.append("--replace")
+    if not refresh:
+        argv.append("--no-refresh")
     return argv
 
 

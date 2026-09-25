@@ -11,7 +11,8 @@ from gridexpand.scenario.config_loader import load_scenario_config
 
 SCENARIO_PATH = SCENARIO_CONFIG_DIR / "schweinfurt_2045.yaml"
 SCENARIO, SCENARIO_HASH = load_scenario_config(SCENARIO_PATH)
-KEY = f"scenario_schweinfurt_2045_{SCENARIO_HASH[:12]}_max_base_electricity_demand_week"
+SID = f"scenario_schweinfurt_2045_{SCENARIO_HASH[:12]}"
+KEY = f"{SID}_max_base_electricity_demand_week"
 
 
 def settings(tmp_path=None, **changes):
@@ -86,9 +87,9 @@ def test_names():
     assert runner.job_key(candidate()) == "9184137-03_85653_1_4"
     assert SCENARIO.time_aggregation.enabled  # schweinfurt_2045 uses TSAM
     assert runner.expansion_analysis_prefix(s) == (
-        "09184137_max_base_electricity_demand_week_post_electrification_tsam_post-hems-heuristic")
+        f"09184137_{SID}_max_base_electricity_demand_week_post_electrification_tsam_post-hems-heuristic")
     assert runner.expansion_analysis_prefix(settings(case_qualified_output=False, demand_scope="residential")) == (
-        "09184137_max_base_electricity_demand_week_post_electrification_hh_only_tsam")
+        f"09184137_{SID}_max_base_electricity_demand_week_post_electrification_hh_only_tsam")
     assert runner.expansion_analysis_prefix(settings(expansion_analysis_prefix="mine")) == "mine"
 
 
@@ -131,8 +132,8 @@ def test_expansion_notes_name_failed_grids(tmp_path, monkeypatch):
     status = StatusLog(tmp_path, echo=False)
     materialized = runner.materialize_expansion_analyses(settings=s, status=status, candidate_count=4)
     assert [m["analysis_key"] for m in materialized] == [
-        "09184137_max_base_electricity_demand_week_post_electrification_tsam_post-hems-heuristic_pre",
-        "09184137_max_base_electricity_demand_week_post_electrification_tsam_post-hems-heuristic_post",
+        f"09184137_{SID}_max_base_electricity_demand_week_post_electrification_tsam_post-hems-heuristic_pre",
+        f"09184137_{SID}_max_base_electricity_demand_week_post_electrification_tsam_post-hems-heuristic_post",
     ]
     assert calls[0][calls[0].index("--note") + 1].endswith("summary stage=pre.")
     calls.clear()

@@ -25,11 +25,10 @@ execution:
   # Change it only when a deliberately different Monte Carlo realization is wanted.
   profile_seed: 481527  # Arbitrary fixed value; no geographic or scenario meaning.
   # Cases listed together use identical controlled demand/profile realizations.
-  # post-inflex-heuristic is refused by the synthetic pipeline for now (no EV
-  # sessions for the INFLEX power flow); remove it to launch this run.
+  # post-inflex-heuristic is not available in the synthetic pipeline yet: synthetic
+  # Step 2 uses the v1 mobility pool and writes no EV sessions for the INFLEX power flow.
   model_cases:
     - pre
-    - post-inflex-heuristic
     - post-hems-heuristic
     - post-hems-optimized
   # Machine-specific execution choices; scientific assumptions stay in the scenario YAML.

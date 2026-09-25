@@ -468,11 +468,12 @@ def step2_filename(candidate: dict[str, object], settings: BatchSettings) -> str
 def expansion_analysis_prefix(settings: BatchSettings) -> str:
     """Prefix of the batch's expansion analysis keys.
 
-    ``<ags:08d>_<timeframe>_<profiles>[_hh_only][_tsam][_<model_case>]``. The
-    AGS keeps two regions apart (review-post B7) and, with
-    ``case_qualified_output``, the model case keeps the heuristic and optimized
-    batches apart (review-orch B2); before, a later batch replaced the earlier
-    one's analyses (``grid_expansion --replace`` deletes by key).
+    ``<ags:08d>_<scenario identity>_<timeframe>_<profiles>[_hh_only][_tsam][_<model_case>]``.
+    The AGS keeps two regions apart (review-post B7), the scenario identity
+    (``scenario_<id>_<hash12>``) two scenarios of one region, and, with
+    ``case_qualified_output``, the model case the heuristic and optimized
+    batches (review-orch B2); before, a later batch replaced the earlier one's
+    analyses (``grid_expansion --replace`` deletes by key).
     """
     if settings.expansion_analysis_prefix:
         return settings.expansion_analysis_prefix
@@ -480,8 +481,9 @@ def expansion_analysis_prefix(settings: BatchSettings) -> str:
     tsam_suffix = "_tsam" if settings.tsam else ""
     case_suffix = f"_{settings.model_case}" if settings.case_qualified_output else ""
     ags = str(int(str(settings.ags).strip() or "0")).zfill(8)
+    scenario = scenario_identity_key(settings.scenario.scenario_id, settings.scenario_hash)
     return (
-        f"{ags}_{settings.timeframe_mode}_{run_name_profile_token(settings.profiles)}"
+        f"{ags}_{scenario}_{settings.timeframe_mode}_{run_name_profile_token(settings.profiles)}"
         f"{scope_suffix}{tsam_suffix}{case_suffix}"
     )
 

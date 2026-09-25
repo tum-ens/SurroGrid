@@ -61,7 +61,8 @@ def test_powerflow_command_one_pass_and_paired_summary():
 def test_expansion_commands():
     argv = commands.expansion_command("run_s", stage="pre", ags="9184137", analysis_key="k_pre", note="n.", python=PY)
     assert argv == [PY, "-m", "gridexpand.analysis.expansion.grid_expansion", "--run-name", "run_s", "--stage", "pre",
-                    "--ags", "9184137", "--analysis-key", "k_pre", "--note", "n.", "--replace"]
+                    "--ags", "9184137", "--analysis-key", "k_pre", "--note", "n.", "--replace",
+                    "--no-refresh"]
     real = commands.expansion_command("run_r", stage="post", data_source="real_swf", plz=91301,
                                       exclude_real_lv_ids=(113,), analysis_key="k", python=PY)
     assert real[real.index("--data-source") + 1] == "real_swf" and real[real.index("--plz") + 1] == "91301"
