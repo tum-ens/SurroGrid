@@ -178,7 +178,8 @@ def _get_total_demands(cdf, occ_list, rng=None):
         columns = cdf.columns.get_level_values(0).unique()
 
         for i, n_occ in enumerate(occ_list):
-            if n_occ > 3: n_occ = 4
+            if n_occ > 3:
+                n_occ = 4
             n_occ = int(n_occ)
             demand_list.append(np.interp(u[i], cdf[columns[n_occ-1], "Y"], cdf[columns[n_occ-1], "X"]))
         return demand_list

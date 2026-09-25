@@ -46,6 +46,9 @@ from .real_swf_electricity_profiles import (
     load_electricity_module,
     select_residential_profile,
 )
+from .heat_profile_source import load_physical_heat_profile
+from .physical_heat_profile_library import PhysicalHeatProfileLibrary
+from .pv_profile_library import read_pv_profile_library
 from ..paths import DEMAND_STATISTICS_DIR, SYNTHETIC_INPUT_DIR
 
 DEFAULT_MOBILITY_WEATHER_KEY = "central_germany_tmy"
@@ -154,9 +157,6 @@ def _read_session_pool(
     if rows is None:
         return pd.DataFrame(columns=list(columns) if columns else ["profile_id"])
     return rows
-from .heat_profile_source import load_physical_heat_profile
-from .physical_heat_profile_library import PhysicalHeatProfileLibrary
-from .pv_profile_library import read_pv_profile_library
 
 
 def source_match_buildings(

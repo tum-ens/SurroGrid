@@ -8,13 +8,6 @@ from pathlib import Path
 import pandas as pd
 
 from ..paths import OUTPUT_DIR, SYNTHETIC_INPUT_DIR
-
-DEFAULT_PAIRED_DIR = (
-    OUTPUT_DIR
-    / "swf_2045_paired_v5_91301_station_hybrid_v2"
-)
-DEFAULT_OUTPUT_DIR = SYNTHETIC_INPUT_DIR
-
 from gridexpand.allocation.config import config
 from gridexpand.common.electrification import (
     assignment_manifest_hash,
@@ -52,6 +45,12 @@ from gridexpand.allocation.scenario_calibration.pipeline.urbs_input_tables impor
 from gridexpand.allocation.scenario_calibration.profiles.profile_contract import (
     assert_paired_component_plan_equivalence,
 )
+
+DEFAULT_PAIRED_DIR = (
+    OUTPUT_DIR
+    / "swf_2045_paired_v5_91301_station_hybrid_v2"
+)
+DEFAULT_OUTPUT_DIR = SYNTHETIC_INPUT_DIR
 
 
 def _plan_path(paired_dir: Path, target_network: str) -> Path:

@@ -91,7 +91,8 @@ class Grid:
         self.altitude = float(region_row.get("altitude", 0.0))  # altitude of location in meters
 
         ### Data to be generated
-        if not self.settings["weather_data_exists"]: self.df_weather_raw = pd.DataFrame()
+        if not self.settings["weather_data_exists"]:
+            self.df_weather_raw = pd.DataFrame()
         self.df_supim_solar = pd.DataFrame()
         self.df_demand_elec = pd.DataFrame()
         self.df_electricity_component_profiles = pd.DataFrame()
@@ -802,7 +803,8 @@ class Grid:
 
                 self.df_demand_mobility = pd.concat([results[i][0] for i in range(len(results))], axis=1)
                 self.df_tve_mobility = pd.concat([results[i][1] for i in range(len(results))], axis=1)
-                for d in [results[i][2] for i in range(len(results))]: self.battery_dict.update(d)
+                for d in [results[i][2] for i in range(len(results))]:
+                    self.battery_dict.update(d)
             else:
                 raise ValueError(f"Unknown mobility source: {mobility_source}")
         

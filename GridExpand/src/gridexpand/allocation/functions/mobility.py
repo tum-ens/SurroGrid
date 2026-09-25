@@ -26,13 +26,15 @@ POOL_MANIFEST_FILENAME = "mobility_pool_manifest.json"
 def _sample_cars_in_building(occ_list, df_cars_per_household, rng):
     car_list = []
     for n_occ in occ_list:
-        if n_occ>5: n_occ = 5
+        if n_occ>5:
+            n_occ = 5
         subset = df_cars_per_household[df_cars_per_household['hh_size'] == n_occ]
         car_list.append(rng.choice(subset['vehicle_count'].values, size=1, p=subset['probability'].values).item())
     return car_list, sum(car_list)
     
 def _sample_model_and_commuting(n_cars, prob_commuter, df_car_model_dist, bus, base_seed, building_id):
-    if n_cars == 0: return {}
+    if n_cars == 0:
+        return {}
     else:
         ### First create all column of the car dataframe
         buses = pd.DataFrame([bus]*n_cars, columns=["bus"])     # bus at which car is placed, always the same
@@ -97,9 +99,12 @@ def _simulate_vehicles(vehicle_configs, weather):
     for idx, cfg in vehicle_configs.items():
         print(f"Currently generating vehicle {idx}...")
         # Determine departure-destination trips file based on schedule
-        if cfg['schedule'] == "commuter": stat_dest_path = "DepartureDestinationTrip_commuter.csv"
-        elif cfg['schedule'] == "non-commuter": stat_dest_path = "DepartureDestinationTrip_noncommuter.csv"
-        else: raise ValueError(f"Unknown schedule '{cfg['schedule']}' for vehicle {idx}")
+        if cfg['schedule'] == "commuter":
+            stat_dest_path = "DepartureDestinationTrip_commuter.csv"
+        elif cfg['schedule'] == "non-commuter":
+            stat_dest_path = "DepartureDestinationTrip_noncommuter.csv"
+        else:
+            raise ValueError(f"Unknown schedule '{cfg['schedule']}' for vehicle {idx}")
 
         # Temporary directory for this vehicle's DB
         with tempfile.TemporaryDirectory() as tmpdb:
@@ -623,7 +628,8 @@ def get_mobility_demand(vehicles, weather):
         # Clip charging demand below battery capacity as otherwise infeasibility in urbs
         charge = df["charge_grid"]*config.MBL_TIME_STEP_LENGTH
         max_cap_allowed = all_batteries[key]-0.1      # Have some slack to prevent rounding caused MILP infeasibilities
-        if max_cap_allowed<0: max_cap_allowed=0
+        if max_cap_allowed<0:
+            max_cap_allowed=0
         charge = charge.clip(lower=0, upper=max_cap_allowed)
         demand_dict[key] = charge
 
@@ -644,7 +650,8 @@ def create_pro_mob(battery_dict, parameters):
         battery_dict: ``{(bus, vehicle_id): battery_kwh}``.
         parameters: ``technologies.processes["home_charger"]`` of the scenario.
     """
-    if not battery_dict: return pd.DataFrame()
+    if not battery_dict:
+        return pd.DataFrame()
     else:
         df_pro = pd.DataFrame([(bus, f"charging_station{id}") for (bus, id) in battery_dict.keys()], columns=["Site","Process"])
         df_pro[["inst-cap","cap-up","inv-cost-fix","inv-cost","fix-cost","var-cost","wacc","depreciation","pf-min"]] = (
@@ -655,14 +662,16 @@ def create_pro_mob(battery_dict, parameters):
         return df_pro.reset_index(drop=True)
     
 def create_com_mob(battery_dict):
-    if not battery_dict: return pd.DataFrame()
+    if not battery_dict:
+        return pd.DataFrame()
     else:
         df_com = pd.DataFrame([(bus, f"mobility{id}") for (bus, id) in battery_dict.keys()], columns=["Site","Commodity"])
         df_com[["Type","price"]] = ("Demand", np.nan)
         return df_com.reset_index(drop=True)
 
 def create_pro_com_mob(battery_dict):
-    if not battery_dict: return pd.DataFrame()
+    if not battery_dict:
+        return pd.DataFrame()
     else:
         max_id = max([id for _,id in battery_dict.keys()])
         df_pro_com_in = pd.DataFrame([(f"charging_station{id}", "electricity", "In", 1) for id in range(max_id+1)], columns=["Process","Commodity","Direction","ratio"])
@@ -676,7 +685,8 @@ def create_sto_mob(battery_dict, parameters):
         battery_dict: ``{(bus, vehicle_id): battery_kwh}``.
         parameters: ``technologies.storages["mobility_storage"]`` of the scenario.
     """
-    if not battery_dict: return pd.DataFrame()
+    if not battery_dict:
+        return pd.DataFrame()
     else:
         df_sto = pd.DataFrame([(bus, f"mobility_storage{id}", f"mobility{id}",cap,cap,cap,cap) for (bus, id), cap in battery_dict.items()], columns=["Site","Storage","Commodity","inst-cap-c","cap-up-c","inst-cap-p","cap-up-p"])
         df_sto[["eff-in","eff-out","discharge","ep-ratio","inv-cost-p","inv-cost-c","fix-cost-p","fix-cost-c","var-cost-p","wacc","depreciation"]] = (
