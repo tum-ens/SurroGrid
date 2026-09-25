@@ -68,7 +68,9 @@ export function installMapLayer(ctx) {
     if (!state.layer.on || !map.getLayer(PICK[0])) return;
     const box = [[e.point.x - 4, e.point.y - 4], [e.point.x + 4, e.point.y + 4]];
     const hits = map.queryRenderedFeatures(box, { layers: PICK.filter((id) => map.getLayer(id)) });
-    hits.sort((a, b) => PICK.indexOf(a.layer.id) - PICK.indexOf(b.layer.id));
+    // Transformers first; of overlapping cables the one with the largest required reinforcement.
+    const severity = (f) => ({ add_2plus: 0, add_1: 1 }[f.properties.action] ?? 2);
+    hits.sort((a, b) => PICK.indexOf(a.layer.id) - PICK.indexOf(b.layer.id) || severity(a) - severity(b));
     setHover(hits[0] || null);
   }
 
