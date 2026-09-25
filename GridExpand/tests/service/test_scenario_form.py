@@ -155,6 +155,9 @@ def test_the_home_charger_power_writes_both_capacities():
     new = yaml.safe_load(sf.apply_changes(text, {"technologies.processes.home_charger.installed_capacity_kw": 7.4}))
     charger = new["technologies"]["processes"]["home_charger"]
     assert charger["installed_capacity_kw"] == charger["capacity_upper_kw"] == 7.4
+    labels = [c["label"] for c in sf.preview(text, base_name="s", changes={
+        "technologies.processes.home_charger.installed_capacity_kw": 7.4})["changes"]]
+    assert labels == ["Home charger power", "Home charger power (capacity_upper_kw)"]
 
 
 @pytest.mark.parametrize(("changes", "key", "needle", "has_line"), [

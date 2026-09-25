@@ -44,12 +44,10 @@ def _adoption_fields(tech: str, label: str) -> list[dict[str, Any]]:
         _field(mode, f"{label}: selection", "enum", options=[
             {"value": "deterministic_share", "label": "Share of eligible buildings"},
             {"value": "source_inventory", "label": "Source inventory (paired data)"},
-        ], hint="deterministic_share selects a seeded share of the eligible buildings; source_inventory takes the "
-                "buildings of the source inventory (needs paired DSO data, not available in synthetic runs)."),
+        ], hint="deterministic_share or source_inventory (paired DSO data only)."),
         _field(f"electrification.{tech}.building_share", f"{label}: building share", "percent", "%",
                min=0, max=1, step=0.05, requires={"key": mode, "value": "deterministic_share"}, after="adoption_mode",
-               hint="Share of the eligible buildings that get the technology (required for deterministic_share, "
-                    "removed for source_inventory)."),
+               hint="Seeded share of the eligible buildings (only with deterministic_share)."),
     ]
 
 
@@ -59,7 +57,11 @@ def _adoption_fields(tech: str, label: str) -> list[dict[str, Any]]:
 # ``optional`` + ``default`` + ``after``: the loader's default applies when the key is absent; a change
 # to another value inserts the key after ``after``. ``mirror``: keys that are always written with it.
 SECTIONS: list[dict[str, Any]] = [
-    {"id": "electrification", "title": "Electrification", "fields": [
+    {"id": "electrification", "title": "Electrification",
+     "note": "Which buildings get heat pumps, EVs and PV + battery. deterministic_share selects a seeded share of the "
+             "eligible buildings; source_inventory takes the buildings of a source inventory (paired DSO data; "
+             "synthetic runs fail with it).",
+     "fields": [
         *_adoption_fields("heat", "Heat pumps"),
         *_adoption_fields("mobility", "Electric vehicles"),
         *_adoption_fields("pv_battery", "PV + battery"),
@@ -143,6 +145,8 @@ SECTIONS: list[dict[str, Any]] = [
     ]},
 ]
 FIELDS: dict[str, dict[str, Any]] = {f["key"]: f for section in SECTIONS for f in section["fields"]}
+LABELS: dict[str, str] = {"scenario.id": "Scenario id", **{key: f["label"] for key, f in FIELDS.items()}, **{
+    other: f"{f['label']} ({other.rsplit('.', 1)[1]})" for f in FIELDS.values() for other in f.get("mirror", ())}}
 
 
 class ScenarioEditError(ValueError):
@@ -479,7 +483,8 @@ def form_sections(text: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                 "help": helps.get(field["key"], ""),
             })
         if fields:
-            sections.append({"id": section["id"], "title": section["title"], "fields": fields})
+            sections.append({"id": section["id"], "title": section["title"], "note": section.get("note"),
+                             "fields": fields})
     return sections, data
 
 
@@ -591,8 +596,7 @@ def changed_values(old: Any, new: Any) -> list[dict[str, Any]]:
         a, b = before.get(key, _MISSING), after.get(key, _MISSING)
         if _same(a, b):
             continue
-        label = "Scenario id" if key == "scenario.id" else FIELDS.get(key, {}).get("label")
-        items.append({"key": key, "label": label,
+        items.append({"key": key, "label": LABELS.get(key),
                       "kind": "added" if a is _MISSING else "removed" if b is _MISSING else "changed",
                       "old": None if a is _MISSING else a, "new": None if b is _MISSING else b})
     return items
