@@ -1234,10 +1234,12 @@ class Grid:
 
     def create_bsp(self):
         economics = self.settings["scenario_config"].economics
+        # Grids without any PV-eligible building have an empty PV profile table.
+        index = self.df_supim_solar.index if not self.df_supim_solar.empty else self.df_demand.index
         df_bsp = pd.DataFrame(
             [[economics.import_price_eur_per_kwh, economics.pv_feed_in_tariff_eur_per_kwh]]
-            * len(self.df_supim_solar.index),
-            index=self.df_supim_solar.index,
+            * len(index),
+            index=index,
             columns=["electricity_import", "electricity_feed_in"],
         )
         self.df_bsp = df_bsp
