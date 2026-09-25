@@ -98,7 +98,7 @@ uv run gridexpand serve                                                   # http
 GRIDEXPAND_UID=$(id -u) GRIDEXPAND_GID=$(id -g) docker compose -f docker/compose.yaml up --build
 ```
 
-The service starts synthetic pipeline jobs, serves expansion results and the pylovo-ui plugin panels:
+The service starts synthetic pipeline jobs, serves expansion results, edits copies of scenario YAMLs and the pylovo-ui plugin panels:
 [docs/service.md](docs/service.md).
 
 ## Commands

@@ -29,6 +29,18 @@ def test_user_directory_is_the_last_scenario_directory(settings, tmp_path, monke
         ServiceSettings(user_scenario_dir=SCENARIO_CONFIG_DIR)
 
 
+def test_serve_option_for_the_user_directory(capsys):
+    from pathlib import Path
+
+    from gridexpand.paths import SCENARIO_CONFIG_DIR
+    from gridexpand.service.cli import build_parser, main
+
+    assert build_parser().parse_args(["--user-scenario-dir", "gp/scenarios"]).user_scenario_dir == Path("gp/scenarios")
+    assert build_parser().parse_args([]).user_scenario_dir is None
+    assert main(["--user-scenario-dir", str(SCENARIO_CONFIG_DIR)]) == 2  # refused before anything starts
+    assert "must not be the repository" in capsys.readouterr().err
+
+
 def test_form(client, settings):
     form = client.get(f"/api/scenarios/{BASE}/form").json()
     assert form["name"] == BASE and form["user"] is False and form["writable"] is False

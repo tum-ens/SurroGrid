@@ -254,7 +254,7 @@ is loaded with override: its values win over variables of the same name in the p
 | `GRIDEXPAND_DATA_DIR` | relocate `data/` (static inputs) |
 | `GRIDEXPAND_SOLVER` | default Step 3 solver (`gurobi` or `appsi_highs`) |
 | `URBS_CLUSTER_CONCURRENCY` | default of `gridexpand optimize --cluster-concurrency` |
-| `GRIDEXPAND_SERVICE_SCENARIO_DIRS`, `GRIDEXPAND_UI_CORS_ORIGINS` | web service, see [service.md](service.md) |
+| `GRIDEXPAND_SERVICE_SCENARIO_DIRS`, `GRIDEXPAND_SERVICE_USER_SCENARIO_DIR`, `GRIDEXPAND_UI_CORS_ORIGINS` | web service, see [service.md](service.md) |
 
 The `GRIDEXPAND_*_DIR`/`_FILE` variables are read from the process environment when `gridexpand.paths` is first
 imported (not from `.env`); child processes of the orchestrators inherit them.
