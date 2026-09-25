@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 
+import gridexpand.allocation.functions.electricity as electricity
+
 
 def read_or_create_weather(weather_source_hdf: Path | None, hours: int) -> pd.DataFrame:
     if weather_source_hdf is None:
@@ -40,21 +42,12 @@ def empty_timeseries(hours: int) -> pd.DataFrame:
 
 def buy_sell_price(
     hours: int,
-    electricity_module,
     *,
-    import_price_eur_per_kwh: float | None = None,
-    pv_feed_in_tariff_eur_per_kwh: float | None = None,
+    import_price_eur_per_kwh: float,
+    pv_feed_in_tariff_eur_per_kwh: float,
 ) -> pd.DataFrame:
-    import_price = (
-        electricity_module.config.BSP_IMPORT
-        if import_price_eur_per_kwh is None
-        else float(import_price_eur_per_kwh)
-    )
-    feed_in_tariff = (
-        electricity_module.config.BSP_FEED_IN
-        if pv_feed_in_tariff_eur_per_kwh is None
-        else float(pv_feed_in_tariff_eur_per_kwh)
-    )
+    import_price = float(import_price_eur_per_kwh)
+    feed_in_tariff = float(pv_feed_in_tariff_eur_per_kwh)
     return pd.DataFrame(
         {
             "electricity_import": [import_price] * hours,
@@ -66,18 +59,28 @@ def buy_sell_price(
 
 def urbs_static_tables(
     active_buses: list[int],
-    electricity_module,
+    technologies,
     *,
     include_generic_battery: bool = True,
 ) -> dict[str, pd.DataFrame]:
+    """Return the grid-connection process, commodity and (generic) storage tables.
+
+    Args:
+        active_buses: Buses with demand.
+        technologies: ``ScenarioConfig.technologies``.
+        include_generic_battery: Add a ``battery_private`` row per bus.
+    """
+    battery = technologies.storages["stationary_battery"]
     storage = (
-        electricity_module.create_sto_elec(active_buses)
+        electricity.create_sto_elec(active_buses, battery)
         if include_generic_battery
-        else electricity_module.create_sto_elec([])
+        else electricity.create_sto_elec([], battery)
     )
     return {
-        "process": electricity_module.create_pro_elec(active_buses),
-        "commodity": electricity_module.create_com_elec(active_buses),
-        "process_commodity": electricity_module.create_pro_com_elec(),
+        "process": electricity.create_pro_elec(
+            active_buses, technologies.processes["grid_connection"]
+        ),
+        "commodity": electricity.create_com_elec(active_buses),
+        "process_commodity": electricity.create_pro_com_elec(),
         "storage": storage,
     }

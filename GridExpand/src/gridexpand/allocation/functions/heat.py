@@ -7,8 +7,6 @@ import warnings
 
 from gridexpand.common.reproducibility import physical_building_id, stable_seed
 
-from gridexpand.allocation.functions.infdb_ro_heat import generate_opendhw, load_space_heat
-
 ##############################################################
 ################## Obtaining GHD + HP COP ####################
 ##############################################################
@@ -103,19 +101,15 @@ def sample_statistics(df_buildings, base_seed=0):
     return df_buildings
 
 def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_seed=0):
+    """Simulate TEASER space heat and OpenDHW hot water (kWh per hour and bus).
+
+    The INFDB ``ro_heat`` source does not use this function (see
+    ``Grid.generate_heat``).
+    """
     if "residential_effective_floor_area_m2" not in df_buildings.columns:
         raise ValueError(
             "Residential heat requires residential_effective_floor_area_m2 from the component manifest."
         )
-    if getattr(config, "SPACE_HEAT_SOURCE", "teaser") == "infdb_ro_heat":
-        space_heat, audit = load_space_heat(df_buildings)
-        if audit["space_heat_source_fallback"]:
-            print(
-                "WARNING: preliminary ro_heat fallback used: "
-                f"{audit['space_heat_source_fallback']} for "
-                f"{audit['space_heat_source_fallback_buildings']} building(s)."
-            )
-        return space_heat, generate_opendhw(df_buildings, base_seed=base_seed)
 
     # Import the legacy generator lazily. The INFDB ro_heat path must not load
     # TEASER or execute any DistrictGenerator code.

@@ -40,7 +40,6 @@ from gridexpand.allocation.assets.pv.roof_catalog import assert_fallback_share
 from gridexpand.allocation.scenario_calibration.profiles.paired_profiles import (
     build_paired_base_electric_demand,
     build_paired_sector_urbs_inputs,
-    load_electricity_module,
     source_match_buildings,
 )
 from gridexpand.allocation.scenario_calibration.profiles.physical_heat_profile_library import (
@@ -153,11 +152,11 @@ def _output_name(
 def _combine_static_tables(
     active_buses: list[int],
     sector_inputs,
-    electricity_module,
+    technologies,
 ) -> dict[str, pd.DataFrame]:
     tables = urbs_static_tables(
         active_buses,
-        electricity_module,
+        technologies,
         include_generic_battery=False,
     )
     for key in ("process", "commodity", "process_commodity", "storage"):
@@ -502,12 +501,10 @@ def materialize_paired_urbs_input(
     active_buses = sorted(
         int(bus) for bus in demand.columns.get_level_values(0).unique()
     )
-    electricity_module = load_electricity_module()
-    electricity_module.config.apply_scenario(scenario)
     static_tables = _combine_static_tables(
         active_buses,
         sector_inputs,
-        electricity_module,
+        scenario.technologies,
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -647,7 +644,6 @@ def materialize_paired_urbs_input(
             "urbs_in/buy_sell_price",
             buy_sell_price(
                 len(demand),
-                electricity_module,
                 import_price_eur_per_kwh=scenario.economics.import_price_eur_per_kwh,
                 pv_feed_in_tariff_eur_per_kwh=scenario.economics.pv_feed_in_tariff_eur_per_kwh,
             ),

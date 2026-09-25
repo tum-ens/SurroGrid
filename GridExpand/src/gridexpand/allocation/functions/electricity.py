@@ -488,11 +488,19 @@ def demand_component_audit(components, profiled, component_profiles):
 #     df_elec_react_demand.columns = df_elec_react_demand.columns.set_levels(["electricity-reactive"]*len(df_elec_react_demand.columns.levels[1]), level=1)
 #     return df_elec_react_demand
 
-def create_pro_elec(consumer_bus_list):
+def create_pro_elec(consumer_bus_list, parameters):
+    """Return the grid ``import`` and ``feed_in`` process rows of every consumer bus.
+
+    Args:
+        consumer_bus_list: Buses with base electricity demand.
+        parameters: ``technologies.processes["grid_connection"]`` of the scenario.
+    """
     df_pro_base = pd.DataFrame(consumer_bus_list, columns=['Site'])
     df_pro_base[["Process","inst-cap","cap-up","inv-cost-fix","inv-cost","fix-cost","var-cost","wacc","depreciation","pf-min"]] = (
-        "import", config.IMP_INST_CAP, config.IMP_CAP_UP, config.IMP_INV_COST_FIX, config.IMP_INV_COST, 
-        config.IMP_FIX_COST, config.IMP_VAR_COST, config.IMP_WACC, config.IMP_DEPRECIATION, config.IMP_PF_MIN)
+        "import", parameters["installed_capacity_kw"], parameters["capacity_upper_kw"],
+        parameters["fixed_investment_cost_eur"], parameters["investment_cost_eur_per_kw"],
+        parameters["fixed_cost_eur_per_hour"], parameters["variable_cost_eur_per_kwh"],
+        parameters["wacc"], parameters["depreciation_years"], parameters["minimum_power_factor"])
 
     df_pro_feed = df_pro_base.copy()
     df_pro_feed["Process"] = "feed_in"
@@ -536,12 +544,21 @@ def create_pro_com_elec():
     })
     return df_pro_com.reset_index(drop=True)
 
-def create_sto_elec(consumer_bus_list):
+def create_sto_elec(consumer_bus_list, parameters):
+    """Return one generic ``battery_private`` storage row per bus.
+
+    Args:
+        consumer_bus_list: Buses that receive the storage.
+        parameters: ``technologies.storages["stationary_battery"]`` of the scenario.
+    """
     df_sto = pd.DataFrame(consumer_bus_list, columns=['Site'])
     df_sto[["Storage","Commodity","inst-cap-c","cap-up-c","inst-cap-p","cap-up-p","eff-in","eff-out","discharge","ep-ratio",
             "inv-cost-p","inv-cost-c","fix-cost-p","fix-cost-c","var-cost-p","wacc","depreciation"]] = (
-            "battery_private", "electricity", config.BS_INST_CAP_C, config.BS_CAP_UP_C, config.BS_INST_CAP_P, 
-            config.BS_CAP_UP_P, config.BS_EFF_IN, config.BS_EFF_OUT, config.BS_DISCHARGE, config.BS_EP_RATIO,
-            config.BS_INV_COST_P, config.BS_INV_COST_C, config.BS_FIX_COST_P, config.BS_FIX_COST_C,
-            config.BS_VAR_COST_P, config.BS_WACC, config.BS_DEPRECIATION)
+            "battery_private", "electricity", parameters["installed_energy_kwh"],
+            parameters["capacity_upper_kwh"], parameters["installed_power_kw"], parameters["power_upper_kw"],
+            parameters["charge_efficiency"], parameters["discharge_efficiency"],
+            parameters["self_discharge_per_timestep"], parameters["energy_to_power_hours"],
+            parameters["investment_cost_eur_per_kw"], parameters["investment_cost_eur_per_kwh"],
+            parameters["fixed_investment_cost_power_eur"], parameters["fixed_investment_cost_energy_eur"],
+            parameters["variable_cost_eur_per_kwh"], parameters["wacc"], parameters["depreciation_years"])
     return df_sto.reset_index(drop=True)

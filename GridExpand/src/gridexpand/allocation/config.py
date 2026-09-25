@@ -125,12 +125,15 @@ class Config:
 
 
     def apply_scenario(self, scenario):
-        """Populate legacy helper attributes from the validated scenario YAML."""
+        """Set the scenario values read by the heat and emobpy generators.
+
+        The urbs process and storage parameters are passed explicitly from
+        ``scenario.technologies``; only the TEASER retrofit level, the
+        reference year and the mobility settings are still module state (they
+        are read inside worker processes and the vendored emobpy code).
+        """
         mobility = scenario.mobility
-        self.SPACE_HEAT_SOURCE = scenario.heat.space_heat_source
         self.TEASER_RETROFIT_LEVEL = scenario.heat.teaser_retrofit_level
-        self.BSP_IMPORT = scenario.economics.import_price_eur_per_kwh
-        self.BSP_FEED_IN = scenario.economics.pv_feed_in_tariff_eur_per_kwh
         self.REF_YEAR = mobility.reference_year
         self.PROB_COMMUTING = mobility.commuting_probability
         self.MBL_TIME_STEP_LENGTH = mobility.emobpy_timestep_hours
@@ -144,45 +147,6 @@ class Config:
         self.ROAD_TYPE = mobility.road_type
         self.ROAD_SLOPE = mobility.road_slope
         self.CAPACITY_HOME_CHARGING = scenario.technologies.processes["home_charger"]["installed_capacity_kw"]
-
-        process_aliases = {
-            "rooftop_pv": "PV", "heatpump_air": "HP_AIR",
-            "heatpump_booster": "HP_BST", "heat_dummy": "HDM",
-            "home_charger": "CS", "grid_connection": "IMP",
-        }
-        process_fields = {
-            "INST_CAP": "installed_capacity_kw", "CAP_UP": "capacity_upper_kw",
-            "INV_COST_FIX": "fixed_investment_cost_eur",
-            "INV_COST": "investment_cost_eur_per_kw",
-            "FIX_COST": "fixed_cost_eur_per_hour",
-            "VAR_COST": "variable_cost_eur_per_kwh", "WACC": "wacc",
-            "DEPRECIATION": "depreciation_years", "PF_MIN": "minimum_power_factor",
-        }
-        for name, prefix in process_aliases.items():
-            values = scenario.technologies.processes[name]
-            for suffix, yaml_name in process_fields.items():
-                setattr(self, f"{prefix}_{suffix}", values[yaml_name])
-
-        storage_aliases = {
-            "stationary_battery": "BS", "thermal_storage": "TS",
-            "mobility_storage": "MS",
-        }
-        storage_fields = {
-            "INST_CAP_C": "installed_energy_kwh", "CAP_UP_C": "capacity_upper_kwh",
-            "INST_CAP_P": "installed_power_kw", "CAP_UP_P": "power_upper_kw",
-            "EP_RATIO": "energy_to_power_hours", "EFF_IN": "charge_efficiency",
-            "EFF_OUT": "discharge_efficiency", "DISCHARGE": "self_discharge_per_timestep",
-            "INV_COST_P": "investment_cost_eur_per_kw",
-            "INV_COST_C": "investment_cost_eur_per_kwh",
-            "FIX_COST_P": "fixed_investment_cost_power_eur",
-            "FIX_COST_C": "fixed_investment_cost_energy_eur",
-            "VAR_COST_P": "variable_cost_eur_per_kwh", "WACC": "wacc",
-            "DEPRECIATION": "depreciation_years",
-        }
-        for name, prefix in storage_aliases.items():
-            values = scenario.technologies.storages[name]
-            for suffix, yaml_name in storage_fields.items():
-                setattr(self, f"{prefix}_{suffix}", values[yaml_name])
 
 
 config = Config()

@@ -11,6 +11,7 @@ import gridexpand.allocation.functions.electricity as elc
 import gridexpand.allocation.functions.heat as heat
 import gridexpand.allocation.functions.mobility as mbl
 from gridexpand.allocation.functions.dst import dst_shift_input, dst_shift_output
+from gridexpand.allocation.functions.infdb_ro_heat import generate_opendhw, load_space_heat
 from gridexpand.allocation.functions.partition import partition_df_by_cpu
 from gridexpand.allocation.assets.battery.materialization import materialize_battery_urbs_inputs
 from gridexpand.allocation.assets.battery.sizing import build_battery_asset_plan
@@ -560,7 +561,10 @@ class Grid:
                     "positive_ev_vehicle_count": ev_count,
                     "ev_profile_count": int(len(self.battery_dict)),
                     "step2_input_capacity_kw": float(
-                        getattr(config, "CS_INST_CAP", 0.0) * ev_count
+                        self.settings["scenario_config"].technologies.processes[
+                            "home_charger"
+                        ]["installed_capacity_kw"]
+                        * ev_count
                     ),
                     "annual_ev_charging_demand_kwh": float(
                         self.df_demand_mobility.apply(pd.to_numeric, errors="coerce")
@@ -791,14 +795,14 @@ class Grid:
                     )
                 self.df_buildings[column] = sampled_values
 
-        if getattr(heat.config, "SPACE_HEAT_SOURCE", "teaser") == "infdb_ro_heat":
+        if self.settings["scenario_config"].heat.space_heat_source == "infdb_ro_heat":
             # The INFDB loader aggregates by bus. Re-load with the selected
             # physical buildings so an unselected building sharing a bus cannot
             # contribute heat to the materialized profile.
             self.df_demand_heat_space, space_heat_source_audit = (
-                heat.load_space_heat(residential)
+                load_space_heat(residential)
             )
-            self.df_demand_heat_water = heat.generate_opendhw(
+            self.df_demand_heat_water = generate_opendhw(
                 residential, base_seed=self.profile_seed
             )
         elif self.settings["parallel"]:
@@ -1083,15 +1087,16 @@ class Grid:
         self.df_bsp = df_bsp
 
     def create_processes(self):
+        processes = self.settings["scenario_config"].technologies.processes
         consumer_buses = list(self.df_demand_elec.columns.get_level_values(0).unique())
         dfs = [
-            elc.create_pro_elec(consumer_buses),
+            elc.create_pro_elec(consumer_buses, processes["grid_connection"]),
             self.df_pv_process,
         ]
         if self.settings["include_heat"]:
             dfs.append(self.df_heat_process)
         if self.settings["include_mobility"]:
-            dfs.append(mbl.create_pro_mob(self.battery_dict))
+            dfs.append(mbl.create_pro_mob(self.battery_dict, processes["home_charger"]))
 
         self.df_pro = pd.concat(dfs, axis=0).reset_index(drop=True)
 
@@ -1125,7 +1130,10 @@ class Grid:
         if self.settings["include_heat"]:
             dfs.append(self.df_heat_storage)
         if self.settings["include_mobility"]:
-            dfs.append(mbl.create_sto_mob(self.battery_dict))
+            dfs.append(mbl.create_sto_mob(
+                self.battery_dict,
+                self.settings["scenario_config"].technologies.storages["mobility_storage"],
+            ))
 
         self.df_sto = pd.concat(dfs, axis=0).reset_index(drop=True)
     

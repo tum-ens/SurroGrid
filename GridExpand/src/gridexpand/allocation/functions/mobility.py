@@ -646,13 +646,21 @@ def get_mobility_demand(vehicles, weather):
     availability.iloc[-1] = availability.iloc[-2]
     return mob_demand, availability, all_batteries
 
-def create_pro_mob(battery_dict):
+def create_pro_mob(battery_dict, parameters):
+    """Return one ``charging_station<i>`` process row per vehicle.
+
+    Args:
+        battery_dict: ``{(bus, vehicle_id): battery_kwh}``.
+        parameters: ``technologies.processes["home_charger"]`` of the scenario.
+    """
     if not battery_dict: return pd.DataFrame()
     else:
         df_pro = pd.DataFrame([(bus, f"charging_station{id}") for (bus, id) in battery_dict.keys()], columns=["Site","Process"])
         df_pro[["inst-cap","cap-up","inv-cost-fix","inv-cost","fix-cost","var-cost","wacc","depreciation","pf-min"]] = (
-                config.CS_INST_CAP, config.CS_CAP_UP, config.CS_INV_COST_FIX, config.CS_INV_COST, 
-                config.CS_FIX_COST, config.CS_VAR_COST, config.CS_WACC, config.CS_DEPRECIATION, config.CS_PF_MIN)
+                parameters["installed_capacity_kw"], parameters["capacity_upper_kw"],
+                parameters["fixed_investment_cost_eur"], parameters["investment_cost_eur_per_kw"],
+                parameters["fixed_cost_eur_per_hour"], parameters["variable_cost_eur_per_kwh"],
+                parameters["wacc"], parameters["depreciation_years"], parameters["minimum_power_factor"])
         return df_pro.reset_index(drop=True)
     
 def create_com_mob(battery_dict):
@@ -670,12 +678,20 @@ def create_pro_com_mob(battery_dict):
         df_pro_com_out = pd.DataFrame([(f"charging_station{id}", f"mobility{id}", "Out", 1) for id in range(max_id+1)], columns=["Process","Commodity","Direction","ratio"])
         return pd.concat([df_pro_com_in, df_pro_com_out], axis=0).reset_index(drop=True)
 
-def create_sto_mob(battery_dict):
+def create_sto_mob(battery_dict, parameters):
+    """Return one ``mobility_storage<i>`` row per vehicle (capacity = its battery).
+
+    Args:
+        battery_dict: ``{(bus, vehicle_id): battery_kwh}``.
+        parameters: ``technologies.storages["mobility_storage"]`` of the scenario.
+    """
     if not battery_dict: return pd.DataFrame()
     else:
         df_sto = pd.DataFrame([(bus, f"mobility_storage{id}", f"mobility{id}",cap,cap,cap,cap) for (bus, id), cap in battery_dict.items()], columns=["Site","Storage","Commodity","inst-cap-c","cap-up-c","inst-cap-p","cap-up-p"])
         df_sto[["eff-in","eff-out","discharge","ep-ratio","inv-cost-p","inv-cost-c","fix-cost-p","fix-cost-c","var-cost-p","wacc","depreciation"]] = (
-        config.MS_EFF_IN, config.MS_EFF_OUT, config.MS_DISCHARGE, config.MS_EP_RATIO,
-            config.MS_INV_COST_P, config.MS_INV_COST_C, config.MS_FIX_COST_P, config.MS_FIX_COST_C,
-            config.MS_VAR_COST_P, config.MS_WACC, config.MS_DEPRECIATION)
+            parameters["charge_efficiency"], parameters["discharge_efficiency"],
+            parameters["self_discharge_per_timestep"], parameters["energy_to_power_hours"],
+            parameters["investment_cost_eur_per_kw"], parameters["investment_cost_eur_per_kwh"],
+            parameters["fixed_investment_cost_power_eur"], parameters["fixed_investment_cost_energy_eur"],
+            parameters["variable_cost_eur_per_kwh"], parameters["wacc"], parameters["depreciation_years"])
         return df_sto.reset_index(drop=True)
