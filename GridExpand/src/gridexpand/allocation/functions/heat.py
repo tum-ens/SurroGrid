@@ -145,6 +145,13 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_
     # TABULA variant applied relative to each building's own year class
     # (0 standard/as built, 1 retrofit, 2 advanced retrofit), from the scenario.
     scenario["retrofit"] = int(getattr(config, "TEASER_RETROFIT_LEVEL", 0))
+    # Occupancy and DHW draw on the global RNGs; seed them per physical
+    # building so the realization is shared by all model cases and does not
+    # depend on the CPU partition.
+    scenario["seed"] = [
+        stable_seed(base_seed, physical_building_id(row), "heat", "teaser")
+        for _, row in df_buildings.iterrows()
+    ]
 
     # Extract location data
     zip_code = str(zip)

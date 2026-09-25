@@ -21,7 +21,7 @@ from gridexpand.common.building_components import (
     validate_component_bus_metadata,
     validate_physical_buildings,
 )
-from gridexpand.common.timeframe import build_full_year_metadata
+from gridexpand.common.timeframe import build_full_year_metadata, build_initial_metadata
 from gridexpand.paths import ENV_FILE, SQL_DIR
 
 
@@ -92,6 +92,22 @@ BOUNDARY_SUMMARY_COLUMNS = (
     ("boundary_peak_in_last_168h", "BOOLEAN"),
 )
 BOUNDARY_SUMMARY_COLUMN_NAMES = tuple(name for name, _type in BOUNDARY_SUMMARY_COLUMNS)
+
+
+SCENARIO_IDENTITY_KEYS = ("scenario_id", "scenario_hash", "scenario_key")
+
+
+def _scenario_level_assumptions(assumptions: dict[str, Any]) -> dict[str, Any]:
+    """Keep the values that every grid and model case of one scenario key shares.
+
+    Grid- and case-specific metadata (selected week, profile hashes, model case)
+    belongs to the run rows; storing it here made the row depend on which run
+    wrote last.
+    """
+    timeframe_mode = assumptions.get("timeframe_mode", "full_year")
+    shared = {**DEFAULT_SCENARIO_ASSUMPTIONS, **build_initial_metadata(timeframe_mode)}
+    shared.update({key: assumptions[key] for key in SCENARIO_IDENTITY_KEYS if key in assumptions})
+    return shared
 
 
 MEAN_HOUSEHOLD_SIZE = 2.03  # persons, mean of gridalloc hh_size_distribution.csv
@@ -1202,9 +1218,7 @@ class SurroGridDatabase:
         description: str = DEFAULT_SCENARIO_DESCRIPTION,
         assumptions: dict[str, Any] | None = None,
     ) -> int:
-        scenario_assumptions = dict(DEFAULT_SCENARIO_ASSUMPTIONS)
-        if assumptions:
-            scenario_assumptions.update(assumptions)
+        scenario_assumptions = _scenario_level_assumptions(assumptions or {})
         query = text(
             """
             INSERT INTO surrogrid.scenario (
