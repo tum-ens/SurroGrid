@@ -25,7 +25,6 @@ from gridexpand.scenario.config_loader import (
 from ..paths import RESULTS_DIR, SYNTHETIC_INPUT_DIR
 
 DEFAULT_SYNTHETIC_LIBRARY = SYNTHETIC_INPUT_DIR
-RESIDENTIAL_BUILDING_TYPES = {"AB", "MFH", "SFH", "TH"}
 
 
 def paired_pylovo_version_id(paired_dir: Path) -> str:

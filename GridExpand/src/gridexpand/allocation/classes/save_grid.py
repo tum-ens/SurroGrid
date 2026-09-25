@@ -39,11 +39,11 @@ class SaveFile:
             if self.grid_ref is None:
                 self.grid_ref = self.db.resolve_grid_identifier(filename)
             self.db.get_or_create_grid_case(self.grid_ref)
-            filename = output_filename_for_timeframe(self.grid_ref["bridge_filename"], self.timeframe_mode)
+            filename = self.grid_ref["bridge_filename"]
             scenario_assumptions = allocation_settings.get("scenario_assumptions")
             self.demand_allocation_run_id = self.db.create_demand_allocation_run(
                 self.grid_ref,
-                bridge_filename=filename,
+                bridge_filename=output_filename_for_timeframe(filename, self.timeframe_mode),
                 profiles=allocation_settings.get("profiles", "all"),
                 mobility_source=allocation_settings.get("mobility_source", "emobpy"),
                 scenario_key=self.scenario_key,

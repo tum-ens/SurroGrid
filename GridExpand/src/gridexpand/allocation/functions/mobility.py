@@ -391,7 +391,6 @@ def _read_pool_timeseries(csv_path, profile_ids, value_column):
 
 def get_mobility_demand_from_pool(
     vehicles,
-    region=None,
     metadata_path=None,
     demand_path=None,
     availability_path=None,
@@ -627,14 +626,6 @@ def get_mobility_demand(vehicles, weather):
         if max_cap_allowed<0: max_cap_allowed=0
         charge = charge.clip(lower=0, upper=max_cap_allowed)
         demand_dict[key] = charge
-
-    # availability = pd.DataFrame(avai_dict).reset_index(drop=True)
-    # new_ids = [f"charging_station{id}" for id in availability.columns.levels[1]]
-    # availability.columns = availability.columns.set_levels(new_ids, level=1)
-
-    # mob_demand = pd.DataFrame(demand_dict).reset_index(drop=True)
-    # new_ids = [f"mobility{id}" for id in mob_demand.columns.levels[1]]
-    # mob_demand.columns = mob_demand.columns.set_levels(new_ids, level=1)
 
     mob_demand, availability = _format_mobility_frames(demand_dict, avai_dict)
 

@@ -177,9 +177,6 @@ def _get_total_demands(cdf, occ_list, rng=None):
         u = (rng or np.random.default_rng()).random(len(occ_list))
         columns = cdf.columns.get_level_values(0).unique()
 
-        # for hh in cdf.columns.get_level_values(0).unique():
-        #     sampled_x = np.interp(u, cdf[hh, "Y"], cdf[hh, "X"])
-
         for i, n_occ in enumerate(occ_list):
             if n_occ > 3: n_occ = 4
             n_occ = int(n_occ)
@@ -481,13 +478,6 @@ def demand_component_audit(components, profiled, component_profiles):
         ]
     ]
 
-# def get_elec_react_demand(df_elec_demand):
-#     conversion_factor = math.tan(math.acos(config.ELEC_REACT_PF))
-#     df_elec_react_demand = df_elec_demand.copy()
-#     df_elec_react_demand*=conversion_factor
-#     df_elec_react_demand.columns = df_elec_react_demand.columns.set_levels(["electricity-reactive"]*len(df_elec_react_demand.columns.levels[1]), level=1)
-#     return df_elec_react_demand
-
 def create_pro_elec(consumer_bus_list, parameters):
     """Return the grid ``import`` and ``feed_in`` process rows of every consumer bus.
 
@@ -505,10 +495,6 @@ def create_pro_elec(consumer_bus_list, parameters):
     df_pro_feed = df_pro_base.copy()
     df_pro_feed["Process"] = "feed_in"
 
-    # df_pro_Q = df_pro_base.copy()
-    # df_pro_Q["Process"] = "Q_feeder_central"
-
-    # df_pro = pd.concat([df_pro_base, df_pro_feed, df_pro_Q], axis=0)
     df_pro = pd.concat([df_pro_base, df_pro_feed], axis=0)
     return df_pro.reset_index(drop=True)
 
@@ -516,26 +502,16 @@ def create_com_elec(consumer_bus_list):
     df_com_base = pd.DataFrame(consumer_bus_list, columns=['Site'])
     df_com_base[["Commodity","Type","price"]] = ("electricity", "Demand", np.nan)
 
-    # df_com_Q = df_com_base.copy()
-    # df_com_Q["Commodity"] = "electricity-reactive"
-
     df_com_imp = df_com_base.copy()
     df_com_imp[["Commodity","Type","price"]] = ("electricity_import", "Buy", 1)
 
     df_com_feed = df_com_base.copy()
     df_com_feed[["Commodity","Type","price"]] = ("electricity_feed_in", "Sell", 1)
 
-    # df_com = pd.concat([df_com_base, df_com_Q, df_com_imp, df_com_feed], axis=0)
     df_com = pd.concat([df_com_base, df_com_imp, df_com_feed], axis=0)
     return df_com.reset_index(drop=True)
 
 def create_pro_com_elec():
-    # df_pro_com = pd.DataFrame({
-    #     'Process':   ["import", "import", "feed_in", "feed_in", "Q_feeder_central"],
-    #     'Commodity': ["electricity_import", "electricity", "electricity", "electricity_feed_in", "electricity-reactive"],
-    #     'Direction': ["In", "Out", "In", "Out", "Out"],
-    #     'ratio':     [1, 1, 1, 1, 1]
-    # })
     df_pro_com = pd.DataFrame({
         'Process':   ["import",             "import",       "feed_in",     "feed_in"],
         'Commodity': ["electricity_import", "electricity",  "electricity", "electricity_feed_in"],

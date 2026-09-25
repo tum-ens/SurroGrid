@@ -4,10 +4,6 @@ All directories come from :mod:`gridexpand.paths`; the aliases below keep the
 names used throughout ``scenario_calibration``.
 """
 
-import os
-
-from dotenv import load_dotenv
-
 from gridexpand.paths import (
     ALLOCATION_RESULTS_DIR,
     ENV_FILE,
@@ -33,16 +29,4 @@ __all__ = [
     "RESULTS_DIR",
     "SCENARIO_CONFIG_DIR",
     "SYNTHETIC_INPUT_DIR",
-    "configured_pylovo_version_id",
 ]
-
-
-def configured_pylovo_version_id() -> str:
-    """Return the pylovo version selected in ``GridExpand/.env``."""
-    load_dotenv(ENV_PATH, override=True)
-    value = os.getenv("PYLOVO_VERSION_ID", "").strip().strip(chr(34)).strip(chr(39))
-    if not value:
-        raise ValueError(
-            f"PYLOVO_VERSION_ID must be set in {ENV_PATH} for paired scenarios."
-        )
-    return value

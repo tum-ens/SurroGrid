@@ -30,16 +30,6 @@ def read_or_create_weather(weather_source_hdf: Path | None, hours: int) -> pd.Da
     return weather
 
 
-def empty_timeseries(hours: int) -> pd.DataFrame:
-    frame = pd.DataFrame(index=pd.RangeIndex(hours, name="t"))
-    frame.columns = pd.MultiIndex(
-        levels=[[], []],
-        codes=[[], []],
-        names=["Site", "Commodity"],
-    )
-    return frame
-
-
 def buy_sell_price(
     hours: int,
     *,

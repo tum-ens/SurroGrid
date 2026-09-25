@@ -56,7 +56,6 @@ class Config:
     ELEC_LPS_PATH = f"{DATA_STAT_DIR}/inhabited_buildings/elec_lps.h5"
     ### Uninhabited buildings
     ELEC_GHD_PATH = f"{DATA_STAT_DIR}/uninhabited_buildings/elec_ghd_per_m2.csv"
-    DHW_GHD_PATH = f"{DATA_STAT_DIR}/uninhabited_buildings/dhw_ghd_per_m2.csv"
     TYPE_GHD_DISTRIBUTION = pd.read_csv(f'{DATA_STAT_DIR}/uninhabited_buildings/nonresbuilding_usetype_distribution.csv', header=[0], skiprows=1) 
     AGE_GHD_DISTRIBUTION = pd.read_csv(f'{DATA_STAT_DIR}/uninhabited_buildings/nonresbuilding_age_distribution.csv', header=[0], skiprows=1) 
 

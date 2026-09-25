@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import re
@@ -46,15 +46,56 @@ from .real_swf_electricity_profiles import (
     load_electricity_module,
     select_residential_profile,
 )
-from .real_swf_sector_profiles import (
-    DEFAULT_MOBILITY_WEATHER_KEY,
-    SectorUrbsInputs,
-    _concat_static,
-    _concat_timeseries,
-    _empty_timeseries,
-)
-
 from ..paths import DEMAND_STATISTICS_DIR, SYNTHETIC_INPUT_DIR
+
+DEFAULT_MOBILITY_WEATHER_KEY = "central_germany_tmy"
+
+
+@dataclass(frozen=True)
+class SectorUrbsInputs:
+    """Sector-coupling urbs sheets of one paired target network."""
+
+    demand: pd.DataFrame
+    supim: pd.DataFrame
+    eff_factor: pd.DataFrame
+    process: pd.DataFrame
+    commodity: pd.DataFrame
+    process_commodity: pd.DataFrame
+    storage: pd.DataFrame
+    audit: pd.DataFrame
+    metadata: dict[str, Any]
+    ev_sessions: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(columns=SESSION_COLUMNS)
+    )
+    ev_session_hours: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(columns=SESSION_HOUR_COLUMNS)
+    )
+    # Pinned content identity of the EV session pool the vehicles came from.
+    ev_pool_id: str = ""
+
+
+def _empty_timeseries(hours: int) -> pd.DataFrame:
+    df = pd.DataFrame(index=pd.RangeIndex(hours, name="t"))
+    df.columns = pd.MultiIndex(
+        levels=[[], []], codes=[[], []], names=["Site", "Commodity"]
+    )
+    return df
+
+
+def _concat_timeseries(frames: list[pd.DataFrame], hours: int) -> pd.DataFrame:
+    non_empty = [frame for frame in frames if frame is not None and not frame.empty]
+    if not non_empty:
+        return _empty_timeseries(hours)
+    out = pd.concat(non_empty, axis=1)
+    out.index = pd.RangeIndex(len(out), name="t")
+    return out
+
+
+def _concat_static(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    non_empty = [frame for frame in frames if frame is not None and not frame.empty]
+    if not non_empty:
+        return pd.DataFrame()
+    return pd.concat(non_empty, ignore_index=True, sort=False)
 
 MOBILITY_SESSION_POOL_DIR = (
     DEMAND_STATISTICS_DIR / "general" / "mobility_profile_pool"

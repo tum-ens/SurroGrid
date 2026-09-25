@@ -14,9 +14,6 @@ from ...assets.pv.labels import profile_label
 from ...assets.pv.roof_catalog import LOD2_QUALITY_FLAG
 
 
-DEFAULT_PROFILE_LIBRARY_NAME = "paired_pv_profile_library.h5"
-
-
 def required_profile_angles(roof_catalog: pd.DataFrame) -> list[tuple[float, float]]:
     """Return angle bins for all genuine usable roofs in the paired population."""
     selected = roof_catalog[

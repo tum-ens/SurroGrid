@@ -84,7 +84,6 @@ class Grid:
             raise ValueError("Missing region metadata in input file (/raw_data/region).")
 
         region_row = self.df_region.iloc[0]
-        self.region = int(region_row["regio7"])            # regiostar region used for mobility statistics
         self.plz = str(region_row["plz"]).zfill(5)         # plz of assumed grid position (not of pylovo grid used as representation)
         self.location = {"lat": float(region_row["lat"]), # latitude of transformer position used for weather data
                          "lon": float(region_row["lon"])} # longitude of transformer position used for weather data
@@ -96,7 +95,6 @@ class Grid:
         self.df_demand_elec = pd.DataFrame()
         self.df_electricity_component_profiles = pd.DataFrame()
         self.df_demand_component_audit = pd.DataFrame()
-        # self.df_demand_elec_react = pd.DataFrame()
         self.df_demand_heat_space = pd.DataFrame()
         self.df_demand_heat_water = pd.DataFrame()
         self._space_heat_source_audit = {}
@@ -725,11 +723,6 @@ class Grid:
             self.df_electricity_component_profiles,
         )
         self._record_profile_fingerprints(base_electricity=self.df_demand_elec)
-        # self.df_demand_elec_react = elc.get_elec_react_demand(self.df_demand_elec)
-
-        # Include daylight saving time effect (electricity timeseries are all UTC+1 only, thus include summer time demand shift):
-        # For normal elec demand only after heat, as still needed in this form!  
-        # self.df_demand_elec_react = self._add_output_data_daylight_saving_shift(self.df_demand_elec_react)
 
     def align_electricity_output_time(self):
         """Map the civil-time base electricity back to UTC+1 (DST shift)."""
@@ -958,8 +951,7 @@ class Grid:
                 vehicles = {}
                 self.df_buildings["car_dict"].apply(lambda x: vehicles.update(x))
                 self.df_demand_mobility, self.df_tve_mobility, self.battery_dict = mbl.get_mobility_demand_from_pool(
-                    vehicles,
-                    self.region,
+                    vehicles
                 )
             elif mobility_source == "emobpy":
                 # Add daylight saving dummy shift to input data
@@ -1063,9 +1055,6 @@ class Grid:
         self.df_supim.index.name = "t"
     
     def create_demand(self):
-        # self.df_demand = pd.concat([self.df_demand_elec, self.df_demand_elec_react, 
-        #                             self.df_demand_heat_space, self.df_demand_heat_water, 
-        #                             self.df_demand_mobility], axis=1).reset_index(drop=True)
         self.df_demand = pd.concat([self.df_demand_elec, self.df_demand_heat_space, 
                                     self.df_demand_heat_water, self.df_demand_mobility], axis=1).reset_index(drop=True)
         self.df_demand.index.name = "t"
