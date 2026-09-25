@@ -1,34 +1,16 @@
-"""Time-series power flow entry points (raw tables, summaries) for Step 4.
+"""Time-series power flow entry points (raw tables, summaries) of the real-grid runners.
 
 ``pf`` returns the raw tables and ``pf_summary`` the compact summary of one demand
-frame; ``pf_outputs`` returns both from a single pass. The implementation lives in
-``engine`` (solves, matrices, summary) and ``network`` (grid preparation, scopes);
-the names below are kept for the Step 5 tools that import this module.
+frame. The implementation lives in ``engine`` (solves, matrices, summary) and
+``network`` (grid preparation, scopes).
 """
 
 from __future__ import annotations
 
-from gridexpand.powerflow.engine import (  # noqa: F401  (re-exported)
-    PowerflowMatrices,
-    _safe_nanmax,
-    _safe_nanpercentile,
-    _tail_values_frame,
-    _transformer_import_diagnostic_frame,
-    annual_boundary_diagnostic,
-    raw_tables,
-    run_timeseries,
-    summarize,
-    summarize_powerflow_matrices,
-)
-from gridexpand.powerflow.network import (  # noqa: F401  (re-exported)
-    active_line_index as _active_line_index,
+from gridexpand.powerflow.engine import raw_tables, run_timeseries, summarize
+from gridexpand.powerflow.network import (  # noqa: F401  (used as pwrflw.* by the real-grid runners)
     comparison_backbone_scope,
     comparison_evaluation_scope,
-    grid_adjacency as _grid_adjacency,
-    parent_tree_from_root as _parent_tree_from_root,
-    prepare_synthetic_grid as prepare_grid,
-    root_bus as _root_bus,
-    set_scenario_load_buses,
 )
 
 

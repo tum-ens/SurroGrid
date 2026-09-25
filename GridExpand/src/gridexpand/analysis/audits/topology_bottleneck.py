@@ -22,6 +22,7 @@ from sqlalchemy import text
 
 from gridexpand.db.database import SurroGridDatabase
 from gridexpand.paths import ANALYSIS_OUTPUT_DIR
+from gridexpand.powerflow import network
 
 
 def _load_real_runner():
@@ -434,12 +435,11 @@ def audit_one_grid(
     original_line_table = net.line.copy()
     grid, _rated, _max_i, _voltage_buses, _backbone_cables, _loads, load_scope = real_runner._prepare_real_grid(net)
 
-    pwrflw = real_runner.pwrflw
-    active_line_ids = [int(value) for value in pwrflw._active_line_index(grid)]
-    adjacency = pwrflw._grid_adjacency(grid)
-    root_bus = int(pwrflw._root_bus(grid))
+    active_line_ids = [int(value) for value in network.active_line_index(grid)]
+    adjacency = network.grid_adjacency(grid)
+    root_bus = int(network.root_bus(grid))
     critical_bus = int(row["critical_bus"])
-    parents = pwrflw._parent_tree_from_root(adjacency, root_bus)
+    parents = network.parent_tree_from_root(adjacency, root_bus)
     path_pairs = _path_bus_pairs(parents, critical_bus)
     line_ids_by_edge = _line_ids_by_edge(grid, active_line_ids)
 
