@@ -11,7 +11,10 @@ import subprocess
 import threading
 import time
 
-from common.timeframe import read_hdf_metadata
+from dotenv import dotenv_values
+
+from gridexpand.common.timeframe import read_hdf_metadata
+from gridexpand.paths import ENV_FILE, OPTIMIZATION_RESULT_DIR
 
 
 def utc_now() -> str:
@@ -97,13 +100,32 @@ class StatusLog:
         self.status_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+DEFAULT_GUROBI_HOME = Path("/opt/gurobi1302/linux64")
+DEFAULT_GRB_LICENSE_FILE = Path.home() / "gurobi.lic"
+
+
 def command_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Return the environment for pipeline subprocesses.
+
+    ``GUROBI_HOME`` and ``GRB_LICENSE_FILE`` come from ``.env`` (which wins, as
+    for the database settings) or the process environment. If unset, the
+    former defaults ``/opt/gurobi1302/linux64`` and ``~/gurobi.lic`` are used
+    when they exist. ``$GUROBI_HOME/bin`` and ``/lib`` are prepended to
+    ``PATH`` and ``LD_LIBRARY_PATH``.
+    """
     env = os.environ.copy()
-    gurobi_home = "/opt/gurobi1302/linux64"
-    env["GUROBI_HOME"] = gurobi_home
-    env["GRB_LICENSE_FILE"] = "/home/breveron/gurobi.lic"
-    env["PATH"] = f"{gurobi_home}/bin:{env.get('PATH', '')}"
-    env["LD_LIBRARY_PATH"] = f"{gurobi_home}/lib:{env.get('LD_LIBRARY_PATH', '')}"
+    dotenv = dotenv_values(ENV_FILE) if ENV_FILE.exists() else {}
+    for key in ("GUROBI_HOME", "GRB_LICENSE_FILE"):
+        if dotenv.get(key):
+            env[key] = str(dotenv[key])
+    if not env.get("GUROBI_HOME") and DEFAULT_GUROBI_HOME.exists():
+        env["GUROBI_HOME"] = str(DEFAULT_GUROBI_HOME)
+    if not env.get("GRB_LICENSE_FILE") and DEFAULT_GRB_LICENSE_FILE.exists():
+        env["GRB_LICENSE_FILE"] = str(DEFAULT_GRB_LICENSE_FILE)
+    gurobi_home = env.get("GUROBI_HOME")
+    if gurobi_home:
+        env["PATH"] = f"{gurobi_home}/bin:{env.get('PATH', '')}"
+        env["LD_LIBRARY_PATH"] = f"{gurobi_home}/lib:{env.get('LD_LIBRARY_PATH', '')}"
     if extra:
         env.update({key: str(value) for key, value in extra.items()})
     return env
@@ -112,12 +134,12 @@ def command_env(extra: dict[str, str] | None = None) -> dict[str, str]:
 def run_command(
     *,
     cmd: list[str],
-    cwd: Path,
     log_path: Path,
     status: StatusLog,
     candidate_index: int,
     stage: str,
     env_extra: dict[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> None:
     status.update(candidate_index, stage=stage, status="running", message="")
     status.event(
@@ -160,11 +182,11 @@ def run_command(
 def run_batch_command(
     *,
     cmd: list[str],
-    cwd: Path,
     log_path: Path,
     status: StatusLog,
     stage: str,
     env_extra: dict[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> None:
     status.event(stage=stage, event="start", cmd=cmd, env_extra=env_extra or {})
     started = time.monotonic()
@@ -193,8 +215,8 @@ def run_batch_command(
         raise RuntimeError(f"{stage} failed with return code {completed.returncode}")
 
 
-def latest_step3_result(step3_dir: Path, input_hdf: Path) -> Path:
-    result_root = step3_dir / "result"
+def latest_step3_result(input_hdf: Path, result_root: Path = OPTIMIZATION_RESULT_DIR) -> Path:
+    """Return the newest Step 3 result for ``input_hdf`` below ``result_root``."""
     try:
         scenario_key = read_hdf_metadata(input_hdf).get("scenario_key")
     except (FileNotFoundError, KeyError, OSError, ValueError, TypeError):

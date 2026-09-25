@@ -1,4 +1,10 @@
-"""Delete DB-backed SurroGrid data and Step 3 files for one scenario key."""
+"""SurroGrid database maintenance: create the schema, delete one scenario's data.
+
+``gridexpand db init-schema`` creates or migrates the ``surrogrid`` schema.
+``gridexpand db delete-scenario <scenario_key> [--execute]`` deletes the rows
+and Step 3 files of one scenario key (dry-run by default). For backwards
+compatibility, ``gridexpand db <scenario_key> ...`` means ``delete-scenario``.
+"""
 
 from __future__ import annotations
 
@@ -8,40 +14,49 @@ import sys
 
 from sqlalchemy import text
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-GRIDEXPAND_DIR = REPO_ROOT / "GridExpand"
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.database import SurroGridDatabase  # noqa: E402
-
-STEP3_DIR = REPO_ROOT / "GridExpand" / "3.urbs"
-STEP3_ARTIFACT_DIRS = (
-    STEP3_DIR / "Input",
-    STEP3_DIR / "result",
-    STEP3_DIR / "logs",
-    STEP3_DIR / "logs" / "gurobi",
+from gridexpand.db.database import SurroGridDatabase
+from gridexpand.paths import (
+    OPTIMIZATION_INPUT_DIR,
+    OPTIMIZATION_LOGS_DIR,
+    OPTIMIZATION_RESULT_DIR,
 )
+
+STEP3_ARTIFACT_DIRS = (
+    OPTIMIZATION_INPUT_DIR,
+    OPTIMIZATION_RESULT_DIR,
+    OPTIMIZATION_LOGS_DIR,
+    OPTIMIZATION_LOGS_DIR / "gurobi",
+)
+COMMANDS = ("delete-scenario", "init-schema")
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Delete SurroGrid data for one scenario_key. Defaults to dry-run."
+        prog="gridexpand db", description="SurroGrid database maintenance."
     )
-    parser.add_argument(
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser(
+        "init-schema", help="Create or migrate the surrogrid schema."
+    )
+    delete = commands.add_parser(
+        "delete-scenario",
+        help="Delete SurroGrid data for one scenario_key. Defaults to dry-run.",
+        description="Delete SurroGrid data for one scenario_key. Defaults to dry-run.",
+    )
+    delete.add_argument(
         "scenario_key", help="Readable surrogrid.scenario.scenario_key to clean up."
     )
-    parser.add_argument(
+    delete.add_argument(
         "--execute",
         action="store_true",
         help="Actually delete rows and Step 3 files. Without this flag, only counts are printed.",
     )
-    parser.add_argument(
+    delete.add_argument(
         "--keep-demands",
         action="store_true",
         help="Keep the scenario, pipeline, and Step 2 demand-allocation rows; delete downstream results only.",
     )
-    parser.add_argument(
+    delete.add_argument(
         "--no-refresh-expansion-views",
         action="store_true",
         help="Skip refreshing Step 5 QGIS materialized views after deletion.",
@@ -93,7 +108,11 @@ def _step3_artifacts_for_scenario(
 ) -> list[Path]:
     exact_filenames, log_prefixes = _step3_artifact_names(db, scenario_key)
     matches: list[Path] = []
-    for directory in STEP3_ARTIFACT_DIRS:
+    directories = list(STEP3_ARTIFACT_DIRS)
+    if Path(scenario_key).name == scenario_key and scenario_key not in {".", ".."}:
+        # Step 3 writes its results to result/<scenario_key>/.
+        directories.append(OPTIMIZATION_RESULT_DIR / scenario_key)
+    for directory in directories:
         if not directory.exists():
             continue
         is_log_dir = directory.name == "logs" or directory.parent.name == "logs"
@@ -140,11 +159,19 @@ def _print_files(paths: list[Path], *, dry_run: bool) -> None:
     action = "Would delete" if dry_run else "Deleted"
     print(f"{action} Step 3 files: {len(paths)}")
     for path in paths:
-        print(f"  {path.relative_to(REPO_ROOT)}")
+        print(f"  {path}")
 
 
-def main() -> int:
-    args = _build_parser().parse_args()
+def main(argv: list[str] | None = None) -> int:
+    """Run ``gridexpand db``; see the module docstring for the commands."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] not in COMMANDS and not argv[0].startswith("-"):
+        argv.insert(0, "delete-scenario")
+    args = _build_parser().parse_args(argv)
+    if args.command == "init-schema":
+        SurroGridDatabase().ensure_schema()
+        print("surrogrid schema is up to date.")
+        return 0
     dry_run = not args.execute
 
     db = SurroGridDatabase()

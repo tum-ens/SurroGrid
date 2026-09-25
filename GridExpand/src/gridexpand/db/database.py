@@ -16,20 +16,18 @@ import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
-from common.building_components import (
+from gridexpand.common.building_components import (
     build_building_components,
     validate_component_bus_metadata,
     validate_physical_buildings,
 )
-from common.timeframe import build_full_year_metadata
+from gridexpand.common.timeframe import build_full_year_metadata
+from gridexpand.paths import ENV_FILE, SQL_DIR
 
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[1]
-ENV_PATH = GRIDEXPAND_DIR / ".env"
-SCHEMA_SQL_PATH = Path(__file__).with_name("surrogrid_schema.sql")
-GRID_BUILDING_BUS_VIEW_SQL_PATH = Path(__file__).with_name(
-    "grid_building_bus_view.sql"
-)
+ENV_PATH = ENV_FILE
+SCHEMA_SQL_PATH = SQL_DIR / "surrogrid_schema.sql"
+GRID_BUILDING_BUS_VIEW_SQL_PATH = SQL_DIR / "grid_building_bus_view.sql"
 TIME_INDEX_START = "2009-01-01 00:00:00+00:00"
 DEFAULT_SCENARIO_KEY = "baseline_static"
 DEFAULT_SCENARIO_LABEL = "Baseline static assumptions"
