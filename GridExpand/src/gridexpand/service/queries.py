@@ -48,7 +48,7 @@ def parse_run_name(run_name: str) -> dict[str, Any]:
     """Profile, model case and output mode encoded in a synthetic power-flow run name.
 
     ``<scenario_key>_<profile>[_<model case>]_<mode>_powerflow`` (see
-    ``synthetic_ags_runner.powerflow_run_name``). Runs without a model case are ``pre``
+    ``gridexpand.scenario.synthetic_ags_runner.powerflow_run_name``). Runs without a model case are ``pre``
     for status-quo profiles and unknown otherwise.
     """
     match = _RUN_NAME_RE.match(run_name or "")
@@ -136,9 +136,11 @@ def grid_candidates(ags: int, pylovo_version_id: str, min_buildings: int, plz: i
 
     Every candidate lists the model cases that already have power-flow summaries.
     """
-    from gridexpand.scenario.synthetic_ags_runner import get_candidates
+    from gridexpand.db.grids import list_grid_candidates
+    from gridexpand.service.db import engine
 
-    candidates = get_candidates(str(ags), int(min_buildings), "all", str(pylovo_version_id))
+    candidates = list_grid_candidates(engine(), ags, min_buildings=int(min_buildings), demand_scope="all",
+                                      pylovo_version_id=str(pylovo_version_id))
     if plz is not None:
         candidates = [c for c in candidates if int(c["plz"]) == int(plz)]
     ids = [int(c["grid_result_id"]) for c in candidates]

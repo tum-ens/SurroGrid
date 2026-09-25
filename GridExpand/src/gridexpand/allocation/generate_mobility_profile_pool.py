@@ -34,10 +34,8 @@ from gridexpand.allocation.functions.mobility import (
 )
 import gridexpand.common.weather as wth
 from gridexpand.common.ev_sessions import build_sessions_from_source
-from gridexpand.paths import SCENARIO_CONFIG_DIR
 from gridexpand.scenario.config_loader import load_scenario_config
 
-DEFAULT_SCENARIO_CONFIG = SCENARIO_CONFIG_DIR / "forchheim_2045_full_year.yaml"
 
 
 SCHEDULES = ["commuter", "non-commuter"]
@@ -607,7 +605,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Session-mode output directory. Must not be the published v1 pool.",
     )
     parser.add_argument("--profiles-per-stratum", type=int, default=1)
-    parser.add_argument("--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG)
+    parser.add_argument("--scenario-config", type=Path, required=True,
+                        help="Scenario YAML (config/scenarios; no default).")
     parser.add_argument("--market-share-threshold", type=float, default=0.80)
     parser.add_argument("--n_cpu", type=int, default=1)
     parser.add_argument("--append", action="store_true", help="Generate missing sample indexes up to the target count.")

@@ -7,8 +7,10 @@ from dataclasses import dataclass
 import math
 from typing import Any
 
+from gridexpand.common.timeframe import REFERENCE_YEAR
 
-from .model_cases import MODEL_CASES
+from .model_cases import get_model_case
+
 PV_SIZING_METHODS = ("annual_electricity_rule", "optimization")
 ADOPTION_MODES = ("deterministic_share", "source_inventory")
 ELECTRIFICATION_TECHNOLOGIES = ("heat", "mobility", "pv_battery")
@@ -329,10 +331,18 @@ class MobilityConfig:
         cycle = str(raw["driving_cycle_type"])
         if cycle not in {"WLTC", "EPA"}:
             raise ValueError("mobility.driving_cycle_type must be WLTC or EPA.")
+        reference_year = int(_positive(raw["reference_year"], "mobility.reference_year"))
+        if reference_year != REFERENCE_YEAR:
+            # The time axis (timeframes, DST hours, weather, run time stamps) is
+            # the fixed calendar year gridexpand.common.timeframe.REFERENCE_YEAR.
+            raise ValueError(
+                f"mobility.reference_year must be {REFERENCE_YEAR} (the fixed calendar "
+                f"year of every GridExpand time axis), got {reference_year}."
+            )
         return cls(
             commuting_probability=probability,
             emobpy_timestep_hours=_positive(raw["emobpy_timestep_hours"], "mobility.emobpy_timestep_hours"),
-            reference_year=int(_positive(raw["reference_year"], "mobility.reference_year")),
+            reference_year=reference_year,
             passenger_mass_kg=_positive(raw["passenger_mass_kg"], "mobility.passenger_mass_kg"),
             passenger_sensible_heat_w=_positive(raw["passenger_sensible_heat_w"], "mobility.passenger_sensible_heat_w", allow_zero=True),
             passengers_per_vehicle=_positive(raw["passengers_per_vehicle"], "mobility.passengers_per_vehicle"),
@@ -494,44 +504,40 @@ class ScenarioConfig:
         return asdict(self)
 
     def pv_sizing_method(self, model_case: str) -> str:
-        if model_case not in MODEL_CASES:
-            raise ValueError(f"Unknown model case {model_case!r}.")
-        if model_case == "post-hems-optimized":
+        plan = get_model_case(model_case).asset_plan
+        if plan == "optimization":
             return self.pv.optimized_method
-        if model_case == "pre":
+        if plan == "none":
             return "none"
         return self.pv.heuristic_method
 
     def battery_sizing_method(self, model_case: str) -> str:
-        if model_case not in MODEL_CASES:
-            raise ValueError(f"Unknown model case {model_case!r}.")
-        if model_case == "post-hems-optimized":
+        plan = get_model_case(model_case).asset_plan
+        if plan == "optimization":
             return self.battery.optimized_method
-        if model_case == "pre":
+        if plan == "none":
             return "none"
         return self.battery.heuristic_method
 
     def battery_capacity_coefficients(self, model_case: str) -> tuple[float, float]:
         """Return PV- and demand-based battery coefficients for one model case."""
-        if model_case == "post-hems-optimized":
+        plan = get_model_case(model_case).asset_plan
+        if plan == "optimization":
             return (
                 self.battery.optimized_upper_kwh_per_pv_kwp,
                 self.battery.optimized_upper_kwh_per_annual_mwh,
             )
-        if model_case == "pre":
+        if plan == "none":
             return (0.0, 0.0)
-        if model_case not in MODEL_CASES:
-            raise ValueError(f"Unknown model case {model_case!r}.")
         return (
             self.battery.heuristic_usable_kwh_per_pv_kwp,
             self.battery.heuristic_usable_kwh_per_annual_mwh,
         )
 
     def heat_sizing_method(self, model_case: str) -> str:
-        if model_case not in MODEL_CASES:
-            raise ValueError(f"Unknown model case {model_case!r}.")
-        if model_case == "post-hems-optimized":
+        plan = get_model_case(model_case).asset_plan
+        if plan == "optimization":
             return "optimization"
-        if model_case == "pre":
+        if plan == "none":
             return "none"
         return "full_load_hours_rule"

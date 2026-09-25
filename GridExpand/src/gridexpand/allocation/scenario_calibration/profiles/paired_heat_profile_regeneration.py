@@ -239,7 +239,7 @@ def _regenerate_one(
     result_dir: Path,
     synthetic_library: Path,
     log_dir: Path,
-    scenario_config: Path | None = None,
+    scenario_config: Path,
     output_directory: Path | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
@@ -265,9 +265,9 @@ def _regenerate_one(
         "full_year",
         "--n_cpu",
         str(n_cpu),
+        "--scenario-config",
+        str(scenario_config),
     ]
-    if scenario_config is not None:
-        command.extend(["--scenario-config", str(scenario_config)])
     if output_directory is not None:
         command.extend(["--output-directory", str(output_directory)])
     try:
@@ -344,8 +344,8 @@ def main() -> None:
     parser.add_argument(
         "--scenario-config",
         type=Path,
-        default=None,
-        help="Scenario YAML passed to Step 2 (default: Step 2's default scenario).",
+        required=True,
+        help="Scenario YAML passed to Step 2 (no default).",
     )
     parser.add_argument(
         "--output-directory",
@@ -419,9 +419,7 @@ def main() -> None:
                 result_dir=result_dir,
                 synthetic_library=synthetic_library,
                 log_dir=log_dir,
-                scenario_config=(
-                    None if args.scenario_config is None else args.scenario_config.resolve()
-                ),
+                scenario_config=args.scenario_config.resolve(),
                 output_directory=(
                     None if args.output_directory is None else args.output_directory.resolve()
                 ),

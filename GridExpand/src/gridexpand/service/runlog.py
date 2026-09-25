@@ -1,10 +1,15 @@
-"""Read what a ``gridexpand synthetic`` run writes into its run directory.
+"""Read what a pipeline job writes into its run directory.
 
-The runner (:mod:`gridexpand.scenario.synthetic_ags_runner`) appends one JSON object per
-event to ``events.jsonl`` (and prints the same line), keeps one row per grid in
-``status.tsv`` and writes each grid's step output to ``logs/candidate_<index>_<file>.log``.
-:class:`RunTracker` follows these files incrementally while a job runs; the other
-functions turn them into progress, table rows and readable log lines.
+A job runs ``gridexpand run <run.yaml> --model-case <case>`` once per model case in one
+run directory (:mod:`gridexpand.scenario.run`): the run root holds ``state.json`` (stages,
+jobs), ``events.jsonl`` and ``prepare/`` (the regional electrification assignment); each
+case's batch (:mod:`gridexpand.scenario.synthetic_ags_runner`) writes ``<root>/<case>/``
+with one JSON object per event in ``events.jsonl`` (also printed), one row per grid in
+``status.tsv`` and each grid's step output in ``logs/candidate_<index>_<file>.log``.
+A step's run directory is its case directory. :class:`RunTracker` follows these files
+incrementally while a job runs; the other functions turn them into progress, table rows
+and readable log lines. A plain ``gridexpand synthetic`` run directory (no ``state.json``)
+works the same.
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ from typing import Any
 
 EVENTS_FILE = "events.jsonl"
 STATUS_FILE = "status.tsv"
+STATE_FILE = "state.json"
 SUMMARY_FILE = "summary.json"
 EXPANSION_LOG = "expansion_materialization.log"
 LOGS_DIR = "logs"
@@ -72,6 +78,10 @@ class RunProgress:
             else:
                 self.grids_done += 1
             self.stage = next((f"grid #{i} · {s}" for i, s in self.running.items()), None)
+        elif kind == "candidate_cancelled":
+            if index is not None:
+                self.running.pop(int(index), None)
+            self.stage = next((f"grid #{i} · {s}" for i, s in self.running.items()), None)
         elif kind == "batch_finish":
             self.batch_status = str(event.get("status") or "unknown")
             self.message = event.get("message") or None
@@ -107,7 +117,8 @@ class RunTracker:
         return [line.rstrip("\r") for line in lines[:-1]]
 
     def poll_events(self) -> list[dict[str, Any]]:
-        """New events (already applied to :attr:`progress`)."""
+        """New events (already applied to :attr:`progress`); before the case's batch starts,
+        the stage comes from the run's ``state.json`` (e.g. the shared preparation)."""
         events = []
         for line in self._new_lines(self.run_dir / EVENTS_FILE):
             try:
@@ -117,11 +128,19 @@ class RunTracker:
             if isinstance(event, dict):
                 self.progress.apply(event)
                 events.append(event)
+        if not events and self.progress.grids_total is None and not self.progress.finished:
+            state = read_state(self.run_dir)
+            if state and state.get("status") == "running" and state.get("stage"):
+                self.progress.stage = f"run · {state['stage']}"
         return events
 
     def poll_logs(self) -> list[tuple[str, str]]:
-        """New ``(source label, line)`` pairs of the step logs of this run."""
+        """New ``(source label, line)`` pairs of the step logs of this run (and of the shared
+        preparation of a ``gridexpand run`` directory)."""
         files = sorted((self.run_dir / LOGS_DIR).glob("*.log")) + [self.run_dir / EXPANSION_LOG]
+        root = run_root(self.run_dir)
+        if root is not None:
+            files += sorted((root / "prepare" / LOGS_DIR).glob("*.log"))
         out: list[tuple[str, str]] = []
         for path in files:
             label = log_label(path)
@@ -144,15 +163,48 @@ def read_progress(run_dir: Path) -> RunProgress:
     return tracker.progress
 
 
+_STATUS_KEYS = ("candidate_index", "plz", "kcid", "bcid", "n_buildings", "status", "stage", "started_at",
+                "finished_at", "seconds", "timeframe_start", "timeframe_end", "message")
+
+
+def run_root(run_dir: Path) -> Path | None:
+    """The ``gridexpand run`` directory that holds ``run_dir`` (itself or its parent), if any."""
+    run_dir = Path(run_dir)
+    for candidate in (run_dir, run_dir.parent):
+        if (candidate / STATE_FILE).is_file():
+            return candidate
+    return None
+
+
+def read_state(run_dir: Path) -> dict[str, Any] | None:
+    """``state.json`` of the ``gridexpand run`` directory of ``run_dir`` (``None`` if there is none)."""
+    root = run_root(run_dir)
+    if root is None:
+        return None
+    try:
+        state = json.loads((root / STATE_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return state if isinstance(state, dict) else None
+
+
 def read_status_rows(run_dir: Path) -> list[dict[str, str]]:
-    """Rows of ``status.tsv`` (one per grid), without absolute log paths."""
+    """Rows of ``status.tsv`` (one per grid), without absolute log paths.
+
+    Before a case's batch has written ``status.tsv``, the planned grids of that case come
+    from the run's ``state.json``.
+    """
     path = Path(run_dir) / STATUS_FILE
     if not path.is_file():
-        return []
-    keep = ("candidate_index", "plz", "kcid", "bcid", "n_buildings", "status", "stage", "started_at",
-            "finished_at", "seconds", "timeframe_start", "timeframe_end", "message")
+        state = read_state(run_dir) or {}
+        group = Path(run_dir).name
+        return [
+            {key: "" if job.get(key) is None else str(job.get(key)) for key in _STATUS_KEYS}
+            | {"stage": str(job.get("step") or ""), "log": ""}
+            for job in state.get("job_list", []) if job.get("group") == group
+        ]
     with path.open(encoding="utf-8", newline="") as handle:
-        rows = [{key: row.get(key, "") for key in keep} | {"log": Path(row.get("log_file") or "").name}
+        rows = [{key: row.get(key, "") for key in _STATUS_KEYS} | {"log": Path(row.get("log_file") or "").name}
                 for row in csv.DictReader(handle, delimiter="\t")]
     return rows
 
@@ -209,6 +261,8 @@ def format_event(event: dict[str, Any], case: str | None = None) -> str:
         return f"✓ {tag}{_grid(event)}done in {event.get('seconds')} s"
     if kind in ("candidate_failed", "candidate_failed_unhandled"):
         return f"✗ {tag}{_grid(event)}failed in {event.get('stage', 'unknown stage')}: {event.get('message', '')}"
+    if kind == "candidate_cancelled":
+        return f"■ {tag}{_grid(event)}cancelled in {event.get('stage', 'unknown stage')}"
     if kind in ("candidate_failed_recorded", "pilot_finish"):
         return f"✗ {tag}{_grid(event)}recorded as failed"
     if kind == "pilot_start":

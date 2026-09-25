@@ -1,0 +1,41 @@
+# REGRESSION SANDBOX ONLY (no secrets, not a scientific run): the run of
+# tests/regression/run_harness.sh as one synthetic run YAML. The harness runs
+# `gridexpand synthetic` once per model case; this YAML runs the same three
+# batches through `gridexpand run` and must leave identical database content:
+#   GRIDEXPAND_ENV_FILE=<sandbox .env> uv run gridexpand run config/runs/sandbox_example.yaml
+# Region: the OSM demo region Aying (AGS 9184137, PLZ 85653, (c) OpenStreetMap
+# contributors, ODbL) of the sandbox database, pylovo version 1.
+run:
+  id: sandbox_example
+  scenario: ../../tests/regression/scenario_sandbox.yaml
+  pipeline: synthetic
+
+resources:
+  pylovo_version_id: 1
+  ags: 9184137
+  plz: null
+  kcid: null
+  bcid: null
+  # Four grids with 63-171 buildings each.
+  min_buildings: 60
+  storage: db
+  output_directory: null
+
+execution:
+  model_cases:
+    - pre
+    - post-hems-heuristic
+    - post-hems-optimized
+  profile_seed: 481527
+  # One week (168 h); TSAM is disabled in the sandbox scenario.
+  timeframe_mode: max_base_electricity_demand_week
+  demand_scope: all
+  mobility_source: pool
+  workers: 2
+  step2_cpus: 2
+  step3_cpus: 4
+  step3_max_cpus: 8
+  step4_cpus: 2
+  powerflow_output: both
+  powerflow_grid_scope: full
+  pilot_gate: false

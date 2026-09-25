@@ -12,6 +12,7 @@ import pandas as pd
 from sqlalchemy import text
 
 from gridexpand.common.ev_sessions import read_sessions
+from gridexpand.common.io import key_exists  # noqa: F401  (re-export)
 from gridexpand.common.timeframe import read_hdf_metadata
 
 # HDF keys shared by every Step-4 reader (synthetic and real grids).
@@ -42,12 +43,6 @@ def hdf_keys(path) -> set[str]:
     with h5py.File(path, "r") as hdf_file:
         hdf_file.visit(names.append)
     return set(names)
-
-
-def key_exists(path, key) -> bool:
-    """True if ``key`` (with or without leading slash) exists in the HDF5 file."""
-    with h5py.File(path, "r") as hdf_file:
-        return str(key).strip("/") in hdf_file
 
 
 def read_temporal_method(path):

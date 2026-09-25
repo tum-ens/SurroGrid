@@ -1,8 +1,9 @@
-# Execution and resource selection for one ordinary synthetic scenario run.
+# Execution and resource selection for one ordinary synthetic run (one exact grid).
+# Launch with `uv run gridexpand run config/runs/forchheim_2045_synthetic.yaml`.
 run:
   id: forchheim_2045_synthetic
   scenario: ../scenarios/forchheim_2045_synthetic.yaml
-  pipeline: scenario
+  pipeline: synthetic
 
 resources:
   # Exact pylovo topology version; never inferred from the environment.
@@ -22,6 +23,8 @@ execution:
   # Change it only when a deliberately different Monte Carlo realization is wanted.
   profile_seed: 481527  # Arbitrary fixed value; no geographic or scenario meaning.
   # Cases listed together use identical controlled demand/profile realizations.
+  # post-inflex-heuristic is refused by the synthetic pipeline for now (no EV
+  # sessions for the INFLEX power flow); remove it to launch this run.
   model_cases:
     - pre
     - post-inflex-heuristic

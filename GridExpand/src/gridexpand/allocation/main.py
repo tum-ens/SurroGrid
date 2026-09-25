@@ -16,7 +16,6 @@ from typing import Any
 
 from gridexpand.allocation.config import config
 from gridexpand.db.database import SurroGridDatabase
-from gridexpand.paths import SCENARIO_CONFIG_DIR
 from gridexpand.scenario.config_loader import load_scenario_config, scenario_identity_key
 from gridexpand.scenario.model_cases import MODEL_CASES
 from gridexpand.common.timeframe import (
@@ -27,7 +26,6 @@ from gridexpand.common.timeframe import (
 import gridexpand.allocation.classes.grid as grd
 from gridexpand.common.resource_report import resource_report
 
-DEFAULT_SCENARIO_CONFIG = SCENARIO_CONFIG_DIR / "forchheim_2045_synthetic.yaml"
 
 
 PROFILE_CHOICES = [
@@ -289,8 +287,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stable scenario case; determines upstream PV sizing and dispatch contract.",
     )
     parser.add_argument(
-        "--scenario-config", type=Path, default=DEFAULT_SCENARIO_CONFIG,
-        help="Scientific scenario YAML.",
+        "--scenario-config", type=Path, required=True,
+        help="Scientific scenario YAML (config/scenarios; no default).",
     )
     parser.add_argument(
         "--electrification-assignment",

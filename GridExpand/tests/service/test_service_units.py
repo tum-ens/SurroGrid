@@ -10,7 +10,7 @@ from gridexpand.service.commands import (
     PipelineSpec,
     contiguous_range,
     pipeline_steps,
-    synthetic_command,
+    run_yaml,
 )
 from gridexpand.service.queries import parse_run_name, split_scenario_key
 from gridexpand.service.runlog import (
@@ -76,23 +76,54 @@ def test_format_and_classify_events():
     assert log_label(Path("expansion_materialization.log")) == "expansion"
 
 
-def test_commands():
-    spec = PipelineSpec(ags=9184137, pylovo_version_id="1", scenario_config=Path("/s/x.yaml"),
+def test_commands(tmp_path):
+    from gridexpand.scenario.run_config import load_run_config
+
+    scenario = Path(__file__).resolve().parents[2] / "config" / "scenarios" / "schweinfurt_2045.yaml"
+    spec = PipelineSpec(ags=9184137, pylovo_version_id="1", scenario_config=scenario,
                         model_cases=("pre", "post-hems-optimized"), timeframe_mode="full_year",
                         min_buildings=60, start_index=3, limit=1)
-    argv = synthetic_command(spec, "pre", Path("/runs/j/pre"), python="py")
-    assert argv[:4] == ["py", "-m", "gridexpand", "synthetic"]
-    joined = " ".join(argv)
-    for part in ("--ags 9184137", "--pylovo-version-id 1", "--min-buildings 60", "--scenario-config /s/x.yaml",
-                 "--model-case pre", "--profiles status_quo", "--case-qualified-output", "--timeframe-mode full_year",
-                 "--powerflow-output summary", "--run-dir /runs/j/pre", "--start-index 3", "--pilot-index 3",
-                 "--limit 1"):
-        assert part in joined
-    steps = pipeline_steps(spec, Path("/runs/j"), python="py")
+    job_dir = tmp_path / "runs" / "abc123"
+    steps = pipeline_steps(spec, job_dir, python="py")
     assert [s.name for s in steps] == ["pre", "post-hems-optimized"]
-    assert "--profiles all" in " ".join(steps[1].argv) and steps[1].run_dir == "/runs/j/post-hems-optimized"
+    assert steps[0].argv == ["py", "-m", "gridexpand", "run", str(job_dir / "run.yaml"), "--run-dir", str(job_dir),
+                             "--model-case", "pre"]
+    assert steps[1].argv[-1] == "post-hems-optimized" and steps[1].run_dir == str(job_dir / "post-hems-optimized")
+    # the generated run YAML is a valid synthetic run with the request's selection
+    run, _ = load_run_config(job_dir / "run.yaml")
+    assert (run.pipeline, run.run_id, run.ags, run.pylovo_version_id) == ("synthetic", "service_abc123", 9184137, "1")
+    assert (run.min_buildings, run.start_index, run.limit, run.pilot_index) == (60, 3, 1, 3)
+    assert run.model_cases == ("pre", "post-hems-optimized") and run.powerflow_output == "summary"
+    assert run.scenario_path == scenario and run.timeframe_mode == "full_year"
+    assert run_yaml(spec, "x")["execution"]["workers"] == 1
     assert contiguous_range([5, 3, 4]) == (3, 3)
     with pytest.raises(ValueError):
         contiguous_range([1, 3])
     with pytest.raises(ValueError):
         contiguous_range([])
+
+
+def test_status_rows_and_stage_from_state(tmp_path):
+    import json
+
+    from gridexpand.service.runlog import RunTracker, read_state, read_status_rows
+
+    root = tmp_path / "job"
+    (root / "pre").mkdir(parents=True)
+    state = {"status": "running", "stage": "prepare", "job_list": [
+        {"job": "pre/9184137-03_85653_1_4", "group": "pre", "candidate_index": 3, "plz": 85653, "kcid": 1,
+         "bcid": 4, "n_buildings": 63, "status": "queued", "step": None},
+        {"job": "post-hems-optimized/9184137-03_85653_1_4", "group": "post-hems-optimized", "candidate_index": 3},
+    ]}
+    (root / "state.json").write_text(json.dumps(state))
+    assert read_state(root / "pre")["stage"] == "prepare"
+    rows = read_status_rows(root / "pre")
+    assert [(r["candidate_index"], r["kcid"], r["bcid"], r["status"], r["log"]) for r in rows] == [
+        ("3", "1", "4", "queued", "")]
+    tracker = RunTracker(root / "pre")
+    tracker.poll_events()
+    assert tracker.progress.stage == "run · prepare"
+    (root / "prepare" / "logs").mkdir(parents=True)
+    (root / "prepare" / "logs" / "electrification_preparation.log").write_text("building inventory\n")
+    assert ("prep", "building inventory") in tracker.poll_logs()
+    assert read_state(tmp_path) is None and read_status_rows(tmp_path / "nothing") == []

@@ -37,7 +37,6 @@ from gridexpand.allocation.electrification import (
 )
 import gridexpand.allocation.functions.electricity as electricity
 import gridexpand.allocation.functions.mobility as mobility
-from gridexpand.scenario.synthetic_ags_runner import get_candidates
 
 
 def _candidate_identity(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -297,7 +296,9 @@ def prepare_regional_electrification_assignment(
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ags", required=True)
-    parser.add_argument("--plz", type=int)
+    parser.add_argument("--plz", type=int, help="Only the candidate grids of this PLZ.")
+    parser.add_argument("--kcid", type=int, help="With --plz and --bcid: one candidate grid only.")
+    parser.add_argument("--bcid", type=int, help="With --plz and --kcid: one candidate grid only.")
     parser.add_argument("--min-buildings", type=int, default=5)
     parser.add_argument("--pylovo-version-id", required=True)
     parser.add_argument("--demand-scope", choices=["all", "residential"], default="all")
@@ -307,15 +308,21 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--source-evidence", type=Path)
     args = parser.parse_args(argv)
-    candidates = get_candidates(
-        args.ags,
-        args.min_buildings,
-        args.demand_scope,
-        args.pylovo_version_id,
+    if (args.kcid is None) != (args.bcid is None) or (args.kcid is not None and args.plz is None):
+        parser.error("--kcid and --bcid go together and need --plz.")
+    db = SurroGridDatabase()
+    db.pylovo_version_id = str(args.pylovo_version_id)
+    candidates = db.list_grid_candidates(
+        args.ags, min_buildings=args.min_buildings, demand_scope=args.demand_scope
     )
     if args.plz is not None:
         candidates = [
             candidate for candidate in candidates if int(candidate["plz"]) == args.plz
+        ]
+    if args.kcid is not None:
+        candidates = [
+            candidate for candidate in candidates
+            if (int(candidate["kcid"]), int(candidate["bcid"])) == (args.kcid, args.bcid)
         ]
     metadata = prepare_regional_electrification_assignment(
         candidates=candidates,

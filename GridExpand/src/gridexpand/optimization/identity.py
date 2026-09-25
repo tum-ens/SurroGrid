@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -12,42 +11,9 @@ from gridexpand.common.electrification import (
     assignment_manifest_hash,
     validate_electrification_assignment_config,
 )
+from gridexpand.common.io import resolve_input_file  # noqa: F401  (re-export)
 from gridexpand.common.timeframe import scenario_key_for_timeframe
 from gridexpand.scenario.config_loader import scenario_identity_key
-
-
-def resolve_input_file(directory: Path | str, file_id: str | Path) -> Path:
-    """Return the input HDF5 file named by ``file_id``.
-
-    ``file_id`` is a path to an existing file, an exact file name in
-    ``directory`` or the unique id prefix before the first underscore of one
-    ``.h5`` file there (e.g. ``9184137-03``).
-
-    Raises:
-        FileNotFoundError: nothing matches.
-        ValueError: the prefix matches several files.
-    """
-    directory = Path(directory)
-    candidate = Path(file_id)
-    if candidate.is_file() and (candidate.is_absolute() or len(candidate.parts) > 1):
-        return candidate
-    name = str(file_id)
-    if name.endswith(".h5"):
-        path = directory / name
-        if path.is_file():
-            return path
-        raise FileNotFoundError(f"No input file {name} in {directory}.")
-    matches = sorted(
-        path for path in directory.glob("*.h5") if path.name.split("_", 1)[0] == name
-    )
-    if not matches:
-        raise FileNotFoundError(f"No input file matches {name} in {directory}.")
-    if len(matches) > 1:
-        raise ValueError(
-            f"Input id {name} is ambiguous in {directory}: "
-            f"{[path.name for path in matches]}; pass the file name."
-        )
-    return matches[0]
 
 
 @dataclass(frozen=True)

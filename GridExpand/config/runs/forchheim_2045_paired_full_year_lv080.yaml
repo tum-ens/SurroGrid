@@ -7,7 +7,7 @@
 # the identical topology, buildings and fixed assets.
 #
 # Regional expansion cost also cannot come from one grid: cost is a sum over grids
-# and the effect of interest is distributional. run_scenario additionally emits no
+# and the effect of interest is distributional. gridexpand run additionally emits no
 # expansion commands when target_grid_id is set.
 # Cloned from forchheim_2045_paired.yaml. Deliberate differences: new run id
 # and output namespace, the full-year scenario, retained intermediates for the

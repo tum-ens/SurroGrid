@@ -1,10 +1,11 @@
 # Execution and resource selection for the v3 (better-dimensioned) Schweinfurt run.
 # v3 carries the voltage-drop-aware feeder/connection-line dimensioning (pylovo "version 2"
 # feature set) and is dimensionally distinct from the v100 baseline (ampacity-only).
+# Launch with `uv run gridexpand run config/runs/schweinfurt_2045_synthetic.yaml`.
 run:
   id: schweinfurt_2045_synthetic_v3
   scenario: ../scenarios/schweinfurt_2045.yaml
-  pipeline: scenario
+  pipeline: synthetic
 
 resources:
   # Exact pylovo topology version: v3 = voltage-drop-aware dimensioned grids.
@@ -24,6 +25,8 @@ execution:
   # Change it only when a deliberately different Monte Carlo realization is wanted.
   profile_seed: 481527  # Arbitrary fixed value; no geographic or scenario meaning.
   # Cases listed together use identical controlled demand/profile realizations.
+  # post-inflex-heuristic is refused by the synthetic pipeline for now (no EV
+  # sessions for the INFLEX power flow); remove it to launch this run.
   model_cases:
     - pre
     - post-inflex-heuristic

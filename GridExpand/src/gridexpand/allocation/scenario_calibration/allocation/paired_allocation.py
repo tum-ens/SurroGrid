@@ -14,7 +14,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import text
 
-from ..paths import ENV_PATH, OUTPUT_DIR, SCENARIO_CONFIG_DIR
+from ..paths import ENV_PATH, OUTPUT_DIR
 
 from gridexpand.db.database import SurroGridDatabase
 from gridexpand.common.building_components import build_building_components
@@ -1000,10 +1000,8 @@ def build_paired_allocation(
 ) -> dict[str, pd.DataFrame]:
     load_dotenv(ENV_PATH, override=True)
     os.environ["PYLOVO_VERSION_ID"] = str(pylovo_version_id)
-    scenario_config_path = scenario_config_path or (
-        SCENARIO_CONFIG_DIR
-        / "forchheim_2045_full_year.yaml"
-    )
+    if scenario_config_path is None:
+        raise ValueError("build_paired_allocation needs scenario_config_path (no default scenario).")
     scenario, scenario_hash = load_scenario_config(scenario_config_path)
     pv_adoption_mode = scenario.electrification.pv_battery.adoption_mode
     pv_location_mode = "swf" if pv_adoption_mode == "source_inventory" else "all_buildings"
@@ -1235,8 +1233,8 @@ def main() -> None:
     parser.add_argument(
         "--scenario-config",
         type=Path,
-        default=None,
-        help="Scientific scenario YAML that owns technology adoption policy.",
+        required=True,
+        help="Scientific scenario YAML that owns technology adoption policy (no default).",
     )
     parser.add_argument(
         "--profile-seed", type=int, default=481527,
@@ -1253,9 +1251,7 @@ def main() -> None:
         max_match_distance_m=args.max_match_distance_m,
         min_buildings=args.min_buildings,
         profile_seed=args.profile_seed,
-        scenario_config_path=args.scenario_config
-        if hasattr(args, "scenario_config")
-        else None,
+        scenario_config_path=args.scenario_config,
     )
     print(outputs["paired_scope_audit"].to_string(index=False))
 
