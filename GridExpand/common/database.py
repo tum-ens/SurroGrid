@@ -135,6 +135,7 @@ class SurroGridDatabase:
                 self._write_schema_marker(conn, marker)
                 return
             sql = SCHEMA_SQL_PATH.read_text(encoding="utf-8")
+            sql = "\n".join(line for line in sql.splitlines() if not line.strip().startswith("--"))
             statements = [statement.strip() for statement in sql.split(";") if statement.strip()]
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb"))
