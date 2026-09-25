@@ -6,6 +6,8 @@ from .envelope import Envelope
 from .solar import Sun
 from .users import Users
 from config import config
+from common.reproducibility import legacy_random_state
+from contextlib import nullcontext
 import math
 import warnings
 
@@ -314,23 +316,25 @@ class Datahandler:
             building["user"].occ = np.zeros(len(self.site["SunTotal"]))
             building["user"].elec = np.zeros(len(self.site["SunTotal"]))
 
-            building["user"].calcProfiles(site=self.site,
-                                          holidays=self.time["holidays"],
-                                          time_resolution=self.time["timeResolution"],
-                                          time_horizon=self.time["dataLength"],
-                                          building=building,
-                                          elecDemand=elecDemand
-                                          )
+            seed = building["buildingFeatures"].get("seed")
+            with legacy_random_state(int(seed)) if seed is not None else nullcontext():
+                building["user"].calcProfiles(site=self.site,
+                                              holidays=self.time["holidays"],
+                                              time_resolution=self.time["timeResolution"],
+                                              time_horizon=self.time["dataLength"],
+                                              building=building,
+                                              elecDemand=elecDemand
+                                              )
 
-            building["envelope"].calcNormativeProperties(self.site["SunRad"], building["user"].gains)
+                building["envelope"].calcNormativeProperties(self.site["SunRad"], building["user"].gains)
 
 
-            # calculate or load heating profiles
-            building["user"].calcHeatingProfile(site=self.site,
-                                                envelope=building["envelope"],
-                                                holidays=self.time["holidays"],
-                                                time_resolution=self.time["timeResolution"]
-                                                )
+                # calculate or load heating profiles
+                building["user"].calcHeatingProfile(site=self.site,
+                                                    envelope=building["envelope"],
+                                                    holidays=self.time["holidays"],
+                                                    time_resolution=self.time["timeResolution"]
+                                                    )
 
             dhw_res_profiles[building["buildingFeatures"]["bus"]] = building["user"].dhw
             space_heat_profiles[building["buildingFeatures"]["bus"]] = building["user"].heat
