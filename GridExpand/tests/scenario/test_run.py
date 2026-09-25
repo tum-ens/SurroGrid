@@ -103,12 +103,23 @@ def test_aligned_plan(tmp_path):
     [str(SANDBOX), "--provider", "swf"],
     [str(SANDBOX), "--target-grid-id", "3"],
     [str(RUN_CONFIG_DIR / "forchheim_2045_paired_full_year.yaml"), "--pre-only"],
-    [str(RUN_CONFIG_DIR / "schweinfurt_2045_synthetic.yaml")],
     [],
 ])
 def test_invalid_configuration_exit_code(argv, capsys):
     assert run_module.main(argv) == run_module.EXIT_INVALID
     assert "invalid configuration" in capsys.readouterr().err
+
+
+def test_synthetic_run_refuses_inflex_before_database_access(tmp_path, capsys):
+    source = RUN_CONFIG_DIR / "schweinfurt_2045_synthetic.yaml"
+    text = source.read_text().replace(
+        "scenario: ../scenarios/", f"scenario: {(RUN_CONFIG_DIR.parent / 'scenarios').as_posix()}/"
+    ).replace("    - post-hems-optimized\n", "    - post-hems-optimized\n    - post-inflex-heuristic\n")
+    assert "post-inflex-heuristic\n" in text
+    config = tmp_path / "synthetic_inflex.yaml"
+    config.write_text(text)
+    assert run_module.main([str(config)]) == run_module.EXIT_INVALID
+    assert "post-inflex-heuristic is not available for the synthetic pipeline" in capsys.readouterr().err
 
 
 def test_dry_run_exits_zero(capsys):
