@@ -12,6 +12,19 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from .cutoff_data import (
+    CRITICAL_PERCENTILE,
+    FALLBACK_PALETTE,
+    Y_TITLES,
+    color_defaults,
+    normalize_filter_scope,
+    normalize_quantiles,
+    retained_curve,
+    retained_frame,
+    select_metrics,
+    select_worst_asset_per_grid,
+)
+
 
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     color = str(hex_color).strip().lstrip("#")
@@ -151,13 +164,7 @@ def plot_powerflow_asset_cutoff_overview(
         raise ValueError("center_stat must be either 'median' or 'mean'.")
     center_label = center_stat.capitalize()
 
-    filter_scope = str(filter_scope).strip().lower()
-    if filter_scope in {"asset", "assets"}:
-        filter_scope = "asset"
-    elif filter_scope in {"grid", "grids"}:
-        filter_scope = "grid"
-    else:
-        raise ValueError("filter_scope must be either 'asset' or 'grid'.")
+    filter_scope = normalize_filter_scope(filter_scope)
     cutoff_unit = "asset" if filter_scope == "asset" else "grid"
     cutoff_units = "assets" if filter_scope == "asset" else "grids"
 
@@ -169,46 +176,18 @@ def plot_powerflow_asset_cutoff_overview(
 
     if asset_cutoff_percentiles is None:
         asset_cutoff_percentiles = (1.0, 0.99, 0.95, 0.90, 0.50)
-    asset_cutoff_percentiles = tuple(float(q) / 100 if float(q) > 1 else float(q) for q in asset_cutoff_percentiles)
-    if any(q <= 0 or q > 1 for q in asset_cutoff_percentiles):
-        raise ValueError("asset_cutoff_percentiles values must satisfy 0 < value <= 1, or 0 < value <= 100.")
+    asset_cutoff_percentiles = normalize_quantiles(asset_cutoff_percentiles, "asset_cutoff_percentiles")
 
     if asset_percentiles is None:
         asset_percentiles = (0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99, 1.0)
-    asset_percentiles = tuple(float(q) / 100 if float(q) > 1 else float(q) for q in asset_percentiles)
-    if any(q <= 0 or q > 1 for q in asset_percentiles):
-        raise ValueError("asset_percentiles values must satisfy 0 < value <= 1, or 0 < value <= 100.")
+    asset_percentiles = normalize_quantiles(asset_percentiles, "asset_percentiles")
     asset_percentiles = tuple(sorted(set(asset_percentiles).union(asset_cutoff_percentiles)))
     asset_cutoff_percentiles = tuple(sorted(set(asset_cutoff_percentiles), reverse=True))
 
-    metric_order = ["Transformer", "Cables", "Voltage"]
-    metric_lookup = {metric.lower(): metric for metric in metric_order}
-    selected_metrics = []
-    for metric in metrics:
-        metric_key = metric_lookup.get(str(metric).strip().lower())
-        if metric_key is None:
-            available = ", ".join(metric_order)
-            raise ValueError(f"Unsupported metric {metric!r}. Available: {available}.")
-        if metric_key not in selected_metrics:
-            selected_metrics.append(metric_key)
+    selected_metrics = select_metrics(metrics)
 
     y_axis_ranges = _powerflow_y_axis_ranges(y_axis_limits)
-    critical_percentile = {"Transformer": "max", "Cables": "max", "Voltage": "min"}
-    critical_direction = {"Transformer": "high", "Cables": "high", "Voltage": "low"}
-    y_titles = {
-        "Transformer": "Max loading [%]",
-        "Cables": "Max loading [%]",
-        "Voltage": "Min voltage [p.u.]",
-    }
-    default_colors = {
-        "Synthetic": "#335C81",
-        "Real SWF": "#D95D39",
-        "synthetic": "#335C81",
-        "real_swf": "#D95D39",
-    }
-    if color_map:
-        default_colors.update({str(key): value for key, value in color_map.items()})
-    fallback_palette = ["#335C81", "#D95D39", "#2A9D8F", "#6D597A", "#7A8450"]
+    default_colors = color_defaults(color_map)
 
     def _cutoff_label(cutoff: float) -> str:
         if np.isclose(cutoff, 1.0):
@@ -221,80 +200,6 @@ def plot_powerflow_asset_cutoff_overview(
     def _visible_asset_percentiles(cutoff: float) -> tuple[float, ...]:
         visible = tuple(q for q in asset_percentiles if q <= cutoff or np.isclose(q, cutoff))
         return visible or (cutoff,)
-
-    def _grid_keys(frame: pd.DataFrame) -> pd.Series:
-        if "powerflow_run_id" in frame.columns:
-            key_cols = [
-                col
-                for col in ("powerflow_source", "comparison_group", "run_name", "stage", "powerflow_run_id")
-                if col in frame.columns
-            ]
-        elif "grid" in frame.columns:
-            key_cols = [col for col in ("comparison_group", "run_name", "stage", "grid") if col in frame.columns]
-        else:
-            raise ValueError("filter_scope='grid' requires a 'powerflow_run_id' or 'grid' column.")
-        return frame[key_cols].astype("string").fillna("<NA>").agg("|".join, axis=1)
-
-    def _retained_mask(values: pd.Series, metric_name: str, retained_fraction: float) -> pd.Series:
-        values = values.astype(float)
-        if np.isclose(retained_fraction, 1.0):
-            return pd.Series(True, index=values.index)
-        if critical_direction[metric_name] == "high":
-            threshold = values.quantile(retained_fraction)
-            return values <= threshold
-        threshold = values.quantile(1 - retained_fraction)
-        return values >= threshold
-
-    def _retained_frame(group_df: pd.DataFrame, metric_name: str, cutoff: float) -> pd.DataFrame:
-        values = group_df["value"].astype(float)
-        if filter_scope == "asset":
-            return group_df.loc[_retained_mask(values, metric_name, cutoff)].copy()
-
-        row_keys = _grid_keys(group_df)
-        reducer = "max" if critical_direction[metric_name] == "high" else "min"
-        grid_values = values.groupby(row_keys, sort=False).agg(reducer)
-        retained_grid_keys = set(grid_values.loc[_retained_mask(grid_values, metric_name, cutoff)].index)
-        return group_df.loc[row_keys.isin(retained_grid_keys)].copy()
-
-    def _retained_curve(group_df: pd.DataFrame, metric_name: str, x_values: tuple[float, ...]) -> pd.DataFrame:
-        rows = []
-        group_df = group_df.dropna(subset=["value"]).copy()
-        if group_df.empty:
-            return pd.DataFrame(rows)
-        total_count = int(group_df["value"].size) if filter_scope == "asset" else int(_grid_keys(group_df).nunique())
-        for retained_fraction in x_values:
-            retained_df = _retained_frame(group_df, metric_name, retained_fraction)
-            retained = retained_df["value"].astype(float).dropna()
-            if retained.empty:
-                continue
-            retained_count = int(retained.size) if filter_scope == "asset" else int(_grid_keys(retained_df).nunique())
-            rows.append(
-                {
-                    "retained_asset_cutoff": retained_fraction,
-                    "center": float(retained.median() if center_stat == "median" else retained.mean()),
-                    "band_lower": float(retained.min()),
-                    "band_upper": float(retained.max()),
-                    "retained_assets": retained_count,
-                    "total_assets": total_count,
-                }
-            )
-        return pd.DataFrame(rows)
-
-    def _select_worst_asset_per_grid(plot_df: pd.DataFrame, metric_name: str) -> pd.DataFrame:
-        if not worst_asset_per_grid or plot_df.empty:
-            return plot_df
-        if "grid" not in plot_df.columns:
-            raise ValueError("worst_asset_per_grid=True requires a 'grid' column in the profile dataframe.")
-        plot_df = plot_df.dropna(subset=["value"]).copy()
-        if plot_df.empty:
-            return plot_df
-        group_keys = [group_col, "grid"] if group_col in plot_df.columns else ["grid"]
-        grouped = plot_df.groupby(group_keys, sort=False, observed=True)["value"]
-        if critical_direction[metric_name] == "high":
-            value_index = grouped.idxmax()
-        else:
-            value_index = grouped.idxmin()
-        return plot_df.loc[value_index.dropna()].reset_index(drop=True)
 
     def _x_range(cutoff: float) -> list[float]:
         x_values = _visible_asset_percentiles(cutoff)
@@ -350,7 +255,7 @@ def plot_powerflow_asset_cutoff_overview(
 
         for col_idx, metric in enumerate(selected_metrics, start=1):
             metric_df = df[
-                (df["metric"] == metric) & (df["percentile_norm"] == critical_percentile[metric])
+                (df["metric"] == metric) & (df["percentile_norm"] == CRITICAL_PERCENTILE[metric])
             ].dropna(subset=["value"]).copy()
             if metric_df.empty:
                 continue
@@ -359,11 +264,13 @@ def plot_powerflow_asset_cutoff_overview(
                 values = group_df["value"].astype(float).dropna()
                 if values.empty:
                     continue
-                curve = _retained_curve(group_df, metric, x_values)
+                curve = retained_curve(
+                    group_df, metric, x_values, filter_scope=filter_scope, center_stat=center_stat, counts=True
+                )
                 if curve.empty:
                     continue
                 group_label = str(group)
-                color = default_colors.get(group_label, fallback_palette[color_idx % len(fallback_palette)])
+                color = default_colors.get(group_label, FALLBACK_PALETTE[color_idx % len(FALLBACK_PALETTE)])
                 customdata = np.column_stack(
                     [
                         curve["band_lower"].to_numpy(dtype=float),
@@ -432,8 +339,9 @@ def plot_powerflow_asset_cutoff_overview(
                 )
                 cutoff_trace_indices.append(len(fig.data) - 1)
 
-                violin_df = _retained_frame(group_df, metric, cutoff)
-                violin_df = _select_worst_asset_per_grid(violin_df, metric)
+                violin_df = retained_frame(group_df, metric, cutoff, filter_scope)
+                if worst_asset_per_grid:
+                    violin_df = select_worst_asset_per_grid(violin_df, metric, group_col)
                 if violin_df.empty:
                     continue
                 hover_parts = []
@@ -480,13 +388,13 @@ def plot_powerflow_asset_cutoff_overview(
                 cutoff_trace_indices.append(len(fig.data) - 1)
 
             fig.update_yaxes(
-                title_text=y_titles[metric],
+                title_text=Y_TITLES[metric],
                 tickformat=".2f" if metric == "Voltage" else None,
                 row=1,
                 col=col_idx,
             )
             fig.update_yaxes(
-                title_text=y_titles[metric],
+                title_text=Y_TITLES[metric],
                 tickformat=".2f" if metric == "Voltage" else None,
                 row=2,
                 col=col_idx,
@@ -587,13 +495,7 @@ def plot_powerflow_asset_cutoff_overview_static(
     if center_stat not in {"median", "mean"}:
         raise ValueError("center_stat must be either 'median' or 'mean'.")
 
-    filter_scope = str(filter_scope).strip().lower()
-    if filter_scope in {"asset", "assets"}:
-        filter_scope = "asset"
-    elif filter_scope in {"grid", "grids"}:
-        filter_scope = "grid"
-    else:
-        raise ValueError("filter_scope must be either 'asset' or 'grid'.")
+    filter_scope = normalize_filter_scope(filter_scope)
     cutoff_unit = "asset" if filter_scope == "asset" else "grid"
 
     cutoff = float(asset_cutoff_percentile)
@@ -604,9 +506,7 @@ def plot_powerflow_asset_cutoff_overview_static(
 
     if asset_percentiles is None:
         asset_percentiles = (0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99, 1.0)
-    asset_percentiles = tuple(float(q) / 100 if float(q) > 1 else float(q) for q in asset_percentiles)
-    if any(q <= 0 or q > 1 for q in asset_percentiles):
-        raise ValueError("asset_percentiles values must satisfy 0 < value <= 1, or 0 < value <= 100.")
+    asset_percentiles = normalize_quantiles(asset_percentiles, "asset_percentiles")
     x_values = tuple(q for q in sorted(set(asset_percentiles).union({cutoff})) if q <= cutoff or np.isclose(q, cutoff))
     if not x_values:
         x_values = (cutoff,)
@@ -623,105 +523,10 @@ def plot_powerflow_asset_cutoff_overview_static(
         df[source_col] = ""
     df["percentile_norm"] = df["percentile"].map(_normalize_percentile_label)
 
-    metric_order = ["Transformer", "Cables", "Voltage"]
-    metric_lookup = {metric.lower(): metric for metric in metric_order}
-    selected_metrics = []
-    for metric in metrics:
-        metric_key = metric_lookup.get(str(metric).strip().lower())
-        if metric_key is None:
-            available = ", ".join(metric_order)
-            raise ValueError(f"Unsupported metric {metric!r}. Available: {available}.")
-        if metric_key not in selected_metrics:
-            selected_metrics.append(metric_key)
+    selected_metrics = select_metrics(metrics)
 
-    critical_percentile = {"Transformer": "max", "Cables": "max", "Voltage": "min"}
-    critical_direction = {"Transformer": "high", "Cables": "high", "Voltage": "low"}
-    y_titles = {
-        "Transformer": "Max loading [%]",
-        "Cables": "Max loading [%]",
-        "Voltage": "Min voltage [p.u.]",
-    }
-    default_colors = {
-        "Synthetic": "#335C81",
-        "Real SWF": "#D95D39",
-        "synthetic": "#335C81",
-        "real_swf": "#D95D39",
-    }
-    if color_map:
-        default_colors.update({str(key): value for key, value in color_map.items()})
-    fallback_palette = ["#335C81", "#D95D39", "#2A9D8F", "#6D597A", "#7A8450"]
+    default_colors = color_defaults(color_map)
     y_axis_ranges = _powerflow_y_axis_ranges(y_axis_limits)
-
-    def _grid_keys(frame: pd.DataFrame) -> pd.Series:
-        if "powerflow_run_id" in frame.columns:
-            key_cols = [
-                col
-                for col in ("powerflow_source", "comparison_group", "run_name", "stage", "powerflow_run_id")
-                if col in frame.columns
-            ]
-        elif "grid" in frame.columns:
-            key_cols = [col for col in ("comparison_group", "run_name", "stage", "grid") if col in frame.columns]
-        else:
-            raise ValueError("filter_scope='grid' requires a 'powerflow_run_id' or 'grid' column.")
-        return frame[key_cols].astype("string").fillna("<NA>").agg("|".join, axis=1)
-
-    def _retained_mask(values: pd.Series, metric_name: str, retained_fraction: float) -> pd.Series:
-        values = values.astype(float)
-        if np.isclose(retained_fraction, 1.0):
-            return pd.Series(True, index=values.index)
-        if critical_direction[metric_name] == "high":
-            threshold = values.quantile(retained_fraction)
-            return values <= threshold
-        threshold = values.quantile(1 - retained_fraction)
-        return values >= threshold
-
-    def _retained_frame_at_cutoff(group_df: pd.DataFrame, metric_name: str, retained_fraction: float) -> pd.DataFrame:
-        values = group_df["value"].astype(float)
-        if filter_scope == "asset":
-            return group_df.loc[_retained_mask(values, metric_name, retained_fraction)].copy()
-
-        row_keys = _grid_keys(group_df)
-        reducer = "max" if critical_direction[metric_name] == "high" else "min"
-        grid_values = values.groupby(row_keys, sort=False).agg(reducer)
-        retained_grid_keys = set(grid_values.loc[_retained_mask(grid_values, metric_name, retained_fraction)].index)
-        return group_df.loc[row_keys.isin(retained_grid_keys)].copy()
-
-    def _retained_curve(group_df: pd.DataFrame, metric_name: str) -> pd.DataFrame:
-        group_df = group_df.dropna(subset=["value"]).copy()
-        rows = []
-        for retained_fraction in x_values:
-            retained_df = _retained_frame_at_cutoff(group_df, metric_name, retained_fraction)
-            retained = retained_df["value"].astype(float).dropna()
-            if retained.empty:
-                continue
-            rows.append(
-                {
-                    "retained_asset_cutoff": retained_fraction,
-                    "center": float(retained.median() if center_stat == "median" else retained.mean()),
-                    "band_lower": float(retained.min()),
-                    "band_upper": float(retained.max()),
-                }
-            )
-        return pd.DataFrame(rows)
-
-    def _retained_frame(group_df: pd.DataFrame, metric_name: str) -> pd.DataFrame:
-        return _retained_frame_at_cutoff(group_df, metric_name, cutoff)
-
-    def _select_worst_asset_per_grid(plot_df: pd.DataFrame, metric_name: str) -> pd.DataFrame:
-        if not worst_asset_per_grid or plot_df.empty:
-            return plot_df
-        if "grid" not in plot_df.columns:
-            raise ValueError("worst_asset_per_grid=True requires a 'grid' column in the profile dataframe.")
-        plot_df = plot_df.dropna(subset=["value"]).copy()
-        if plot_df.empty:
-            return plot_df
-        group_keys = [group_col, "grid"] if group_col in plot_df.columns else ["grid"]
-        grouped = plot_df.groupby(group_keys, sort=False, observed=True)["value"]
-        if critical_direction[metric_name] == "high":
-            value_index = grouped.idxmax()
-        else:
-            value_index = grouped.idxmin()
-        return plot_df.loc[value_index.dropna()].reset_index(drop=True)
 
     def _cutoff_label(value: float) -> str:
         return f"P{int(round(value * 100)):02d}" if value < 1 else "P100"
@@ -773,7 +578,7 @@ def plot_powerflow_asset_cutoff_overview_static(
     for key, value in source_style_map.items():
         default_source_styles[str(key)] = {**default_source_styles.get(str(key), {}), **value}
     group_colors = {
-        group: default_colors.get(group, fallback_palette[index % len(fallback_palette)])
+        group: default_colors.get(group, FALLBACK_PALETTE[index % len(FALLBACK_PALETTE)])
         for index, group in enumerate(groups)
     }
 
@@ -792,7 +597,7 @@ def plot_powerflow_asset_cutoff_overview_static(
     for col_idx, metric in enumerate(selected_metrics):
         metric_df = df[
             (df["metric"] == metric)
-            & (df["percentile_norm"] == critical_percentile[metric])
+            & (df["percentile_norm"] == CRITICAL_PERCENTILE[metric])
         ].dropna(subset=["value"]).copy()
         if metric_df.empty:
             continue
@@ -808,7 +613,7 @@ def plot_powerflow_asset_cutoff_overview_static(
                 values = group_df["value"].astype(float).dropna()
                 if values.empty:
                     continue
-                curve = _retained_curve(group_df, metric)
+                curve = retained_curve(group_df, metric, x_values, filter_scope=filter_scope, center_stat=center_stat)
                 color = group_colors[group]
                 style = _source_style(source)
                 (line,) = ax_curve.plot(
@@ -845,7 +650,9 @@ def plot_powerflow_asset_cutoff_overview_static(
                     (metric_df[group_col].astype(str) == group)
                     & (metric_df[source_col].astype(str) == source)
                 ]
-                retained = _select_worst_asset_per_grid(_retained_frame(group_df, metric), metric)
+                retained = retained_frame(group_df, metric, cutoff, filter_scope)
+                if worst_asset_per_grid:
+                    retained = select_worst_asset_per_grid(retained, metric, group_col)
                 values = retained["value"].astype(float).dropna().to_numpy()
                 if values.size == 0:
                     continue
@@ -914,11 +721,11 @@ def plot_powerflow_asset_cutoff_overview_static(
 
         ax_curve.set_title(metric, fontsize=panel_title_fontsize, fontweight="bold")
         ax_curve.set_xlabel("")
-        ax_curve.set_ylabel(f"{center_stat.capitalize()} {y_titles[metric].lower()}", fontsize=label_fontsize)
+        ax_curve.set_ylabel(f"{center_stat.capitalize()} {Y_TITLES[metric].lower()}", fontsize=label_fontsize)
         ax_curve.set_xticks(list(x_values))
         ax_curve.set_xticklabels([_cutoff_label(q) for q in x_values], rotation=35, ha="right", rotation_mode="anchor", fontsize=tick_fontsize)
         ax_dist.set_xlabel("")
-        ax_dist.set_ylabel(y_titles[metric], fontsize=label_fontsize)
+        ax_dist.set_ylabel(Y_TITLES[metric], fontsize=label_fontsize)
         if metric == "Voltage":
             voltage_formatter = FormatStrFormatter("%.3f")
             ax_curve.yaxis.set_major_formatter(voltage_formatter)
