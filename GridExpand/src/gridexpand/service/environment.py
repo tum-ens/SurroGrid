@@ -87,18 +87,34 @@ def check_highs() -> dict[str, Any]:
     return {"installed": installed, "package_version": _package_version("highspy"), "usable": installed}
 
 
+def step3_reads_solver_setting() -> bool:
+    """Whether Step 3 honours ``GRIDEXPAND_SOLVER`` (added by the optimisation refactor).
+
+    Until then Step 3 always uses Gurobi, whatever the service is configured with.
+    """
+    from gridexpand import paths
+
+    code = paths.PACKAGE_DIR / "optimization"
+    return any("GRIDEXPAND_SOLVER" in p.read_text(encoding="utf-8", errors="ignore") for p in code.glob("*.py"))
+
+
 def solver_status(configured: str) -> dict[str, Any]:
     """Solver availability and whether post cases (which need Step 3) can run."""
     gurobi, highs = check_gurobi(), check_highs()
     name = configured.lower()
-    if name.startswith("gurobi"):
-        usable, reason = gurobi["usable"], None if gurobi["usable"] else f"Gurobi is not usable: {gurobi['detail']}"
+    honoured = step3_reads_solver_setting()
+    if name.startswith("gurobi") or not honoured:
+        usable = gurobi["usable"]
+        reason = None if usable else f"Gurobi is not usable: {gurobi['detail']}"
+        if not honoured and not name.startswith("gurobi"):
+            reason = (f"Step 3 does not read GRIDEXPAND_SOLVER={configured} yet and always uses Gurobi"
+                      + ("" if usable else f" ({gurobi['detail']})"))
     elif "highs" in name:
         usable, reason = highs["usable"], None if highs["usable"] else "highspy is not installed"
     else:
         usable, reason = False, f"unknown solver '{configured}'"
-    return {"configured": configured, "gurobi": gurobi, "highs": highs, "post_cases_supported": usable,
-            "post_cases_reason": reason}
+    return {"configured": configured, "step3_reads_setting": honoured, "gurobi": gurobi, "highs": highs,
+            "post_cases_supported": usable, "post_cases_reason": reason}
 
 
 def data_assets() -> list[dict[str, Any]]:
