@@ -83,3 +83,9 @@ packages = ["src/gridexpand"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint.per-file-ignores]
+# Vendored third-party code (districtgenerator, emobpy, urbs) keeps its upstream
+# star imports, re-exports and idioms to ease comparison with upstream.
+"src/gridexpand/allocation/external/**" = ["F401", "F403", "F405", "F541", "F841"]
+"src/gridexpand/optimization/urbs/**" = ["F401", "F403", "F405", "F541", "F811", "F841"]
