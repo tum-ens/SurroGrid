@@ -86,7 +86,8 @@ def run_tsam(data, noTypicalPeriods, hoursPerPeriod, extremePeriodMethod="replac
         if isinstance(df.columns, pd.MultiIndex) and df.columns.nlevels >= 2:
             mask = df.columns.get_level_values(1).str.startswith(tuple(extract_if_startwith))
             filtered_dfs.append(df.loc[:, mask])
-        else: raise ValueError("Check dataframe validity and column multiindex naming convention!")
+        else:
+            raise ValueError("Check dataframe validity and column multiindex naming convention!")
     time_series_data = pd.concat(filtered_dfs, axis=1)
 
     ### Assign datetime index which is required by tsam method
@@ -128,7 +129,8 @@ def run_tsam(data, noTypicalPeriods, hoursPerPeriod, extremePeriodMethod="replac
     rescaleClusterPeriods = bool(method_settings.get("rescale_cluster_periods", False))
     if extremePeriodMethod=="new_cluster_center":     # Reduce number of typical periods by how many extreme periods will be added (s.t. final typical weeks still same)
         noTypicalPeriods -= sum([len(addMeanMin_cols) if addMeanMin_cols is not None else 0, len(addMeanMax_cols) if addMeanMax_cols is not None else 0])
-        if noTypicalPeriods < 1: raise ValueError("Number extreme periods cannot be higher than number of typical periods")
+        if noTypicalPeriods < 1:
+            raise ValueError("Number extreme periods cannot be higher than number of typical periods")
 
 
     ################################# Conduct TSAM #######################################
@@ -220,7 +222,8 @@ def run_tsam(data, noTypicalPeriods, hoursPerPeriod, extremePeriodMethod="replac
         if indices_to_keep_extra != []:
             data_extra = data[data_name].reindex(indices_to_keep_extra, axis=0, level='t')
             data[data_name] = pd.concat([data_base, data_extra])
-        else: data[data_name] = data_base
+        else:
+            data[data_name] = data_base
         data[data_name] = data[data_name].groupby(level='support_timeframe', group_keys=False).apply(reset_hour_counter)
 
 

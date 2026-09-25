@@ -15,9 +15,14 @@ def _get_cop(heating_type, df_heat_space, df_heat_water, air_temp):
     hp_cop_func = config.ASHP_COP
 
     ### Floor heat sink temperature function:
-    if heating_type=="radiator": heating_func = lambda T_amb: np.array(40-T_amb)
-    elif heating_type=="floor": heating_func = lambda T_amb: np.array(30-0.5*T_amb)
-    else: raise ValueError("Unknown heating system type!")
+    if heating_type == "radiator":
+        def heating_func(T_amb):
+            return np.array(40 - T_amb)
+    elif heating_type == "floor":
+        def heating_func(T_amb):
+            return np.array(30 - 0.5 * T_amb)
+    else:
+        raise ValueError("Unknown heating system type!")
 
     ### Calculate T_sink-T_amb:
     dT_space = heating_func(air_temp) - air_temp

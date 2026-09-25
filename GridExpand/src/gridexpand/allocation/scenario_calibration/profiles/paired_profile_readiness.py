@@ -12,12 +12,12 @@ from ..paths import OUTPUT_DIR, SYNTHETIC_INPUT_DIR
 
 from gridexpand.common.electrification import validate_electrification_assignment
 
+from .physical_heat_profile_library import PhysicalHeatProfileLibrary
+
 PUBLICATION_READY_HEAT_METHODS = frozenset({
     "exact_physical_building",
     "nearest_floor_area_scaled_approved",
 })
-from .physical_heat_profile_library import PhysicalHeatProfileLibrary
-
 DEFAULT_PAIRED_DIR = (
     OUTPUT_DIR
     / "swf_2045_paired_v5_91301_station_hybrid_v2"
