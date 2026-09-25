@@ -21,11 +21,11 @@ __all__ = (
     "msg_disable"
 )
 
-from src.external.emobpy.mobility import Mobility
-from src.external.emobpy.availability import Availability
-from src.external.emobpy.charging import Charging
-from src.external.emobpy.database import DataBase, DataManager
-from src.external.emobpy.consumption import (
+from gridexpand.allocation.external.emobpy.mobility import Mobility
+from gridexpand.allocation.external.emobpy.availability import Availability
+from gridexpand.allocation.external.emobpy.charging import Charging
+from gridexpand.allocation.external.emobpy.database import DataBase, DataManager
+from gridexpand.allocation.external.emobpy.consumption import (
     Weather,
     BEVspecs,
     ModelSpecs,
@@ -36,6 +36,6 @@ from src.external.emobpy.consumption import (
     HeatInsulation,
     Consumption,
 )
-from src.external.emobpy.export import Export
-from src.external.emobpy.tools import parallelize, msg_disable
-from src.external.emobpy.init import (copy_to_user_data_dir, create_project)
+from gridexpand.allocation.external.emobpy.export import Export
+from gridexpand.allocation.external.emobpy.tools import parallelize, msg_disable
+from gridexpand.allocation.external.emobpy.init import (copy_to_user_data_dir, create_project)

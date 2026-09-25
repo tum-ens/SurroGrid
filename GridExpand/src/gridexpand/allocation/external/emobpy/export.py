@@ -9,9 +9,9 @@ The documentation contains examples of Export class https://diw-evu.gitlab.io/em
 import pandas as pd
 import numpy as np
 import os
-from src.external.emobpy.tools import check_for_new_function_name, display_all
-from src.external.emobpy.init import copy_to_user_data_dir
-from src.external.emobpy.logger import get_logger
+from gridexpand.allocation.external.emobpy.tools import check_for_new_function_name, display_all
+from gridexpand.allocation.external.emobpy.init import copy_to_user_data_dir
+from gridexpand.allocation.external.emobpy.logger import get_logger
 
 logger = get_logger(__name__)
 

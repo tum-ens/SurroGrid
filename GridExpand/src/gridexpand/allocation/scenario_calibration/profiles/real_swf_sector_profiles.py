@@ -9,12 +9,12 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from common.ev_sessions import SESSION_COLUMNS, SESSION_HOUR_COLUMNS
+from gridexpand.common.ev_sessions import SESSION_COLUMNS, SESSION_HOUR_COLUMNS
 
-from ..paths import GRIDALLOC_DIR
+from ..paths import DEMAND_STATISTICS_DIR
 
 MOBILITY_POOL_DIR = (
-    GRIDALLOC_DIR / "data" / "statistics" / "general" / "mobility_profile_pool_old"
+    DEMAND_STATISTICS_DIR / "general" / "mobility_profile_pool_old"
 )
 DEFAULT_MOBILITY_WEATHER_KEY = "central_germany_tmy"
 DEFAULT_EV_CHARGER_KW = 11.0
@@ -455,7 +455,7 @@ def _source_heat_buses(
 
 
 def _create_pro_heat(consumer_list):
-    from config import config
+    from gridexpand.allocation.config import config
     rows = []
     for bus in consumer_list:
         for (
@@ -562,7 +562,7 @@ def _create_pro_com_heat():
 
 
 def _create_sto_heat(consumer_list):
-    from config import config
+    from gridexpand.allocation.config import config
     rows = []
     for bus in consumer_list:
         rows.append(

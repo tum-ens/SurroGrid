@@ -1,11 +1,11 @@
-from config import config
+from gridexpand.allocation.config import config
 import pandas as pd
 import numpy as np
 import warnings
 
-from common.reproducibility import physical_building_id, stable_seed
+from gridexpand.common.reproducibility import physical_building_id, stable_seed
 
-from src.functions.infdb_ro_heat import generate_opendhw, load_space_heat
+from gridexpand.allocation.functions.infdb_ro_heat import generate_opendhw, load_space_heat
 
 ##############################################################
 ################## Obtaining GHD + HP COP ####################
@@ -121,7 +121,7 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_
 
     # Import the legacy generator lazily. The INFDB ro_heat path must not load
     # TEASER or execute any DistrictGenerator code.
-    from src.external.districtgenerator.classes import Datahandler
+    from gridexpand.allocation.external.districtgenerator.classes import Datahandler
 
     # The first heat scenario models residential components only. In
     # particular, do not infer non-residential DHW from a mixed building's

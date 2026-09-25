@@ -19,9 +19,9 @@ import pickle
 import gzip
 import os
 import uuid
-from src.external.emobpy.tools import (parallelize, check_for_new_function_name, display_all)
-from src.external.emobpy.constants import VARIABLES_DB
-from src.external.emobpy.logger import get_logger
+from gridexpand.allocation.external.emobpy.tools import (parallelize, check_for_new_function_name, display_all)
+from gridexpand.allocation.external.emobpy.constants import VARIABLES_DB
+from gridexpand.allocation.external.emobpy.logger import get_logger
 
 logger = get_logger(__name__)
 

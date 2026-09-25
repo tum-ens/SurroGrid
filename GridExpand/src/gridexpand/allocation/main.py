@@ -1,30 +1,23 @@
 #!/usr/bin/env python3
+"""Step 2 entry point: allocate demands for one grid and write the urbs input HDF5."""
 import argparse
 import os
-import sys
-import time
 from pathlib import Path
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[2]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-DEFAULT_SCENARIO_CONFIG = (
-    GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
-    / "forchheim_2045_synthetic.yaml"
-)
-
-from config import config
-from common.database import SurroGridDatabase
-from scenario_pipeline.config_loader import load_scenario_config, scenario_identity_key
-from scenario_pipeline.model_cases import MODEL_CASES
-from common.timeframe import (
+from gridexpand.allocation.config import config
+from gridexpand.db.database import SurroGridDatabase
+from gridexpand.paths import SCENARIO_CONFIG_DIR
+from gridexpand.scenario.config_loader import load_scenario_config, scenario_identity_key
+from gridexpand.scenario.model_cases import MODEL_CASES
+from gridexpand.common.timeframe import (
     TIMEFRAME_MODES,
     build_initial_metadata,
     scenario_key_for_timeframe,
 )
-import src.classes.grid as grd
-from src.classes.resource_report import resource_report
+import gridexpand.allocation.classes.grid as grd
+from gridexpand.common.resource_report import resource_report
+
+DEFAULT_SCENARIO_CONFIG = SCENARIO_CONFIG_DIR / "forchheim_2045_synthetic.yaml"
 
 
 PROFILE_CHOICES = [
@@ -58,10 +51,13 @@ def scenario_assumptions(timeframe_metadata, scenario_key, demand_scope):
     return assumptions
 
 
-if __name__ == '__main__':
-    with resource_report(include_children=True, name="Main Script") as rr_main:
+def main(argv: list[str] | None = None) -> None:
+    """Run Step 2 for one grid; see ``gridexpand allocate --help``."""
+    with resource_report(include_children=True, name="Main Script"):
         ####### Input arguments: #######
-        parser = argparse.ArgumentParser(description="Low voltage grid DER allocation.")
+        parser = argparse.ArgumentParser(
+            prog="gridexpand allocate", description="Low voltage grid DER allocation."
+        )
         parser.add_argument("inputfile_id", help="Input file name (no path)")
         parser.add_argument("--n_cpu", default=1, help="Number of CPUs available for parallel generation")
         parser.add_argument(
@@ -165,7 +161,7 @@ if __name__ == '__main__':
             help="Append the model-case name to the Step-2 HDF output.",
         )
         parser.add_argument("--output-directory", type=Path)
-        args = parser.parse_args()
+        args = parser.parse_args(argv)
         if args.timeframe_mode != "full_year" and args.mobility_source != "pool":
             parser.error("Timeslice modes require --mobility-source pool.")
         if args.model_case == "pre" and args.profiles != "status_quo":
@@ -204,7 +200,7 @@ if __name__ == '__main__':
         grid_ref = None
         if args.storage == "h5":
             # list all .h5 files in your directory
-            all_entries = os.listdir("data/grids")
+            all_entries = os.listdir(config.DATA_GRID_DIR)
             h5_files = [fname for fname in all_entries if fname.endswith(".h5")]
             # find file with correct id prefix
             input_id_str = str(args.inputfile_id)
@@ -272,7 +268,7 @@ if __name__ == '__main__':
         ### Data and Demand Generation
         # Order is important: Weather -> base electricity -> PV -> battery -> Heat -> Mobility.
         if settings["is_status_quo"]:
-            with resource_report(include_children=True, name="Electricity Generation") as rr:
+            with resource_report(include_children=True, name="Electricity Generation"):
                 GRD.generate_electricity()
             GRD.align_electricity_output_time()
             GRD.select_timeframe_after_electricity()
@@ -293,10 +289,10 @@ if __name__ == '__main__':
             # and must not block heat-profile regeneration.
             GRD.retrieve_weather()
             GRD.select_timeframe_from_weather()
-            with resource_report(include_children=True, name="Electricity Generation") as rr:
+            with resource_report(include_children=True, name="Electricity Generation"):
                 GRD.generate_electricity()
             GRD.select_timeframe_after_electricity()
-            with resource_report(include_children=True, name="Heat Generation") as rr:
+            with resource_report(include_children=True, name="Heat Generation"):
                 GRD.generate_heat()
             GRD.apply_timeframe_slice()
             GRD.create_demand()
@@ -317,20 +313,20 @@ if __name__ == '__main__':
             GRD.retrieve_weather()          # Weather
             GRD.select_timeframe_from_weather()
 
-            with resource_report(include_children=True, name="Electricity Generation") as rr:
+            with resource_report(include_children=True, name="Electricity Generation"):
                 GRD.generate_electricity()  # Electricity
-            with resource_report(include_children=True, name="Solar Generation") as rr:
+            with resource_report(include_children=True, name="Solar Generation"):
                 GRD.generate_solar()        # LoD2 potential and PV sizing use base electricity
-            with resource_report(include_children=True, name="Battery Sizing") as rr:
+            with resource_report(include_children=True, name="Battery Sizing"):
                 GRD.generate_battery()      # Uses PV capacity and base electricity only
             GRD.select_timeframe_after_electricity()
             if settings["include_heat"]:
-                with resource_report(include_children=True, name="Heat Generation") as rr:
+                with resource_report(include_children=True, name="Heat Generation"):
                     GRD.generate_heat()     # Heat
             else:
                 GRD.align_electricity_output_time()
             if settings["include_mobility"]:
-                with resource_report(include_children=True, name="Mobility Generation") as rr:
+                with resource_report(include_children=True, name="Mobility Generation"):
                     GRD.generate_mobility() # Mobility
             GRD.apply_timeframe_slice()
 
@@ -347,3 +343,7 @@ if __name__ == '__main__':
 
             ### Saving Grid Data
             GRD.save_grid_data()
+
+
+if __name__ == "__main__":
+    main()

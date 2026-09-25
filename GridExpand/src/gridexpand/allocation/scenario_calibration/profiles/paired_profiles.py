@@ -17,8 +17,8 @@ from ...assets.heat.sizing import build_heat_asset_plan
 from ...functions.heat import get_norm_outside_temperature
 from ...assets.pv.materialization import materialize_pv_urbs_inputs
 from ...assets.pv.sizing import build_pv_asset_plan
-from common.electrification import validate_electrification_assignment
-from common.ev_sessions import (
+from gridexpand.common.electrification import validate_electrification_assignment
+from gridexpand.common.ev_sessions import (
     SESSION_COLUMNS,
     SESSION_HOUR_COLUMNS,
     SESSION_HOUR_OFFSET,
@@ -44,17 +44,15 @@ from .real_swf_electricity_profiles import (
 from .real_swf_sector_profiles import (
     DEFAULT_MOBILITY_WEATHER_KEY,
     SectorUrbsInputs,
-    _choose_source_pv_profile,
     _concat_static,
     _concat_timeseries,
     _empty_timeseries,
-    _read_pool_timeseries,
 )
 
-from ..paths import GRIDALLOC_DIR, SYNTHETIC_INPUT_DIR
+from ..paths import DEMAND_STATISTICS_DIR, SYNTHETIC_INPUT_DIR
 
 MOBILITY_SESSION_POOL_DIR = (
-    GRIDALLOC_DIR / "data" / "statistics" / "general" / "mobility_profile_pool"
+    DEMAND_STATISTICS_DIR / "general" / "mobility_profile_pool"
 )
 SESSION_GENERATION_VERSION = "emobpy_pool_v2_sessions"
 

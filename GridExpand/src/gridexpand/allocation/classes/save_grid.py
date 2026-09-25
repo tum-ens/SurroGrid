@@ -1,25 +1,20 @@
-from config import config
+from gridexpand.allocation.config import config
 
 import os
 import pandas as pd
 import shutil
-import sys
 from pathlib import Path
 
 import warnings
 from pandas.errors import PerformanceWarning
 
-GRIDEXPAND_DIR = Path(__file__).resolve().parents[4]
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.building_components import (
+from gridexpand.common.building_components import (
     build_building_components,
     validate_physical_buildings,
 )
 
-from common.database import SurroGridDatabase
-from common.timeframe import (
+from gridexpand.db.database import SurroGridDatabase
+from gridexpand.common.timeframe import (
     output_filename_for_timeframe,
     scenario_output_directory,
     write_hdf_metadata,

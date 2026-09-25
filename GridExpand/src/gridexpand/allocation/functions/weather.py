@@ -1,4 +1,4 @@
-from config import config
+from gridexpand.allocation.config import config
 
 import calendar
 import fcntl

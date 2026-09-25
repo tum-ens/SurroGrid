@@ -7,7 +7,7 @@ import pylightxl as xl
 import richardsonpy.classes.occupancy as occ_residential
 import richardsonpy.functions.change_resolution as cr
 import OpenDHW
-import src.external.districtgenerator.functions.change_resolution as chres
+import gridexpand.allocation.external.districtgenerator.functions.change_resolution as chres
 
 class Profiles:
     """

@@ -20,31 +20,20 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
-import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import pandas as pd
 
-GRIDALLOC_DIR = Path(__file__).resolve().parent
-GRIDEXPAND_DIR = GRIDALLOC_DIR.parents[1]
-os.chdir(GRIDALLOC_DIR)
-if str(GRIDALLOC_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDALLOC_DIR))
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
+from gridexpand.allocation.config import config
+import gridexpand.allocation.functions.mobility as mbl
+import gridexpand.allocation.functions.weather as wth
+from gridexpand.common.ev_sessions import build_sessions_from_source
+from gridexpand.paths import SCENARIO_CONFIG_DIR
+from gridexpand.scenario.config_loader import load_scenario_config
 
-from scenario_pipeline.config_loader import load_scenario_config
-
-DEFAULT_SCENARIO_CONFIG = GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios" / "forchheim_2045_full_year.yaml"
-
-from common.ev_sessions import build_sessions_from_source
-
-from config import config
-import src.functions.mobility as mbl
-import src.functions.weather as wth
+DEFAULT_SCENARIO_CONFIG = SCENARIO_CONFIG_DIR / "forchheim_2045_full_year.yaml"
 
 
 SCHEDULES = ["commuter", "non-commuter"]
@@ -613,7 +602,7 @@ def generate_pool(args: argparse.Namespace) -> None:
             _append_csv(availability_rows, availability_path)
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate pregenerated emobpy mobility profile CSV pool.")
     parser.add_argument(
         "--mode",
@@ -651,7 +640,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--metadata-csv", help="Metadata CSV output path.")
     parser.add_argument("--demand-csv", help="Demand CSV output path.")
     parser.add_argument("--availability-csv", help="Availability CSV output path.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.profiles_per_stratum < 1:
         raise ValueError("--profiles-per-stratum must be at least 1")
     if not 0 < args.market_share_threshold <= 1:
@@ -661,8 +650,9 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-if __name__ == "__main__":
-    arguments = parse_args()
+def main(argv: list[str] | None = None) -> None:
+    """Generate (or freeze) the mobility profile pool; see ``--help``."""
+    arguments = parse_args(argv)
     scenario, _scenario_hash = load_scenario_config(arguments.scenario_config)
     config.apply_scenario(scenario)
     if arguments.mode == "session":
@@ -677,3 +667,7 @@ if __name__ == "__main__":
             print(f"Pool manifest written to {path}")
     else:
         generate_pool(arguments)
+
+
+if __name__ == "__main__":
+    main()

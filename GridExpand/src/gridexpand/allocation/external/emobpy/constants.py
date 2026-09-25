@@ -13,8 +13,8 @@ For more details see the article and cite:
 
 """
 
-import src.external.emobpy as emobpy
-from config import config
+import gridexpand.allocation.external.emobpy as emobpy
+from gridexpand.allocation.config import config
 import os
 
 CWD = os.getcwd()

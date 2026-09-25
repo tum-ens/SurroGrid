@@ -3,10 +3,10 @@ import time
 import os
 
 try:
-    from src.external.emobpy.init import (create_project, copy_to_user_data_dir)
-    from src.external.emobpy.constants import CWD, MODULE_DATA_PATH
-    from src.external.emobpy.tools import display_all
-    from src.external.emobpy.logger import get_logger
+    from gridexpand.allocation.external.emobpy.init import (create_project, copy_to_user_data_dir)
+    from gridexpand.allocation.external.emobpy.constants import CWD, MODULE_DATA_PATH
+    from gridexpand.allocation.external.emobpy.tools import display_all
+    from gridexpand.allocation.external.emobpy.logger import get_logger
     logger = get_logger(__name__)
 except ImportError as exc:
     raise ImportError(

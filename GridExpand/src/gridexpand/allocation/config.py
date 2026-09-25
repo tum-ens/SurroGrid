@@ -1,14 +1,16 @@
 import numpy as np
 import pandas as pd
 
+from gridexpand.paths import ALLOCATION_GRIDS_DIR, ALLOCATION_RESULTS_DIR, STATISTICS_DIR
+
 class Config:
     #--------------------------------------------------------------#
     #----------------- Paths/Dataset Readout ----------------------#
     #--------------------------------------------------------------#
-    ##### Important data paths #####
-    DATA_GRID_DIR = "data/grids"           # Directory from which to read the pylovo grid input data
-    DATA_STAT_DIR = "data/statistics"      # Directory from which to read data for computing demands
-    STORAGE_DIR = "results"                # Directory in which to store resulting urbs input files
+    ##### Important data paths (absolute; see gridexpand.paths) #####
+    DATA_GRID_DIR = str(ALLOCATION_GRIDS_DIR)     # Directory from which to read the pylovo grid input data (HDF5 mode)
+    DATA_STAT_DIR = str(STATISTICS_DIR)           # Directory from which to read data for computing demands
+    STORAGE_DIR = str(ALLOCATION_RESULTS_DIR)     # Directory in which to store resulting urbs input files
 
     #--------------------------------------------------------------#
     #-------------- Weather Data API Connections ------------------#

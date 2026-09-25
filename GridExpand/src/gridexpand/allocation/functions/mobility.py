@@ -1,10 +1,10 @@
-from config import config
-from src.external.emobpy import Charging
-from src.external.emobpy import Mobility
-from src.external.emobpy import Availability
-from src.external.emobpy import DataBase
-from src.external.emobpy import Consumption, HeatInsulation, BEVspecs
-from src.external.emobpy.tools import set_seed
+from gridexpand.allocation.config import config
+from gridexpand.allocation.external.emobpy import Charging
+from gridexpand.allocation.external.emobpy import Mobility
+from gridexpand.allocation.external.emobpy import Availability
+from gridexpand.allocation.external.emobpy import DataBase
+from gridexpand.allocation.external.emobpy import Consumption, HeatInsulation, BEVspecs
+from gridexpand.allocation.external.emobpy.tools import set_seed
 
 import random
 import tempfile
@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from common.reproducibility import physical_building_id, stable_seed
+from gridexpand.common.reproducibility import physical_building_id, stable_seed
 
 ##############################################################
 #################### Sampling Statistics #####################

@@ -16,7 +16,6 @@ import argparse
 import hashlib
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -25,22 +24,19 @@ import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import text
 
-from ..paths import ENV_PATH, GRIDALLOC_DIR, GRIDEXPAND_DIR
+from ..paths import ENV_PATH
 
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.database import SurroGridDatabase  # noqa: E402
-from common.electrification import (  # noqa: E402
+from gridexpand.db.database import SurroGridDatabase
+from gridexpand.common.electrification import (
     assignment_manifest_hash,
     assignment_summary,
     build_electrification_assignment,
 )
-from common.reproducibility import stable_seed  # noqa: E402
-from config import config as grid_config  # noqa: E402
-import src.functions.electricity as electricity  # noqa: E402
-import src.functions.mobility as mobility  # noqa: E402
-from scenario_pipeline.config_loader import (  # noqa: E402
+from gridexpand.common.reproducibility import stable_seed
+from gridexpand.allocation.config import config as grid_config
+import gridexpand.allocation.functions.electricity as electricity
+import gridexpand.allocation.functions.mobility as mobility
+from gridexpand.scenario.config_loader import (
     load_scenario_config,
     scenario_identity_key,
 )

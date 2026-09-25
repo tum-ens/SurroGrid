@@ -28,10 +28,10 @@ import os
 import pickle
 import gzip
 from numba import jit
-from src.external.emobpy.constants import CWD
-from src.external.emobpy.tools import (check_for_new_function_name, _add_column_datetime, represents_int, is_between, display_all)
-from src.external.emobpy.init import copy_to_user_data_dir
-from src.external.emobpy.logger import get_logger
+from gridexpand.allocation.external.emobpy.constants import CWD
+from gridexpand.allocation.external.emobpy.tools import (check_for_new_function_name, _add_column_datetime, represents_int, is_between, display_all)
+from gridexpand.allocation.external.emobpy.init import copy_to_user_data_dir
+from gridexpand.allocation.external.emobpy.logger import get_logger
 
 logger = get_logger(__name__)
 

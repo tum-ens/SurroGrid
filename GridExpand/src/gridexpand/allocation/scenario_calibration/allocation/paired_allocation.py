@@ -6,7 +6,6 @@ import argparse
 import hashlib
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,23 +14,20 @@ import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import text
 
-from ..paths import ENV_PATH, GRIDEXPAND_DIR
+from ..paths import ENV_PATH, OUTPUT_DIR, SCENARIO_CONFIG_DIR
 
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.database import SurroGridDatabase  # noqa: E402
-from common.building_components import build_building_components  # noqa: E402
-from common.electrification import (
+from gridexpand.db.database import SurroGridDatabase
+from gridexpand.common.building_components import build_building_components
+from gridexpand.common.electrification import (
     assignment_manifest_hash,
     assignment_summary,
     build_electrification_assignment,
-)  # noqa: E402
-from common.reproducibility import stable_seed  # noqa: E402
-from config import config as grid_config  # noqa: E402
-import src.functions.electricity as electricity  # noqa: E402
-import src.functions.mobility as mobility  # noqa: E402
-from scenario_pipeline.config_loader import (  # noqa: E402
+)
+from gridexpand.common.reproducibility import stable_seed
+from gridexpand.allocation.config import config as grid_config
+import gridexpand.allocation.functions.electricity as electricity
+import gridexpand.allocation.functions.mobility as mobility
+from gridexpand.scenario.config_loader import (
     load_scenario_config,
     scenario_identity_key,
 )
@@ -47,7 +43,6 @@ from .scope_filters import build_grid_scope_summary
 from .sector_asset_calibration import build_sector_asset_calibration
 from .pv_roof_potential import building_lod2_capacity, load_lod2_roof_catalog
 from .swf_2045_building_match import (
-    GRIDALLOC_DIR,
     MatchConfig,
     _database_engine,
     _expected_ghd_kwh_per_m2_by_building_use,
@@ -1001,7 +996,7 @@ def build_paired_allocation(
     load_dotenv(ENV_PATH, override=True)
     os.environ["PYLOVO_VERSION_ID"] = str(pylovo_version_id)
     scenario_config_path = scenario_config_path or (
-        GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
+        SCENARIO_CONFIG_DIR
         / "forchheim_2045_full_year.yaml"
     )
     scenario, scenario_hash = load_scenario_config(scenario_config_path)
@@ -1009,9 +1004,7 @@ def build_paired_allocation(
     pv_location_mode = "swf" if pv_adoption_mode == "source_inventory" else "all_buildings"
     grid_config.apply_scenario(scenario)
     output_dir = output_dir or (
-        GRIDALLOC_DIR
-        / "outputs"
-        / "scenario_calibration"
+        OUTPUT_DIR
         / f"swf_2045_paired_v{pylovo_version_id}_{plz}"
     )
     grid_root = grid_data_path or Path(os.environ["GRID_DATA_PATH"])

@@ -1,4 +1,4 @@
-from config import config
+from gridexpand.allocation.config import config
 
 import json
 from pathlib import Path
@@ -9,37 +9,37 @@ from multiprocessing import Pool
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_EXCEPTION
 import heapq
 
-import src.classes.save_grid as svgrd
-import src.functions.weather as wth
-import src.functions.electricity as elc
-import src.functions.heat as heat
-import src.functions.mobility as mbl
-from src.assets.battery.materialization import materialize_battery_urbs_inputs
-from src.assets.battery.sizing import build_battery_asset_plan
-from src.assets.heat.materialization import materialize_heat_urbs_inputs
-from src.assets.heat.sizing import build_heat_asset_plan
-from src.assets.pv.materialization import materialize_pv_urbs_inputs
-from src.assets.pv.profiles import generate_profile_library
-from src.assets.pv.roof_catalog import (
+import gridexpand.allocation.classes.save_grid as svgrd
+import gridexpand.allocation.functions.weather as wth
+import gridexpand.allocation.functions.electricity as elc
+import gridexpand.allocation.functions.heat as heat
+import gridexpand.allocation.functions.mobility as mbl
+from gridexpand.allocation.assets.battery.materialization import materialize_battery_urbs_inputs
+from gridexpand.allocation.assets.battery.sizing import build_battery_asset_plan
+from gridexpand.allocation.assets.heat.materialization import materialize_heat_urbs_inputs
+from gridexpand.allocation.assets.heat.sizing import build_heat_asset_plan
+from gridexpand.allocation.assets.pv.materialization import materialize_pv_urbs_inputs
+from gridexpand.allocation.assets.pv.profiles import generate_profile_library
+from gridexpand.allocation.assets.pv.roof_catalog import (
     assert_fallback_share,
     building_lod2_capacity,
     load_lod2_roof_catalog,
     read_lod2_roof_catalog_hdf,
 )
-from src.assets.pv.sizing import build_pv_asset_plan
-from common.reproducibility import (
+from gridexpand.allocation.assets.pv.sizing import build_pv_asset_plan
+from gridexpand.common.reproducibility import (
     frame_fingerprint,
     physical_building_id,
     realization_id,
 )
-from common.building_components import residential_component_mask
-from common.electrification import (
+from gridexpand.common.building_components import residential_component_mask
+from gridexpand.common.electrification import (
     assignment_manifest_hash,
     assignment_summary,
     build_electrification_assignment,
     validate_electrification_assignment_config,
 )
-from common.timeframe import (
+from gridexpand.common.timeframe import (
     TIMESLICE_HOURS,
     build_full_year_metadata,
     select_timeframe_from_electricity,

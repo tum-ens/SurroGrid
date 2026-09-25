@@ -11,20 +11,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import text
 
-from ..paths import GRIDEXPAND_DIR
-
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.database import SurroGridDatabase  # noqa: E402
-from common.timeframe import build_full_year_metadata, write_hdf_metadata  # noqa: E402
-import src.functions.weather as weather_functions  # noqa: E402
+from gridexpand.db.database import SurroGridDatabase
+from gridexpand.common.timeframe import build_full_year_metadata, write_hdf_metadata
+import gridexpand.allocation.functions.weather as weather_functions
 
 
 def write_aligned_weather(paired_dir: Path, output: Path, reference_year: int) -> Path:

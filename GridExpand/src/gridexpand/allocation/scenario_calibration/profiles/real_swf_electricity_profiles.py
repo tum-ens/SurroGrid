@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-import importlib.util
 import math
-import os
-import sys
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
-
-from ..paths import GRIDALLOC_DIR
 
 PF_ELC = 0.959
 MEASURED_PROFILE_SELECTION_CLOSEST = "closest"
@@ -26,39 +21,10 @@ DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES = 10
 
 
 def load_electricity_module():
-    """Load gridalloc's electricity helper with its local config module."""
-    demand_dir = GRIDALLOC_DIR.resolve()
-    old_cwd = Path.cwd()
-    sys.path.insert(0, str(demand_dir))
-    previous_config = sys.modules.pop("config", None)
-    try:
-        os.chdir(demand_dir)
-        spec = importlib.util.spec_from_file_location(
-            "gridalloc_electricity",
-            demand_dir / "src" / "functions" / "electricity.py",
-        )
-        if spec is None or spec.loader is None:
-            raise ImportError("Could not load gridalloc electricity module.")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        _make_relevant_config_paths_absolute(module)
-    finally:
-        os.chdir(old_cwd)
-        try:
-            sys.path.remove(str(demand_dir))
-        except ValueError:
-            pass
-        if previous_config is not None:
-            sys.modules["config"] = previous_config
-    return module
+    """Return Step 2's electricity helper module (paths in its config are absolute)."""
+    import gridexpand.allocation.functions.electricity as electricity
 
-
-def _make_relevant_config_paths_absolute(module) -> None:
-    """Make paths used by the shared profile builder independent of caller cwd."""
-    for attr in ("ELEC_LPS_PATH", "ELEC_GHD_PATH"):
-        value = Path(getattr(module.config, attr))
-        if not value.is_absolute():
-            setattr(module.config, attr, str(GRIDALLOC_DIR / value))
+    return electricity
 
 
 def read_allocation_plan(

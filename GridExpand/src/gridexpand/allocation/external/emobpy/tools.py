@@ -13,9 +13,9 @@ import os
 import time
 import datetime
 import json
-from src.external.emobpy.constants import (TIME_FREQ, DEFAULT_DATA_DIR, USER_PATH)
-from src.external.emobpy.messages import (MSG_CONF, MSG_ARGS, MSG_TEXT)
-from src.external.emobpy.logger import get_logger
+from gridexpand.allocation.external.emobpy.constants import (TIME_FREQ, DEFAULT_DATA_DIR, USER_PATH)
+from gridexpand.allocation.external.emobpy.messages import (MSG_CONF, MSG_ARGS, MSG_TEXT)
+from gridexpand.allocation.external.emobpy.logger import get_logger
 
 logger = get_logger(__name__)
 

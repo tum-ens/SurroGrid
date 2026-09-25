@@ -3,65 +3,58 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import pandas as pd
 
-from ..paths import GRIDALLOC_DIR, GRIDEXPAND_DIR
+from ..paths import OUTPUT_DIR, SCENARIO_CONFIG_DIR, SYNTHETIC_INPUT_DIR
 
 DEFAULT_PAIRED_DIR = (
-    GRIDALLOC_DIR
-    / "outputs"
-    / "scenario_calibration"
+    OUTPUT_DIR
     / "swf_2045_paired_v5_91301_station_hybrid_v2"
 )
-DEFAULT_OUTPUT_DIR = GRIDEXPAND_DIR / "3.urbs" / "Input"
+DEFAULT_OUTPUT_DIR = SYNTHETIC_INPUT_DIR
 DEFAULT_SCENARIO_CONFIG = (
-    GRIDEXPAND_DIR / "scenario_pipeline" / "config" / "scenarios"
+    SCENARIO_CONFIG_DIR
     / "forchheim_2045_full_year.yaml"
 )
 
-for path in (GRIDEXPAND_DIR, GRIDALLOC_DIR):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
-
-from config import config  # noqa: E402
-from common.electrification import (  # noqa: E402
+from gridexpand.allocation.config import config
+from gridexpand.common.electrification import (
     assignment_manifest_hash,
     assignment_summary,
     validate_electrification_assignment_config,
 )
-from common.ev_sessions import (  # noqa: E402
+from gridexpand.common.ev_sessions import (
     SESSION_HOUR_OFFSET,
     validate_sessions,
     write_sessions,
 )
-from common.timeframe import build_full_year_metadata, write_hdf_metadata  # noqa: E402
-from scenario_pipeline.config_loader import (  # noqa: E402
+from gridexpand.common.timeframe import build_full_year_metadata, write_hdf_metadata
+from gridexpand.scenario.config_loader import (
     load_scenario_config,
     scenario_identity_key,
 )
-from scenario_pipeline.model_cases import POST_MODEL_CASES  # noqa: E402
-from src.assets.pv.roof_catalog import assert_fallback_share  # noqa: E402
-from src.scenario_calibration.profiles.paired_profiles import (  # noqa: E402
+from gridexpand.scenario.model_cases import POST_MODEL_CASES
+from gridexpand.allocation.assets.pv.roof_catalog import assert_fallback_share
+from gridexpand.allocation.scenario_calibration.profiles.paired_profiles import (
     build_paired_base_electric_demand,
     build_paired_sector_urbs_inputs,
     load_electricity_module,
     source_match_buildings,
 )
-from src.scenario_calibration.profiles.physical_heat_profile_library import (  # noqa: E402
+from gridexpand.allocation.scenario_calibration.profiles.physical_heat_profile_library import (
     PhysicalHeatProfileLibrary,
 )
-from src.scenario_calibration.profiles.paired_profile_readiness import (  # noqa: E402
+from gridexpand.allocation.scenario_calibration.profiles.paired_profile_readiness import (
     PUBLICATION_READY_HEAT_METHODS,
 )
-from src.scenario_calibration.pipeline.urbs_input_tables import (  # noqa: E402
+from gridexpand.allocation.scenario_calibration.pipeline.urbs_input_tables import (
     buy_sell_price,
     read_or_create_weather,
     urbs_static_tables,
 )
-from src.scenario_calibration.profiles.profile_contract import (  # noqa: E402
+from gridexpand.allocation.scenario_calibration.profiles.profile_contract import (
     assert_paired_component_plan_equivalence,
 )
 

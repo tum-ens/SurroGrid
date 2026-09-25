@@ -4,17 +4,13 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import sys
 
 import numpy as np
 import pandas as pd
 
-from ..paths import GRIDALLOC_DIR, GRIDEXPAND_DIR, SYNTHETIC_INPUT_DIR
+from ..paths import OUTPUT_DIR, SYNTHETIC_INPUT_DIR
 
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.electrification import validate_electrification_assignment  # noqa: E402
+from gridexpand.common.electrification import validate_electrification_assignment
 
 PUBLICATION_READY_HEAT_METHODS = frozenset({
     "exact_physical_building",
@@ -23,9 +19,7 @@ PUBLICATION_READY_HEAT_METHODS = frozenset({
 from .physical_heat_profile_library import PhysicalHeatProfileLibrary
 
 DEFAULT_PAIRED_DIR = (
-    GRIDALLOC_DIR
-    / "outputs"
-    / "scenario_calibration"
+    OUTPUT_DIR
     / "swf_2045_paired_v5_91301_station_hybrid_v2"
 )
 

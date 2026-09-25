@@ -7,37 +7,31 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-import sys
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from .scenario_calibration.paths import GRIDEXPAND_DIR
-
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.building_components import residential_component_mask  # noqa: E402
-from common.database import SurroGridDatabase  # noqa: E402
-from common.electrification import (  # noqa: E402
+from gridexpand.common.building_components import residential_component_mask
+from gridexpand.db.database import SurroGridDatabase
+from gridexpand.common.electrification import (
     assignment_manifest_hash,
     assignment_summary,
     build_electrification_assignment,
 )
-from config import config  # noqa: E402
-from scenario_pipeline.config_loader import (  # noqa: E402
+from gridexpand.allocation.config import config
+from gridexpand.scenario.config_loader import (
     load_scenario_config,
     scenario_identity_key,
 )
-from src.assets.pv.roof_catalog import (  # noqa: E402
+from gridexpand.allocation.assets.pv.roof_catalog import (
     building_lod2_capacity,
     load_lod2_roof_catalog,
 )
-import src.functions.electricity as electricity  # noqa: E402
-import src.functions.heat as heat  # noqa: E402
-import src.functions.mobility as mobility  # noqa: E402
-from scenario_pipeline.synthetic_ags_runner import get_candidates  # noqa: E402
+import gridexpand.allocation.functions.electricity as electricity
+import gridexpand.allocation.functions.heat as heat
+import gridexpand.allocation.functions.mobility as mobility
+from gridexpand.scenario.synthetic_ags_runner import get_candidates
 
 
 def _candidate_identity(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -389,7 +383,7 @@ def prepare_regional_electrification_assignment(
     return metadata
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ags", required=True)
     parser.add_argument("--plz", type=int)
@@ -401,9 +395,8 @@ def main() -> None:
     parser.add_argument("--scenario-config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--source-evidence", type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     candidates = get_candidates(
-        GRIDEXPAND_DIR.parent,
         args.ags,
         args.min_buildings,
         args.demand_scope,

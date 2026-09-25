@@ -6,7 +6,7 @@ Fuctions used for Consumption class
 import pandas as pd
 import numpy as np
 import numba
-from src.external.emobpy.constants import AIR_SPECIFIC_HEAT
+from gridexpand.allocation.external.emobpy.constants import AIR_SPECIFIC_HEAT
 
 T_RNG = np.array(list(AIR_SPECIFIC_HEAT.keys()))
 CP_RNG = np.array(list(AIR_SPECIFIC_HEAT.values()))

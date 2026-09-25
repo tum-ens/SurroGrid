@@ -5,7 +5,7 @@ from teaser.project import Project
 from .envelope import Envelope
 from .solar import Sun
 from .users import Users
-from config import config
+from gridexpand.allocation.config import config
 import math
 import warnings
 

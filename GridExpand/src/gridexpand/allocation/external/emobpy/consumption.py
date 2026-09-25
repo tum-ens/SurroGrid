@@ -35,7 +35,7 @@ import gzip
 import pickle
 import json
 
-from src.external.emobpy.constants import (
+from gridexpand.allocation.external.emobpy.constants import (
     TIME_FREQ,
     DEFAULT_DATA_DIR,
     USER_PATH,
@@ -56,7 +56,7 @@ from src.external.emobpy.constants import (
     VEHICLE_NEEDED_PARAMETERS,
 )
 
-from src.external.emobpy.functions import (
+from gridexpand.allocation.external.emobpy.functions import (
     inertial_mass,
     include_weather,
     rolling_resistance_coeff,
@@ -73,9 +73,9 @@ from src.external.emobpy.functions import (
     p_generatorout,
     qhvac
 )
-from src.external.emobpy.tools import (Unit, check_for_new_function_name, _add_column_datetime, consumption_progress_bar, wget_progress_bar, display_all)
-from src.external.emobpy.init import copy_to_user_data_dir
-from src.external.emobpy.logger import get_logger
+from gridexpand.allocation.external.emobpy.tools import (Unit, check_for_new_function_name, _add_column_datetime, consumption_progress_bar, wget_progress_bar, display_all)
+from gridexpand.allocation.external.emobpy.init import copy_to_user_data_dir
+from gridexpand.allocation.external.emobpy.logger import get_logger
 
 logger = get_logger(__name__)
 

@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import json
-import os
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from ..paths import GRIDALLOC_DIR, GRIDEXPAND_DIR
 from ...assets.pv.labels import profile_label
 
 
@@ -165,22 +161,13 @@ def _load_weather_and_location(
     except KeyError:
         pass
 
-    if str(GRIDEXPAND_DIR) not in sys.path:
-        sys.path.insert(0, str(GRIDEXPAND_DIR))
-        remove_gridexpand_path = True
-    else:
-        remove_gridexpand_path = False
-    try:
-        from common.database import SurroGridDatabase
+    from gridexpand.db.database import SurroGridDatabase
+    import gridexpand.allocation.functions.weather as weather_module
 
-        database = SurroGridDatabase()
-        grid_ref = database.resolve_grid_identifier(weather_source_hdf.name)
-        region = database.read_region(grid_ref)
-    finally:
-        if remove_gridexpand_path:
-            sys.path.remove(str(GRIDEXPAND_DIR))
+    database = SurroGridDatabase()
+    grid_ref = database.resolve_grid_identifier(weather_source_hdf.name)
+    region = database.read_region(grid_ref)
     row = region.iloc[0]
-    weather_module = _load_gridalloc_function_module("weather")
     weather_result = weather_module.get_pvgis_tmy_sarah3_dataframe(
         float(row["lat"]),
         float(row["lon"]),
@@ -192,32 +179,6 @@ def _load_weather_and_location(
         )
     weather, altitude, _ = weather_result
     return weather, float(row["lat"]), float(row["lon"]), float(altitude)
-
-
-def _load_gridalloc_function_module(name: str, relative_dir: str = "functions"):
-    demand_dir = GRIDALLOC_DIR.resolve()
-    old_cwd = Path.cwd()
-    sys.path.insert(0, str(demand_dir))
-    previous_config = sys.modules.pop("config", None)
-    try:
-        os.chdir(demand_dir)
-        spec = importlib.util.spec_from_file_location(
-            f"gridalloc_{name}",
-            demand_dir / "src" / relative_dir / f"{name}.py",
-        )
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Could not load gridalloc {name} module.")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    finally:
-        os.chdir(old_cwd)
-        try:
-            sys.path.remove(str(demand_dir))
-        except ValueError:
-            pass
-        if previous_config is not None:
-            sys.modules["config"] = previous_config
-    return module
 
 
 def main() -> None:

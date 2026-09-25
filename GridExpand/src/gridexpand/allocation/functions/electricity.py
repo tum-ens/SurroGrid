@@ -1,10 +1,10 @@
-from config import config
+from gridexpand.allocation.config import config
 
 import pandas as pd
 import numpy as np
 import random
 
-from common.reproducibility import frame_fingerprint, physical_building_id, stable_seed
+from gridexpand.common.reproducibility import frame_fingerprint, physical_building_id, stable_seed
 
 
 ##############################################################

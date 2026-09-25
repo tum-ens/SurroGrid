@@ -6,11 +6,7 @@ import pandas as pd
 from pvlib import location, modelchain, pvsystem
 from pvlib.temperature import TEMPERATURE_MODEL_PARAMETERS
 
-try:
-    from config import config
-except ModuleNotFoundError:
-    from ....config import config
-
+from gridexpand.allocation.config import config
 
 from .labels import profile_label
 

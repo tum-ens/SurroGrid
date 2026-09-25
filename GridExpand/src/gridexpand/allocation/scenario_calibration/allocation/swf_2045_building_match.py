@@ -16,7 +16,6 @@ import argparse
 import json
 import os
 import re
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -31,21 +30,17 @@ from sqlalchemy import create_engine, text
 from ..paths import (
     DEMAND_STATISTICS_DIR,
     ENV_PATH,
-    GRIDALLOC_DIR,
-    GRIDEXPAND_DIR,
+    OUTPUT_DIR,
 )
 
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.database import get_pylovo_version_id  # noqa: E402
-from .ghd_calibration import build_synthetic_ghd_calibration  # noqa: E402
-from .scope_filters import build_grid_scope_summary, summarize_grid_scope_filters  # noqa: E402
+from gridexpand.db.database import get_pylovo_version_id
+from .ghd_calibration import build_synthetic_ghd_calibration
+from .scope_filters import build_grid_scope_summary, summarize_grid_scope_filters
 from .sector_asset_calibration import (
     build_sector_asset_calibration,
     summarize_sector_scope_filters,
-)  # noqa: E402
-from .allocation_plan import build_scenario_allocation_plan  # noqa: E402
+)
+from .allocation_plan import build_scenario_allocation_plan
 
 HH_MIN_ANNUAL_DEMAND_KWH = 500.0
 HH_NAME_PATTERN = re.compile(r"NS_(?:Er)?Last", re.IGNORECASE)
@@ -1062,9 +1057,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=GRIDALLOC_DIR
-        / "outputs"
-        / "scenario_calibration"
+        default=OUTPUT_DIR
         / "swf_2045_building_match",
     )
     parser.add_argument(

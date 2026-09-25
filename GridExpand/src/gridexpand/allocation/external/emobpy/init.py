@@ -3,7 +3,7 @@ import json
 import glob
 import os
 import shutil
-from src.external.emobpy.constants import (
+from gridexpand.allocation.external.emobpy.constants import (
     CWD,
     DEFAULT_DATA_DIR,
     USER_PATH,

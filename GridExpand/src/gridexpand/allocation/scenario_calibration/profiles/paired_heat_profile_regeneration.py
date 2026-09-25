@@ -9,25 +9,20 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from typing import Any
 
 import pandas as pd
 
-
-from ..paths import GRIDALLOC_DIR, GRIDEXPAND_DIR, SYNTHETIC_INPUT_DIR
-
-import sys
-
-if str(GRIDEXPAND_DIR) not in sys.path:
-    sys.path.insert(0, str(GRIDEXPAND_DIR))
-
-from common.timeframe import scenario_output_directory  # noqa: E402
-from scenario_pipeline.config_loader import (  # noqa: E402
+from gridexpand.common.timeframe import scenario_output_directory
+from gridexpand.scenario.config_loader import (
     load_scenario_config,
     scenario_identity_key,
 )
+
+from ..paths import RESULTS_DIR, SYNTHETIC_INPUT_DIR
 
 DEFAULT_SYNTHETIC_LIBRARY = SYNTHETIC_INPUT_DIR
 RESIDENTIAL_BUILDING_TYPES = {"AB", "MFH", "SFH", "TH"}
@@ -112,10 +107,6 @@ def build_regeneration_catalog(paired_dir: Path) -> pd.DataFrame:
         building_column = f"{column}_building"
         if building_column in selected:
             selected[column] = selected[column].fillna(selected[building_column])
-    residential_flag = selected.get(
-        "building_is_residential",
-        pd.Series(False, index=selected.index),
-    ).astype("boolean").fillna(False).astype(bool)
     if "residential_effective_floor_area_m2" in selected:
         selected["building_floor_area"] = selected["residential_effective_floor_area_m2"].fillna(selected["building_floor_area"])
     residential = pd.to_numeric(selected["building_floor_area"], errors="coerce").gt(0.0)
@@ -255,12 +246,9 @@ def _regenerate_one(
     started = time.monotonic()
     log_path = log_dir / f"{Path(source_name).stem}.log"
     command = [
-        "uv",
-        "run",
-        "--project",
-        "..",
-        "python",
-        "main.py",
+        sys.executable,
+        "-m",
+        "gridexpand.allocation.main",
         source_name,
         "--storage",
         "db",
@@ -288,7 +276,6 @@ def _regenerate_one(
             log.write(f"COMMAND: {' '.join(command)}\n")
             completed = subprocess.run(
                 command,
-                cwd=GRIDALLOC_DIR,
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -400,7 +387,7 @@ def main() -> None:
 
     synthetic_library = args.synthetic_library.resolve()
     synthetic_library.mkdir(parents=True, exist_ok=True)
-    result_dir = GRIDALLOC_DIR / "results"
+    result_dir = RESULTS_DIR
     log_dir = paired_dir / "heat_profile_regeneration_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     print(

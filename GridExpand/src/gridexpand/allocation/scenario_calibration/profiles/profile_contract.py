@@ -7,7 +7,7 @@ from collections.abc import Hashable, Iterable
 import numpy as np
 import pandas as pd
 
-from common.reproducibility import stable_seed
+from gridexpand.common.reproducibility import stable_seed  # noqa: F401 - re-exported to paired_profiles
 
 
 def profile_key(row: pd.Series | dict, *parts: object) -> tuple[object, ...]:

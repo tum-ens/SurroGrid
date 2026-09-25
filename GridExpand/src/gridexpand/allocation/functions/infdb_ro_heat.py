@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 import os
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -12,7 +11,8 @@ import OpenDHW
 from dotenv import load_dotenv
 from sqlalchemy import bindparam, create_engine, text
 
-from config import config
+from gridexpand.allocation.config import config
+from gridexpand.paths import ENV_FILE
 
 
 EXPECTED_HOURS = 8760
@@ -23,8 +23,7 @@ RO_HEAT_UNIT = "W"
 
 def _database_engine():
     """Create the configured INFDB engine without importing the heat pipeline."""
-    gridexpand_dir = Path(__file__).resolve().parents[4]
-    load_dotenv(gridexpand_dir / ".env", override=True)
+    load_dotenv(ENV_FILE, override=True)
     return create_engine(
         "postgresql+psycopg2://"
         f"{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
@@ -359,7 +358,7 @@ def generate_opendhw(buildings: pd.DataFrame, base_seed: int = 0) -> pd.DataFram
         occupants = building.get("occ_list")
         if not isinstance(occupants, (list, tuple, np.ndarray)):
             raise ValueError("OpenDHW requires an occupant list for every building.")
-        from common.reproducibility import (
+        from gridexpand.common.reproducibility import (
             legacy_random_state,
             physical_building_id,
             stable_seed,
