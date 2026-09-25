@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import math
-import os
 
 import numpy as np
 import pandas as pd
 import OpenDHW
-from dotenv import load_dotenv
-from sqlalchemy import bindparam, create_engine, text
+from sqlalchemy import bindparam, text
 
 from gridexpand.allocation.config import config
-from gridexpand.paths import ENV_FILE
+from gridexpand.db.engine import get_engine
 
 
 EXPECTED_HOURS = 8760
@@ -22,13 +20,8 @@ RO_HEAT_UNIT = "W"
 
 
 def _database_engine():
-    """Create the configured INFDB engine without importing the heat pipeline."""
-    load_dotenv(ENV_FILE, override=True)
-    return create_engine(
-        "postgresql+psycopg2://"
-        f"{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
-        f"@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT', 5432)}/{os.getenv('DB_NAME')}"
-    )
+    """The configured INFDB engine (shared, see gridexpand.db.engine)."""
+    return get_engine()
 
 
 def _building_id_column(buildings: pd.DataFrame) -> str:

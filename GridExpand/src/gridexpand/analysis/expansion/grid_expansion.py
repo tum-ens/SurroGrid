@@ -9,32 +9,16 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
-from pathlib import Path
 
 from sqlalchemy import text
 
 from gridexpand.db.database import SurroGridDatabase, normalize_ags
-from gridexpand.paths import SQL_DIR
 
 from .overview import (  # noqa: F401
     latest_expansion_analysis_key,
     load_expansion_overview,
 )
 from .real_materialization import materialize_real_results
-
-SCHEMA_SQL_PATH = SQL_DIR / "expansion_schema.sql"
-
-
-def _execute_sql_file(db: SurroGridDatabase, path: Path) -> None:
-    statements = [
-        statement.strip()
-        for statement in path.read_text(encoding="utf-8").split(";")
-        if statement.strip()
-    ]
-    with db.engine.begin() as conn:
-        for statement in statements:
-            conn.execute(text(statement))
-
 
 def _refresh_qgis_materialized_views(db: SurroGridDatabase) -> None:
     with db.engine.begin() as conn:
@@ -344,9 +328,18 @@ def _materialize_line_results(
                 gc.bcid,
                 gc.pylovo_grid_result_id,
                 gc.pylovo_version_id,
-                pcr.settlement_type
+                pcr.settlement_type,
+                COALESCE(
+                    NULLIF(
+                        CASE WHEN pr.assumptions <> '{}'::JSONB THEN pr.assumptions ELSE sc.assumptions END
+                            ->> 'timeframe_start',
+                        ''
+                    ),
+                    '2009-01-01 00:00:00+00:00'
+                )::TIMESTAMPTZ AS timeframe_start
             FROM surrogrid.powerflow_run pr
             JOIN surrogrid.grid_case gc USING (grid_case_id)
+            JOIN surrogrid.scenario sc ON sc.scenario_id = pr.scenario_id
             LEFT JOIN pylovo.postcode_result pcr
               ON pcr.version_id = gc.pylovo_version_id
              AND pcr.postcode_result_plz = gc.plz
@@ -426,7 +419,9 @@ def _materialize_line_results(
                     / 100.0
                     * pcs.cable_installed_capacity_ka AS max_i_from_ka,
                 pcs.cable_loading_max_t_index AS critical_t_index,
-                NULL::TIMESTAMPTZ AS critical_ts
+                -- Same rule as the raw tables' ts (db.writers.RunTimestamps).
+                sr.timeframe_start
+                    + pcs.cable_loading_max_t_index * INTERVAL '1 hour' AS critical_ts
             FROM surrogrid.powerflow_cable_summary pcs
             JOIN selected_runs sr USING (powerflow_run_id)
             WHERE pcs.stage = :stage
@@ -1118,7 +1113,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     db = SurroGridDatabase()
-    _execute_sql_file(db, SCHEMA_SQL_PATH)
+    db.ensure_schema()
     if args.schema_only:
         print("Expansion schema and QGIS views are ready.")
         return
