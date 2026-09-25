@@ -1,10 +1,12 @@
 # Plotting moved
 
-The plotting notebooks and helper module moved to `../5.postprocessing/plotting` so Step 5 can serve as the dedicated result-analysis workspace.
+The power-flow plotting helpers live in `src/gridexpand/analysis/plotting/` and the
+notebooks in `notebooks/analysis/`, so Step 5 serves as the dedicated result-analysis
+workspace.
 
-Use the new environment from the repository root with:
+Use the GridExpand environment with the notebook extra:
 
 ```bash
-cd GridExpand/5.postprocessing
-uv sync
+cd GridExpand
+uv sync --extra notebooks
 ```

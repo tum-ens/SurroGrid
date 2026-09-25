@@ -1,16 +1,16 @@
 # Paired validation
 
-This layer maps one scenario onto corresponding real and synthetic networks and
+This layer (`gridexpand.paired`) maps one scenario onto corresponding real and synthetic networks and
 checks equivalence. Scenario logic, prices, asset sizing, profiles, and TSAM
-assumptions belong to `scenario_pipeline`; dependencies only point from paired
+assumptions belong to `gridexpand.scenario`; dependencies only point from paired
 validation to that shared layer.
 
-`runner.py` is the authoritative comparison entry point for both `real_swf`
+`gridexpand.paired.runner` is the authoritative comparison entry point for both `real_swf`
 and `synthetic` targets. It owns only paired projection, shared temporal
 mapping checks, and equivalent execution across the two network models.
-Scenario assumptions and asset sizing remain in `scenario_pipeline` and the
+Scenario assumptions and asset sizing remain in `gridexpand.scenario` and the
 shared Step-2 asset modules. The paired runner is launched through the paired run YAML in
-`scenario_pipeline/config/runs`. Its `execution.model_cases` list can request
+`config/runs`. Its `execution.model_cases` list can request
 either heuristic dispatch, both heuristic dispatches, optimized HEMS, or all
 three. Requested heuristic cases reuse one materialized capacity plan, which
 guarantees identical assets for the controlled HEMS/INFLEX comparison.
@@ -23,15 +23,15 @@ Internal artifact and result paths are derived from `paired_dataset_id` and
 ## Dependencies
 
 ```text
-scenario_pipeline -------------------\
-common/orchestration -----------------+--> paired_validation/runner.py
+gridexpand.scenario ------------------\
+gridexpand.common.orchestration ------+--> gridexpand.paired.runner
 Step 2 paired materialization -------/              |
                                                     +--> sources/swf.py --> SWF Step 4
                                                     +--> sources/synthetic.py --> synthetic Step 4
 ```
 
 The paired runner does not call the synthetic AGS runner. Both runners reuse
-the same lower-level Step 2--4 programs and `common/orchestration.py`. The AGS
+the same lower-level Step 2--4 programs and `src/gridexpand/common/orchestration.py`. The AGS
 runner discovers arbitrary synthetic grids for a regional study; paired
 validation reads an existing allocation pairing and runs only its selected
 synthetic counterpart.

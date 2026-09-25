@@ -1,14 +1,14 @@
 # Scenario pipeline
 
-The scenario pipeline owns scientific configuration, physical-building asset
-plans, and stable model-case semantics. It must run without importing
-`paired_validation`. See `docs/SCENARIO_METHOD.md` for the method and
-`docs/CONFIGURATION_REFERENCE.md` for YAML options.
+The scenario pipeline (`gridexpand.scenario`) owns scientific configuration,
+physical-building asset plans, and stable model-case semantics. It must run
+without importing `gridexpand.paired`. See [SCENARIO_METHOD.md](SCENARIO_METHOD.md)
+for the method and [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) for YAML options.
 
 The package layout is deliberately flat: Python configuration models and
-loaders live beside the runner, while user-edited YAML files live under
-`config/scenarios` and `config/runs`. Generated manifests are written to
-`GridExpand/run_logs/scenario_manifests`, never into this source directory.
+loaders live beside the runner in `src/gridexpand/scenario/`, while user-edited
+YAML files live under `config/scenarios` and `config/runs`. Generated manifests are written to
+`work/runs/scenario_manifests`, never into this source directory.
 
 ## Starting a new scenario or run
 
@@ -28,9 +28,8 @@ materializes expansion results. Expansion schema initialization is part of the
 postprocessing command, so no separate `--schema-only` setup is required.
 
 ```bash
-uv run --project GridExpand/2.demand_allocation \
-  python GridExpand/scenario_pipeline/run_scenario.py \
-  --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired_full_year.yaml
+uv run gridexpand run \
+  --run-config config/runs/forchheim_2045_paired_full_year.yaml
 ```
 
 Use `--prepare-only` to rebuild and validate shared inputs without starting

@@ -8,21 +8,21 @@ This step takes sampled low-voltage grids from **Step 1** (stored as `.h5`) and 
 - Space-heating + domestic hot water demand
 - EV charging (mobility demand) + EV availability
 
-It then **writes URBS-ready input tables** into the same `.h5` file (stored in `gridalloc/results/`) under the HDF5 group `urbs_in/`.
+It then **writes URBS-ready input tables** into the same `.h5` file (stored in `work/allocation/results/`) under the HDF5 group `urbs_in/`.
 
 ---
 
 ## What this code does (high level)
 
-The executable entrypoint is `gridalloc/main.py`.
+The executable entrypoint is `src/gridexpand/allocation/main.py`.
 
-1. **Select input grid file** from `gridalloc/data/grids/` by matching the `inputfile_id` (see “Input selection”).
+1. **Select input grid file** from `work/allocation/grids/` by matching the `inputfile_id` (see “Input selection”).
 1. **Load raw input tables** from the `.h5`: `raw_data/buildings`, the required `raw_data/building_components`, `raw_data/region`, optionally `raw_data/weather`.
 1. **Generate time series** in a strict order (dependencies matter): Weather → PV → Electricity → Heat → Mobility.
 1. **Assemble URBS input sheets** (demand, supply, processes, commodities, storages, etc.).
-1. **Copy the input `.h5` to `gridalloc/results/`** and append/overwrite tables (update `raw_data/buildings`/`raw_data/weather`, add `urbs_in/*`).
+1. **Copy the input `.h5` to `work/allocation/results/`** and append/overwrite tables (update `raw_data/buildings`/`raw_data/weather`, add `urbs_in/*`).
 
-The `Grid` orchestration logic is implemented in `gridalloc/src/classes/grid.py`.
+The `Grid` orchestration logic is implemented in `src/gridexpand/allocation/classes/grid.py`.
 
 ---
 
@@ -32,7 +32,7 @@ The `Grid` orchestration logic is implemented in `gridalloc/src/classes/grid.py`
 
 Place input grid files in:
 
-- `gridalloc/data/grids/*.h5`
+- `work/allocation/grids/*.h5`
 
 Each file must contain at least these HDF5 keys (written by Step 1 in this project):
 
@@ -80,7 +80,7 @@ error; old one-use HDF files are not reconstructed heuristically.
 
 The code reads multiple statistics files from:
 
-- `gridalloc/data/statistics/`
+- `data/statistics/`
 
 Examples (non-exhaustive):
 
@@ -89,22 +89,22 @@ Examples (non-exhaustive):
 - Roof tilt distributions for PV
 - EV specs and trip statistics for mobility
 
-These are already included in the repository under `gridalloc/data/statistics/**`.
+These are already included in the repository under `data/statistics/**`.
 
 ---
 
 ## Real/Synthetic Scenario Calibration
 
-The publication comparison is organized under `gridalloc/src/scenario_calibration/` by responsibility:
+The publication comparison is organized under `src/gridexpand/allocation/scenario_calibration/` by responsibility:
 
 - `allocation/`: SWF-to-building matching, scope calibration, and paired allocation plans.
 - `profiles/`: shared electricity, PV, mobility, and heat-profile construction and readiness checks.
 - `pipeline/`: active paired URBS-input materialization and shared input-table helpers.
 
-Build the common physical-building scenario and verify exact heat-profile coverage from `GridExpand/2.demand_allocation/gridalloc`:
+Build the common physical-building scenario and verify exact heat-profile coverage from `GridExpand`:
 
 ```bash
-uv run --project .. python -m src.scenario_calibration.allocation.paired_allocation \
+uv run python -m gridexpand.allocation.scenario_calibration.allocation.paired_allocation \
   --ags 9474126 \
   --plz 91301 \
   --pylovo-version-id 1 \
@@ -112,18 +112,18 @@ uv run --project .. python -m src.scenario_calibration.allocation.paired_allocat
   --min-buildings 5 \
   --pv-location-mode swf \
   --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \
-  --output-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2
+  --output-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2
 
 # One-time creation for this physical heat-profile assumption set.
-uv run --project .. python -m src.scenario_calibration.profiles.physical_heat_profile_library \
-  --source-catalog outputs/scenario_calibration/swf_2045_paired_v4_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
-  --source-hdf-dir ../../3.urbs/Input \
-  --output outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5 \
+uv run python -m gridexpand.allocation.scenario_calibration.profiles.physical_heat_profile_library \
+  --source-catalog work/allocation/outputs/scenario_calibration/swf_2045_paired_v4_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
+  --source-hdf-dir work/optimization/input \
+  --output work/allocation/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5 \
   --profile-set-id forchheim_2045_physical_heat_v1
 
-uv run --project .. python -m src.scenario_calibration.profiles.paired_profile_readiness \
-  --paired-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
-  --heat-profile-library outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5
+uv run python -m gridexpand.allocation.scenario_calibration.profiles.paired_profile_readiness \
+  --paired-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
+  --heat-profile-library work/allocation/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5
 ```
 
 ### Rebuild physical heat profiles after a method change
@@ -132,25 +132,25 @@ A change to TEASER inputs or another physical heat-profile assumption requires
 regenerating every exact source grid, even when the existing catalog marks its
 profiles ready. Keep the previous library until the replacement passes the
 readiness audit, and use a new profile-set version so results remain traceable.
-From `GridExpand/2.demand_allocation/gridalloc` run:
+From `GridExpand` run:
 
 ```bash
-uv run --project .. python -m src.scenario_calibration.profiles.paired_heat_profile_regeneration \
-  --paired-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
+uv run python -m gridexpand.allocation.scenario_calibration.profiles.paired_heat_profile_regeneration \
+  --paired-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
   --force-all \
   --workers 4 \
   --n-cpu 1
 
-uv run --project .. python -m src.scenario_calibration.profiles.physical_heat_profile_library \
-  --source-catalog outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
-  --source-hdf-dir ../../3.urbs/Input \
+uv run python -m gridexpand.allocation.scenario_calibration.profiles.physical_heat_profile_library \
+  --source-catalog work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
+  --source-hdf-dir work/optimization/input \
   --source-mode exact \
-  --output outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v2.h5 \
+  --output work/allocation/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v2.h5 \
   --profile-set-id forchheim_2045_physical_heat_v2
 
-uv run --project .. python -m src.scenario_calibration.profiles.paired_profile_readiness \
-  --paired-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
-  --heat-profile-library outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v2.h5
+uv run python -m gridexpand.allocation.scenario_calibration.profiles.paired_profile_readiness \
+  --paired-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
+  --heat-profile-library work/allocation/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v2.h5
 ```
 
 The regeneration helper uses Step 2's dedicated `heat_library` profile mode:
@@ -179,7 +179,7 @@ If the selected DB-mode result HDF does not contain `raw_data/weather`, the
 builder resolves that grid's database coordinates and requests the same PVGIS
 SARAH3 TMY input once while creating the shared cache.
 
-The regional physical heat-profile library is keyed by stable building identifiers and is reused across pylovo topology versions whenever weather and building assumptions are unchanged. The paired contract fixes one `scenario_unit_id` for each `(source LV, source connection bus, physical building)` tuple. Real and synthetic plans must contain the same scenario units and HH/GHD energy before optimization. Profiles remain at scenario-unit resolution through URBS and are projected to the selected network buses only at the Step-4 boundary. See [`gridalloc/src/scenario_calibration/PAIRED_SCENARIO.md`](gridalloc/src/scenario_calibration/PAIRED_SCENARIO.md) for the current audit, strict publication gate, and complete runner command.
+The regional physical heat-profile library is keyed by stable building identifiers and is reused across pylovo topology versions whenever weather and building assumptions are unchanged. The paired contract fixes one `scenario_unit_id` for each `(source LV, source connection bus, physical building)` tuple. Real and synthetic plans must contain the same scenario units and HH/GHD energy before optimization. Profiles remain at scenario-unit resolution through URBS and are projected to the selected network buses only at the Step-4 boundary. See [`docs/PAIRED_SCENARIO.md`](../PAIRED_SCENARIO.md) for the current audit, strict publication gate, and complete runner command.
 
 
 ## Generated outputs
@@ -188,7 +188,7 @@ The regional physical heat-profile library is keyed by stable building identifie
 
 For each run, the input file is **copied** to:
 
-- `gridalloc/results/<same_filename_as_input>.h5`
+- `work/allocation/results/<same_filename_as_input>.h5`
 
 and then augmented with additional tables.
 
@@ -223,8 +223,8 @@ By default this step writes (or overwrites) the following keys using `pandas.HDF
 
 The SLURM scripts write logs to:
 
-- `gridalloc/logs/normal/<jobid>_output.log`
-- `gridalloc/logs/errors/<jobid>_error.log`
+- `work/runs/slurm/<jobid>_output.log`
+- `work/runs/slurm/<jobid>_error.log`
 
 ---
 
@@ -290,7 +290,7 @@ Expected length:
 
 ### Output file schema (written by this step)
 
-All outputs are written into a copy of the input file under `gridalloc/results/`.
+All outputs are written into a copy of the input file under `work/allocation/results/`.
 
 #### Updated raw data tables
 
@@ -330,11 +330,11 @@ Notes on column naming:
 
 ---
 
-## Source code tour (`gridalloc/src`)
+## Source code tour (`src/gridexpand/allocation`)
 
-This section documents the first-party code in `gridalloc/src`. Vendored third-party libraries under `gridalloc/src/external/` are intentionally not described here.
+This section documents the first-party code in `src/gridexpand/allocation`. Vendored third-party libraries under `src/gridexpand/allocation/external/` are intentionally not described here.
 
-### `gridalloc/src/classes/`
+### `src/gridexpand/allocation/classes/`
 
 - `grid.py`
   - Main orchestration class `Grid(settings)`.
@@ -343,13 +343,13 @@ This section documents the first-party code in `gridalloc/src`. Vendored third-p
 
 - `save_grid.py`
   - Defines `SaveFile`, a small wrapper around pandas HDF5 I/O.
-  - Reads required input tables (`get_input_data()`), copies the input file into `results/` (`copy_save_file()`), and appends tables with compression (`save_df()`).
+  - Reads required input tables (`get_input_data()`), copies the input file into `work/allocation/results/` (`copy_save_file()`), and appends tables with compression (`save_df()`).
 
 - `resource_report.py`
   - Provides `resource_report(...)` / `ResourceReport` context manager.
   - Prints wall-clock time, CPU time and peak RSS (best-effort across platforms). Used for profiling pipeline sections.
 
-### `gridalloc/src/functions/`
+### `src/gridexpand/allocation/functions/`
 
 - `weather.py`
   - Fetches typical meteorological year weather data from PVGIS (SARAH3) and soil temperatures from OpenMeteo.
@@ -383,73 +383,68 @@ This section documents the first-party code in `gridalloc/src`. Vendored third-p
 
 Top-level (this step):
 
-- `gridalloc/main.py` – CLI entrypoint, selects input file and runs the pipeline
-- `gridalloc/config.py` – implementation paths, static datasets, and a legacy
+- `src/gridexpand/allocation/main.py` – CLI entrypoint, selects input file and runs the pipeline
+- `src/gridexpand/allocation/config.py` – implementation paths, static datasets, and a legacy
   attribute adapter; mobility and urbs assumptions come from the validated
   scenario YAML.
-- `gridalloc/run_cluster_serialstd.sh` – SLURM job script (single grid per job)
-- `gridalloc/start_batch_jobs_serialstd.sh` – submits multiple SLURM jobs over an index range
+- `scripts/hpc/allocation/run_cluster_serialstd.sh` – SLURM job script (single grid per job)
+- `scripts/hpc/start_batch_jobs.sh allocation` – submits multiple SLURM jobs over an index range
 
 Data:
 
-- `gridalloc/data/grids/` – input grid `.h5` files
-- `gridalloc/data/statistics/` – statistical datasets used for sampling and profiles
-- `gridalloc/results/` – output `.h5` files (copy of inputs + URBS sheets)
+- `work/allocation/grids/` – input grid `.h5` files
+- `data/statistics/` – statistical datasets used for sampling and profiles
+- `work/allocation/results/` – output `.h5` files (copy of inputs + URBS sheets)
 
 Code:
 
-- `gridalloc/src/classes/grid.py` – `Grid` class orchestrating the generation and URBS table creation
-- `gridalloc/src/classes/save_grid.py` – HDF5 read/copy/write helpers
-- `gridalloc/src/functions/` – domain generators:
+- `src/gridexpand/allocation/classes/grid.py` – `Grid` class orchestrating the generation and URBS table creation
+- `src/gridexpand/allocation/classes/save_grid.py` – HDF5 read/copy/write helpers
+- `src/gridexpand/allocation/functions/` – domain generators:
   - `weather.py` (PVGIS/OpenMeteo fetching)
   - `solar.py` (pvlib PV modeling)
   - `electricity.py` (residential + GHD electrical load assignment)
   - `heat.py` (districtgenerator-based heat profiles + COP)
   - `mobility.py` (emobpy-based EV demand + availability)
-- `gridalloc/src/external/` – vendored third-party code (districtgenerator, emobpy)
+- `src/gridexpand/allocation/external/` – vendored third-party code (districtgenerator, emobpy)
 
 ---
 
 ## How to run
 
-All commands below assume you are in the `gridalloc/` directory.
+All commands below are run from `GridExpand/`; the working directory does not matter otherwise.
 
 ### 1) Create the environment
-
-From `GridExpand/2.demand_allocation` use uv:
 
 ```bash
 uv sync
 ```
 
-Then run Step 2 from `gridalloc/` with the step-local interpreter:
+Then run Step 2:
 
 ```bash
-cd gridalloc
-uv run --project .. python main.py <inputfile_id> --n_cpu <N>
+uv run gridexpand allocate <inputfile_id> --n_cpu <N>
 ```
 
 DB-backed raw-grid readout can be enabled with:
 
 ```bash
-uv run --project .. python main.py 09278140 --storage db --profiles status_quo
-uv run --project .. python main.py 09278140 --storage db --profiles all
+uv run gridexpand allocate 09278140 --storage db --profiles status_quo
+uv run gridexpand allocate 09278140 --storage db --profiles all
 ```
 
 In DB mode Step 2 resolves the AGS against the existing `pylovo` tables, stores AGS without a leading zero, and reads raw building/region input from PostgreSQL. The generated Step 2 outputs intentionally remain HDF5 for now. `--profiles status_quo` writes only `urbs_in/demand` for Step 4 `--pre-only`; electrification profile combinations write the normal `urbs_in/*` tables for Step 3.
 
-Legacy fallback: `environment.yml` and `environment_HPC.yml` remain available for conda-based setups.
-
 ### 2) Run a single grid locally
 
 ```bash
-uv run --project .. python main.py <inputfile_id> --n_cpu 1
+uv run gridexpand allocate <inputfile_id> --n_cpu 1
 ```
 
 Example (if your grid file name starts with `0_`):
 
 ```bash
-uv run --project .. python main.py 0 --n_cpu 8
+uv run gridexpand allocate 0 --n_cpu 8
 ```
 
 ### 3) Run on HPC (SLURM)
@@ -457,27 +452,27 @@ uv run --project .. python main.py 0 --n_cpu 8
 Single job:
 
 ```bash
-sbatch run_cluster_serialstd.sh <inputfile_id>
+sbatch scripts/hpc/allocation/run_cluster_serialstd.sh <inputfile_id>
 ```
 
 Submit a range (inclusive):
 
 ```bash
-bash start_batch_jobs_serialstd.sh 0 24
+bash scripts/hpc/start_batch_jobs.sh allocation 0 24
 ```
 
 ---
 
 ## Input selection (`inputfile_id`)
 
-`main.py` does **not** take a full path. It takes an `inputfile_id` and searches in `data/grids/`.
+`gridexpand allocate` does **not** take a full path. It takes an `inputfile_id` and searches in `work/allocation/grids/` (HDF5 mode).
 
 Matching rule:
 
 - For each `*.h5`, take the substring before the **first underscore** (`_`).
 - If it equals `str(inputfile_id)`, that file is selected.
 
-So a call like `python3 main.py 0` matches files like:
+So a call like `gridexpand allocate 0` matches files like:
 
 - `0_N2819500E4261500_86165_2_40.h5`
 
@@ -509,7 +504,7 @@ Notes:
 
 ## Details to keep in mind
 
-- **Run directory matters**: paths like `data/grids` and `data/statistics` are relative; run from `gridalloc/`.
+- **Directories**: all paths come from `gridexpand.paths` (`data/statistics`, `work/allocation/...`); the run directory does not matter.
 - **Time resolution**: all outputs are designed around **8760 hourly** time steps (1 year). The DST correction in `Grid` uses fixed indices for 2009.
 - **Randomness / reproducibility**:
   - The legacy standalone allocation samples PV roof sections without a global seed; the paired pipeline uses deterministic LoD2 roof surfaces.

@@ -135,13 +135,12 @@ Gate T2:
 
 Owner: batch-execution agent. Start only after Gate T2.
 
-From `GridExpand/2.demand_allocation/gridalloc`, run against the new paired
+From `GridExpand`, run against the new paired
 directory:
 
 ```bash
-uv run --project .. python \
-  -m src.scenario_calibration.profiles.paired_heat_profile_regeneration \
-  --paired-dir outputs/scenario_calibration/swf_2045_paired_pylovo_v1_91301_station_hybrid_v2 \
+uv run python -m gridexpand.allocation.scenario_calibration.profiles.paired_heat_profile_regeneration \
+  --paired-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_pylovo_v1_91301_station_hybrid_v2 \
   --force-all \
   --workers 4 \
   --n-cpu 1
@@ -165,12 +164,11 @@ Owner: library agent.
 Build the source-specific exact library:
 
 ```bash
-uv run --project .. python \
-  -m src.scenario_calibration.profiles.physical_heat_profile_library \
-  --source-catalog outputs/scenario_calibration/swf_2045_paired_pylovo_v1_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
-  --source-hdf-dir ../../3.urbs/Input \
+uv run python -m gridexpand.allocation.scenario_calibration.profiles.physical_heat_profile_library \
+  --source-catalog work/allocation/outputs/scenario_calibration/swf_2045_paired_pylovo_v1_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
+  --source-hdf-dir work/optimization/input \
   --source-mode exact \
-  --output outputs/scenario_calibration/profile_libraries/forchheim_2045_teaser_5r1c_v2.h5 \
+  --output work/allocation/outputs/scenario_calibration/profile_libraries/forchheim_2045_teaser_5r1c_v2.h5 \
   --profile-set-id forchheim_2045_teaser_5r1c_v2
 ```
 

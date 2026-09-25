@@ -1,19 +1,19 @@
 
 # 3. urbs (LVDS energy system optimization)
 
-This folder contains the **urbs** optimization step of the GridExpand pipeline. It solves a linear (M)ILP energy system model for a low-voltage distribution system / building-node representation and writes results back to an HDF5 file.
+This document describes the **urbs** optimization step of the GridExpand pipeline. It solves a linear (M)ILP energy system model for a low-voltage distribution system / building-node representation and writes results back to an HDF5 file.
 
 The main entrypoint for this step is:
 
-- `run_urbs_cluster.py` (local execution or called from SLURM)
+- `gridexpand optimize` = `src/gridexpand/optimization/run_urbs_cluster.py` (local execution or called from SLURM)
 
-The code in `urbs/` is a vendored / adapted urbs variant tailored to this GridExpand workflow.
+The code in `src/gridexpand/optimization/urbs/` is a vendored / adapted urbs variant tailored to this GridExpand workflow.
 
 ## What this step does (high-level)
 
-1. **Selects an input HDF5** from `Input/` based on a numeric/prefix ID.
+1. **Selects an input HDF5** from `work/optimization/input/` based on a numeric/prefix ID.
 2. **Reads scenario identity and electrification-manifest metadata** and builds the execution `global_settings` dict (TSAM on/off, etc.).
-3. **Copies the input file to `result/<scenario-key>/`** (working copy).
+3. **Copies the input file to `work/optimization/result/<scenario-key>/`** (working copy).
 4. **Reads the input datasets** from the HDF5 (`/urbs_in/...`).
 5. **Optionally applies Time Series Aggregation (TSAM)** to reduce the time horizon.
 6. **Consumes the exact Step-2 technology assignment**; it does not resample or randomly remove electrification cohorts.
@@ -26,50 +26,43 @@ The code in `urbs/` is a vendored / adapted urbs variant tailored to this GridEx
 ## Folder / file structure
 
 ```text
-3.urbs/
-  README.md
-  environment.yml
-  environment_HPC.yml
-  run_urbs_cluster.py
-  run_cluster_serialstd.sh
-  start_batch_jobs_serialstd.sh
-  urbs_LICENSE
-
-  Input/
-    *.h5                  # required input files for this step
-
-  result/
-    <scenario-key>/
-      *.h5                 # generated result files (HDF5)
-
-  logs/
-    normal/               # SLURM stdout logs (if using sbatch)
-    errors/               # SLURM stderr logs (if using sbatch)
-    gurobi/               # solver logs per parallel sub-model
-
+src/gridexpand/optimization/
+  run_urbs_cluster.py     # entry point (gridexpand optimize)
   urbs/
+    LICENSE               # urbs license (GPL-3.0)
     runfunctions.py       # run_lvds_opt(), parallelization, solver setup
     input.py              # HDF5 input reader (read_input_h5)
     model.py              # Pyomo model construction
     saveload.py           # HDF5 result writer (save)
     features/             # TSAM, helper logic, technology modifiers, etc.
+
+work/optimization/        # runtime artifacts (gitignored)
+  input/
+    *.h5                  # required input files for this step
+  result/
+    <scenario-key>/
+      *.h5                # generated result files (HDF5)
+  logs/
+    gurobi/               # solver logs per parallel sub-model
+
+scripts/hpc/optimization/run_cluster_serialstd.sh   # Slurm template
 ```
 
 ## Required inputs
 
-### 1) Input HDF5 file in `Input/`
+### 1) Input HDF5 file in `work/optimization/input/`
 
-The step expects one or more `*.h5` files in `Input/`.
+The step expects one or more `*.h5` files in `work/optimization/input/`.
 
 Selection logic (in `run_urbs_cluster.py`):
 
-- The script lists all `.h5` files in `Input/`.
+- The script lists all `.h5` files in `work/optimization/input/`.
 - It matches the file whose **prefix before the first underscore** equals `inputfile_id`.
 
 Example:
 
-- File: `Input/0_N2819500E4261500_86165_2_40.h5`
-- Run with: `python3 run_urbs_cluster.py 0`
+- File: `work/optimization/input/0_N2819500E4261500_86165_2_40.h5` (a tracked example is `data/sample_grids/urbs_input/`)
+- Run with: `uv run gridexpand optimize 0`
 
 Important:
 
@@ -101,7 +94,7 @@ Notes on expected structure:
 
 ## Generated outputs
 
-### 1) Result HDF5 in `result/<scenario-key>/`
+### 1) Result HDF5 in `work/optimization/result/<scenario-key>/`
 
 The script copies the selected input file into the scenario-specific result directory and writes results into that copy.
 
@@ -119,45 +112,37 @@ The output file is an HDFStore written with compression (`blosc`). You will typi
 
 ### 3) Logs
 
-- SLURM logs (only if using `sbatch`):
-  - `logs/normal/<jobid>_output.log`
-  - `logs/errors/<jobid>_error.log`
-- Solver logs (one per parallel sub-model): `logs/gurobi/<input>_<scenario>_<clusterIndex>.log`
+- SLURM logs (only if using `sbatch`): `work/runs/slurm/<jobid>_output.log`, `work/runs/slurm/<jobid>_error.log`
+- Solver logs (one per parallel sub-model): `work/optimization/logs/gurobi/<input>_<scenario>_<clusterIndex>.log`
 
 ## How to run
 
 ### Local run (interactive)
 
-From the `GridExpand/3.urbs` directory:
+From the `GridExpand` directory:
 
-1. Create and activate the environment (example):
+1. Create the environment:
   - `uv sync`
 2. Run a case:
-  - `uv run python run_urbs_cluster.py 0 --n_cpu 8`
+  - `uv run gridexpand optimize 0 --n_cpu 8`
 
 `--n_cpu` controls how many **parallel Python worker processes** are spawned (clusters of building nodes).
 
 ### HPC / SLURM run
 
-This folder includes a serial partition template:
+`scripts/hpc/` includes serial-partition templates:
 
-- `run_cluster_serialstd.sh`: runs one case (one `inputfile_id`) as a single SLURM job
-- `start_batch_jobs_serialstd.sh`: submits many jobs for `START..END`
+- `scripts/hpc/optimization/run_cluster_serialstd.sh`: runs one case (one `inputfile_id`) as a single SLURM job
+- `scripts/hpc/start_batch_jobs.sh optimization START END`: submits many jobs for `START..END`
 
-Examples:
+Examples (from `GridExpand/`):
 
 - Submit one run:
-  - `sbatch run_cluster_serialstd.sh 0`
+  - `sbatch scripts/hpc/optimization/run_cluster_serialstd.sh 0`
 - Submit a range:
-  - `bash start_batch_jobs_serialstd.sh 0 24`
+  - `bash scripts/hpc/start_batch_jobs.sh optimization 0 24`
 
-The SLURM script:
-
-- loads `miniconda3` and `gurobi`
-- activates `conda env urbs`
-- runs: `srun python3 run_urbs_cluster.py <INDEX> --n_cpu $SLURM_CPUS_PER_TASK`
-
-If you migrate HPC jobs to uv as well, replace the conda activation with `uv run python ...` in the job script.
+The SLURM script loads `gurobi` and runs `srun uv run --frozen gridexpand optimize <INDEX> --n_cpu $SLURM_CPUS_PER_TASK`.
 
 Note: uv manages Python dependencies only. Gurobi binaries/licenses are external and still required.
 
@@ -181,7 +166,7 @@ Execution-only settings remain command-line controls:
 ### Result isolation / reproducibility
 
 - `urbs.prepare_result_directory()` writes outputs below
-  `3.urbs/result/<scenario-key>/`, where the key contains the scenario identity
+  `work/optimization/result/<scenario-key>/`, where the key contains the scenario identity
   and timeframe mode.
 - Step-2 and Step-3 artifacts use the same scenario-key contract, so different
   adoption shares, seeds, or timeframes do not silently reuse one another s
@@ -237,7 +222,7 @@ To quickly inspect what’s inside an output file, you can do:
 ```python
 import pandas as pd
 
-path = "result/<scenario-key>/<your_output>.h5"
+path = "work/optimization/result/<scenario-key>/<your_output>.h5"
 with pd.HDFStore(path, mode="r") as store:
     print(store.keys())
 
@@ -247,7 +232,7 @@ df_costs = pd.read_hdf(path, key="/urbs_out/MILP/costs")
 
 ## License
 
-See [urbs_LICENSE](urbs_LICENSE) for the license information of the urbs code included in this step.
+See [urbs_LICENSE](../../src/gridexpand/optimization/urbs/LICENSE) for the license information of the urbs code included in this step.
 
 
 ### TSAM reduce-only mode

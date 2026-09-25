@@ -107,11 +107,10 @@ Gate 1:
 
 Owner: paired-allocation agent. Start only after Gate 1.
 
-From `GridExpand/2.demand_allocation/gridalloc`, run:
+From `GridExpand`, run:
 
 ```bash
-uv run --project .. python \
-  -m src.scenario_calibration.allocation.paired_allocation \
+uv run python -m gridexpand.allocation.scenario_calibration.allocation.paired_allocation \
   --ags 9474126 \
   --plz 91301 \
   --pylovo-version-id 1 \
@@ -119,7 +118,7 @@ uv run --project .. python \
   --min-buildings 5 \
   --pv-location-mode swf \
   --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \
-  --output-dir outputs/scenario_calibration/swf_2045_paired_pylovo_v1_91301_station_hybrid_v2
+  --output-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_pylovo_v1_91301_station_hybrid_v2
 ```
 
 Then rebuild or validate the paired PV profile library from the new LoD2 roof
@@ -208,7 +207,7 @@ profile_source_kind = physical_heat_library
 profile_set_id = forchheim_2045_infdb_ro_heat_v1
 ```
 
-Verify that `paired_validation.datasets.resolve_paired_dataset()` resolves the
+Verify that `gridexpand.paired.datasets.resolve_paired_dataset()` resolves the
 library automatically from the dataset ID. Do not add a library path to the run
 YAML if the catalog can provide it.
 

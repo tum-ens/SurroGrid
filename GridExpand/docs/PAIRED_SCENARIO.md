@@ -114,7 +114,7 @@ The validated physical heat and COP time series are generated once and stored in
 
 Paired readiness checks building coverage against this library, and URBS input generation reads the same building profile before projecting it to the current real or synthetic target bus. Changing the pylovo grid version therefore requires a new paired allocation but no repeated heat-profile generation when the physical profile assumptions are unchanged. The legacy per-grid HDF workflow remains available only for constructing a new library or explicitly diagnostic fallbacks.
 
-The paired materializer then applies the same residential heat-asset method documented in [SCENARIO_METHOD.md](../../../scenario_pipeline/docs/SCENARIO_METHOD.md): the original hourly OpenDHW demand and its matching COP are retained, one central system is assigned per physical building, and the resulting fixed capacities or optimization bounds are projected through scenario-unit sites. The real and synthetic targets consume the same physical profiles and sizing assumptions.
+The paired materializer then applies the same residential heat-asset method documented in [SCENARIO_METHOD.md](scenario_pipeline/SCENARIO_METHOD.md): the original hourly OpenDHW demand and its matching COP are retained, one central system is assigned per physical building, and the resulting fixed capacities or optimization bounds are projected through scenario-unit sites. The real and synthetic targets consume the same physical profiles and sizing assumptions.
 
 ## Diagnostic Pilot: LV113
 
@@ -139,28 +139,28 @@ Topology also matters. Restoring all 15 lines removed by radialization improves 
 
 Build and audit the paired allocation. Creating the physical heat-profile library is a one-time regional preparation step; skip that command when the named profile set already exists:
 
-The allocation command requires the AGS and PyLoVo version explicitly, registers every eligible regional grid, and records both in paired-scenario metadata. Prefer the staged `run_scenario.py --prepare-only` command for normal operation; the commands below remain useful for component diagnostics. The shown V4 catalog is needed only for the one-time migration of already validated physical profiles into the reusable library; later topology versions use the library directly.
+The allocation command requires the AGS and PyLoVo version explicitly, registers every eligible regional grid, and records both in paired-scenario metadata. Prefer the staged `gridexpand run --prepare-only` command for normal operation; the commands below remain useful for component diagnostics. The shown V4 catalog is needed only for the one-time migration of already validated physical profiles into the reusable library; later topology versions use the library directly.
 
 ```bash
-cd GridExpand/2.demand_allocation/gridalloc
-uv run --project .. python -m src.scenario_calibration.allocation.paired_allocation \
+cd GridExpand
+uv run python -m gridexpand.allocation.scenario_calibration.allocation.paired_allocation \
   --ags 9474126 \
   --plz 91301 \
   --pylovo-version-id 1 \
   --final-year 2045 \
   --min-buildings 5 \
   --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \
-  --output-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2
+  --output-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2
 
-uv run --project .. python -m src.scenario_calibration.profiles.physical_heat_profile_library \
-  --source-catalog outputs/scenario_calibration/swf_2045_paired_v4_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
-  --source-hdf-dir ../../3.urbs/Input \
-  --output outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5 \
+uv run python -m gridexpand.allocation.scenario_calibration.profiles.physical_heat_profile_library \
+  --source-catalog work/allocation/outputs/scenario_calibration/swf_2045_paired_v4_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
+  --source-hdf-dir work/optimization/input \
+  --output work/allocation/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5 \
   --profile-set-id forchheim_2045_physical_heat_v1
 
-uv run --project .. python -m src.scenario_calibration.profiles.paired_profile_readiness \
-  --paired-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
-  --heat-profile-library outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5
+uv run python -m gridexpand.allocation.scenario_calibration.profiles.paired_profile_readiness \
+  --paired-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
+  --heat-profile-library work/allocation/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5
 ```
 
 
@@ -170,25 +170,25 @@ A change to TEASER inputs or another physical heat-profile assumption requires
 regenerating every exact source grid, even when the existing catalog marks its
 profiles ready. Keep the previous library until the replacement passes the
 readiness audit, and use a new profile-set version so results remain traceable.
-From `GridExpand/2.demand_allocation/gridalloc` run:
+From `GridExpand` run:
 
 ```bash
-uv run --project .. python -m src.scenario_calibration.profiles.paired_heat_profile_regeneration \
-  --paired-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
+uv run python -m gridexpand.allocation.scenario_calibration.profiles.paired_heat_profile_regeneration \
+  --paired-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
   --force-all \
   --workers 4 \
   --n-cpu 1
 
-uv run --project .. python -m src.scenario_calibration.profiles.physical_heat_profile_library \
-  --source-catalog outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
-  --source-hdf-dir ../../3.urbs/Input \
+uv run python -m gridexpand.allocation.scenario_calibration.profiles.physical_heat_profile_library \
+  --source-catalog work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
+  --source-hdf-dir work/optimization/input \
   --source-mode exact \
-  --output outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v2.h5 \
+  --output work/allocation/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v2.h5 \
   --profile-set-id forchheim_2045_physical_heat_v2
 
-uv run --project .. python -m src.scenario_calibration.profiles.paired_profile_readiness \
-  --paired-dir outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
-  --heat-profile-library outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v2.h5
+uv run python -m gridexpand.allocation.scenario_calibration.profiles.paired_profile_readiness \
+  --paired-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
+  --heat-profile-library work/allocation/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v2.h5
 ```
 
 The regeneration helper uses Step 2's dedicated `heat_library` profile mode:
@@ -202,10 +202,9 @@ repeat the first command with `--resume` in addition to `--force-all`.
 The paired runner produces pre electricity-only, post-flex, and post-inflex power-flow summaries for every selected target. The publication run uses six representative weeks selected only from ambient temperature and irradiation. One canonical mapping is stored in the run directory and every real and synthetic optimization result must reproduce it before its power flows are accepted.
 
 ```bash
-cd <repository-root>
-uv run --project GridExpand/2.demand_allocation \
-  python GridExpand/scenario_pipeline/run_scenario.py \
-  --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired_full_year.yaml
+cd GridExpand
+uv run gridexpand run \
+  --run-config config/runs/forchheim_2045_paired_full_year.yaml
 ```
 
 The paired run YAML is the authoritative dataset, model-case, and

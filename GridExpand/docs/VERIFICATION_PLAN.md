@@ -22,9 +22,8 @@ paired run without explicit user authorization after reporting the audits.
 5. Dry-run the authoritative YAML command:
 
 ~~~bash
-uv run --project GridExpand/2.demand_allocation \
-  python GridExpand/scenario_pipeline/run_scenario.py \
-  --run-config GridExpand/scenario_pipeline/config/runs/forchheim_2045_paired_full_year.yaml \
+uv run gridexpand run \
+  --run-config config/runs/forchheim_2045_paired_full_year.yaml \
   --dry-run
 ~~~
 
@@ -85,4 +84,4 @@ Report smoke evidence, audit results, warnings, expected job count, resource
 settings, and output footprint. Launch only after explicit user authorization.
 The authoritative paired YAML launches the requested groups sequentially.
 Their output directories are derived automatically as `heuristic-assets/` and
-`post-hems-optimized/` beneath `GridExpand/run_logs/<run.id>/`.
+`post-hems-optimized/` beneath `work/runs/<run.id>/`.

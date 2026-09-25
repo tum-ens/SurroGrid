@@ -13,37 +13,34 @@ At a high level:
 ## Folder & file structure
 
 ```text
-4.powerflow/
+src/gridexpand/powerflow/
   config.py
-  run_pwrflw.py
-  run_cluster_serialstd.sh
-  start_batch_jobs_serialstd.sh
-  environment.yml
-  environment_HPC.yml
-  Input/
+  run_pwrflw.py                       # entry point (gridexpand powerflow)
+  run_real_swf_powerflow.py
+  run_real_swf_scenario_powerflow.py
+  demands.py
+  powerflow.py
+  save_grid.py
+  grid_topol.py
+
+work/powerflow/                       # runtime artifacts (gitignored)
+  input/
     *.h5
-  Output/
-    *.h5   (copied from Input/ and augmented with pwrflw/* datasets)
-  logs/
-    normal/
-    errors/
-  src/
-    demands.py
-    powerflow.py
-    save_grid.py
-    grid_topol.py
-    resource_report.py
+  output/
+    *.h5   (copied from input/ and augmented with pwrflw/* datasets)
+
+scripts/hpc/powerflow/run_cluster_serialstd.sh   # Slurm template
 ```
 
 Notes:
 
-- `Input/` and `Output/` are controlled by `config.py` (`Config.DATA_DIR`, `Config.STORAGE_DIR`).
-- `run_pwrflw.py` always reads from `Input/` and writes to `Output/`.
-- Plotting notebooks and reusable analysis helpers now live in `../5.postprocessing/plotting`.
+- `work/powerflow/input/` and `work/powerflow/output/` come from `gridexpand.paths` (via `config.py`: `Config.DATA_DIR`, `Config.STORAGE_DIR`).
+- `run_pwrflw.py` always reads from `work/powerflow/input/` and writes to `work/powerflow/output/`.
+- Plotting notebooks and reusable analysis helpers live in `src/gridexpand/analysis/plotting` and `notebooks/analysis`.
 
 ## Required inputs
 
-### 1) Scenario `.h5` file in `Input/`
+### 1) Scenario `.h5` file in `work/powerflow/input/`
 
 The code expects each input file to contain (HDF5 keys / datasets):
 
@@ -53,32 +50,32 @@ The code expects each input file to contain (HDF5 keys / datasets):
 - `urbs_out/MILP/tau_pro`: required for the default flexible post-expansion case and for inflex timestep alignment.
 - `urbs_out/MILP/cap_pro`: required for inflex heat reconstruction, because fixed heat demand is split with optimized post-flex `heatpump_air` and `heatpump_booster` capacities.
 
-The exact schema of these tables is defined by upstream steps; this step assumes they match what `src/save_grid.py` and `src/demands.py` read.
+The exact schema of these tables is defined by upstream steps; this step assumes they match what `save_grid.py` and `demands.py` read.
 
 ### 2) Python environment
 
-Preferred setup is uv in this step folder:
+Set up the one GridExpand environment:
 
 ```bash
-cd GridExpand/4.powerflow
+cd GridExpand
 uv sync
 ```
 
-Use the uv-managed interpreter to run the step:
+Run the step:
 
 ```bash
-uv run python run_pwrflw.py <inputfile_id> --n_cpu <N>
+uv run gridexpand powerflow <inputfile_id> --n_cpu <N>
 ```
 
 DB-backed power-flow result storage can be enabled with the command below. Use `--pre-only` to run only the pre-expansion stage from `urbs_in/demand` without requiring Step 3 URBS output:
 
 ```bash
-uv run python run_pwrflw.py <inputfile_id> --storage db --pre-only
+uv run gridexpand powerflow <inputfile_id> --storage db --pre-only
 ```
 
 ### Paired real/synthetic scenario power flow
 
-The active paired pipeline materializes the same physical-building scenario for both network models and calls `run_real_swf_scenario_powerflow.py` for the real target and `run_pwrflw.py` for the synthetic target. Use `GridExpand/paired_validation/runner.py` rather than invoking the old one-sided materializer.
+The active paired pipeline materializes the same physical-building scenario for both network models and calls `run_real_swf_scenario_powerflow.py` for the real target and `run_pwrflw.py` for the synthetic target. Use `src/gridexpand/paired/runner.py` rather than invoking the old one-sided materializer.
 
 Paired HDFs use `optimization_space=scenario_unit`. Step 3 therefore optimizes stable `(source LV, source connection bus, physical building)` units rather than network buses. Both Step-4 paths read `raw_data/allocation_plan` and aggregate these profiles onto the selected target buses immediately before power flow. This projection conserves active and reactive demand and prevents network partitioning from changing optimization resolution.
 
@@ -106,16 +103,12 @@ The inflex mode intentionally reuses the existing Step 2 mobility pool and does 
 Example after Step 3 has produced a post-flex result file:
 
 ```bash
-uv run python run_pwrflw.py <inputfile_id> --storage db --summary-only --post-demand-mode inflex
+uv run gridexpand powerflow <inputfile_id> --storage db --summary-only --post-demand-mode inflex
 ```
 
-In DB mode Step 4 still reads `urbs_in/*` and `urbs_out/*` from the input HDF5 file, but reads the pandapower grid from PostgreSQL and writes `pwrflw/*` results to the `surrogrid` schema instead of `Output/*.h5`. Results are grouped under the static `baseline_static` scenario key, integer `scenario_id`, and an interpretable `run_name`; rerunning the same grid/scenario/run overwrites the previous time-series rows. Building-level joins are available through the `surrogrid.grid_building_bus` view.
+In DB mode Step 4 still reads `urbs_in/*` and `urbs_out/*` from the input HDF5 file, but reads the pandapower grid from PostgreSQL and writes `pwrflw/*` results to the `surrogrid` schema instead of `work/powerflow/output/*.h5`. Results are grouped under the static `baseline_static` scenario key, integer `scenario_id`, and an interpretable `run_name`; rerunning the same grid/scenario/run overwrites the previous time-series rows. Building-level joins are available through the `surrogrid.grid_building_bus` view.
 
-Dependency manifests are available in:
-
-- `pyproject.toml` (uv)
-- `environment.yml` (legacy conda, local/dev)
-- `environment_HPC.yml` (legacy conda, cluster)
+Dependencies are declared in `GridExpand/pyproject.toml` (one uv environment).
 
 Core runtime packages used in this step:
 
@@ -125,7 +118,7 @@ Core runtime packages used in this step:
 
 ## Generated outputs
 
-For each processed input file, an output file is created in `Output/` with the **same filename**. The output file is a copy of the input `.h5` augmented with additional datasets.
+For each processed input file, an output file is created in `work/powerflow/output/` with the **same filename**. The output file is a copy of the input `.h5` augmented with additional datasets.
 
 ### Written HDF5 keys
 
@@ -142,7 +135,7 @@ For each processed input file, an output file is created in `Output/` with the *
 - `/pwrflw/output/post/vm`: bus voltage magnitudes `vm_pu` per timestep.
 - `/pwrflw/output/post/line_loads`: line flows and currents per timestep.
 
-`src/demands.py` additionally writes reactive-power components derived from urbs results:
+`demands.py` additionally writes reactive-power components derived from urbs results:
 
 - `pwrflw/urbs_out/MILP/reactive`: concatenated reactive components (household, heat pump, PV) for traceability.
 
@@ -155,7 +148,7 @@ On the HPC submission scripts, stdout/stderr are written to:
 
 ## How the code works (conceptual)
 
-### Demand reconstruction (`src/demands.py`)
+### Demand reconstruction (`demands.py`)
 
 - **Pre-expansion**: household active power is taken from `urbs_in/demand`, and reactive power is synthesized using a fixed power factor (`config.PF_ELC`).
 - **Flexible post-expansion**: the urbs results `urbs_out/MILP/tau_pro` are filtered to keep:
@@ -169,7 +162,7 @@ Reactive power post-expansion is computed using:
 - HP reactive demand from `config.PF_HP`.
 - PV reactive capability bounded by `config.PF_PV_MIN`. PV is assumed to produce reactive power to reduce net reactive import as much as possible within its capability.
 
-### Grid preparation (`src/powerflow.py`)
+### Grid preparation (`powerflow.py`)
 
 Before running the time-series power flow, the network is “relaxed” to avoid artificial constraint binding:
 
@@ -178,7 +171,7 @@ Before running the time-series power flow, the network is “relaxed” to avoid
 - Bus voltage bounds are widened.
 - The transformer is removed and replaced by a closed bus-bus switch between HV/LV sides.
 
-### Power flow execution (`src/powerflow.py`)
+### Power flow execution (`powerflow.py`)
 
 For each timestep:
 
@@ -195,12 +188,12 @@ Optional parallelization uses Python multiprocessing by chunking timesteps acros
 
 ### Local run
 
-1) Put one or more scenario files into `Input/`.
+1) Put one or more scenario files into `work/powerflow/input/`.
 
 2) Run for a specific *file ID prefix*:
 
 ```bash
-python3 run_pwrflw.py 0 --n_cpu 8
+uv run gridexpand powerflow 0 --n_cpu 8
 ```
 
 The positional argument (`0` above) is matched against the prefix before the first underscore in the filename, e.g.:
@@ -212,31 +205,31 @@ The positional argument (`0` above) is matched against the prefix before the fir
 Submit a single job:
 
 ```bash
-sbatch run_cluster_serialstd.sh 0
+sbatch scripts/hpc/powerflow/run_cluster_serialstd.sh 0
 ```
 
 Submit a range of jobs (`START`..`END`, inclusive):
 
 ```bash
-bash start_batch_jobs_serialstd.sh 0 24
+bash scripts/hpc/start_batch_jobs.sh powerflow 0 24
 ```
 
-`run_cluster_serialstd.sh` activates conda env `pwrflw-hpc` and passes `--n_cpu $SLURM_CPUS_PER_TASK`.
+The job script runs `uv run --frozen gridexpand powerflow <INDEX> --n_cpu $SLURM_CPUS_PER_TASK`.
 
 ## Details to keep in mind
 
-- **File selection logic**: if `inputfile_id` ends with `.h5`, `run_pwrflw.py` selects that exact file from `Input/`. Otherwise it chooses the first `.h5` whose prefix before the first `_` matches `inputfile_id`. Use the exact filename when both a Step 2 bridge file and a suffixed Step 3 URBS result exist for the same grid.
-- **Output overwrites**: if `Output/<filename>` already exists it will be overwritten (because the input file is copied over at start).
+- **File selection logic**: if `inputfile_id` ends with `.h5`, `run_pwrflw.py` selects that exact file from `work/powerflow/input/`. Otherwise it chooses the first `.h5` whose prefix before the first `_` matches `inputfile_id`. Use the exact filename when both a Step 2 bridge file and a suffixed Step 3 URBS result exist for the same grid.
+- **Output overwrites**: if `work/powerflow/output/<filename>` already exists it will be overwritten (because the input file is copied over at start).
 - **Units**: loads are converted from kW/kVAr to MW/MVAr by dividing by `1000` before running pandapower.
 - **Parallel runs**: each worker receives a deep-copied pandapower net. This avoids shared-state issues but increases memory use.
-- **Reactive power sign convention**: the code models inductive/lagging demand as negative Q (see `src/demands.py`). Ensure upstream/downstream steps use consistent conventions.
+- **Reactive power sign convention**: the code models inductive/lagging demand as negative Q (see `demands.py`). Ensure upstream/downstream steps use consistent conventions.
 - **Performance**: runtime scales with `#timesteps × #buses/lines`. Use `--n_cpu` to distribute timesteps.
 
 ## Troubleshooting
 
 - If you see `IndexError` or “no matched files”, verify that:
-	- the file exists in `Input/`,
+	- the file exists in `work/powerflow/input/`,
 	- it ends with `.h5`,
 	- its prefix before the first `_` matches the `inputfile_id` you pass.
-- If pandapower fails to converge for some timesteps, consider checking the input demands and the integrity of the network (zero-length lines etc.). Helper utilities exist in `src/grid_topol.py`.
+- If pandapower fails to converge for some timesteps, consider checking the input demands and the integrity of the network (zero-length lines etc.). Helper utilities exist in `gridexpand/powerflow/grid_topol.py`.
 

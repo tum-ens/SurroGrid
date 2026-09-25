@@ -3,7 +3,7 @@
 ## Scope
 
 This report audits the results consumed by
-GridExpand/5.postprocessing/notebooks/analysis_expansion.ipynb for the paired
+notebooks/analysis/analysis_expansion.ipynb for the paired
 Forchheim run forchheim_2045_paired_v11. It addresses:
 
 1. whether terminal building-connection lines are included in power-flow and

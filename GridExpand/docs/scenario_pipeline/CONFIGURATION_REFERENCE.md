@@ -74,7 +74,7 @@ For run.pipeline: scenario:
 - resources.storage: db or h5.
 - resources.output_directory: optional output override.
 - execution.model_cases: requested cases for this run. Names are validated
-  against the global model-case registry in scenario_pipeline/model_cases.py.
+  against the global model-case registry in src/gridexpand/scenario/model_cases.py.
 - execution.n_cpu, mobility_source, demand_scope, and timeframe_mode:
   machine/runtime choices that do not define scientific assumptions.
 
@@ -120,7 +120,7 @@ For run.pipeline: paired_validation:
 
 Internal directories are deliberately absent from this YAML. Outputs follow:
 
-    GridExpand/run_logs/<run.id>/
+    work/runs/<run.id>/
     ├── run_manifest.json
     ├── heuristic-assets/
     └── post-hems-optimized/

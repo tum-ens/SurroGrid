@@ -80,7 +80,6 @@ filename. HDF5 runs do not support the DB wildcard selectors.
 Launch from the repository root, for example:
 
 ```bash
-uv run --project GridExpand/2.demand_allocation \
-  python GridExpand/scenario_pipeline/run_scenario.py \
-  --run-config GridExpand/scenario_pipeline/config/runs/<copied-run>.yaml
+uv run gridexpand run \
+  --run-config config/runs/<copied-run>.yaml
 ```

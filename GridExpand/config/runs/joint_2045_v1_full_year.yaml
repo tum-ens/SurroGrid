@@ -2,8 +2,8 @@
 # One scenario YAML and one pylovo version for both providers; each provider
 # gets its own paired dataset (weather, PV and TEASER heat libraries, adoption
 # selection) built from its alignment bundle. Launch with
-#   uv run --project GridExpand/2.demand_allocation python GridExpand/scenario_pipeline/run_aligned.py \
-#     --run-config GridExpand/scenario_pipeline/config/runs/joint_2045_v1_full_year.yaml
+#   uv run gridexpand run-aligned \
+#     --run-config config/runs/joint_2045_v1_full_year.yaml
 run:
   id: joint_2045_v1_full_year
   scenario: ../scenarios/joint_2045_full_year.yaml

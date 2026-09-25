@@ -4,10 +4,10 @@ This document is the concise source of truth for GridExpand scenario runs. It re
 
 Detailed methodology remains in:
 
-- [Paired SWF scenario contract](../../2.demand_allocation/gridalloc/src/scenario_calibration/PAIRED_SCENARIO.md)
+- [Paired SWF scenario contract](../PAIRED_SCENARIO.md)
 - [Pipeline runner documentation](../../README.md)
-- [Power-flow methodology](../../4.powerflow/README.md)
-- [Postprocessing and expansion analysis](../README.md)
+- [Power-flow methodology](../steps/4_powerflow.md)
+- [Postprocessing and expansion analysis](../steps/5_postprocessing.md)
 - [Expansion cost assumptions](assumptions_costs.md)
 
 ## Current Source of Truth
@@ -39,10 +39,10 @@ Two additional calibrated buildings are absent from pylovo version 3. Together t
 
 | Artifact | Location or identifier |
 |---|---|
-| Paired allocation | `2.demand_allocation/gridalloc/outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2` |
+| Paired allocation | `work/allocation/outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2` |
 | Real grid files | `/home/breveron/data/swf_split_station_hybrid_v2/station_radialized` |
-| Runner directory | `run_logs/forchheim_paired_v2_tsam_20260720T105015Z` |
-| Shared TSAM mapping | `run_logs/forchheim_paired_v2_tsam_20260720T105015Z/shared_tsam_reference.json` |
+| Runner directory | `work/runs/forchheim_paired_v2_tsam_20260720T105015Z` |
+| Shared TSAM mapping | `work/runs/forchheim_paired_v2_tsam_20260720T105015Z/shared_tsam_reference.json` |
 | Analysis prefix | `forchheim_paired_battery_tsam` |
 
 The first execution attempts contained materialization and power-flow failures. The run was resumed in the same directory, and its final `status.tsv` contains 171 jobs with `status=done` and `message=ok`. Historical entries remain in `failed_grids.jsonl` for auditability but do not describe the final run state.
@@ -90,7 +90,7 @@ All three cases use the same paired physical buildings, annual base demand, sect
 | Post-flex | `forchheim_paired_battery_tsam_synthetic_flex` | `forchheim_paired_battery_tsam_real_swf_flex` | `forchheim_paired_battery_tsam_post` | `forchheim_paired_battery_tsam_real_post` |
 | Post-inflex | `forchheim_paired_battery_tsam_synthetic_inflex` | `forchheim_paired_battery_tsam_real_swf_inflex` | `forchheim_paired_battery_tsam_post_inflex` | `forchheim_paired_battery_tsam_real_post_inflex` |
 
-These are the identifiers used by `5.postprocessing/notebooks/analysis_expansion.ipynb`.
+These are the identifiers used by `notebooks/analysis/analysis_expansion.ipynb`.
 
 ## Expansion Cost Comparison
 
@@ -135,15 +135,13 @@ Until the LV 113 source topology has been clarified or an explicit sensitivity h
 Run from the repository root after the paired allocation and heat-profile readiness checks have passed:
 
 ```bash
-uv run --project GridExpand/2.demand_allocation \
-  python GridExpand/paired_validation/runner.py \
-  --repo-root /home/breveron/git/github/SurroGrid \
+uv run python -m gridexpand.paired.runner \
   --plz 91301 \
-  --paired-dir GridExpand/2.demand_allocation/gridalloc/outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2 \
+  --paired-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_v3_91301_station_hybrid_v2 \
   --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \
-  --weather-source-hdf GridExpand/2.demand_allocation/gridalloc/results/9474126-00_91301_1_2.h5 \
+  --weather-source-hdf work/allocation/results/9474126-00_91301_1_2.h5 \
   --target both \
-  --scenario-config GridExpand/scenario_pipeline/config/scenarios/forchheim_2045_full_year.yaml \
+  --scenario-config config/scenarios/forchheim_2045_full_year.yaml \
   --model-case post-hems-heuristic \
   --workers 4 \
   --step3-cpus 4 \
@@ -152,7 +150,7 @@ uv run --project GridExpand/2.demand_allocation \
   --cleanup-intermediates \
   --scenario-label forchheim_paired_battery_tsam \
   --run-name-prefix forchheim_paired_battery_tsam \
-  --run-dir GridExpand/run_logs/forchheim_paired_battery_tsam_$(date -u +%Y%m%dT%H%M%SZ)
+  --run-dir work/runs/forchheim_paired_battery_tsam_$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
 Do not add `--allow-diagnostic-heat-fallback` to a publication run.
