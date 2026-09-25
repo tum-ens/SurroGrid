@@ -6,27 +6,6 @@ identify consumer buses). Scenario-load normalization retains one zeroed row
 per consumer bus; component categories remain in the component manifest.
 """
 
-import networkx as nx
-import matplotlib.pyplot as plt
-
-
-def draw_grid(df_lines):
-    """ Creates an image of the network graph
-        Args: net.line dataframe from pandapower network
-    """
-    # Create an undirected graph
-    G = nx.Graph()
-
-    # Add edges to the graph
-    for _, row in df_lines.iterrows():
-        G.add_edge(row["from_bus"], row["to_bus"])
-
-    pos = nx.spring_layout(G, k=0.05, iterations=120)
-    # Draw the graph
-    plt.figure(figsize=(10, 8))
-    nx.draw(G, pos, with_labels=True, node_color='skyblue', node_size=100, font_size=12, font_weight='bold', edge_color='gray')
-    plt.title("Network Graph of Nodes")
-    plt.show()
 
 
 def assign_min_linelen(net):

@@ -11,6 +11,9 @@ Example::
     uv run python -m gridexpand.analysis.expansion.aligned_expansion \\
         --run-id joint_2045_v1_smoke24 --providers swf uzw \\
         --cases pre post-inflex-heuristic post-hems-heuristic
+
+All groups are materialized (one transaction each) and the QGIS views are
+refreshed once at the end.
 """
 
 from __future__ import annotations
@@ -20,24 +23,22 @@ import sys
 
 from sqlalchemy import text
 
+from gridexpand.db import refresh_qgis_views
 from gridexpand.db.database import SurroGridDatabase
 
 from . import grid_expansion
+from .cases import CASE_STAGES
 
 # DSO providers of an aligned run.
 PROVIDERS = ("swf", "uzw")
-CASE_STAGES = {
-    "pre": ("pre", "pre"),
-    "post-inflex-heuristic": ("post", "post_inflex"),
-    "post-hems-heuristic": ("post", "post"),
-}
+DEFAULT_CASES = ("pre", "post-inflex-heuristic", "post-hems-heuristic")
 
 
 def aligned_groups(
     run_id: str,
     *,
     providers: tuple[str, ...] = PROVIDERS,
-    cases: tuple[str, ...] = tuple(CASE_STAGES),
+    cases: tuple[str, ...] = DEFAULT_CASES,
     pylovo_version_id: str = "1",
     excluded_real_grids: dict[str, tuple[str, ...]] | None = None,
 ) -> list[list[str]]:
@@ -74,7 +75,9 @@ def aligned_groups(
 
 
 def _matching_runs(db: SurroGridDatabase, args: argparse.Namespace) -> int:
+    """Number of compact summaries one group would materialize (dry run)."""
     if args.data_source == "synthetic":
+        # The run name names the provider; synthetic groups have no postcode filter.
         query = text(
             """
             SELECT COUNT(*)
@@ -82,11 +85,10 @@ def _matching_runs(db: SurroGridDatabase, args: argparse.Namespace) -> int:
             JOIN surrogrid.grid_case gc USING (grid_case_id)
             JOIN surrogrid.powerflow_summary pfs USING (powerflow_run_id)
             WHERE pr.run_name = :run_name AND pfs.stage = :stage
-              AND gc.plz = ANY(CAST(:plz AS INTEGER[]))
               AND gc.pylovo_version_id = :pylovo_version_id
             """
         )
-        params = {"plz": list(args.plz), "pylovo_version_id": args.pylovo_version_id}
+        params = {"pylovo_version_id": args.pylovo_version_id}
     else:
         query = text(
             """
@@ -108,6 +110,7 @@ def _matching_runs(db: SurroGridDatabase, args: argparse.Namespace) -> int:
 
 
 def _parse_exclusions(values: list[str]) -> dict[str, tuple[str, ...]]:
+    """``PROVIDER:ID`` options -> ids per provider."""
     excluded: dict[str, list[str]] = {}
     for value in values:
         provider, separator, lv_id = value.partition(":")
@@ -124,7 +127,7 @@ def main(argv: list[str] | None = None) -> None:
         "--providers", nargs="+", choices=PROVIDERS, default=list(PROVIDERS)
     )
     parser.add_argument(
-        "--cases", nargs="+", choices=tuple(CASE_STAGES), default=list(CASE_STAGES)
+        "--cases", nargs="+", choices=tuple(CASE_STAGES), default=list(DEFAULT_CASES)
     )
     parser.add_argument("--pylovo-version-id", default="1")
     parser.add_argument(
@@ -169,7 +172,7 @@ def main(argv: list[str] | None = None) -> None:
         except Exception as exc:  # noqa: BLE001 - report every failed group, then fail
             failures.append((group.analysis_key, exc))
             print(f"FAILED: {exc}")
-    grid_expansion._refresh_qgis_materialized_views(db)
+    refresh_qgis_views(db.engine)
     print("QGIS materialized views refreshed.")
     if failures:
         for analysis_key, exc in failures:

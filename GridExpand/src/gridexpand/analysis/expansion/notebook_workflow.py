@@ -11,16 +11,17 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import text
 
+from gridexpand.analysis.expansion.cases import LABEL_CASES, analysis_suffix, case_stage
+from gridexpand.analysis.ids import ags_string, canonical_real_grid_id
 from gridexpand.db.database import SurroGridDatabase
 from gridexpand.paths import PROJECT_DIR
-from gridexpand.analysis.expansion import grid_expansion
+from gridexpand.analysis.expansion.overview import load_expansion_overview
 from gridexpand.analysis.powerflow.comparison_data import (
     load_synthetic_powerflow_cutoff_profile,
     real_powerflow_headline_summary_db,
     real_powerflow_percentile_profile_db,
 )
-from gridexpand.analysis.plotting.powerflow_transformer import transformer_import_distribution_db
-from gridexpand.analysis.plotting.powerflow_voltage import voltage_deviation_summary_db
+from gridexpand.analysis.powerflow.raw import transformer_import_distribution_db, voltage_deviation_summary_db
 
 
 PROVIDER_LABELS = {"swf": "SWF", "uzw": "ÜZW"}
@@ -49,7 +50,7 @@ def _default_specs_by_source(
 
 def _excluded_ids(
     excluded_real_lv_ids: tuple[int | str, ...] | Mapping[str, tuple[int | str, ...]],
-    group: str,
+    group: str | None,
 ) -> set[str]:
     """Return canonical text grid ids excluded for one real group.
 
@@ -60,12 +61,15 @@ def _excluded_ids(
         if isinstance(excluded_real_lv_ids, Mapping)
         else excluded_real_lv_ids
     )
-    return {str(int(value)) if str(value).isdigit() else str(value) for value in values}
+    return {canonical_real_grid_id(value) for value in values}
 
 
-def normalize_ags_string(value: str | int) -> str:
-    """Return AGS as an eight-character string with leading zero if needed."""
-    return str(int(str(value).strip().lstrip("0") or "0")).zfill(8)
+def _without_excluded(frame: pd.DataFrame, excluded: set[str]) -> pd.DataFrame:
+    return frame[~frame["lv_id"].map(canonical_real_grid_id).isin(excluded)].copy()
+
+
+# Name used by the analysis notebooks.
+normalize_ags_string = ags_string
 
 
 def display_label_from_ags(ags: str | int) -> str:
@@ -90,62 +94,6 @@ def display_label_from_ags(ags: str | int) -> str:
     return f"{gen} ({bez})" if bez else gen
 
 
-def output_slug_from_ags(ags: str | int) -> str:
-    """Return the directory-safe AGS slug used for plot exports."""
-    return normalize_ags_string(ags)
-
-
-def analysis_prefix_from_ags(ags: str | int, base_suffix: str) -> str:
-    """Find the newest materialized expansion-analysis prefix for a region."""
-    normalized_ags = normalize_ags_string(ags)
-    db = SurroGridDatabase()
-    query = text(
-        """
-        SELECT analysis_key, created_at
-        FROM surrogrid.expansion_analysis_run
-        WHERE ags = :ags
-          AND (
-              analysis_key = :pre_key
-              OR analysis_key = :post_key
-              OR analysis_key = :post_inflex_key
-              OR analysis_key LIKE :prefixed_pre_key
-              OR analysis_key LIKE :prefixed_post_key
-              OR analysis_key LIKE :prefixed_post_inflex_key
-          )
-        ORDER BY created_at DESC
-        """
-    )
-    params = {
-        "ags": int(normalized_ags),
-        "pre_key": f"{base_suffix}_pre",
-        "post_key": f"{base_suffix}_post",
-        "post_inflex_key": f"{base_suffix}_post_inflex",
-        "prefixed_pre_key": f"%_{base_suffix}_pre",
-        "prefixed_post_key": f"%_{base_suffix}_post",
-        "prefixed_post_inflex_key": f"%_{base_suffix}_post_inflex",
-    }
-    with db.engine.connect() as conn:
-        rows = conn.execute(query, params).mappings().all()
-
-    prefixes: list[str] = []
-    for row in rows:
-        analysis_key = str(row["analysis_key"])
-        for stage_suffix in ("_post_inflex", "_post", "_pre"):
-            ending = f"{base_suffix}{stage_suffix}"
-            if analysis_key.endswith(ending):
-                prefix = analysis_key[: -len(stage_suffix)]
-                if prefix not in prefixes:
-                    prefixes.append(prefix)
-                break
-
-    if not prefixes:
-        raise ValueError(
-            f"No materialized expansion analysis found for AGS {normalized_ags} "
-            f"and base suffix {base_suffix!r}."
-        )
-    return prefixes[0]
-
-
 def load_expansion_stage_context(
     analysis_keys: Mapping[str, str],
     *,
@@ -154,7 +102,7 @@ def load_expansion_stage_context(
 ) -> dict[str, object]:
     """Load expansion overview tables and availability metadata for all stages."""
     expansion_tables_by_stage = {
-        label: grid_expansion.load_expansion_overview(analysis_key=key)
+        label: load_expansion_overview(analysis_key=key)
         for label, key in analysis_keys.items()
     }
 
@@ -452,7 +400,7 @@ def load_powerflow_cutoff_comparison(
                 skipped[source][label] = str(exc)
                 continue
             if excluded_lv_ids and "lv_id" in profile.columns:
-                excluded = profile[profile["lv_id"].astype(str).isin(excluded_lv_ids)]
+                excluded = profile[profile["lv_id"].map(canonical_real_grid_id).isin(excluded_lv_ids)]
                 if not excluded.empty:
                     excluded_real_grids.append(
                         {
@@ -464,9 +412,7 @@ def load_powerflow_cutoff_comparison(
                             "excluded_grids": excluded["grid"].nunique(),
                         }
                     )
-                profile = profile[
-                    ~profile["lv_id"].astype(str).isin(excluded_lv_ids)
-                ].copy()
+                profile = _without_excluded(profile, excluded_lv_ids)
             profile["comparison_stage"] = label
             profile["data_source"] = source
             powerflow_profiles.append(profile)
@@ -511,38 +457,6 @@ def load_powerflow_cutoff_comparison(
     }
 
 
-def meta_filter(meta: pd.Series) -> dict[str, object]:
-    """Convert one expansion-analysis metadata row to DB loader filters."""
-    return {
-        "run_name": meta["run_name"],
-        "stage": meta["stage"],
-        "scenario_id": None
-        if pd.isna(meta["scenario_id"])
-        else int(meta["scenario_id"]),
-        "ags": None if pd.isna(meta["ags"]) else int(meta["ags"]),
-        "plz": None if pd.isna(meta["plz"]) else int(meta["plz"]),
-    }
-
-
-def load_voltage_summaries_for_analysis(
-    analysis_meta_by_stage: Mapping[str, pd.Series],
-) -> dict[str, pd.DataFrame]:
-    """Load grid-level voltage-extreme summaries for each available synthetic stage."""
-    voltage_summaries = {}
-    for label, meta in analysis_meta_by_stage.items():
-        filters = meta_filter(meta)
-        voltage_summaries[label] = voltage_deviation_summary_db(
-            run_name=filters["run_name"],
-            stages=(filters["stage"],),
-            scenario_id=filters["scenario_id"],
-            ags=filters["ags"],
-            plz=filters["plz"],
-        )
-    if not voltage_summaries:
-        raise ValueError("No available expansion analyses for voltage diagnostics.")
-    return voltage_summaries
-
-
 def load_voltage_summaries_for_powerflow_comparison(
     *,
     synthetic_specs: Mapping[str, Mapping[str, object]] | None = None,
@@ -583,9 +497,7 @@ def load_voltage_summaries_for_powerflow_comparison(
             except ValueError:
                 continue
             if excluded_lv_ids and "lv_id" in summary.columns:
-                summary = summary[
-                    ~summary["lv_id"].astype(str).isin(excluded_lv_ids)
-                ].copy()
+                summary = _without_excluded(summary, excluded_lv_ids)
             if summary.empty or "voltage_min_asset_time_pu" not in summary.columns:
                 continue
             summaries[label] = pd.DataFrame(
@@ -644,23 +556,12 @@ ALL_MODEL_CASE_STAGE_LABELS = {
 
 
 def _case_specs(run_prefix: str, labels: Mapping[str, str]) -> dict[str, dict[str, str]]:
-    specs = {
-        labels["pre"]: {"run_name": f"{run_prefix}_pre", "stage": "pre"},
-        labels["post_inflex"]: {
-            "run_name": f"{run_prefix}_post-inflex-heuristic",
-            "stage": "post",
-        },
-        labels["post_flex"]: {
-            "run_name": f"{run_prefix}_post-hems-heuristic",
-            "stage": "post",
-        },
+    """``{label: {run_name, stage}}`` of the configured model cases (``cases.LABEL_CASES``)."""
+    return {
+        labels[key]: {"run_name": f"{run_prefix}_{case}", "stage": case_stage(case)}
+        for key, case in LABEL_CASES.items()
+        if key in labels
     }
-    if "post_optimized" in labels:
-        specs[labels["post_optimized"]] = {
-            "run_name": f"{run_prefix}_post-hems-optimized",
-            "stage": "post",
-        }
-    return specs
 
 
 def scenario_powerflow_specs(
@@ -710,14 +611,11 @@ def scenario_analysis_keys(
         key_prefix = f"{scenario_prefix}_{provider}_{network}"
     else:
         key_prefix = scenario_prefix + ("" if data_source == "Synthetic" else "_real")
-    keys = {
-        labels["pre"]: f"{key_prefix}_pre",
-        labels["post_inflex"]: f"{key_prefix}_post_inflex",
-        labels["post_flex"]: f"{key_prefix}_post",
+    return {
+        labels[key]: f"{key_prefix}_{analysis_suffix(case)}"
+        for key, case in LABEL_CASES.items()
+        if key in labels
     }
-    if "post_optimized" in labels:
-        keys[labels["post_optimized"]] = f"{key_prefix}_post_hems_optimized"
-    return keys
 
 
 def _powerflow_run_readiness(
@@ -1087,7 +985,7 @@ def load_cable_loading_decomposition(
     db = SurroGridDatabase()
     synthetic_query = text(
         """
-        SELECT CONCAT(gc.plz, '-', gc.kcid, '-', gc.bcid) AS grid,
+        SELECT CONCAT(LPAD(gc.ags::TEXT, 8, '0'), '-', gc.plz, '_', gc.kcid, '_', gc.bcid) AS grid,
                pcs.cable AS asset_id,
                pcs.cable_installed_capacity_ka,
                pcs.cable_loading_max_time_percent
@@ -1135,7 +1033,7 @@ def load_cable_loading_decomposition(
                     params["source"] = REAL_GROUP_SOURCES.get(source)
                     frame = pd.read_sql_query(real_query, conn, params=params)
                     if excluded and not frame.empty:
-                        frame = frame[~frame["lv_id"].astype(str).isin(excluded)].copy()
+                        frame = _without_excluded(frame, excluded)
                 if frame.empty:
                     continue
                 frame["data_source"] = source
@@ -1207,7 +1105,7 @@ def export_scenario_analysis_manifest(
                 for source in excluded_real_lv_ids
             }
             if isinstance(excluded_real_lv_ids, Mapping)
-            else [int(value) for value in excluded_real_lv_ids]
+            else list(dict.fromkeys(canonical_real_grid_id(value) for value in excluded_real_lv_ids))
         ),
         "publication_checks": publication_gate.to_dict(orient="records"),
     }

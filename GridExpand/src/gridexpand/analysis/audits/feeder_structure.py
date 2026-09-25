@@ -21,11 +21,8 @@ import pandas as pd
 import pandapower as pp
 from sqlalchemy import text
 
+from gridexpand.analysis.ids import normalize_ags
 from gridexpand.db.database import SurroGridDatabase
-
-
-def _normalized_ags(value: str | int) -> int:
-    return int(str(value).strip().lstrip("0") or "0")
 
 
 def _active_line_ids(net: pp.pandapowerNet) -> pd.Index:
@@ -543,7 +540,7 @@ def _synthetic_grid_rows(
             params={
                 "run_name": spec["run_name"],
                 "stage": spec["stage"],
-                "ags": _normalized_ags(ags),
+                "ags": normalize_ags(ags),
             },
         )
 
@@ -615,7 +612,7 @@ def _cable_summaries(
         for stage_label, spec in specs.items():
             params = {"run_name": spec["run_name"], "stage": spec["stage"]}
             if data_source == "Synthetic":
-                params["ags"] = _normalized_ags(ags)
+                params["ags"] = normalize_ags(ags)
                 frame = pd.read_sql_query(synthetic_query, conn, params=params)
             else:
                 params["plz"] = real_plz
@@ -637,13 +634,20 @@ def _attach_section_loading(
     rows = []
     summaries = cable_summaries.copy()
     summaries["line_id"] = summaries["line_id"].astype(int)
+    stages = summaries["comparison_stage"].drop_duplicates()
+    # One pre-grouped frame per (grid, stage) instead of three masks per section (E4).
+    by_grid_stage = {
+        key: frame
+        for key, frame in summaries.groupby(
+            [summaries["grid"].astype(str), "comparison_stage"], sort=False, observed=True
+        )
+    }
     for section in sections.to_dict("records"):
-        for stage in summaries["comparison_stage"].drop_duplicates():
-            lines = summaries[
-                summaries["grid"].astype(str).eq(str(section["grid"]))
-                & summaries["comparison_stage"].eq(stage)
-                & summaries["line_id"].isin(section["line_ids"])
-            ]
+        for stage in stages:
+            group = by_grid_stage.get((str(section["grid"]), stage))
+            if group is None:
+                continue
+            lines = group[group["line_id"].isin(section["line_ids"])]
             if lines.empty:
                 continue
             edge_groups = []
