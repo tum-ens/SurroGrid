@@ -170,13 +170,21 @@ and the expansion `critical_ts` columns.
   physical building (eligibility, rank, selection, exclusion reason, seed).
 - `allocated_vehicle`: the vehicle (pool profile or emobpy vehicle) per bus.
 - `allocated_demand`, `allocated_eff_factor`: hourly `urbs_in/demand` and
-  `urbs_in/eff_factor` per bus, written only with
-  `--step2-timeseries-storage db|both` (default `temp` writes none).
+  `urbs_in/eff_factor` per bus, written only with `gridexpand allocate
+  --timeseries-storage db|both` (its default `db`); the synthetic runner and
+  run YAMLs default to `temp` (`--step2-timeseries-storage`), which writes none.
 
 ### Step 4 power flow
 
 - `powerflow_run`: one Step 4 run (`run_name`, `urbs_input_file`, `pre_only`,
-  `assumptions`). Raw and summary passes are separate runs.
+  `assumptions`). One power-flow pass can write raw and summary rows into one
+  run or into two (`gridexpand powerflow --outputs raw,summary
+  --summary-run-name`); the synthetic runner writes
+  `<scenario key>_<profiles>[_<case>]_raw_powerflow` and `…_summary_powerflow`.
+  Step 4 writes into a staging run `<run_name>#staging-<token>` and promotes it
+  (deleting the previous run of that name, grid case and scenario) in one transaction at
+  the end; a failed or cancelled pass discards the staging run and keeps the
+  previous results.
 - Raw hourly results (`--powerflow-output raw|both`; TimescaleDB hypertables on
   `ts`, index `(run, stage, t_index)`): `powerflow_demand` (p_kw, q_kvar per bus),
   `powerflow_import` (p_mw, q_mvar), `powerflow_bus_voltage` (vm_pu per bus),
@@ -193,7 +201,7 @@ and the expansion `critical_ts` columns.
 ### Step 5 expansion
 
 - `expansion_cost_assumption`: cost and catalogue assumptions
-  (`de_lv_heuristic_2026`, see `docs/expansion/assumptions_costs.md`).
+  (`de_lv_heuristic_2026`, see [expansion_costs.md](expansion_costs.md)).
 - `expansion_analysis_run`: one materialization (`analysis_key` unique,
   `run_name`, `stage`, `data_source` Synthetic / Real SWF / Real ÜZW).
 - `expansion_line_result`, `expansion_transformer_result`: per visible pylovo

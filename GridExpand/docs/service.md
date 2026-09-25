@@ -1,7 +1,7 @@
 # GridExpand service and pylovo-ui plugin
 
 `gridexpand serve` runs a small web service: a **job API** that starts the ordinary
-`gridexpand synthetic` pipeline as subprocesses, **read endpoints** for expansion analyses and
+synthetic pipeline (`gridexpand run`) as subprocesses, **read endpoints** for expansion analyses and
 power-flow summaries, and the **plugin panels** that pylovo-ui loads (one UI for "generate LV grids,
 then allocate loads, optimise, run power flow and analyse grid expansion"). The composition of both
 tools (proxy, images, compose) lives in the GridPlanner repository.
@@ -15,6 +15,9 @@ uv sync --extra service
 uv run gridexpand serve                      # http://127.0.0.1:18766/  (API docs: /docs)
 uv run pylovo-ui --plugin gridexpand=http://127.0.0.1:18766/   # in the pylovo checkout (development)
 ```
+
+The plugin loader of pylovo-ui (`--plugin NAME=BASE`) is on the pylovo branch `fable/ui-plugins-dev-review`
+(not yet merged).
 
 For the cross-origin development setup above start the service with
 `GRIDEXPAND_UI_CORS_ORIGINS=http://127.0.0.1:8765`. Behind a reverse proxy (GridPlanner) use
@@ -32,29 +35,35 @@ and 60 s statement timeout. There is no destructive endpoint.
 
 ## Jobs
 
-A pipeline job is one `gridexpand synthetic` run per selected model case, one after another
-(`gridexpand.service.commands.pipeline_steps`, the only place that builds the command lines):
+A pipeline job becomes one `pipeline: synthetic` run YAML in its run directory, and every selected model case
+is one step `gridexpand run <run.yaml> --model-case <case>` in that directory, one after another
+(`gridexpand.service.commands.pipeline_steps`, the only place that builds the command lines). The steps share the
+run's identity, `state.json` and the regional electrification assignment; each case's batch writes
+`<run dir>/<case>/`:
 
 ```text
-python -m gridexpand synthetic --ags <AGS> --pylovo-version-id <v> --min-buildings <n>
-    --scenario-config <yaml> --model-case <case> --profiles <status_quo|all> --case-qualified-output
-    --timeframe-mode <mode> --powerflow-output summary --workers 1 --run-dir WORK_DIR/runs/<job>/<case>
-    [--start-index <i> --pilot-index <i> --limit <k>]
+python -m gridexpand run WORK_DIR/runs/<job>/run.yaml --run-dir WORK_DIR/runs/<job> --model-case <case>
+
+# run.yaml
+run:        {id: service_<job>, scenario: <scenario yaml>, pipeline: synthetic}
+resources:  {pylovo_version_id: <v>, ags: <AGS>, min_buildings: <n>[, start_index: <i>, limit: <k>]}
+execution:  {model_cases: [...], timeframe_mode: <mode>, powerflow_output: <summary|both>, workers: <w>
+             [, pilot_index: <i>]}
 ```
 
 - Grids: all candidates of the AGS, of one PLZ, or a consecutive range of candidate numbers (the
-  runner's numbering, `get_candidates`); the first selected grid is the pilot.
+  runner's numbering, `list_grid_candidates`); the first selected grid is the pilot.
 - Model cases: `pre`, `post-hems-heuristic`, `post-hems-optimized`. `post-inflex-heuristic` is not
   offered (the synthetic Step 2 writes no EV sessions). Post cases need Step 3: the service refuses
   them when the solver is not usable (Gurobi licence check with a model above the size limit of the
   licence bundled with gurobipy).
 - At most `--max-running-jobs` (default 1) jobs run; later jobs wait in a queue.
 - Each step runs in its own process group. Cancel sends SIGTERM to the group (the runner and every
-  step it started), SIGKILL after 20 s. **Note:** Step 4 clears the earlier results of its power-flow
-  run before it writes new ones, so a grid cancelled during its power flow has no results of that run
-  until it is run again (the UI warns before cancelling).
-- Progress comes from the runner's `events.jsonl` in the run directory; the per-grid table from
-  `status.tsv`. The job log shows the runner's events as readable lines plus the step logs of every
+  step it started), SIGKILL after 20 s. Step 4 writes into a staging run and replaces the previous results only
+  when the pass completes, so a grid cancelled during its power flow keeps its earlier results (the
+  cancel dialog of the UI still warns about lost results; that text predates the staging runs).
+- Progress comes from the run's `state.json` and `events.jsonl` and each case's `events.jsonl`; the
+  per-grid table from the case's `status.tsv`. The job log shows the runner's events as readable lines plus the step logs of every
   grid (`#<grid> │ …`, muted). Metadata and logs are kept in `WORK_DIR/service/jobs/`; after a
   restart the history is reloaded and jobs that were still active are marked failed.
 
@@ -106,7 +115,8 @@ explicit read-only file mounts (`elec_lps.h5`, the two mobility pool CSVs). Step
 uses gurobipy (Pyomo's `gurobi` interface falls back to it when `gurobi.sh` is absent) and needs a
 Gurobi WLS licence file (`WLSACCESSID`, `WLSSECRET`, `LICENSEID`) mounted read-only with
 `GRB_LICENSE_FILE` pointing to it; without a licence the service offers the `pre` case only.
-`GRIDEXPAND_SOLVER=appsi_highs` becomes useful once Step 3 reads that variable.
+`GRIDEXPAND_SOLVER=appsi_highs` runs Step 3 without a licence (it can return a different optimal solution
+than Gurobi, see [Step 3](steps/3_urbs.md)).
 
 ## Tests
 

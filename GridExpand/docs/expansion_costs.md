@@ -1,21 +1,21 @@
 # Expansion Cost Assumptions
 
-This note documents the LV expansion cost assumptions used by `expansion/grid_expansion.py` and `expansion/schema.sql`.
+This note documents the LV expansion cost assumptions and rules of `gridexpand expansion` ([Step 5](steps/5_postprocessing.md)). The rules are implemented once in `src/gridexpand/analysis/expansion/heuristics.py` (real grids, via `real_materialization.py`) and once in SQL (`analysis/expansion/sql/*.sql`, synthetic grids); a parity test keeps both identical. The numbers are one row of `surrogrid.expansion_cost_assumption`, seeded by `src/gridexpand/db/sql/0001_baseline.sql` (`ON CONFLICT DO NOTHING`, so manual edits of the row survive migrations).
 
-Default assumption key: `de_lv_heuristic_2026`
+Default assumption key: `de_lv_heuristic_2026` (`gridexpand expansion --assumption-key`)
 
-The result is a transparent screening estimate for spatial postprocessing. It is not a construction offer, a DSO work-order cost, or a substitute for site-specific grid planning. The current heuristic prices overload-driven cable and transformer reinforcement in existing settlement structures. Flexibility costs are intentionally excluded because flexibility is represented by the separate `Post-flex` and `Post-inflex` power-flow scenarios.
+The result is a transparent screening estimate for spatial postprocessing. It is not a construction offer, a DSO work-order cost, or a substitute for site-specific grid planning. The current heuristic prices overload-driven cable and transformer reinforcement in existing settlement structures. Flexibility costs are intentionally excluded because flexibility is represented by the separate model cases (`post-hems-*` with optimized dispatch, `post-inflex-heuristic` with rule-based dispatch).
 
 Important topology note: cable capacity must be derived from raw electrical pandapower/pylovo line components, not from `pylovo.lines_result_view`. The `lines_result_view` object is a QGIS-friendly display layer. It can contain artificial helper geometries, offset geometries, merged feeder chains, and visual lines that share geometry without being electrically parallel. It is suitable for displaying and joining final results in QGIS, but it must not be used as the source of installed electrical capacity.
 
 ## Benchmark, Defaults, and Sources
 
-This table is the single source of truth for the numerical assumptions used by the current LV expansion heuristic. Rows marked as "used directly" are read by `schema.sql` / `grid_expansion.py`; rows marked as "not included" are retained only for interpretation or possible later sensitivity layers.
+This table is the single source of truth for the numerical assumptions used by the current LV expansion heuristic. Rows marked as "used directly" are columns of the `expansion_cost_assumption` row; rows marked as "not included" are retained only for interpretation or possible later sensitivity layers.
 
 | Model component | Parameter / category | Default used | Unit | Literature benchmark or status | Source / rationale | Used directly in code? |
 | --- | --- | ---: | --- | --- | --- | --- |
 | Loading trigger | Expansion threshold | 100 | % nominal loading | Technical screening criterion, not a unit-cost literature value | Reinforcement is triggered only when simulated peak loading exceeds the installed nominal rating. This keeps the heuristic tied to pandapower/pylovo asset ratings and avoids adding an implicit planning margin. | yes |
-| Duct availability | Existing duct share | 0.20 | share of reinforced LV routes | No robust published national share found | WEI/GridSim and Wintzek/PuBStadt recommend laying empty ducts during first reinforcement, but the review found no national statistic for existing spare ducts. Therefore this is an explicit scenario parameter, not an empirical statistic. | yes |
+| Duct availability | Existing duct share (`--line-existing-duct-share` overrides) | 0.20 | share of reinforced LV routes | No robust published national share found | WEI/GridSim and Wintzek/PuBStadt recommend laying empty ducts during first reinforcement, but the review found no national statistic for existing spare ducts. Therefore this is an explicit scenario parameter, not an empirical statistic. | yes |
 | Duct availability | Trenching share | 0.80 | share of reinforced LV routes | Complement of existing duct share | Derived as `1 - existing_duct_share`. With the default assumption, 80% of reinforced routes require trenching / street reopening. | yes, derived |
 | LV cable reinforcement with trenching | Rural settlement (`settlement_type = 1`) | 90,000 | EUR/km | about 80k-120k EUR/km | Verteilnetzstudie Baden-Wuerttemberg reports rural NS cable costs around 80k EUR/km; Agora/FfE and WEI/GridSim support a broader 67k-120k EUR/km corridor. | yes |
 | LV cable reinforcement with trenching | Semi-urban settlement (`settlement_type = 2`) | 100,000 | EUR/km | about 100k EUR/km | Verteilnetzstudie Baden-Wuerttemberg semi-urban NS cable benchmark. Also used as fallback if settlement type is missing. | yes |
@@ -53,9 +53,9 @@ The existing cable is retained regardless of its SWF or pylovo type. Every added
 | `NAYY_4_185` | 0.313 kA | 45,000 EUR/km |
 | `NAYY_4_240` | 0.357 kA | 70,000 EUR/km |
 
-All nonnegative integer combinations are considered. The selected combination is the least-cost option whose added nominal ampacity covers `required_added_capacity_ka`. Ties are resolved by fewer circuits, then lower excess capacity. This is a thermal screening approximation: actual current sharing between unlike parallel cables is not recalculated.
+All nonnegative integer combinations are considered. The selected combination is the least-cost option whose added nominal ampacity covers `required_added_capacity_ka` (a gap below 1e-12 kA counts as covered). Ties are resolved by fewer circuits, then lower excess capacity, then more 240 mm² circuits, then more 185 mm² circuits. This is a thermal screening approximation: actual current sharing between unlike parallel cables is not recalculated.
 
-For real SWF grids, parallel physical line rows are normalized to construction corridors before this selection is applied. Rows are grouped only when they connect the same unordered bus pair and their recorded lengths differ by no more than 5%. The exported SWF station files do not contain route geometries, so agreement in endpoints and length is the conservative available proxy for a common physical route; same-bus rows with materially different lengths remain separate. Installed ampacity and row-level P100 currents are summed, the longest member length represents the corridor, and trenching is charged once. The result retains the member cable IDs and grouping method for auditability. Synthetic parallel circuits already use pandapower's `parallel` attribute and therefore enter the same calculation as one electrical corridor.
+For real grids (SWF and ÜZW), parallel physical line rows are normalized to construction corridors before this selection is applied. Rows are grouped only when they connect the same unordered bus pair and their recorded lengths differ by no more than 5%. The real grid files do not contain route geometries, so agreement in endpoints and length is the conservative available proxy for a common physical route; same-bus rows with materially different lengths remain separate. Installed ampacity and row-level P100 currents are summed, the longest member length represents the corridor, and trenching is charged once. The result retains the member cable IDs and grouping method for auditability. Synthetic parallel circuits already use pandapower's `parallel` attribute and therefore enter the same calculation as one electrical corridor.
 
 The settlement class controls the reopened-route cost:
 
@@ -95,12 +95,12 @@ For synthetic display geometries that combine several raw electrical components,
 
 ## Transformer Heuristic
 
-Transformer capacity is evaluated on the annual peak apparent power imported through the transformer position.
+Transformer capacity is evaluated on the peak (P100) apparent power imported through the transformer position over the simulated horizon (the full year, the representative TSAM hours or one week).
 
 ```text
 peak_s_kva = sqrt(P_mW^2 + Q_mvar^2) * 1000
 loading_percent = peak_s_kva / rated_kva * 100
-required_transformer_kva = ceil(peak_s_kva / transformer_capacity_step_kva) * transformer_capacity_step_kva
+required_transformer_kva = ceil(peak_s_kva / transformer_capacity_step_kva - 1e-12) * transformer_capacity_step_kva
 additional_transformer_kva = max(required_transformer_kva - rated_kva, 0)
 requires_expansion = additional_transformer_kva > 0
 ```
@@ -159,13 +159,13 @@ Primary/context sources and how they are used:
 The same `de_lv_heuristic_2026` assumption row and the same asset-level formulas are applied to both network sources. The implementation differs only where source-specific identifiers and geometry must be read:
 
 - Synthetic assets are joined through pylovo grid, line, and transformer identifiers.
-- Real SWF assets are joined through `real_grid_case_id`, pandapower line indices, transformer ratings, and geometries from the exported station grid.
+- Real assets are joined through `real_grid_case_id`, pandapower line indices, transformer ratings, and geometries read from the grid file of the power-flow run (SWF: pandapower Excel workbook, ÜZW: pandapower JSON).
 - Cable reinforcement uses the P100 current, existing installed capacity, common three-cable reinforcement catalogue, line length, settlement class, and duct/trenching blend on both sides.
 - Transformer reinforcement uses the P100 apparent-power loading, installed rating, 50 kVA rounding step, and the same replacement/rebuild cost bins on both sides.
 
 A real grid-stage is priced only when every simulated timestep converged. A grid with failed timesteps is stored as `incomplete`, receives no cable or transformer cost rows, and is excluded from aggregate costs rather than being interpreted as a zero-cost grid. Methodological exclusions are stored separately as `excluded`. Cost comparisons must therefore report both total cost and coverage; per-complete-grid values are useful when source coverage differs.
 
-The current real-SWF implementation deliberately follows the same thermal-only boundary as the synthetic calculation. It does not add a separate cost for voltage violations, meshing, switchgear changes, or rONT installation.
+The real-grid implementation deliberately follows the same thermal-only boundary as the synthetic calculation. It does not add a separate cost for voltage violations, meshing, switchgear changes, or rONT installation.
 
 ## Interpretation Guidance
 
@@ -177,4 +177,4 @@ Use the default result as an order-of-magnitude spatial screening layer:
 - Not suitable for final construction budgeting without checking route feasibility, trench reopening constraints, switchgear, protection, voltage constraints, station constraints, and DSO-specific planning rules.
 - Not suitable for inferring electrical parallel cables from QGIS helper geometries. Raw electrical line components must remain the source for installed capacity and additional cable counts.
 
-The output deliberately keeps `critical_component_cost_basis`, `critical_component_cost_eur_per_km`, `critical_component_duct_cost_eur_per_km`, `critical_component_reopen_cost_eur_per_km`, and `transformer_cost_basis` in the result tables so QGIS users can see why a feature received its cost.
+Cost-basis labels such as `catalog_rural_duct20_trench80_150x1_185x0_240x0` round the shares to whole percent like PostgreSQL `ROUND`. The output deliberately keeps `critical_component_cost_basis`, `critical_component_cost_eur_per_km`, `critical_component_duct_cost_eur_per_km`, `critical_component_reopen_cost_eur_per_km`, and `transformer_cost_basis` in the result tables so QGIS users can see why a feature received its cost.
