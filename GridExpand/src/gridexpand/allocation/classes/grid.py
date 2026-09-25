@@ -7,13 +7,13 @@ import pandas as pd
 import numpy as np
 from multiprocessing import Pool
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_EXCEPTION
-import heapq
 
 import gridexpand.allocation.classes.save_grid as svgrd
 import gridexpand.allocation.functions.weather as wth
 import gridexpand.allocation.functions.electricity as elc
 import gridexpand.allocation.functions.heat as heat
 import gridexpand.allocation.functions.mobility as mbl
+from gridexpand.allocation.functions.partition import partition_df_by_cpu
 from gridexpand.allocation.assets.battery.materialization import materialize_battery_urbs_inputs
 from gridexpand.allocation.assets.battery.sizing import build_battery_asset_plan
 from gridexpand.allocation.assets.heat.materialization import materialize_heat_urbs_inputs
@@ -968,7 +968,7 @@ class Grid:
                 f"Generating heat demands for {len(residential)} building(s) "
                 f"with {sum(residential["households"])} flat(s)..."
             )
-            building_subsets = self.partition_df_by_cpu(
+            building_subsets = partition_df_by_cpu(
                 residential, self.settings["n_cpu"], "households"
             )
             column_subsets = [
@@ -985,7 +985,7 @@ class Grid:
                 )
                 for index, subset in enumerate(building_subsets)
             ]
-            with Pool() as pool:
+            with Pool(processes=len(job_args)) as pool:
                 results = pool.starmap(heat.generate_heat_demands, job_args)
             self.df_demand_heat_space = pd.concat(
                 [result[0] for result in results], axis=1
@@ -1392,51 +1392,3 @@ class Grid:
             df_ts = df_ts.drop(index=ts_hour1).reset_index(drop=True)
 
         return df_ts
-    
-    @staticmethod
-    def partition_df_by_cpu(df: pd.DataFrame, n_cpus: int, count_column: str ) -> list[pd.DataFrame]:
-        """
-        Partition the DataFrame `df` (one row per building, with count_column proportional to computational load e.g "n_cars_tot" or "n_flats_tot")
-        into up to `n_cpus` subsets, balancing total car counts as evenly as possible
-        without splitting any building. If any bin ends up empty, it is dropped from the result.
-
-        Uses the Longest‐Processing‐Time (LPT) greedy heuristic:
-        1. Sort buildings by descending `count_column`.
-        2. Maintain a min‐heap of (current_load, bin_id) for each of the `n_cpus` bins.
-        3. Assign each building to the bin with the smallest load, updating that bin’s load.
-        4. After assignment, discard any empty bins.
-
-        Returns:
-            A list of pandas DataFrames; each DataFrame is a subset of `df` (same columns/index),
-            and no returned DataFrame is empty.
-        """
-        # 1. Create a list of (index, cars) and sort descending by cars
-        building_list = list(df[count_column].items())  # [(idx_0, cars_0), (idx_1, cars_1), ...]
-        building_list.sort(key=lambda x: x[1], reverse=True)
-
-        # 2. Initialize a min‐heap [(current_load, bin_id), ...] for bin_id in [0 .. n_cpus-1]
-        heap: list[tuple[int, int]] = [(0, bin_id) for bin_id in range(n_cpus)]
-        heapq.heapify(heap)
-
-        # 3. Prepare a list of lists to collect row‐indices for each bin
-        bins_indices: list[list[pd.Index]] = [[] for _ in range(n_cpus)]
-
-        # 4. Greedily assign each building to the bin with the smallest current load
-        for idx, n_count in building_list:
-            if n_count == 0: pass
-            else:
-                current_load, bin_id = heapq.heappop(heap)
-                bins_indices[bin_id].append(idx)
-                new_load = current_load + n_count
-                heapq.heappush(heap, (new_load, bin_id))
-
-        # 5. Convert each non‐empty list of indices into a DataFrame slice
-        bins_dfs: list[pd.DataFrame] = []
-        for indices_list in bins_indices:
-            if not indices_list:
-                # Skip any bin that has no assigned buildings
-                continue
-            subset_df = df.loc[indices_list].copy()
-            bins_dfs.append(subset_df)
-
-        return bins_dfs
