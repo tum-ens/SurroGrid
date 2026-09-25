@@ -1,7 +1,31 @@
+"""Step 2 constants, statistics tables and scenario-derived settings.
+
+``config`` is the one instance. Paths are absolute (see :mod:`gridexpand.paths`);
+the statistics CSVs are read on first access and cached per process, so
+importing this module does not touch the data directory. The cached frames are
+shared: callers must not modify them in place.
+"""
+
+import functools
+
 import numpy as np
 import pandas as pd
 
 from gridexpand.paths import ALLOCATION_GRIDS_DIR, ALLOCATION_RESULTS_DIR, STATISTICS_DIR
+
+_STAT_DIR = str(STATISTICS_DIR)
+
+
+@functools.cache
+def _read_statistics(relative_path: str, header: int = 0, skiprows: int = 0) -> pd.DataFrame:
+    header_arg = [0, 1] if header == 2 else [header]
+    return pd.read_csv(f"{_STAT_DIR}/{relative_path}", header=header_arg, skiprows=skiprows)
+
+
+@functools.cache
+def _read_car_statistics(relative_path: str, dtypes: tuple[tuple[str, type], ...]) -> pd.DataFrame:
+    return pd.read_csv(f"{_STAT_DIR}/{relative_path}", dtype=dict(dtypes), skiprows=1)
+
 
 class Config:
     #--------------------------------------------------------------#
@@ -51,13 +75,25 @@ class Config:
     #---------------- Electrical Demand Assignment ----------------#
     #--------------------------------------------------------------#
     ### Private households
-    ELEC_BY_HHSIZE_CDFS_NOHEAT = pd.read_csv(f'{DATA_STAT_DIR}/inhabited_buildings/elec_by_hhsize_cdfs_noheat.csv', header=[0,1])   
-    HH_SIZE_DISTRIBUTION = pd.read_csv(f'{DATA_STAT_DIR}/inhabited_buildings/hh_size_distribution.csv', header=[0], skiprows=1) 
+    @property
+    def ELEC_BY_HHSIZE_CDFS_NOHEAT(self):          # Annual demand CDFs per household size
+        return _read_statistics("inhabited_buildings/elec_by_hhsize_cdfs_noheat.csv", header=2)
+
+    @property
+    def HH_SIZE_DISTRIBUTION(self):                # Household size probabilities
+        return _read_statistics("inhabited_buildings/hh_size_distribution.csv", skiprows=1)
+
     ELEC_LPS_PATH = f"{DATA_STAT_DIR}/inhabited_buildings/elec_lps.h5"
     ### Uninhabited buildings
     ELEC_GHD_PATH = f"{DATA_STAT_DIR}/uninhabited_buildings/elec_ghd_per_m2.csv"
-    TYPE_GHD_DISTRIBUTION = pd.read_csv(f'{DATA_STAT_DIR}/uninhabited_buildings/nonresbuilding_usetype_distribution.csv', header=[0], skiprows=1) 
-    AGE_GHD_DISTRIBUTION = pd.read_csv(f'{DATA_STAT_DIR}/uninhabited_buildings/nonresbuilding_age_distribution.csv', header=[0], skiprows=1) 
+
+    @property
+    def TYPE_GHD_DISTRIBUTION(self):               # Use-type probabilities of commercial/public components
+        return _read_statistics("uninhabited_buildings/nonresbuilding_usetype_distribution.csv", skiprows=1)
+
+    @property
+    def AGE_GHD_DISTRIBUTION(self):                # Construction-year classes of non-residential buildings
+        return _read_statistics("uninhabited_buildings/nonresbuilding_age_distribution.csv", skiprows=1)
 
 
     #--------------------------------------------------------------#
@@ -113,12 +149,17 @@ class Config:
     MOBILITY_PROFILE_POOL_LAT = 51.16
     MOBILITY_PROFILE_POOL_LON = 10.45
     MOBILITY_PROFILE_POOL_GENERATION_VERSION = "emobpy_pool_v1"
-    CARS_PER_HH_BY_REGION = pd.read_csv(f"{DATA_STAT_DIR}/general/cars_per_household_by_region.csv", 
-                                    dtype={"region": int, "hh_size": int, "vehicle_count": int, "probability": float},
-                                    skiprows=1)
-    CAR_MODEL_DISTRIBUTION = pd.read_csv(f"{DATA_STAT_DIR}/general/cars_by_model.csv", 
-                                    dtype={"model": str, "probability": float},
-                                    skiprows=1)
+
+    @property
+    def CARS_PER_HH_BY_REGION(self):               # Vehicle count probabilities per RegioStaR 7 region and household size
+        return _read_car_statistics(
+            "general/cars_per_household_by_region.csv",
+            (("region", int), ("hh_size", int), ("vehicle_count", int), ("probability", float)),
+        )
+
+    @property
+    def CAR_MODEL_DISTRIBUTION(self):              # EV model shares
+        return _read_car_statistics("general/cars_by_model.csv", (("model", str), ("probability", float)))
     TOTAL_HOURS = 8760
 
 
