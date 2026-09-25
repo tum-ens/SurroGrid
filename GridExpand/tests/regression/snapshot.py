@@ -29,7 +29,7 @@ engine = create_engine(
     f"@{os.environ.get('HARNESS_DB_HOST', '127.0.0.1')}:{os.environ.get('HARNESS_DB_PORT', '55439')}/{DB}"
 )
 
-DROP = {"created_at", "updated_at", "hash", "computed_at", "refreshed_at"}
+DROP = {"created_at", "updated_at", "applied_at", "hash", "computed_at", "refreshed_at"}
 PATH_COLUMNS = {"urbs_input_file", "bridge_filename", "source_file", "source_path"}
 
 

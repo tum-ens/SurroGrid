@@ -319,6 +319,65 @@ def create_powerflow_run(
     return run_id
 
 
+STAGING_MARKER = "#staging-"
+
+
+def staging_run_name(run_name: str, token: str) -> str:
+    """Name under which a Step 4 run is written before it replaces ``run_name``."""
+    return f"{run_name}{STAGING_MARKER}{token}"
+
+
+def promote_powerflow_run(engine: Engine, staging_run_id: int, run_name: str) -> None:
+    """Replace the run ``run_name`` of the same grid and scenario by a completed staging run.
+
+    The previous run (and its result rows, via ``ON DELETE CASCADE``) and any leftover
+    staging runs of earlier, interrupted attempts are deleted in the same transaction in
+    which the staging run takes over the final name, so readers see either the old or
+    the new results, never a half-written run.
+    """
+    with engine.begin() as conn:
+        grid_case_id, scenario_id = conn.execute(
+            text(
+                "SELECT grid_case_id, scenario_id FROM surrogrid.powerflow_run "
+                "WHERE powerflow_run_id = :run_id"
+            ),
+            {"run_id": int(staging_run_id)},
+        ).one()
+        conn.execute(
+            text(
+                """
+                DELETE FROM surrogrid.powerflow_run
+                WHERE grid_case_id = :grid_case_id AND scenario_id = :scenario_id
+                  AND powerflow_run_id <> :run_id
+                  AND (run_name = :run_name OR starts_with(run_name, :staging_prefix))
+                """
+            ),
+            {
+                "grid_case_id": grid_case_id,
+                "scenario_id": scenario_id,
+                "run_id": int(staging_run_id),
+                "run_name": run_name,
+                "staging_prefix": f"{run_name}{STAGING_MARKER}",
+            },
+        )
+        conn.execute(
+            text(
+                "UPDATE surrogrid.powerflow_run SET run_name = :run_name, updated_at = NOW() "
+                "WHERE powerflow_run_id = :run_id"
+            ),
+            {"run_name": run_name, "run_id": int(staging_run_id)},
+        )
+
+
+def discard_powerflow_run(engine: Engine, run_id: int) -> None:
+    """Delete one (staging) Step 4 run and its rows."""
+    with engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM surrogrid.powerflow_run WHERE powerflow_run_id = :run_id"),
+            {"run_id": int(run_id)},
+        )
+
+
 def get_or_create_real_grid_case(engine: Engine, grid_ref: dict[str, Any]) -> int:
     """Upsert a real (DSO) grid by ``(source, source_file)``."""
     ensure_schema(engine)
@@ -435,6 +494,7 @@ def find_powerflow_run(
           AND (CAST(:pre_only AS BOOLEAN) IS NULL OR pr.pre_only = :pre_only)
           AND (CAST(:scenario_id AS BIGINT) IS NULL OR pr.scenario_id = :scenario_id)
           AND (CAST(:grid_case_id AS BIGINT) IS NULL OR pr.grid_case_id = :grid_case_id)
+          AND strpos(pr.run_name, '#staging-') = 0
         ORDER BY pr.updated_at DESC, pr.powerflow_run_id DESC
         LIMIT 1
         """
@@ -482,7 +542,8 @@ def list_powerflow_runs(
         JOIN surrogrid.grid_case gc USING (grid_case_id)
         JOIN surrogrid.scenario sc USING (scenario_id)
         JOIN surrogrid.powerflow_import pi USING (powerflow_run_id)
-        WHERE (CAST(:run_name AS TEXT) IS NULL OR pr.run_name = :run_name)
+        WHERE strpos(pr.run_name, '#staging-') = 0
+          AND (CAST(:run_name AS TEXT) IS NULL OR pr.run_name = :run_name)
           AND (CAST(:scenario_id AS BIGINT) IS NULL OR pr.scenario_id = :scenario_id)
           AND (CAST(:ags AS BIGINT) IS NULL OR gc.ags = :ags)
           AND (CAST(:plz AS INTEGER) IS NULL OR gc.plz = :plz)
