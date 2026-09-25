@@ -1,240 +1,104 @@
+# Step 3: urbs optimization
 
-# 3. urbs (LVDS energy system optimization)
+Step 3 solves the building energy-system model (Pyomo, adapted urbs) of one grid: dispatch of all post cases and,
+for `post-hems-optimized`, the investment in PV, battery, heat pump, auxiliary heater and buffer. It reads a
+Step 2 file and writes the results into a copy of it.
 
-This document describes the **urbs** optimization step of the GridExpand pipeline. It solves a linear (M)ILP energy system model for a low-voltage distribution system / building-node representation and writes results back to an HDF5 file.
+Entry point: `gridexpand optimize` = `src/gridexpand/optimization/run_urbs_cluster.py`. Model code:
+`src/gridexpand/optimization/urbs/` (trimmed urbs, GPL-3.0, see its `LICENSE`); solver selection and provenance:
+`optimization/solver.py`; input identity checks: `optimization/identity.py`. Compared with urbs-lvds (4 February
+2025) this version has no grid optimization, 14a/bui-react, uhp, coordination, curtailment, microgrids, CO2
+limits, intertemporal support timeframes, reactive power, or Excel/LP outputs.
 
-The main entrypoint for this step is:
+## Inputs
 
-- `gridexpand optimize` = `src/gridexpand/optimization/run_urbs_cluster.py` (local execution or called from SLURM)
+`inputfile_id` is a path to a file, an exact file name in `work/optimization/input/`, or the unique prefix before
+the first underscore of one file there (an ambiguous prefix is an error). The orchestrators copy the Step 2 result
+there. The file must contain:
 
-The code in `src/gridexpand/optimization/urbs/` is a vendored / adapted urbs variant tailored to this GridExpand workflow.
+- `urbs_in/*` (all tables of a post profile, [Step 2](2_demand_allocation.md#outputs)); the sites are the columns
+  of `urbs_in/demand`;
+- `metadata/timeframe` with `scenario_key`, `scenario_hash`, `model_case`, the assignment hashes and
+  `profile_seed`;
+- for post cases, `raw_data/electrification_assignment`.
 
-## What this step does (high-level)
+Before solving, Step 3 checks that the Step 2 scenario hash equals the hash of `--scenario-config`, that the
+assignment matches its recorded hash and the scenario's adoption rules, and that the scenario key is canonical for
+the scenario and timeframe; it never resamples the technology adoption. Full-year inputs must carry no
+type-period weights.
 
-1. **Selects an input HDF5** from `work/optimization/input/` based on a numeric/prefix ID.
-2. **Reads scenario identity and electrification-manifest metadata** and builds the execution `global_settings` dict (TSAM on/off, etc.).
-3. **Copies the input file to `work/optimization/result/<scenario-key>/`** (working copy).
-4. **Reads the input datasets** from the HDF5 (`/urbs_in/...`).
-5. **Optionally applies Time Series Aggregation (TSAM)** to reduce the time horizon.
-6. **Consumes the exact Step-2 technology assignment**; it does not resample or randomly remove electrification cohorts.
-7. **Solves the optimization**:
-   - The building nodes are split into `n_cpu` clusters.
-   - Each cluster is solved in a separate Python process.
-   - Results are merged and written into the output HDF5.
-8. **Names the output file** using the canonical scenario identity carried by the Step-2 metadata.
+## Command line
 
-## Folder / file structure
-
-```text
-src/gridexpand/optimization/
-  run_urbs_cluster.py     # entry point (gridexpand optimize)
-  urbs/
-    LICENSE               # urbs license (GPL-3.0)
-    runfunctions.py       # run_lvds_opt(), parallelization, solver setup
-    input.py              # HDF5 input reader (read_input_h5)
-    model.py              # Pyomo model construction
-    saveload.py           # HDF5 result writer (save)
-    features/             # TSAM, helper logic, technology modifiers, etc.
-
-work/optimization/        # runtime artifacts (gitignored)
-  input/
-    *.h5                  # required input files for this step
-  result/
-    <scenario-key>/
-      *.h5                # generated result files (HDF5)
-  logs/
-    gurobi/               # solver logs per parallel sub-model
-
-scripts/hpc/optimization/run_cluster_serialstd.sh   # Slurm template
+```bash
+uv run gridexpand optimize <inputfile_id> --scenario-config config/scenarios/<scenario>.yaml --n_cpu 16
 ```
 
-## Required inputs
+| option | default | meaning |
+|---|---|---|
+| `--scenario-config` | required | scenario YAML; its hash must match the Step 2 input |
+| `--n_cpu` (alias `--partitions`) | 1 | number of building clusters; each is one model in its own process. **Changes the result**, it is not a CPU limit |
+| `--cluster-concurrency` | `$URBS_CLUSTER_CONCURRENCY`, else all | clusters solved at the same time |
+| `--solver` | `$GRIDEXPAND_SOLVER`, else `gurobi` | `gurobi` or `appsi_highs` |
+| `--tsam` | scenario YAML | enable TSAM regardless of `time_aggregation.enabled` |
+| `--tsam-periods`, `--tsam-hours-per-period`, `--tsam-extreme-method` | scenario YAML | TSAM overrides |
+| `--reduce-only` | off | run preprocessing and TSAM, write `urbs_out/reduced_data` and `urbs_out/tsam`, skip the solve (needs TSAM) |
 
-### 1) Input HDF5 file in `work/optimization/input/`
+**Partition.** The buildings (sites) are split into `n_cpu` contiguous, equally sized clusters in site order (the
+first `len % n_cpu` clusters get one more building; empty clusters are dropped). The synthetic runner chooses
+`n_cpu` per grid (`--step3-cpus`, `--step3-max-cpus`, `--step3-target-columns`, see
+[configuration.md](../configuration.md#pipeline-synthetic)).
 
-The step expects one or more `*.h5` files in `work/optimization/input/`.
+**Solver.** `gurobi` is Pyomo's LP-file interface to Gurobi with `Method=4` (deterministic concurrent),
+`MIPFocus=2`, `MIPGap=0.05`, `Presolve=2`, `Threads=4` per cluster (so up to `4 × concurrency` threads);
+it needs a Gurobi installation and licence (`GUROBI_HOME`, `GRB_LICENSE_FILE`, see the
+[README](../../README.md#install)). `appsi_highs` needs no licence (`mip_rel_gap=0.05`); the heuristic cases are
+degenerate LPs and the optimized case a MIP stopped at a 5 % gap, so another solver can return a different optimal
+vertex or MIP solution: treat the solver as part of the scenario. A solve that does not terminate optimally fails
+the run.
 
-Selection logic (in `run_urbs_cluster.py`):
+**TSAM.** With `time_aggregation.enabled` (or `--tsam`), typical periods are selected from `Tamb` and
+`Irradiation` only. TSAM is refused when the input has EV sessions (paired inputs), and the paired and aligned
+scenarios run the full chronological year.
 
-- The script lists all `.h5` files in `work/optimization/input/`.
-- It matches the file whose **prefix before the first underscore** equals `inputfile_id`.
+## Outputs
 
-Example:
+`work/optimization/result/<scenario key>/<input stem>_<scenario key>.h5`. The input is copied to `<result>.partial`,
+results are appended, and the file is renamed only on success (removed on failure). Keys added:
 
-- File: `work/optimization/input/0_N2819500E4261500_86165_2_40.h5` (a tracked example is `data/sample_grids/urbs_input/`)
-- Run with: `uv run gridexpand optimize 0`
+| key | content |
+|---|---|
+| `urbs_out/temporal_method` | `temporal_method` (`full_year_no_tsam` or `shared_weather_tsam`), operating hours, `annual_weight`, storage and EV boundary policies, scenario key and hash (Step 4 and the paired checks read it) |
+| `urbs_out/tsam/*` | `kept_timesteps` (always); with TSAM also `clusterOrder`, `clusterCenterIndices`, `hoursPerPeriod`, `noTypicalPeriods`, accuracy indicators, ... |
+| `urbs_out/reduced_data/*` | the (possibly reduced) input tables used for solving, incl. `global_prop` (run settings) |
+| `urbs_out/MILP/*` | Pyomo sets, parameters, variables and expressions merged across clusters (e.g. `tau_pro`, `cap_pro`, `costs`) |
+| `urbs_out/solver_audit` | one row per cluster: solver, interface, version, options, status, termination, objective, best bound, gap |
 
-Important:
+Solver logs: `work/optimization/logs/<gurobi|appsi_highs>/<input stem>_<scenario key>_<cluster>.log`. The run
+settings are printed at start; Step 4 copies a summary of the solver audit into its run assumptions.
 
-- If multiple files share the same prefix, the first match is used.
-- If no file matches, the script will crash (index error). Make sure the ID exists.
+## HPC
 
-### 2) Required datasets inside the HDF5
+```bash
+SCENARIO_CONFIG=config/scenarios/<scenario>.yaml sbatch scripts/hpc/optimization/run_cluster_serialstd.sh <inputfile_id>
+SCENARIO_CONFIG=config/scenarios/<scenario>.yaml bash scripts/hpc/start_batch_jobs.sh optimization 0 24
+```
 
-The HDF5 must contain input datasets under the prefix:
+The templates (adapt the `#SBATCH` header) run `uv run --frozen gridexpand optimize <INDEX> --n_cpu
+$SLURM_CPUS_PER_TASK`; logs go to `work/runs/slurm/`.
 
-- `/urbs_in/...`
+## Conventions
 
-At minimum, the workflow assumes the presence of time series + techno-economic tables typically including:
+- One urbs site per bus (synthetic) or per scenario unit (paired); all energies per hourly step, costs in EUR.
+- Heuristic assets are fixed (`inst-cap` = `cap-up`, zero investment cost); optimized assets start at zero with
+  finite building-specific upper bounds ([method.md](../method.md)).
+- The row order of `urbs_out/MILP/e_co_buy` and `e_co_sell` depends on `PYTHONHASHSEED` (values do not).
 
-- `/urbs_in/demand` (required; also used to infer the set of sites/buildings)
-- `/urbs_in/supim`
-- `/urbs_in/buy_sell_price`
-- `/urbs_in/eff_factor`
-- `/urbs_in/weather`
-- `/urbs_in/commodity`
-- `/urbs_in/process`
-- `/urbs_in/process_commodity`
-- `/urbs_in/storage`
-
-Notes on expected structure:
-
-- Time series tables (`demand`, `supim`, `buy_sell_price`, `eff_factor`, `weather`) are expected as pandas tables with (site, signal) multi-indexed columns in the urbs conventions.
-- The reader adds an initialization row at the top (t = 0) for time series tables.
-
-## Generated outputs
-
-### 1) Result HDF5 in `work/optimization/result/<scenario-key>/`
-
-The script copies the selected input file into the scenario-specific result directory and writes results into that copy.
-
-Final naming uses the input base name plus the canonical scenario key from
-`/metadata/timeframe`; the exact key is therefore scientific-identity
-aware and no longer encodes legacy electrification percentages.
-
-### 2) HDF5 output groups written
-
-The output file is an HDFStore written with compression (`blosc`). You will typically find:
-
-- `/urbs_out/reduced_data/<table>`: the (possibly modified) input tables used for solving
-- `/urbs_out/tsam/<tsam_info>`: TSAM metadata (even when TSAM is off, a `kept_timesteps` vector is stored)
-- `/urbs_out/MILP/<entity>`: Pyomo entity dumps (sets, parameters, variables, expressions), merged across parallel sub-models
-
-### 3) Logs
-
-- SLURM logs (only if using `sbatch`): `work/runs/slurm/<jobid>_output.log`, `work/runs/slurm/<jobid>_error.log`
-- Solver logs (one per parallel sub-model): `work/optimization/logs/gurobi/<input>_<scenario>_<clusterIndex>.log`
-
-## How to run
-
-### Local run (interactive)
-
-From the `GridExpand` directory:
-
-1. Create the environment:
-  - `uv sync`
-2. Run a case:
-  - `uv run gridexpand optimize 0 --n_cpu 8`
-
-`--n_cpu` controls how many **parallel Python worker processes** are spawned (clusters of building nodes).
-
-### HPC / SLURM run
-
-`scripts/hpc/` includes serial-partition templates:
-
-- `scripts/hpc/optimization/run_cluster_serialstd.sh`: runs one case (one `inputfile_id`) as a single SLURM job
-- `scripts/hpc/start_batch_jobs.sh optimization START END`: submits many jobs for `START..END`
-
-Examples (from `GridExpand/`):
-
-- Submit one run:
-  - `sbatch scripts/hpc/optimization/run_cluster_serialstd.sh 0`
-- Submit a range:
-  - `bash scripts/hpc/start_batch_jobs.sh optimization 0 24`
-
-The SLURM script loads `gurobi` and runs `srun uv run --frozen gridexpand optimize <INDEX> --n_cpu $SLURM_CPUS_PER_TASK`.
-
-Note: uv manages Python dependencies only. Gurobi binaries/licenses are external and still required.
-
-## Configuration knobs (most important)
-
-Scenario YAML is the source of scientific and policy assumptions. The
-electrification section defines one adoption mode for each of heat, mobility,
-and pv_battery: deterministic_share uses an exact stable building selection,
-while source_inventory requires explicit source evidence in the prepared
-assignment manifest. Step 3 consumes the manifest and does not resample
-technology adoption.
-
-Execution-only settings remain command-line controls:
-
-- n_cpu (int): number of parallel worker processes
-- timeframe_mode: full-year or a named operational stress slice
-- model_case: pre, heuristic, or optimized materialization case
-
-## Details to keep in mind
-
-### Result isolation / reproducibility
-
-- `urbs.prepare_result_directory()` writes outputs below
-  `work/optimization/result/<scenario-key>/`, where the key contains the scenario identity
-  and timeframe mode.
-- Step-2 and Step-3 artifacts use the same scenario-key contract, so different
-  adoption shares, seeds, or timeframes do not silently reuse one another s
-  files.
-- Re-running the same input and scenario may overwrite that scenario s own
-  output file; preserve or archive it when comparing repeated runs.
-
-### Parallelism and CPU usage
-
-Parallelism has two layers:
-
-1. Python multiprocessing: `n_cpu` worker processes
-2. Solver threads inside each worker (Gurobi): `Threads=4` (hard-coded in `urbs/runfunctions.py`)
-
-So worst-case thread demand is approximately `n_cpu * 4`.
-
-On HPC, if you set `--n_cpu=$SLURM_CPUS_PER_TASK` and keep `Threads=4`, you can easily oversubscribe.
-
-Recommended practice:
-
-- Either reduce `--n_cpu`, or adjust solver `Threads` to match the allocation strategy you want.
-
-### Solver requirements
-
-- The default solver is forced to `gurobi` inside `urbs/runfunctions.py`.
-- A working Gurobi installation + license is required unless you modify the code to use another solver supported by Pyomo.
-
-### TSAM behavior
-
-When TSAM is enabled, typical periods are selected using only weather signals:
-
-- Ambient temperature (`Tamb`)
-- Irradiation (`Irradiation`)
-
-TSAM writes metadata to `/urbs_out/tsam/` including kept time steps and cluster weights.
-
-### Non-implemented features
-
-Two global settings exist but are intentionally blocked:
-
-- `vartariff != 0` → raises `NotImplementedError`
-- `power_price_kw != 0` → raises `NotImplementedError`
-
-### Input assumptions
-
-- Building/site list is inferred from `demand` columns; if a site has no demand column it may not be included in clustering.
-- The reader adds an initialization row at `t=0` for time series tables.
-
-## Inspecting results
-
-To quickly inspect what’s inside an output file, you can do:
+Inspect a result:
 
 ```python
 import pandas as pd
-
-path = "work/optimization/result/<scenario-key>/<your_output>.h5"
+path = "work/optimization/result/<scenario key>/<file>.h5"
 with pd.HDFStore(path, mode="r") as store:
-    print(store.keys())
-
-# Example: load a particular result table
-df_costs = pd.read_hdf(path, key="/urbs_out/MILP/costs")
+    print([key for key in store.keys() if key.startswith("/urbs_out")])
+print(pd.read_hdf(path, "urbs_out/solver_audit"))
 ```
-
-## License
-
-See [urbs_LICENSE](../../src/gridexpand/optimization/urbs/LICENSE) for the license information of the urbs code included in this step.
-
-
-### TSAM reduce-only mode
-
-Use `--reduce-only` together with `--tsam` to write reduced input tables and TSAM metadata without solving URBS.
