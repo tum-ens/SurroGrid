@@ -162,22 +162,17 @@ def _load_weather_and_location(
         pass
 
     from gridexpand.db.database import SurroGridDatabase
-    import gridexpand.allocation.functions.weather as weather_module
+    import gridexpand.common.weather as weather_module
 
     database = SurroGridDatabase()
     grid_ref = database.resolve_grid_identifier(weather_source_hdf.name)
     region = database.read_region(grid_ref)
     row = region.iloc[0]
-    weather_result = weather_module.get_pvgis_tmy_sarah3_dataframe(
+    weather, altitude = weather_module.get_pvgis_tmy_sarah3_dataframe(
         float(row["lat"]),
         float(row["lon"]),
         reference_year=int(reference_year),
     )
-    if weather_result is None:
-        raise RuntimeError(
-            "PVGIS did not return TMY weather for the shared PV profile library."
-        )
-    weather, altitude, _ = weather_result
     return weather, float(row["lat"]), float(row["lon"]), float(altitude)
 
 

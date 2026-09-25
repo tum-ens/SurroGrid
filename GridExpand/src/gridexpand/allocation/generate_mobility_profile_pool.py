@@ -28,7 +28,7 @@ import pandas as pd
 
 from gridexpand.allocation.config import config
 import gridexpand.allocation.functions.mobility as mbl
-import gridexpand.allocation.functions.weather as wth
+import gridexpand.common.weather as wth
 from gridexpand.common.ev_sessions import build_sessions_from_source
 from gridexpand.paths import SCENARIO_CONFIG_DIR
 from gridexpand.scenario.config_loader import load_scenario_config
@@ -75,9 +75,10 @@ def _load_or_fetch_weather(weather_csv: Path) -> pd.DataFrame:
         return pd.read_csv(weather_csv)
 
     weather_csv.parent.mkdir(parents=True, exist_ok=True)
-    df_weather, _altitude, _selected_months = wth.get_pvgis_tmy_sarah3_dataframe(
+    df_weather, _altitude = wth.get_pvgis_tmy_sarah3_dataframe(
         config.MOBILITY_PROFILE_POOL_LAT,
         config.MOBILITY_PROFILE_POOL_LON,
+        reference_year=config.REF_YEAR,
     )
     df_weather["dew_point"] = wth.get_dew_point(
         df_weather["temp_air"],

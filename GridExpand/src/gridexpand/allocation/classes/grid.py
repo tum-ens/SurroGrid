@@ -9,7 +9,7 @@ from multiprocessing import Pool
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_EXCEPTION
 
 import gridexpand.allocation.classes.save_grid as svgrd
-import gridexpand.allocation.functions.weather as wth
+import gridexpand.common.weather as weather
 import gridexpand.allocation.functions.electricity as elc
 import gridexpand.allocation.functions.heat as heat
 import gridexpand.allocation.functions.mobility as mbl
@@ -726,14 +726,16 @@ class Grid:
     ############################################
     # The order of these operations has to be followed (e.g. heat depends on electric results)
     def retrieve_weather(self):
-        if self.settings["weather_data_exists"]: pass
-        else:
-            # Get TMY data from SARAH3 dataset as DataFrame
-            self.df_weather_raw, self.altitude, selected_months = wth.get_pvgis_tmy_sarah3_dataframe(self.location["lat"], self.location["lon"])
-            # Add dew point temperature necessary for vehicle simulation
-            self.df_weather_raw["dew_point"] = wth.get_dew_point(self.df_weather_raw["temp_air"], self.df_weather_raw["relative_humidity"])
-            # Add soil temperature (1.00-2.55m) necessary for ground source heat pumps
-            self.df_weather_raw["soil_temp"] = wth.get_open_meteo_soil_temperature(self.location["lat"], self.location["lon"], selected_months)
+        """Download the PVGIS TMY for the grid location unless the input has weather."""
+        if self.settings["weather_data_exists"]:
+            return
+        self.df_weather_raw, self.altitude = weather.get_pvgis_tmy_sarah3_dataframe(
+            self.location["lat"], self.location["lon"], reference_year=config.REF_YEAR
+        )
+        # Dew point for the emobpy vehicle simulation.
+        self.df_weather_raw["dew_point"] = weather.get_dew_point(
+            self.df_weather_raw["temp_air"], self.df_weather_raw["relative_humidity"]
+        )
 
     def generate_solar(self):
         """Compile and materialize LoD2 PV after base electricity generation."""

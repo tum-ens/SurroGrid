@@ -18,7 +18,7 @@ from sqlalchemy import text
 
 from gridexpand.db.database import SurroGridDatabase
 from gridexpand.common.timeframe import build_full_year_metadata, write_hdf_metadata
-import gridexpand.allocation.functions.weather as weather_functions
+import gridexpand.common.weather as weather_functions
 
 
 def write_aligned_weather(paired_dir: Path, output: Path, reference_year: int) -> Path:
@@ -40,12 +40,9 @@ def write_aligned_weather(paired_dir: Path, output: Path, reference_year: int) -
                 "ids": plan["building_objectid"].astype(str).tolist(),
             },
         ).mappings().one()
-    result = weather_functions.get_pvgis_tmy_sarah3_dataframe(
+    weather, altitude = weather_functions.get_pvgis_tmy_sarah3_dataframe(
         float(centroid["lat"]), float(centroid["lon"]), reference_year=int(reference_year)
     )
-    if result is None:
-        raise RuntimeError("PVGIS returned no TMY weather.")
-    weather, altitude, _ = result
     region = pd.DataFrame(
         [{"lat": float(centroid["lat"]), "lon": float(centroid["lon"]),
           "altitude": float(altitude), "plz": int(plz)}]

@@ -13,16 +13,11 @@ class Config:
     STORAGE_DIR = str(ALLOCATION_RESULTS_DIR)     # Directory in which to store resulting urbs input files
 
     #--------------------------------------------------------------#
-    #-------------- Weather Data API Connections ------------------#
+    #------------------------ Weather -----------------------------#
     #--------------------------------------------------------------#
-    # PVGIS API
-    PVGIS_URL = "https://re.jrc.ec.europa.eu/api/tmy"               # URL from which to fetch typical meterological year weather data
-    # Reference year and scientific mobility/urbs parameters are loaded from scenario YAML.
+    # PVGIS weather is downloaded by gridexpand.common.weather. The reference
+    # year and scientific mobility/urbs parameters come from the scenario YAML.
     TIME_ZONE = 1   # Currently only implemented for UTC+1!!!       # Shift between the location's time and GMT in hours. CET would be 1.
-
-    # OpenMeteo API
-    OPENMETEO_URL = "https://archive-api.open-meteo.com/v1/archive" # URL from which to fetch soil temperature data
-    OPENMETEO_TIME_ZONE = "UTC+01:00"  # Currently only  UTC+1!!!   # Timezone at location (for alignment of weather with human actions)
 
     #--------------------------------------------------------------#
     #---------------- Solar Generator Constants -------------------#
@@ -99,14 +94,6 @@ class Config:
     @staticmethod
     def ASHP_COP(delta_T):                          # COP of air source heat pump
         return pd.DataFrame(6.08 - 0.09*delta_T + 0.0005*np.square(delta_T))
-    @staticmethod
-    def GSHP_COP(delta_T):                          # COP of ground source heat pump
-        return pd.DataFrame(10.29 - 0.21*delta_T + 0.0012*np.square(delta_T))
-    # @staticmethod
-    # def WSHP_COP(delta_T):                          # COP of water source heat pump
-    #     return pd.DataFrame(9.97 - 0.20*delta_T + 0.0012*np.square(delta_T))
-    
-    # HP_TYPE_DIST = pd.read_csv(f'{DATA_STAT_DIR}/general/heat_pump_type.csv', header=[0], skiprows=1)
 
     ### Heating system type, source: https://www.umweltbundesamt.de/sites/default/files/medien/11850/publikationen/11_2024_cc_waermepumpensysteme.pdf, Abbildung 26
     PROB_RADIATOR = 0.727                           # Probability for building to be heating with radiators 

@@ -10,12 +10,9 @@ from gridexpand.allocation.functions.infdb_ro_heat import generate_opendhw, load
 ##############################################################
 ################## Obtaining GHD + HP COP ####################
 ##############################################################
-def _get_cop(hp_type, heating_type, df_heat_space, df_heat_water, air_temp, soil_temp):
-    ### Select heat pump function:
-    if hp_type=="ASHP": hp_cop_func = config.ASHP_COP
-    elif hp_type=="GSHP": hp_cop_func = config.GSHP_COP
-    # elif hp_type=="WSHP": hp_cop_func = config.WSHP_COP
-    else: raise ValueError("Unknown heat pump type!")
+def _get_cop(heating_type, df_heat_space, df_heat_water, air_temp):
+    """Return the demand-weighted air-source heat pump COP of one bus."""
+    hp_cop_func = config.ASHP_COP
 
     ### Floor heat sink temperature function:
     if heating_type=="radiator": heating_func = lambda T_amb: np.array(40-T_amb)
@@ -23,15 +20,8 @@ def _get_cop(hp_type, heating_type, df_heat_space, df_heat_water, air_temp, soil
     else: raise ValueError("Unknown heating system type!")
 
     ### Calculate T_sink-T_amb:
-    if hp_type=="ASHP":
-        dT_space = heating_func(air_temp) - air_temp
-        dT_water = 50 - air_temp
-    # if hp_type=="GSHP":
-    #     dT_space = heating_func(air_temp) - soil_temp - 5  # -5 to account for heat transfer of soil to brine
-    #     dT_water = 50 - soil_temp
-    # if hp_type=="WSHP":
-    #     dT_space = heating_func(air_temp) - 10 - 5         # assume 10°C water temperature - 5 loss for intermediate heat exchangers 
-    #     dT_water = np.ones((8760))*(50 - 10 - 5)
+    dT_space = heating_func(air_temp) - air_temp
+    dT_water = 50 - air_temp
 
     ### Clip to minimum temperature difference of 15K:
     dT_space = pd.DataFrame(dT_space).clip(lower=15)
@@ -196,41 +186,23 @@ def require_heat_profiles(buses, df_heat_space, df_heat_water):
         )
 
 def generate_hp_cop(df_buildings, df_heat_space, df_heat_water, df_weather):
+    """Return one air-source heat pump COP series per heat bus.
+
+    Demand columns are already shared-bus aggregates; the heating system
+    (radiator or floor) of the first building on a bus sets the sink
+    temperature.
+    """
     air_temp = df_weather["temp_air"]
-    soil_temp = df_weather["soil_temp"]
-
-    ### Generation
     cop_dict = {}
-
-    # Air-source: demand columns are already shared-bus aggregates.
     for bus, group in df_buildings.groupby("bus", sort=True):
-        hp_type = "ASHP"
         if (bus, "space_heat") not in df_heat_space.columns:
             continue
-        row = group.iloc[0]
-        heating_type = row["heating_type"]
+        heating_type = group.iloc[0]["heating_type"]
         space_heat = pd.DataFrame(df_heat_space[bus, "space_heat"])
         water_heat = pd.DataFrame(df_heat_water[bus, "water_heat"])
-        cop_dict[bus] = _get_cop(hp_type, heating_type, space_heat, water_heat, air_temp, soil_temp)
+        cop_dict[bus] = _get_cop(heating_type, space_heat, water_heat, air_temp)
     if not cop_dict:
         return pd.DataFrame(index=df_heat_space.index)
     cops_air = pd.concat([cop for _,cop in cop_dict.items()], axis=1)
     cops_air.columns = pd.MultiIndex.from_tuples([(col, "heatpump_air") for col in cop_dict.keys()])
-
-    # # Ground-source
-    # for _, row in df_buildings.iterrows():
-    #     hp_type = "GSHP"
-    #     bus = row["bus"]
-    #     # hp_type = row["hp_type"]
-    #     heating_type = row["heating_type"]
-        
-    #     space_heat = pd.DataFrame(df_heat_space[bus, "space_heat"])
-    #     water_heat = pd.DataFrame(df_heat_water[bus, "water_heat"])
-
-    #     cop_dict[bus] = _get_cop(hp_type, heating_type, space_heat, water_heat, air_temp, soil_temp)
-    # cops_grd = pd.concat([cop for _,cop in cop_dict.items()], axis=1)
-    # cops_grd.columns = pd.MultiIndex.from_tuples([(col, "heatpump_grd") for col in cop_dict.keys()])
-
-    # cops = pd.concat([cops_air, cops_grd], axis=1)
-    cops = cops_air
-    return cops
+    return cops_air
