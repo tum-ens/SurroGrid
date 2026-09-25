@@ -1002,6 +1002,9 @@ class Grid:
                 self.plz,
                 self.profile_seed,
             )
+        heat.require_heat_profiles(
+            residential["bus"], self.df_demand_heat_space, self.df_demand_heat_water
+        )
         self._space_heat_source_audit = dict(space_heat_source_audit)
         if space_heat_source_audit:
             self.settings["scenario_assumptions"].update(space_heat_source_audit)

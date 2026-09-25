@@ -178,6 +178,23 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_
 
     return df_space_heat, df_dhw
 
+def require_heat_profiles(buses, df_heat_space, df_heat_water):
+    """Raise if a selected heat bus has no space-heat or hot-water profile.
+
+    Heat sizing treats a missing profile column as zero demand, so a building
+    dropped by a generator would otherwise be sized at 0 kW without an error.
+    """
+    missing = [
+        bus
+        for bus in dict.fromkeys(buses)
+        if (bus, "space_heat") not in df_heat_space.columns
+        or (bus, "water_heat") not in df_heat_water.columns
+    ]
+    if missing:
+        raise ValueError(
+            f"Heat generation produced no profile for selected heat bus(es) {missing[:10]}."
+        )
+
 def generate_hp_cop(df_buildings, df_heat_space, df_heat_water, df_weather):
     air_temp = df_weather["temp_air"]
     soil_temp = df_weather["soil_temp"]
