@@ -1,19 +1,50 @@
 # THIRD_PARTY_LICENSES
 
-## RWTH districtgenerator
+## Vendored code
+
+### RWTH districtgenerator
 Used in: src/gridexpand/allocation/external/districtgenerator
 Original repo: https://github.com/RWTH-EBC/districtgenerator
 License: MIT
 See license: src/gridexpand/allocation/external/third_party_licenses/districtgenerator_LICENSE
 
-## emobpy
+### emobpy
 Used in: src/gridexpand/allocation/external/emobpy
-Original repo: https://github.com/RWTH-EBC/districtgenerator
+Original repo: https://gitlab.com/diw-evu/emobpy/emobpy
 License: MIT
 See license: src/gridexpand/allocation/external/third_party_licenses/emobpy_LICENSE
 
-## urbs
-Used in: src/gridexpand/optimization/urbs
-Original repo: https://github.com/RWTH-EBC/districtgenerator
+### urbs
+Used in: src/gridexpand/optimization/urbs (trimmed and adapted from the urbs-lvds variant, 04 Feb 2025)
+Original repo: https://github.com/tum-ens/urbs
 License: GNU General Public License v3.0
 See license: src/gridexpand/optimization/urbs/LICENSE
+
+## Tracked data (data/sampling/)
+
+The following third-party data files are tracked in this repository. Their licence terms and the
+required attribution have NOT been verified for redistribution; the maintainers must check them
+(and add the exact licence and attribution here) before publishing the repository with these files.
+
+### Zensus 2022, population per 1 km grid cell
+File: data/sampling/Zensus2022_Bevoelkerungszahl_1km-Gitter.csv
+Source: Statistische Ämter des Bundes und der Länder (Zensus 2022)
+License: to be checked
+
+### Administrative areas VG250 (municipalities)
+Files: data/sampling/VG250_GEM.{shp,shx,dbf,prj,cpg}
+Source: Bundesamt für Kartographie und Geodäsie (BKG), VG250
+License: to be checked
+
+### Five-digit postcode areas
+Files: data/sampling/plz-5stellig.{shp,shx,dbf,prj}
+Source: not recorded in the repository
+License: to be checked
+
+### RegioStaR reference files
+File: data/sampling/regiostar-referenzdateien.xlsx
+Source: Bundesministerium für Digitales und Verkehr (BMDV), RegioStaR regional statistical spatial typology
+License: to be checked
+
+The statistics in data/statistics/ (household sizes, load profiles, trip and vehicle statistics,
+climate zones) have no per-file provenance record either; their sources should be documented as well.

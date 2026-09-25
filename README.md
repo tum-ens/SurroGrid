@@ -3,10 +3,10 @@
 
 SurroGrid is a research codebase that combines two workflows:
 
-1) **GridExpand**: a 4-step pipeline to generate *grid-level simulation data* for low-voltage (LV) distribution grids.
+1) **GridExpand**: one Python package (`gridexpand`) that simulates low-voltage (LV) distribution grids before and after electrification in five steps (grid sampling, demand allocation, urbs optimization, power flow, expansion analysis), backed by an InfDB/pylovo PostgreSQL database, plus paired real/synthetic validation and a web service.
 2) **GridForecast**: preprocessing + machine learning models (MLP and Transformer) to train **surrogate forecasters** on the GridExpand outputs.
 
-In short: **GridExpand produces one HDF5 (`.h5`) file per grid/scenario containing inputs + optimization + power-flow results, and GridForecast turns those files into ML-ready time-series tables and trains forecasting models.**
+In short: **GridExpand produces grid-level results (in the `surrogrid` database schema and, in HDF5 mode, one `.h5` file per grid/scenario with inputs, optimization and power-flow results), and GridForecast turns those HDF5 files into ML-ready time-series tables and trains forecasting models.**
 
 > Note: Several scripts in this repository are tuned for an HPC environment (Slurm) and may contain absolute filesystem paths (e.g. `/dss/...`). If you run elsewhere, adjust the configs accordingly.
 
@@ -20,10 +20,11 @@ In short: **GridExpand produces one HDF5 (`.h5`) file per grid/scenario containi
 
 **Data generation / simulation (GridExpand):**
 
-- Sample representative LV distribution grids (pandapower networks) and export each grid to an HDF5 file.
-- Allocate building- and bus-resolved hourly time series (electricity/heat/mobility/PV) and write **MILP-ready** URBS input tables.
-- Run the **urbs** (Pyomo) optimization to simulate DER adoption/dispatch (e.g., PV/HP/EV) and write results back into the same HDF5.
-- Run time-series **pandapower** power-flow “pre” vs “post” expansion and store voltages, line loadings, and external-grid imports.
+- Sample representative LV distribution grids (pandapower networks) from pylovo and export each grid to an HDF5 file.
+- Allocate building- and bus-resolved hourly time series (electricity/heat/mobility/PV) and write **MILP-ready** urbs input tables.
+- Run the **urbs** (Pyomo) optimization to simulate DER dispatch and sizing (PV, battery, heat pump, EV) and write the results.
+- Run time-series **pandapower** power flow before and after electrification and store voltages, line loadings and external-grid imports (raw series and/or compact summaries).
+- Estimate cable and transformer **expansion costs**, compare real DSO grids with synthetic pylovo grids, and run all of it for a region from one run YAML (`gridexpand run`) or from a web UI (`gridexpand serve`).
 
 **Surrogate modeling / forecasting (GridForecast):**
 
@@ -42,10 +43,11 @@ The intended end-to-end flow is:
 ```text
 GridExpand (simulation)                                           
 
-1) Grid sampling (.h5 per grid)
-2) Demand allocation + URBS inputs (writes /urbs_in/*)
+1) Grid sampling (.h5 per grid, optional)
+2) Demand allocation + urbs inputs (writes /urbs_in/*)
 3) urbs optimization (writes /urbs_out/*)
-4) Power flow (writes /pwrflw/*)
+4) Power flow (writes /pwrflw/* or the surrogrid database)
+5) Expansion analysis (surrogrid database)
 
 GridForecast (ML)
 1) 0_preprocessing/ (extract ML features/targets)
@@ -53,18 +55,20 @@ GridForecast (ML)
 	b) 3_transformer/ (Transformer training + HPO)
 ```
 
-All GridExpand steps communicate through a **single `.h5` file per grid/scenario**. Downstream steps copy the input file into their own output folder and append new groups/datasets.
+GridExpand Steps 2-4 hand over a **single `.h5` file per grid/scenario**: each step copies its input and appends new groups. GridForecast needs the HDF5 power-flow output (`gridexpand powerflow --storage h5`).
 
 ---
 
 ## Repository layout
 
-- [GridExpand/](GridExpand): LV grid sampling → demand allocation → optimization → power flow (one Python package, `gridexpand`)
+- [GridExpand/](GridExpand): LV grid sampling → demand allocation → optimization → power flow → expansion analysis (one Python package, `gridexpand`; start with [GridExpand/README.md](GridExpand/README.md))
   - [GridExpand/src/gridexpand/sampling/](GridExpand/src/gridexpand/sampling): grid sampling/export (notebooks in [GridExpand/notebooks/sampling/](GridExpand/notebooks/sampling))
   - [GridExpand/src/gridexpand/allocation/](GridExpand/src/gridexpand/allocation): generate demands + write `/urbs_in/*`
-  - [GridExpand/src/gridexpand/optimization/](GridExpand/src/gridexpand/optimization): run URBS optimization + write `/urbs_out/*`
-  - [GridExpand/src/gridexpand/powerflow/](GridExpand/src/gridexpand/powerflow): run pandapower PF + write `/pwrflw/*`
-  - [GridExpand/docs/steps/](GridExpand/docs/steps): one document per step
+  - [GridExpand/src/gridexpand/optimization/](GridExpand/src/gridexpand/optimization): run the urbs optimization + write `/urbs_out/*`
+  - [GridExpand/src/gridexpand/powerflow/](GridExpand/src/gridexpand/powerflow): run the pandapower power flow + write `/pwrflw/*`
+  - [GridExpand/src/gridexpand/analysis/](GridExpand/src/gridexpand/analysis): expansion costs, loaders, plots (notebooks in [GridExpand/notebooks/analysis/](GridExpand/notebooks/analysis))
+  - [GridExpand/src/gridexpand/scenario/](GridExpand/src/gridexpand/scenario), [paired/](GridExpand/src/gridexpand/paired), [service/](GridExpand/src/gridexpand/service): run YAMLs and orchestration, paired validation, web service
+  - [GridExpand/docs/](GridExpand/docs): documentation ([index](GridExpand/docs/README.md), one document per step in [GridExpand/docs/steps/](GridExpand/docs/steps))
 
 - [GridForecast/](GridForecast): preprocessing + ML training for forecasting
   - [GridForecast/0_preprocessing/](GridForecast/0_preprocessing): build `ts_train.h5` / `ts_test.h5`
@@ -79,24 +83,20 @@ Each subfolder contains a more detailed README describing its inputs/outputs and
 
 ### A) If you want to run GridExpand end-to-end
 
-1) **Create/obtain input grids**
-	- Either run Step 1 sampling ([GridExpand/docs/steps/1_grid_sampling.md](GridExpand/docs/steps/1_grid_sampling.md); notebook-driven, often requires pylovo DB access),
-	- Or start from existing compatible `.h5` grid files.
+From `GridExpand/`: `uv sync`, `cp .env.example .env` (database credentials), then run a region from a run YAML:
 
-2) **Demand allocation (Step 2)**
-	- Place your Step-1 `.h5` files into `GridExpand/work/allocation/grids/`.
-	- Run `uv run gridexpand allocate <id>` as described in [GridExpand/docs/steps/2_demand_allocation.md](GridExpand/docs/steps/2_demand_allocation.md).
+```bash
+uv run gridexpand config check config/runs/<run>.yaml
+uv run gridexpand run config/runs/<run>.yaml          # Steps 2-4 + expansion analysis
+```
 
-3) **Optimization (Step 3: urbs)**
-	- Copy Step-2 result `.h5` files into `GridExpand/work/optimization/input/`.
-	- Run `uv run gridexpand optimize <id>` as described in [GridExpand/docs/steps/3_urbs.md](GridExpand/docs/steps/3_urbs.md).
-	- This step typically requires a MILP solver (the code is configured for Gurobi by default).
+See [GridExpand/README.md](GridExpand/README.md) for installation, data assets, database setup, the paired
+validation and the web service. To produce HDF5 files step by step (for example for GridForecast):
 
-4) **Power flow (Step 4)**
-	- Copy Step-3 scenario `.h5` files into `GridExpand/work/powerflow/input/`.
-	- Run `uv run gridexpand powerflow <id>` as described in [GridExpand/docs/steps/4_powerflow.md](GridExpand/docs/steps/4_powerflow.md).
-
-The DB-backed orchestrators (`uv run gridexpand synthetic ...`, `uv run gridexpand run --run-config ...`) run Steps 2-4 in one go; see [GridExpand/README.md](GridExpand/README.md).
+1) **Grids**: Step 1 export ([GridExpand/docs/steps/1_grid_sampling.md](GridExpand/docs/steps/1_grid_sampling.md)) into `GridExpand/work/sampling/results/`, then copy the files to `GridExpand/work/allocation/grids/`.
+2) **Demand allocation**: `uv run gridexpand allocate <id> --scenario-config config/scenarios/<scenario>.yaml` ([Step 2](GridExpand/docs/steps/2_demand_allocation.md)); output in `GridExpand/work/allocation/results/<scenario key>/`.
+3) **Optimization**: copy the Step 2 file to `GridExpand/work/optimization/input/`, `uv run gridexpand optimize <id> --scenario-config config/scenarios/<scenario>.yaml` ([Step 3](GridExpand/docs/steps/3_urbs.md); Gurobi by default, or `--solver appsi_highs`).
+4) **Power flow**: copy the Step 3 result to `GridExpand/work/powerflow/input/`, `uv run gridexpand powerflow <id>` ([Step 4](GridExpand/docs/steps/4_powerflow.md)); output in `GridExpand/work/powerflow/output/`.
 
 At the end, you will have `.h5` files containing raw grid data plus `/urbs_*` and `/pwrflw/*` groups.
 
@@ -127,7 +127,8 @@ GridExpand’s contract between steps is the **HDF5 file structure**. At a high 
 
 For the precise keys and expectations, refer to:
 
-- [GridExpand/README.md](GridExpand/README.md) (overview + interface)
+- [GridExpand/README.md](GridExpand/README.md) (overview)
+- [GridExpand/docs/steps/1_grid_sampling.md](GridExpand/docs/steps/1_grid_sampling.md)
 - [GridExpand/docs/steps/2_demand_allocation.md](GridExpand/docs/steps/2_demand_allocation.md)
 - [GridExpand/docs/steps/3_urbs.md](GridExpand/docs/steps/3_urbs.md)
 - [GridExpand/docs/steps/4_powerflow.md](GridExpand/docs/steps/4_powerflow.md)
@@ -136,7 +137,7 @@ For the precise keys and expectations, refer to:
 
 ## Environments / dependencies
 
-- GridExpand is one uv project (`GridExpand/pyproject.toml`, `uv.lock`): run `uv sync` in `GridExpand/`.
+- GridExpand is one uv project (`GridExpand/pyproject.toml`, `uv.lock`, Python 3.12): run `uv sync` in `GridExpand/` (extras `notebooks`, `service`).
 - GridForecast does not ship a single canonical environment file; the Slurm scripts and training scripts may install packages at runtime.
 
 ---

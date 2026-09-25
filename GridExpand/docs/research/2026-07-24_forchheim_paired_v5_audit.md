@@ -1,33 +1,10 @@
-# Paired SWF Scenario Contract
+> **Historical record** (not maintained). Run: paired SWF allocation `swf_2045_paired_v5_91301_station_hybrid_v2` and the diagnostic runs named below. pylovo version: 5. Written: 2026-07-17 to 2026-07-24 (later edits until September 2026). Split from `docs/PAIRED_SCENARIO.md` on 2026-09-25: the contract (scenario unit, shared and network-specific layers, evidence rules, heat-profile library, publication criteria) is maintained in [method.md](../method.md#paired-validation-contract); this note keeps the audit numbers, the LV113 diagnostic and the commands of that time. See [the documentation index](../README.md) for the current code.
 
-## Purpose
+# Paired SWF scenario: pylovo v5 audit (Forchheim, PLZ 91301)
 
-The paired scenario is the authoritative path for comparing real SWF and synthetic pylovo grids under post-electrification demand. It holds the physical demand and technology realization constant and changes only the electrical network and the mapping of scenario units to network buses.
-
-## Contract
-
-| Layer | Shared between real and synthetic | Network-specific |
-|---|---|---|
-| Scope | Physical buildings retained by both network models and the same minimum-building rule | Grid partition |
-| Base demand | HH rows, measured annual HH energy, calibrated GHD energy, and sampled profile realization | Allocation bus |
-| Sector assets | Deduplicated SWF 2045 PV, EV, and heat-pump inventory | Allocation bus |
-| Time series | Profile seed, weather, mobility pool, heat demand, COP, and temporal horizon | None |
-| Optimization | Identical scenario-unit inputs, model formulation, technology assumptions, solver settings, and TSAM mapping | Target-grid batch partition |
-| Power flow | Active-power time series and metric definitions | Pandapower topology, impedance, equipment capacity, and bus mapping |
-
-The comparison must fail before optimization when the paired plans contain different physical buildings or different HH/GHD totals.
-
-## Scenario Unit
-
-A physical building can be associated with several real SWF connection buses. Therefore, a physical building alone is not always a sufficiently precise demand-allocation unit. The stable scenario-unit identity is:
-
-```text
-(source_lv_id, source_allocation_bus, building_objectid)
-```
+## Scope
 
 For PLZ 91301 and pylovo version 5, the revised station-hybrid-v2 scope contains 7,994 scenario units covering 7,643 physical buildings. The same units are projected to 88 real grids and 91 synthetic grids.
-
-Optimization remains at scenario-unit resolution. Aggregating units to real or synthetic buses before URBS can change flexibility and therefore violates the paired comparison contract. Bus aggregation belongs at the power-flow boundary. Each target-grid batch recreates the same deterministic scenario-unit inputs and uses the same optimization and TSAM settings; only the target-grid grouping and final bus projection differ.
 
 ## Current Regional Audit
 
@@ -56,43 +33,6 @@ For external communication, the 2045 electrification assumptions are summarized 
 
 The SWF inventory provides heat-pump locations but no positive heat-pump capacities. It is therefore location evidence only. Both heuristic cases use the shared building-level full-load-hour HP/auxiliary/buffer plan; `post-hems-optimized` instead uses its calculated monovalent values as finite optimization bounds. SWF PV capacity is not used as an installation limit. The SWF pandapower file is cumulative: existing and future PV rows with different `Baujahr` values coexist in the final network and are `in_service`. In `swf` location mode, any PV row with `Baujahr <= 2045` establishes building/location eligibility; legacy rows without a usable year are retained as existing assets. Repeated rows at the same connection collapse to one eligibility record. In `all_buildings` mode, every retained physical building is eligible. Charging-station capacities are fixed; a building can carry more than one 11 kW charging point.
 
-### LoD2 PV roof potential and profiles
-
-The paired allocator joins `pylovo.buildings_result.objectid` to the corresponding
-`citydb.feature`, follows its `boundary` property to child roof-surface features,
-and reads `Flaeche`, `Dachneigung`, and `Dachorientierung`. Available capacity is
-calculated independently for every usable roof section:
-
-```text
-available_pv_kw = Flaeche × roof_utilization × 0.202 kW/m²
-```
-
-Flat roofs retain the 0.27 utilization assumption and slanted roofs use 0.58.
-Because `Flaeche` is the actual LoD2 surface area, no footprint/cosine area
-reconstruction is applied. The pvlib tilt is `90° - Dachneigung`; flat surfaces
-use azimuth 0° when the source orientation is undefined. Non-flat sections with
-an invalid orientation are excluded and audited. Only when a building has no
-usable LoD2 section is one 14.5 kW fallback section at 45°/180° created.
-
-Capacity always uses the exact surface area. Generation profiles use deterministic
-5° tilt and 15° azimuth bins so similar orientations share a normalized annual
-pvlib profile. The paired runner builds `paired_pv_profile_library.h5` once from
-the selected weather source before starting parallel real/synthetic grid jobs.
-For DB-mode result files without embedded raw weather, it resolves the source
-grid coordinates from PostgreSQL and obtains the same PVGIS SARAH3 TMY once
-during cache construction. Subsequent runs reuse the library while its weather
-source and required angle set are unchanged.
-For `post-hems-optimized`, roof sections in the same angle bin are aggregated
-into one URBS process and the optimized dimension remains bounded by their
-summed LoD2 `cap-up`. Both heuristic cases instead use the same per-building
-capacity from the annual base-electricity rule and a capacity-weighted roof
-profile. INFLEX therefore no longer obtains PV capacity from a prior HEMS solve.
-
-
-SWF stationary-battery rows are used as location evidence, not as capacity inputs. At those locations, heuristic cases apply the shared extrapolated HTW rule to base electricity and the heuristically installed PV system. The optimized HEMS case chooses battery capacity endogenously below the HTW bound computed from base electricity and LoD2 PV potential. A two-hour E/P ratio sets charge and discharge power to half the usable energy capacity. INFLEX uses causal local self-consumption control without forecasts: PV first supplies simultaneous demand, surplus charges the battery, and stored electricity later covers residual demand. Grid charging and battery export are excluded. Each TSAM representative week uses a cyclic state-of-charge boundary so unrelated representative weeks cannot exchange energy.
-
-Previous electrification-combination counts reflected SWF battery capacities and are intentionally omitted. They must be regenerated from the new battery asset-plan audit before publication.
-
 ## GHD and Mixed-Use Calibration
 
 Pylovo's open building layer contains many more Commercial/Public polygons than SWF contains GHD customer rows. These quantities are not directly comparable: an ALKIS building polygon is not necessarily an active independent electricity customer, while one electrical connection can represent a mixed-use building. The paired scenario therefore applies the following evidence rules:
@@ -102,7 +42,7 @@ Pylovo's open building layer contains many more Commercial/Public polygons than 
 3. Unsupported pylovo per-square-metre GHD defaults are not added to either target network.
 4. An unmatched SWF GHD row is excluded and audited at row level; it does not reject the otherwise valid LV grid.
 
-The full audit contains 2,991 generic Commercial structures without direct SWF load evidence. Most are unaddressed and small, and all use the broad ALKIS `31001_2000` category. Conversely, 719 Commercial/Public buildings already receive 1,647 SWF HH rows and are represented as mixed-use proxies. A blanket conversion of the remaining generic structures to households would duplicate demand or displace demand from explicitly residential buildings. See [GHD_CALIBRATION.md](GHD_CALIBRATION.md) for the complete evidence table and interpretation.
+The full audit contains 2,991 generic Commercial structures without direct SWF load evidence. Most are unaddressed and small, and all use the broad ALKIS `31001_2000` category. Conversely, 719 Commercial/Public buildings already receive 1,647 SWF HH rows and are represented as mixed-use proxies. A blanket conversion of the remaining generic structures to households would duplicate demand or displace demand from explicitly residential buildings. See [2026-07-21_forchheim_ghd_calibration_v5.md](2026-07-21_forchheim_ghd_calibration_v5.md) for the complete evidence table and interpretation.
 
 ## Heat-Profile Readiness
 
@@ -114,7 +54,7 @@ The validated physical heat and COP time series are generated once and stored in
 
 Paired readiness checks building coverage against this library, and URBS input generation reads the same building profile before projecting it to the current real or synthetic target bus. Changing the pylovo grid version therefore requires a new paired allocation but no repeated heat-profile generation when the physical profile assumptions are unchanged. The legacy per-grid HDF workflow remains available only for constructing a new library or explicitly diagnostic fallbacks.
 
-The paired materializer then applies the same residential heat-asset method documented in [SCENARIO_METHOD.md](scenario_pipeline/SCENARIO_METHOD.md): the original hourly OpenDHW demand and its matching COP are retained, one central system is assigned per physical building, and the resulting fixed capacities or optimization bounds are projected through scenario-unit sites. The real and synthetic targets consume the same physical profiles and sizing assumptions.
+The paired materializer then applies the same residential heat-asset method documented in [method.md](../method.md#residential-heat-assets): the original hourly OpenDHW demand and its matching COP are retained, one central system is assigned per physical building, and the resulting fixed capacities or optimization bounds are projected through scenario-unit sites. The real and synthetic targets consume the same physical profiles and sizing assumptions.
 
 ## Diagnostic Pilot: LV113
 

@@ -16,6 +16,9 @@ uv run gridexpand serve                      # http://127.0.0.1:18766/  (API doc
 uv run pylovo-ui --plugin gridexpand=http://127.0.0.1:18766/   # in the pylovo checkout (development)
 ```
 
+The plugin loader of pylovo-ui (`--plugin NAME=BASE`) is on the pylovo branch `fable/ui-plugins-dev-review`
+(not yet merged).
+
 For the cross-origin development setup above start the service with
 `GRIDEXPAND_UI_CORS_ORIGINS=http://127.0.0.1:8765`. Behind a reverse proxy (GridPlanner) use
 `--root-path /gridexpand --allowed-host 127.0.0.1:18780`. Options: `--host`, `--port`, `--root-path`,

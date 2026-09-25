@@ -1,3 +1,5 @@
+> **Historical record** (not maintained). Run: paired Forchheim power flows (SWF station-hybrid-v2 split, path-preserving radialization, 1,008 TSAM hours); run id not recorded. pylovo version: not recorded in the note. Written: 2026-07-21. Moved from `docs/audits/failed_grids_analyisis.md` on 2026-09-25. Paths, commands and module names below are those of the code at that time; see [the documentation index](../README.md) for the current code.
+
 # Failed Real-SWF Grid Analysis
 
 ## Scope

@@ -1,525 +1,153 @@
-# Step 2: Demand allocation (GridExpand)
+# Step 2: demand allocation (urbs inputs)
 
-This step takes sampled low-voltage grids from **Step 1** (stored as `.h5`) and enriches them with **hourly time series** for:
+Step 2 turns one grid into building- and bus-resolved hourly time series (weather, base electricity, rooftop PV,
+stationary batteries, space heat and hot water with heat-pump COP, EV charging and availability) and writes the
+urbs input tables of Step 3 (`urbs_in/*`) plus the asset plans and audits into one HDF5 file.
 
-- Weather (if not already present in the input)
-- Rooftop PV supply (SupIm)
-- Electricity demand
-- Space-heating + domestic hot water demand
-- EV charging (mobility demand) + EV availability
+Entry point: `gridexpand allocate` = `src/gridexpand/allocation/main.py`. `run_allocation(settings)` runs the
+stages of `STAGES[profile]` on a `Grid` (`classes/grid.py`) and writes the keys of `OUTPUT_KEYS[profile]`.
 
-It then **writes URBS-ready input tables** into the same `.h5` file (stored in `work/allocation/results/`) under the HDF5 group `urbs_in/`.
+| module | content |
+|---|---|
+| `classes/grid.py`, `classes/save_grid.py` | stage methods; HDF5/database input and output |
+| `functions/electricity.py` | household occupancy and annual electricity, residential load profiles (`elec_lps.h5`), GHD per-m² profiles, component aggregation |
+| `functions/heat.py`, `functions/infdb_ro_heat.py` | TEASER / INFDB `ro_heat` space heat, OpenDHW hot water, air-source COP |
+| `functions/mobility.py` | vehicles per household, pool or emobpy profiles, EV sessions |
+| `functions/dst.py`, `functions/partition.py` | daylight-saving alignment, workload partition for parallel heat generation |
+| `assets/pv/`, `assets/battery/`, `assets/heat/`, `assets/urbs_rows.py` | LoD2 roof catalog, sizing and urbs rows of PV, batteries, heat pumps and buffers |
+| `electrification.py`, `electrification_preparation.py` | electrification inventory and the regional assignment manifest |
+| `generate_mobility_profile_pool.py` | builds the mobility profile pools |
+| `scenario_calibration/` | paired (real vs synthetic) preparation, see [paired_validation.md](../paired_validation.md) |
+| `external/` | vendored districtgenerator and emobpy (licences in `external/third_party_licenses/`) |
 
----
+## Inputs
 
-## What this code does (high level)
+- **Grid.** `--storage db` (used by all orchestrators): the grid, buildings and components are read from pylovo
+  through `gridexpand.db`; weather is downloaded from PVGIS. `--storage h5`: a Step 1 file in
+  `work/allocation/grids/` that must already contain `raw_data/weather` (see [Step 1](1_grid_sampling.md)).
+- **Scenario YAML** (`--scenario-config`, required): all scientific values ([configuration.md](../configuration.md)).
+- **Electrification assignment** (`--electrification-assignment`, optional CSV or HDF5 manifest): the regional
+  selection of heat, mobility and PV+battery buildings. Required for `source_inventory` scenarios without source
+  evidence in the input; the synthetic runner always prepares one per region (below).
+- **Static data** in `data/statistics/` (tracked) and the large untracked inputs
+  `data/statistics/inhabited_buildings/elec_lps.h5` and the mobility pools (see the
+  [README](../../README.md#large-data-assets)).
+- **LoD2 roofs** from the database schema `citydb` (buildings without usable roof sections get the fallback).
 
-The executable entrypoint is `src/gridexpand/allocation/main.py`.
+## Input selection
 
-1. **Select input grid file** from `work/allocation/grids/` by matching the `inputfile_id` (see “Input selection”).
-1. **Load raw input tables** from the `.h5`: `raw_data/buildings`, the required `raw_data/building_components`, `raw_data/region`, optionally `raw_data/weather`.
-1. **Generate time series** in a strict order (dependencies matter): Weather → PV → Electricity → Heat → Mobility.
-1. **Assemble URBS input sheets** (demand, supply, processes, commodities, storages, etc.).
-1. **Copy the input `.h5` to `work/allocation/results/`** and append/overwrite tables (update `raw_data/buildings`/`raw_data/weather`, add `urbs_in/*`).
+`inputfile_id` is interpreted by `--storage`:
 
-The `Grid` orchestration logic is implemented in `src/gridexpand/allocation/classes/grid.py`.
+- `db`: an AGS (`09184137` or `9184137`, optionally `-<candidate index>`), with `--candidate-index`,
+  `--min-buildings` and `--demand-scope` choosing among its candidate grids (same numbering as `gridexpand
+  grids`), or `--plz --kcid --bcid` for one exact grid, or a bridge file name such as
+  `9184137-00_85653_1_3.h5`. `--pylovo-version-id` pins the topology version (default `PYLOVO_VERSION_ID` of
+  `.env`).
+- `h5`: the first `*.h5` in `work/allocation/grids/` whose name before the first underscore equals
+  `inputfile_id` (keep prefixes unique).
 
----
-
-## Required inputs
-
-### 1) Grid input file(s) (`.h5`)
-
-Place input grid files in:
-
-- `work/allocation/grids/*.h5`
-
-Each file must contain at least these HDF5 keys (written by Step 1 in this project):
-
-- `raw_data/buildings` (pandas table)
-- `raw_data/building_components` (pandas table; required mixed-capable component manifest)
-- `raw_data/region` (pandas table; typically a single-row DataFrame)
-
-Recommended (and assumed by default in `main.py`):
-
-- `raw_data/weather` (pandas table)
-
-If `raw_data/weather` is missing, you must run with `weather_data_exists=False` (see “Weather data handling”), otherwise the run will fail when PV/heat/mobility try to access weather columns.
-
-#### Expected columns (minimum)
-
-The exact schema depends on the Step 1 generator, but Step 2 expects at least:
-
-`raw_data/region` (single row):
-
-- `lat`, `lon` (float): location used for weather/PV
-- `altitude` (float): used for PV modeling
-- `plz` (int/str): ZIP code used by the heat generator
-- `regio7` (int): region class used for mobility statistics
-- `bcid`, `kcid` (int): used to build deterministic per-vehicle seeds
-
-`raw_data/buildings` (one row per building):
-
-- `bus` (int): node/site id
-- `objectid` (str): stable physical-building identity; it must occur once
-- `building_use`/`building_type`: source classifications, kept unchanged
-- `residential_floor_area` and `nonresidential_floor_area` (float): effective component areas
-- `nonresidential_use`: `Commercial` or `Public` when the non-residential area is positive
-- `households`/`occupants`: Residential component quantities
-- `floor_area`/`floor_number`: footprint and above-ground floor count
-- `nonresidential_mv_direct`: whether the non-residential component is outside the LV scenario
-- `residential_peak_load_in_kw`/`nonresidential_peak_load_in_kw`: source installed peaks for provenance only
-
-`raw_data/building_components` is the long-form demand manifest. Step 2 profiles
-included Residential and Commercial/Public component rows independently, then
-aggregates them to their shared physical bus. A missing manifest is a hard
-error; old one-use HDF files are not reconstructed heuristically.
-- `constructi` (str/int/NaN): construction year category for heat model (missing values are sampled)
-
-### 2) Statistical input data
-
-The code reads multiple statistics files from:
-
-- `data/statistics/`
-
-Examples (non-exhaustive):
-
-- Household size distributions and electricity CDFs
-- Non-residential (GHD) electricity/DHW per m² profiles
-- Roof tilt distributions for PV
-- EV specs and trip statistics for mobility
-
-These are already included in the repository under `data/statistics/**`.
-
----
-
-## Real/Synthetic Scenario Calibration
-
-The publication comparison is organized under `src/gridexpand/allocation/scenario_calibration/` by responsibility:
-
-- `allocation/`: SWF-to-building matching, scope calibration, and paired allocation plans.
-- `profiles/`: shared electricity, PV, mobility, and heat-profile construction and readiness checks.
-- `pipeline/`: active paired URBS-input materialization and shared input-table helpers.
-
-Build the common physical-building scenario and verify exact heat-profile coverage from `GridExpand`:
+## Command line
 
 ```bash
-uv run python -m gridexpand.allocation.scenario_calibration.allocation.paired_allocation \
-  --ags 9474126 \
-  --plz 91301 \
-  --pylovo-version-id 1 \
-  --final-year 2045 \
-  --min-buildings 5 \
-  --pv-location-mode swf \
-  --grid-data-path /home/breveron/data/swf_split_station_hybrid_v2 \
-  --output-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2
-
-# One-time creation for this physical heat-profile assumption set.
-uv run python -m gridexpand.allocation.scenario_calibration.profiles.physical_heat_profile_library \
-  --source-catalog work/allocation/outputs/scenario_calibration/swf_2045_paired_v4_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
-  --source-hdf-dir work/optimization/input \
-  --output work/allocation/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5 \
-  --profile-set-id forchheim_2045_physical_heat_v1
-
-uv run python -m gridexpand.allocation.scenario_calibration.profiles.paired_profile_readiness \
-  --paired-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
-  --heat-profile-library work/allocation/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v1.h5
+uv run gridexpand allocate 9184137 --storage db --pylovo-version-id 1 --candidate-index 0 \
+  --scenario-config config/scenarios/forchheim_2045_synthetic.yaml \
+  --profiles status_quo --model-case pre --mobility-source pool
 ```
 
-### Rebuild physical heat profiles after a method change
+| option | default | meaning |
+|---|---|---|
+| `--scenario-config` | required | scenario YAML |
+| `--storage` | `h5` | `h5` or `db` (see above) |
+| `--profiles` | `all` | `status_quo`, `heat_library`, `electricity_heat`, `electricity_mobility`, `electricity_heat_mobility` (`all` is an alias) |
+| `--model-case` | `post-hems-heuristic` | `pre` requires `--profiles status_quo`; post cases require an electrification profile |
+| `--timeframe-mode` | `full_year` | or a one-week mode (`min_temperature_week`, `max_solar_radiation_week`, `max_base_electricity_demand_week`); weeks require `--mobility-source pool` |
+| `--mobility-source` | `emobpy` | `emobpy` (simulate) or `pool` (pregenerated profiles) |
+| `--demand-scope` | `all` | `residential`: household components only, for all later steps |
+| `--profile-seed` | 481527 | realization seed ([method.md](../method.md#reproducible-profile-realization)) |
+| `--electrification-assignment` | none | regional assignment manifest |
+| `--timeseries-storage` | `db` | DB mode: `db`/`both` also store `urbs_in/demand` and `urbs_in/eff_factor` in the database, `temp` only in HDF5 |
+| `--case-qualified-output` | off | append `_<model case>` to the output file name |
+| `--output-directory` | `work/allocation/results` | parent of the scenario-key directory |
+| `--n_cpu` | 1 | processes for heat generation and emobpy |
+| `--candidate-index`, `--plz`, `--kcid`, `--bcid`, `--pylovo-version-id`, `--min-buildings` | | DB-mode grid selection |
 
-A change to TEASER inputs or another physical heat-profile assumption requires
-regenerating every exact source grid, even when the existing catalog marks its
-profiles ready. Keep the previous library until the replacement passes the
-readiness audit, and use a new profile-set version so results remain traceable.
-From `GridExpand` run:
+Profiles and stage order (the order is part of the method):
+
+| `--profiles` | stages | use |
+|---|---|---|
+| `status_quo` | base electricity, timeframe, `urbs_in/demand` | `pre` case, Step 4 `--pre-only` (no Step 3) |
+| `heat_library` | weather, base electricity, heat, demand and COP (no PV, battery, mobility) | regeneration of paired heat-profile libraries |
+| `electricity_heat`, `electricity_mobility`, `electricity_heat_mobility`/`all` | weather, base electricity, PV, battery, heat, mobility, urbs tables | post cases |
+
+## Outputs
+
+The file is `<output directory>/<scenario key>/<input or bridge file name>[_<timeframe>][_<model case>].h5`
+(scenario key: [configuration.md](../configuration.md)). It is a copy of the HDF5 input (HDF5 mode) or a new
+file (DB mode) with these keys:
+
+| key | written for | content |
+|---|---|---|
+| `metadata/timeframe` | all | run metadata: scenario id, hash and key, model case, timeframe (mode, start, horizon), profile seed, realization id and profile fingerprints, assignment hashes, sizing methods |
+| `raw_data/buildings`, `raw_data/weather` | all (HDF5 mode) | physical buildings with sampled attributes; the weather used |
+| `raw_data/building_components`, `raw_data/demand_component_audit` | all | validated component manifest; per-component annual energy, profile method and hash, suppression reason |
+| `raw_data/heat_asset_plan`, `raw_data/heat_asset_audit` | heat profiles | heat pump, auxiliary heater and buffer per building; sizing audit |
+| `raw_data/electrification_assignment`, `raw_data/electrification_assignment_summary` | post profiles | selected buildings per technology with eligibility, rank and exclusion reason |
+| `raw_data/pv_roof_sections`, `raw_data/pv_selected_sections` | post profiles (HDF5 mode) | LoD2 roof catalog; selected sections |
+| `raw_data/asset_plan`, `raw_data/pv_asset_audit` | post profiles | PV plan and audit |
+| `raw_data/battery_asset_plan`, `raw_data/battery_asset_audit` | post profiles | battery plan and audit |
+| `urbs_in/demand` | all | demand per bus: `(bus, electricity)`, `(bus, space_heat)`, `(bus, water_heat)`, `(bus, mobility<id>)` |
+| `urbs_in/eff_factor` | `heat_library`, post profiles | `(bus, heatpump_air)` COP, `(bus, charging_station<id>)` availability 0/1 |
+| `urbs_in/supim` | post profiles | normalized PV supply per bus and roof label |
+| `urbs_in/weather` | post profiles | `(ambient, Tamb)`, `(ambient, Irradiation)` (TSAM features) |
+| `urbs_in/buy_sell_price` | post profiles | `electricity_import`, `electricity_feed_in` from the scenario YAML |
+| `urbs_in/process`, `commodity`, `process_commodity`, `storage` | post profiles | urbs tables (sites are bus ids; per-vehicle `charging_station<id>`, `mobility<id>`, `mobility_storage<id>`) |
+
+Paired preparation additionally writes `raw_data/allocation_plan` (scenario units) and `urbs_in/ev_sessions` /
+`ev_session_hours`; the synthetic Step 2 writes no EV sessions.
+
+In DB mode the bulky copies of the database inputs (`raw_data/buildings`, `raw_data/weather`,
+`raw_data/pv_roof_sections`, `raw_data/pv_selected_sections`) are not written to the HDF5 file; the compact plans
+and audits are. The database receives one `demand_allocation_run` with the final run metadata, the component
+audit, the electrification assignment and the allocated vehicles, plus `allocated_demand` and
+`allocated_eff_factor` with `--timeseries-storage db|both` ([database.md](../database.md)).
+
+## Regional electrification assignment
+
+The orchestrators prepare one assignment per region before the grid jobs start:
 
 ```bash
-uv run python -m gridexpand.allocation.scenario_calibration.profiles.paired_heat_profile_regeneration \
-  --paired-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
-  --force-all \
-  --workers 4 \
-  --n-cpu 1
-
-uv run python -m gridexpand.allocation.scenario_calibration.profiles.physical_heat_profile_library \
-  --source-catalog work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2/paired_heat_profile_catalog.csv \
-  --source-hdf-dir work/optimization/input \
-  --source-mode exact \
-  --output work/allocation/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v2.h5 \
-  --profile-set-id forchheim_2045_physical_heat_v2
-
-uv run python -m gridexpand.allocation.scenario_calibration.profiles.paired_profile_readiness \
-  --paired-dir work/allocation/outputs/scenario_calibration/swf_2045_paired_v5_91301_station_hybrid_v2 \
-  --heat-profile-library work/allocation/outputs/scenario_calibration/profile_libraries/forchheim_2045_physical_heat_v2.h5
+uv run python -m gridexpand.allocation.electrification_preparation --ags 9184137 --pylovo-version-id 1 \
+  --scenario-config config/scenarios/forchheim_2045_synthetic.yaml --mobility-source pool \
+  --output work/runs/<run>/electrification_assignment.csv
 ```
 
-The regeneration helper uses Step 2's dedicated `heat_library` profile mode:
-weather and base electricity are retained as heat-model inputs, while unrelated
-PV and battery generation is skipped. `--workers` controls concurrently
-regenerated source grids. `--n-cpu` controls heat-generation processes inside
-each grid job; avoid multiplying both values without checking available RAM.
-If a regional batch is interrupted,
-repeat the first command with `--resume` in addition to `--force-all`.
-
-`--pv-location-mode swf` uses every cumulative, in-service SWF PV installation
-with `Baujahr <= 2045` only as evidence that a physical building is a permitted
-PV location; legacy rows without a usable `Baujahr` are retained as existing
-assets. `--pv-location-mode all_buildings` instead makes every retained
-physical building PV-eligible and does not require SWF PV locations. In both
-modes, `paired_roof_sections.csv` supplies the available capacity and angle bins
-from LoD2 roof surfaces. A building without any usable LoD2 roof section receives
-a 14.5 kW fallback at 45°/180°.
-
-The paired runner automatically creates or reuses
-`paired_pv_profile_library.h5` before parallel grid jobs start. The library uses
-the exact LoD2 surface area for capacity, bins profile tilt to 5° and azimuth to
-15°, and runs the existing pvlib model once per required angle bin. Real and
-synthetic grids therefore use identical normalized PV profiles.
-If the selected DB-mode result HDF does not contain `raw_data/weather`, the
-builder resolves that grid's database coordinates and requests the same PVGIS
-SARAH3 TMY input once while creating the shared cache.
-
-The regional physical heat-profile library is keyed by stable building identifiers and is reused across pylovo topology versions whenever weather and building assumptions are unchanged. The paired contract fixes one `scenario_unit_id` for each `(source LV, source connection bus, physical building)` tuple. Real and synthetic plans must contain the same scenario units and HH/GHD energy before optimization. Profiles remain at scenario-unit resolution through URBS and are projected to the selected network buses only at the Step-4 boundary. See [`docs/PAIRED_SCENARIO.md`](../PAIRED_SCENARIO.md) for the current audit, strict publication gate, and complete runner command.
-
-
-## Generated outputs
-
-### 1) Result `.h5` file
-
-For each run, the input file is **copied** to:
-
-- `work/allocation/results/<same_filename_as_input>.h5`
-
-and then augmented with additional tables.
-
-### 2) HDF5 keys written by this step
-
-By default this step writes (or overwrites) the following keys using `pandas.HDFStore`:
-
-#### Raw data updates
-
-- `raw_data/weather` (written even if it existed)
-- `raw_data/buildings` (written with additional sampled fields)
-- `raw_data/building_components` (the validated physical component manifest)
-- `raw_data/demand_component_audit` (compact per-component profile evidence and suppression reasons)
-- `raw_data/heat_asset_plan` (building-level HP, auxiliary, and buffer sizing)
-- `raw_data/heat_asset_audit` (climate, load, capacity, and representation audit fields)
-
-#### URBS inputs (new group)
-
-- `urbs_in/weather` (ambient time series with `Tamb`, `Irradiation`)
-- `urbs_in/supim` (PV supply time series; multi-indexed columns `(bus, solar_tilt_azim)`)
-- `urbs_in/demand` (electricity, heat, water heat, mobility demand)
-- `urbs_in/eff_factor` (efficiency factors: heat pump COP and EV availability)
-- `urbs_in/buy_sell_price` (import/feed-in prices)
-- `urbs_in/process`
-- `urbs_in/commodity`
-- `urbs_in/process_commodity`
-- `urbs_in/storage`
-
-`--profiles status_quo` writes only sampled building metadata and `urbs_in/demand`; that output is intended for Step 4 pre-expansion power flow with `--pre-only`, not for Step 3 URBS. Electrification studies use profile combinations that always include electricity: `electricity_heat`, `electricity_mobility`, or `electricity_heat_mobility` (`all` is kept as an alias for the full combination).
-
-### 3) Logs (HPC)
-
-The SLURM scripts write logs to:
-
-- `work/runs/slurm/<jobid>_output.log`
-- `work/runs/slurm/<jobid>_error.log`
-
----
-
-## Expected HDF5 schema (input and output)
-
-This step reads and writes pandas objects via `pandas.HDFStore`. Paths below are HDF5 keys.
-
-### Input file schema (required)
-
-#### `raw_data/region` (pandas DataFrame)
-
-Expected to be a single-row table (the code reads it as a DataFrame and accesses columns like a series).
-
-Required columns:
-
-- `lat` (float): latitude of the transformer / representative grid location
-- `lon` (float): longitude
-- `altitude` (float): meters above sea level
-- `plz` (int or str): ZIP code used by the heat generator
-- `regio7` (int): region class used for EV ownership statistics
-
-Strongly recommended (used for deterministic EV seeding; missing values can break mobility generation):
-
-- `bcid` (int)
-- `kcid` (int)
-
-#### `raw_data/buildings` (pandas DataFrame)
-
-One row per building. Minimum required columns:
-
-- `bus` (int): unique node/site id for the building in the LV grid
-- `use` (str): building use class; the code expects values like `Residential`, `Public`, `Commercial`
-- `type` (str): building type code; residential types are typically `SFH`, `MFH`, `TH`, `AB`, non-res types match the GHD profile tables
-- `houses_per_building` (int): number of flats / households in the building
-- `occupants` (int/float): total occupants in the building (used to distribute household sizes)
-- `area` (float): building footprint area in m²
-- `floors` (int): number of floors (used to scale non-res GHD profiles)
-
-Recommended:
-
-- `constructi` (str/int/NaN): construction year class; if missing, this step samples missing values for non-res buildings
-
-#### `raw_data/weather` (pandas DataFrame) (optional but recommended)
-
-If present, the run can be executed fully offline (recommended on HPC). If missing, weather must be fetched from PVGIS/OpenMeteo.
-
-Minimum columns used by this step:
-
-- `time(inst)` (datetime-like): used by the shared LoD2 pvlib profile generator in `src/assets/pv/profiles.py`
-- `ghi`, `dni`, `dhi` (float): irradiance components (W/m²)
-- `temp_air` (float): ambient temperature (°C)
-- `relative_humidity` (float): % (0–100)
-- `pressure` (float): Pa
-
-Additional columns required/used by other generators:
-
-- `dew_point` (float): °C (mobility)
-- `soil_temp` (float): °C (heat pump COP calculation; currently air-source COP uses `temp_air`, but soil temp is referenced)
-
-Expected length:
-
-- 8760 hourly rows (reference year handling is based on `config.REF_YEAR` and DST offsets are hard-coded for 2009)
-
-### Output file schema (written by this step)
-
-All outputs are written into a copy of the input file under `work/allocation/results/`.
-
-#### Updated raw data tables
-
-`raw_data/buildings` is overwritten with additional columns created during sampling, typically including:
-
-- `roofs`: list of roof sections per building; each element is `(cap_kW, tilt_deg, azimuth_deg)`
-- `occ_list`: list of household sizes per flat (residential)
-- `demand_tot_list`: list of sampled annual electricity demands per flat (residential), or derived totals (non-res)
-- `heating_type`: sampled as `radiator` or `floor` (used for COP)
-- `cars_by_flat`, `n_cars_tot`, `car_dict`: mobility sampling results
-
-`raw_data/weather` is written/overwritten with the final weather table used by the generators.
-
-#### URBS inputs (`urbs_in/*`)
-
-The following keys are written. Most time series are stored as DataFrames with 8760 rows and index name `t`.
-
-- `urbs_in/weather`: ambient time series with MultiIndex columns `('ambient', 'Tamb')` and `('ambient', 'Irradiation')`
-- `urbs_in/supim`: PV supply time series (SupIm), MultiIndex columns `(bus, solar_<tilt>_<azim>)`
-- `urbs_in/demand`: concatenated demand time series
-  - electricity: columns `(bus, 'electricity')`
-  - heat: columns `(bus, 'space_heat')` and `(bus, 'water_heat')`
-  - mobility: columns for each simulated EV, typically `(bus, 'mobility<id>')`
-- `urbs_in/eff_factor`: efficiency factors
-  - heat pump COP: columns `(bus, 'heatpump_air')`
-  - EV availability: columns derived from emobpy, typically `(bus, 'charging_station<id>')` with values 0/1
-- `urbs_in/buy_sell_price`: columns `electricity_import` and `electricity_feed_in`
-- `urbs_in/process`: process table with URBS columns like `Site`, `Process`, `inst-cap`, `cap-up`, `inv-cost-fix`, `inv-cost`, `fix-cost`, `var-cost`, `wacc`, `depreciation`, `pf-min`
-- `urbs_in/commodity`: commodity table with columns `Site`, `Commodity`, `Type`, `price`
-- `urbs_in/process_commodity`: mapping table with columns `Process`, `Commodity`, `Direction`, `ratio`
-- `urbs_in/storage`: storage table with columns `Site`, `Storage`, `Commodity`, capacities, efficiencies, and cost parameters
-
-Notes on column naming:
-
-- Bus-level tables use the building `bus` ids as the URBS `Site`.
-- Mobility creates per-vehicle commodities/processes (`mobility<id>`, `charging_station<id>`, `mobility_storage<id>`). These ids are local to the grid/run.
-
----
-
-## Source code tour (`src/gridexpand/allocation`)
-
-This section documents the first-party code in `src/gridexpand/allocation`. Vendored third-party libraries under `src/gridexpand/allocation/external/` are intentionally not described here.
-
-### `src/gridexpand/allocation/classes/`
-
-- `grid.py`
-  - Main orchestration class `Grid(settings)`.
-  - Loads input HDF5 tables via `SaveFile`, runs generators in the required order, builds URBS tables (`create_*`), and writes everything back via `save_grid_data()`.
-  - Implements daylight-saving alignment helpers (`_add_input_data_daylight_saving_shift`, `_add_output_data_daylight_saving_shift`) and a greedy workload partitioner (`partition_df_by_cpu`) for parallel heat generation.
-
-- `save_grid.py`
-  - Defines `SaveFile`, a small wrapper around pandas HDF5 I/O.
-  - Reads required input tables (`get_input_data()`), copies the input file into `work/allocation/results/` (`copy_save_file()`), and appends tables with compression (`save_df()`).
-
-- `resource_report.py`
-  - Provides `resource_report(...)` / `ResourceReport` context manager.
-  - Prints wall-clock time, CPU time and peak RSS (best-effort across platforms). Used for profiling pipeline sections.
-
-### `src/gridexpand/allocation/functions/`
-
-- `weather.py`
-  - Fetches typical meteorological year weather data from PVGIS (SARAH3) and soil temperatures from OpenMeteo.
-  - Adds helper `get_dew_point()` used by the mobility generator.
-
-- `solar.py`
-  - Samples roof sections (`roofs`) per building from tilt distributions and assigns flat vs. gabled roofs.
-  - Uses `pvlib` to compute PV AC power time series per `(tilt, azimuth)` combination and builds the URBS `supim` (Supply-Import) table.
-  - Creates URBS process/commodity mappings for PV.
-  - The paired pipeline replaces randomized roofs with the CityDB LoD2 roof
-    catalog and a shared angle-binned pvlib profile library.
-
-- `electricity.py`
-  - Samples household occupancy distribution per building and total annual electricity per household from CDFs.
-  - Builds hourly electricity demand time series using residential load profiles (`elec_lps.h5`) and non-residential GHD profiles (per m²).
-  - Creates URBS processes/commodities/storages for import/feed-in and electricity demand.
-
-- `heat.py`
-  - Uses the vendored districtgenerator interface (`Datahandler`) to generate hourly space-heating and DHW demand for residential buildings.
-  - Generates air-source heat-pump COP time series using radiator/floor sink-temperature assumptions.
-  - The scenario pipeline currently materializes central heat assets only for residential buildings; commercial heat needs a separate method.
-
-- `mobility.py`
-  - Samples number of cars per household and assigns vehicle models + commuter/non-commuter schedules.
-  - Runs EV simulation via emobpy (per-vehicle temporary DB dirs), resamples to hourly, reallocates non-home charging to home, and consolidates charging into the end of home-stretches.
-  - Produces hourly EV charging demand (`mobility<id>`) and availability (`charging_station<id>`), and creates URBS process/commodity/storage definitions based on the simulated battery capacities.
-
----
-
-## Folder and file structure
-
-Top-level (this step):
-
-- `src/gridexpand/allocation/main.py` – CLI entrypoint, selects input file and runs the pipeline
-- `src/gridexpand/allocation/config.py` – implementation paths, static datasets, and a legacy
-  attribute adapter; mobility and urbs assumptions come from the validated
-  scenario YAML.
-- `scripts/hpc/allocation/run_cluster_serialstd.sh` – SLURM job script (single grid per job)
-- `scripts/hpc/start_batch_jobs.sh allocation` – submits multiple SLURM jobs over an index range
-
-Data:
-
-- `work/allocation/grids/` – input grid `.h5` files
-- `data/statistics/` – statistical datasets used for sampling and profiles
-- `work/allocation/results/` – output `.h5` files (copy of inputs + URBS sheets)
-
-Code:
-
-- `src/gridexpand/allocation/classes/grid.py` – `Grid` class orchestrating the generation and URBS table creation
-- `src/gridexpand/allocation/classes/save_grid.py` – HDF5 read/copy/write helpers
-- `src/gridexpand/allocation/functions/` – domain generators:
-  - `weather.py` (PVGIS/OpenMeteo fetching)
-  - `solar.py` (pvlib PV modeling)
-  - `electricity.py` (residential + GHD electrical load assignment)
-  - `heat.py` (districtgenerator-based heat profiles + COP)
-  - `mobility.py` (emobpy-based EV demand + availability)
-- `src/gridexpand/allocation/external/` – vendored third-party code (districtgenerator, emobpy)
-
----
-
-## How to run
-
-All commands below are run from `GridExpand/`; the working directory does not matter otherwise.
-
-### 1) Create the environment
+Options: `--plz` (only that postcode's grids), `--kcid --bcid` (with `--plz`: one grid), `--min-buildings`,
+`--demand-scope`, `--profile-seed`, `--source-evidence` (evidence file for `source_inventory`). It writes the
+manifest, a `.json` sidecar (hashes, candidate grids) and `electrification_candidate_grids.json`; the runner
+refuses a manifest whose sidecar belongs to another run or candidate set.
+
+## Mobility profile pools
+
+Synthetic runs (`--mobility-source pool`) use the legacy pool `emobpy_pool_v1` in
+`data/statistics/general/mobility_profile_pool_old/` (tracked metadata and weather, untracked demand and
+availability CSVs). Paired runs use the session pool in `data/statistics/general/mobility_profile_pool/`
+(`emobpy_pool_v2_sessions`, with `mobility_pool_manifest.json`). To build a session pool:
 
 ```bash
-uv sync
+uv run python -m gridexpand.allocation.generate_mobility_profile_pool --mode session \
+  --scenario-config config/scenarios/joint_2045_full_year.yaml --n_cpu 8 --dry-run
+uv run python -m gridexpand.allocation.generate_mobility_profile_pool --mode session --freeze-manifest \
+  --scenario-config config/scenarios/joint_2045_full_year.yaml
 ```
 
-Then run Step 2:
+(`--mode deadline` reproduces the legacy clipped v1 pool; `--append`, `--profiles-per-stratum`, `--models`,
+`--schedules` control the size; consumers require the frozen manifest.)
 
-```bash
-uv run gridexpand allocate <inputfile_id> --n_cpu <N>
-```
+## Conventions
 
-DB-backed raw-grid readout can be enabled with:
-
-```bash
-uv run gridexpand allocate 09278140 --storage db --profiles status_quo
-uv run gridexpand allocate 09278140 --storage db --profiles all
-```
-
-In DB mode Step 2 resolves the AGS against the existing `pylovo` tables, stores AGS without a leading zero, and reads raw building/region input from PostgreSQL. The generated Step 2 outputs intentionally remain HDF5 for now. `--profiles status_quo` writes only `urbs_in/demand` for Step 4 `--pre-only`; electrification profile combinations write the normal `urbs_in/*` tables for Step 3.
-
-### 2) Run a single grid locally
-
-```bash
-uv run gridexpand allocate <inputfile_id> --n_cpu 1
-```
-
-Example (if your grid file name starts with `0_`):
-
-```bash
-uv run gridexpand allocate 0 --n_cpu 8
-```
-
-### 3) Run on HPC (SLURM)
-
-Single job:
-
-```bash
-sbatch scripts/hpc/allocation/run_cluster_serialstd.sh <inputfile_id>
-```
-
-Submit a range (inclusive):
-
-```bash
-bash scripts/hpc/start_batch_jobs.sh allocation 0 24
-```
-
----
-
-## Input selection (`inputfile_id`)
-
-`gridexpand allocate` does **not** take a full path. It takes an `inputfile_id` and searches in `work/allocation/grids/` (HDF5 mode).
-
-Matching rule:
-
-- For each `*.h5`, take the substring before the **first underscore** (`_`).
-- If it equals `str(inputfile_id)`, that file is selected.
-
-So a call like `gridexpand allocate 0` matches files like:
-
-- `0_N2819500E4261500_86165_2_40.h5`
-
-Important:
-
-- If multiple files share the same prefix, the code currently picks the first match.
-- If no file matches, the run errors.
-
----
-
-## Weather data handling (HPC vs local)
-
-The pipeline supports two modes:
-
-- **Weather already in the `.h5`** (`raw_data/weather`)
-  - This is the default in `main.py` (`weather_data_exists=True`).
-  - Recommended for HPC environments with restricted internet access.
-
-- **Fetch weather from online APIs** (PVGIS + OpenMeteo)
-  - Requires outbound internet.
-  - Uses PVGIS SARAH3 TMY and OpenMeteo archive data.
-
-Notes:
-
-- The code assumes a fixed UTC+1 alignment (see `config.TIME_ZONE` and comments).
-- Holidays/daylight-saving logic is hard-coded for the reference year `2009`.
-
----
-
-## Details to keep in mind
-
-- **Directories**: all paths come from `gridexpand.paths` (`data/statistics`, `work/allocation/...`); the run directory does not matter.
-- **Time resolution**: all outputs are designed around **8760 hourly** time steps (1 year). The DST correction in `Grid` uses fixed indices for 2009.
-- **Randomness / reproducibility**:
-  - The legacy standalone allocation samples PV roof sections without a global seed; the paired pipeline uses deterministic LoD2 roof surfaces.
-  - EV simulation uses deterministic per-vehicle seeds derived from `(bcid, plz, kcid, bus, vehicle_id)` with retries that increment the seed if emobpy fails.
-- **Parallel execution**:
-  - `--n_cpu > 1` parallelizes heat generation (multiprocessing) and mobility simulation (process pool).
-  - Mobility can be memory-heavy; keep `n_cpu` within available RAM.
-- **Units**:
-  - Electricity/heat/mobility demands are generated as per-timestep energies compatible with hourly URBS timesteps.
-  - PV supply is derived from pvlib AC power in W and stored scaled by `1/1000` (kW). For hourly URBS timesteps this is typically interpreted as kWh per hour.
-
----
-
-## Troubleshooting
-
-- Missing weather columns (`temp_air`, `ghi`, `dni`, …): ensure `raw_data/weather` exists in the input `.h5`, or switch to API fetching.
-- `IndexError` during input selection: no file matched your `inputfile_id`, or multiple matches exist and the selected one is unexpected.
-- Mobility failures: emobpy may throw sporadic errors for certain sampled vehicles; the code retries up to 3 times with bumped seeds.
+- Time: 8,760 hourly steps of the reference year 2009 in fixed UTC+1, or 168 hours for a one-week timeframe;
+  civil-time profiles are shifted around the 2009 DST hours ([method.md](../method.md#time-axis)).
+- Units: demands are energies per hourly step in kWh (equal to mean kW); PV supply (`supim`) is normalized per kWp.
+- Reproducibility: all sampling uses stable seeds from `--profile-seed` and the physical building id; `--n_cpu` does
+  not change results.
+- emobpy (`--mobility-source emobpy`) makes up to three attempts per failing vehicle, bumping the seed each time.

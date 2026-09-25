@@ -1,3 +1,5 @@
+> **Historical record** (not maintained). Run: paired SWF building calibration for PLZ 91301 (`swf_2045_paired_v5_91301_station_hybrid_v2` scope). pylovo version: 5. Written: 2026-07-21. Moved from `docs/GHD_CALIBRATION.md` on 2026-09-25; the evidence rules are maintained in [method.md](../method.md#ghd-and-mixed-use-evidence-rules). See [the documentation index](../README.md) for the current code.
+
 # GHD Calibration for the Paired SWF Comparison
 
 ## Decision

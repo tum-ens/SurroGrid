@@ -1,211 +1,118 @@
-# 5. Postprocessing
+# Step 5: expansion analysis and postprocessing
 
-This step contains the DB-backed analysis, plotting, and expansion-cost materialization tools for GridExpand results. It reads power-flow outputs from the `surrogrid` PostgreSQL schema and writes only derived analysis tables, figures, or QGIS views.
+Step 5 reads power-flow results from the `surrogrid` schema, turns peak loadings into cable and transformer
+reinforcement needs and costs, and provides the loaders, plots and notebooks of the result analysis. It writes only
+derived analysis tables, QGIS views, figures and audit exports.
 
-## Setup
+Code: `src/gridexpand/analysis/`
+
+| module | content |
+|---|---|
+| `expansion/grid_expansion.py` | `gridexpand expansion`: one analysis per run name and stage, one transaction |
+| `expansion/sql/*.sql` | synthetic path: selected runs, component loading, cable selection, line and transformer rows |
+| `expansion/heuristics.py` | the shared reinforcement rules (Python twin of the SQL, parity-tested) |
+| `expansion/real_materialization.py` | real SWF / ÜZW grids: cable corridors, grid status |
+| `expansion/aligned_expansion.py` | all provider groups of an aligned run in one command |
+| `expansion/cases.py` | model case → stage and analysis-key suffix |
+| `expansion/overview.py`, `expansion/notebook_workflow.py` | read-only loaders for the notebooks |
+| `powerflow/comparison_data.py`, `powerflow/raw.py`, `powerflow/scope.py` | summary and raw-series loaders, run/scope resolution |
+| `plotting/*` | figures (asset cutoff and percentile plots, voltage, transformer import, heatmaps, expansion costs, geoplots) |
+| `audits/topology_bottleneck.py`, `audits/feeder_structure.py` | real-grid voltage-path audit (CLI), feeder-structure comparison (functions) |
+
+## Expansion materialization
+
+Pipelines materialize their analyses automatically at the end (`materialize_expansion`), passing `--no-refresh`
+and refreshing the QGIS views once per batch. Manual use:
 
 ```bash
-cd GridExpand
+uv run gridexpand expansion --run-name <power-flow run name> --stage post --ags 9184137 \
+  --analysis-key <key> --replace
+uv run gridexpand expansion --data-source real_swf --run-name <real run name> --stage post --plz 91301 \
+  --exclude-real-lv-id 113 --analysis-key <key> --replace
+uv run gridexpand expansion --refresh-only        # refresh the QGIS materialized views
+```
+
+| option | default | meaning |
+|---|---|---|
+| `--run-name` | legacy default, always pass it | power-flow run whose compact summaries are materialized |
+| `--stage` | `post` | `pre` or `post` |
+| `--data-source` | `synthetic` | `synthetic`, `real_swf`, `real_uzw` |
+| `--ags`, `--plz` | none | filters (repeatable); synthetic AGS or grid PLZ, real majority PLZ |
+| `--scenario-id` | the single scenario of the selected runs | scenario recorded with the analysis |
+| `--pylovo-version-id` | run assumptions | synthetic grid-case filter; real-grid settlement type |
+| `--exclude-real-lv-id` | none | real grid kept in coverage but not costed (repeatable) |
+| `--assumption-key` | `de_lv_heuristic_2026` | cost row of `expansion_cost_assumption` ([expansion_costs.md](../expansion_costs.md)) |
+| `--line-existing-duct-share` | from the assumption | existing-duct share override |
+| `--analysis-key` | `<ags or all>_<run>_<stage>_<UTC stamp>` | readable key |
+| `--note` | empty | free text |
+| `--replace` | off | replace an analysis of the same key; refused if it has another run name, stage, data source or AGS |
+| `--no-refresh`, `--refresh-only` | | skip the QGIS refresh; only refresh |
+| `--schema-only` | | only initialise a fresh database and exit |
+
+Analysis keys written by the pipelines:
+
+| pipeline | key |
+|---|---|
+| synthetic | `<ags:08d>_<scenario key>_<timeframe>_<profiles>[_hh_only][_tsam][_<model case>]_<pre\|post>` (override the prefix with `gridexpand synthetic --expansion-analysis-prefix`) |
+| paired_validation | `<run.id>[_real]_<pre\|post_inflex\|post\|post_hems_optimized>` |
+| paired_aligned | `<run.id>_<provider>_<real\|synthetic>_<pre\|post_inflex\|post\|post_hems_optimized>` |
+
+Aligned runs (all four groups SWF real/synthetic, ÜZW real/synthetic, or a subset):
+
+```bash
+uv run python -m gridexpand.analysis.expansion.aligned_expansion --run-id joint_2045_v1_smoke24 \
+  --providers swf uzw --cases pre post-inflex-heuristic post-hems-heuristic [--dry-run]
+```
+
+(`--pylovo-version-id`, `--exclude-real-grid PROVIDER:ID` repeatable; power-flow run names
+`<run.id>_<provider>_<real_<provider>|synthetic>_<case>`.)
+
+**Method in short** ([expansion_costs.md](../expansion_costs.md)): cable reinforcement from the P100 current of
+each visible pylovo line (synthetic: summed over its electrical components) or real cable corridor, with the
+least-cost combination of added NAYY 4×150/185/240 circuits and one trench per route; transformer upgrade from the
+P100 apparent power rounded up to 50 kVA with all-in replacement bins. Real grid-stages with failed power-flow
+timesteps are `incomplete` (no cost rows, not zero cost); explicit exclusions are `excluded`. Synthetic and real
+analyses use the same assumption row.
+
+## Outputs
+
+Tables ([database.md](../database.md#step-5-expansion)): `expansion_analysis_run`, `expansion_line_result`,
+`expansion_transformer_result`, `expansion_real_grid_status`, `expansion_real_line_result`,
+`expansion_real_transformer_result`. QGIS views (synthetic grids, pylovo geometry): `expansion_line_qgis_mv`,
+`expansion_transformer_qgis_mv`. Useful fields: `analysis_key`, `requires_expansion`, `loading_percent`,
+`estimated_cost_eur`, `additional_parallel`, `reinforcement_150_count` / `_185_count` / `_240_count`,
+`additional_transformer_kva`, `critical_ts`, and the cost-basis columns (`critical_component_cost_basis`,
+`transformer_cost_basis`, ...).
+
+Files go below `work/analysis/output/` (plots under `plots/`, audits under `audits/<workflow>/`); callers choose the
+destination of plots.
+
+## Notebooks
+
+```bash
 uv sync --extra notebooks
+uv run jupyter lab notebooks/analysis
 ```
 
-Database connection details are read from `GridExpand/.env` (or `$GRIDEXPAND_ENV_FILE`) through `SurroGridDatabase`.
+- `analysis_powerflow.ipynb`: paired real/synthetic status-quo power-flow analysis;
+- `analysis_expansion.ipynb`: paired pre/post expansion analysis. `prepare_expansion_analysis(scenario_prefix=<run.id>,
+  providers=("swf", "uzw"))` (in `expansion.notebook_workflow`) prepares the four groups of an aligned run and
+  enforces consistent provenance (temporal method, run readiness);
+- `grid_area_envelope_comparison.ipynb`: supplied-area envelope diagnostic (OSM tiles need `contextily` and
+  network access).
 
-## Module Layout
+`notebooks/archive/` keeps run-bound notebooks with their outputs as a historical record; they are not maintained.
 
-Step 5 (`gridexpand.analysis`) is split by workflow responsibility:
-
-- `powerflow.comparison_data`: load compact synthetic and real power-flow summaries, build comparison datasets, compute similarity tables, and summarize component-category/mixed-use exposure from the compact Step-2 audit. `demand_component_exposure_summary_db()` reports category energy and effective-area shares, MV-direct shares, mixed-use counts, and low-confidence classification rows.
-- `plotting.*`: create figures from prepared data. Notebooks import the concrete plotting modules directly.
-- `audits.topology_bottleneck`: reusable diagnostics for critical real-grid voltage paths and bottlenecks.
-- `audits.feeder_structure`: graph-normalized feeder, downstream-demand, path-depth, and physical-corridor comparison.
-- `expansion.*`: materialize expansion summaries/costs and load expansion overview tables.
-
-Import from the owning module instead of using compatibility facades. For example, use `powerflow.comparison_data` for DB loaders and `plotting.powerflow_asset_plots` for asset stress plots.
-
-## Output Layout
-
-All generated Step 5 files belong below `work/analysis/output/`. Plotting modules do not own an output directory; notebooks and callers provide a destination below `work/analysis/output/plots/`. Audit CLIs default to `work/analysis/output/audits/<workflow>/`. Scenario-calibration exports remain owned by Step 2 under `work/allocation/outputs/` and must not be duplicated in Step 5.
-
-```text
-output/
-  plots/
-    asset_powerflow/
-    expansion/<AGS>/<scenario_prefix>/
-  audits/
-    building_coverage/
-    feeder_structure/<AGS>/<scenario_prefix>/
-    topology/
-```
-
-The entire `work/` tree is generated and ignored by Git. Durable conclusions and methodological decisions belong in the Markdown files under `docs/audits/` or `docs/expansion/`, not only in generated CSV or figure files.
-
-## Main Files
-
-```text
-src/gridexpand/analysis/
-  powerflow/
-    comparison_data.py                    # DB loaders, comparison datasets, and component exposure summaries
-  plotting/
-    powerflow_heatmaps.py                 # HDF/DB timestep heatmaps and single-grid loading CLI
-    powerflow_asset_plots.py              # asset cutoff, percentile, and violin plot functions
-    powerflow_voltage.py                  # voltage deviation summaries and plots
-    powerflow_transformer.py              # transformer import and stage-comparison plots
-    powerflow_io.py                       # shared Plotly export helper
-    geoplotting.py                        # envelope and geospatial plotting helpers
-  audits/
-    feeder_structure.py                  # synthetic/real feeder and physical-corridor audit
-    topology_bottleneck.py                # critical voltage path/bottleneck audit
-  expansion/
-    grid_expansion.py                     # source-neutral CLI/orchestration for expansion costs
-    real_materialization.py                # real SWF/ÜZW asset adapter for the shared cost heuristic
-    aligned_expansion.py                  # one-command expansion of all provider groups of an aligned run
-    overview.py                           # read-only expansion summary loaders for notebooks
-    materialize_powerflow_summary.py      # derive compact summaries from stored raw rows
-src/gridexpand/db/sql/expansion_schema.sql  # expansion tables, assumptions, QGIS views
-notebooks/analysis/
-  analysis_powerflow.ipynb               # paired real/synthetic status-quo power-flow analysis
-  analysis_expansion.ipynb               # paired pre/post-flex/post-inflex expansion analysis
-  grid_area_envelope_comparison.ipynb    # spatial supplied-area diagnostic
-docs/audits/feeder_structure_comparison.md  # current paired-scenario findings and interpretation
-docs/expansion/assumptions_costs.md      # cost assumptions and source evidence
-docs/expansion/assumptions_scenario.md   # authoritative scenario-run summary
-```
-
-## Command Summary
-
-Run the full AGS pipeline and store raw pre/post power-flow time series:
+## Audits
 
 ```bash
-uv run gridexpand synthetic \
-  --ags <AGS> \
-  --profiles electricity_heat \
-  --timeframe-mode min_temperature_week \
-  --powerflow-output raw \
-  --run-dir work/runs/<run_name>
+uv run python -m gridexpand.analysis.audits.topology_bottleneck --real-run-name <real run> --plz 91301
 ```
 
-Run the pipeline but store only compact summaries, not raw time series:
+(`--stage` default `pre`, `--voltage-threshold` default 0.90, `--output-dir` default
+`work/analysis/output/audits/topology`; writes `critical_grid_summary.csv`, `critical_path_lines.csv` and
+`critical_path_alternative_lines.csv`.)
 
-```bash
-uv run gridexpand synthetic \
-  --ags <AGS> \
-  --profiles electricity_heat \
-  --timeframe-mode min_temperature_week \
-  --powerflow-output summary \
-  --run-dir work/runs/<run_name>
-```
-
-Run a full-year all-assets scenario with TSAM typical weeks and compact post/pre power-flow summaries:
-
-```bash
-uv run gridexpand synthetic \
-  --ags <AGS> \
-  --profiles all \
-  --timeframe-mode full_year \
-  --powerflow-output summary \
-  --scenario-config config/scenarios/forchheim_2045_full_year.yaml \
-  --run-dir work/runs/<run_name> \
-  --workers 1 \
-  --step2-cpus 4 \
-  --step3-cpus 32 \
-  --step3-max-cpus 32 \
-  --step3-cluster-concurrency 16 \
-  --step4-cpus 4
-```
-
-Add `--demand-scope residential` to run the same Step 2 to Step 4 pipeline on household/residential buildings only. The runner then passes `--hh-only` to Step 4, uses the `baseline_static_hh_only` scenario key family, and appends `_hh_only` to automatic expansion analysis keys.
-
-With TSAM enabled, Step 4 uses the reduced demand horizon written by Step 3, so the power-flow summaries cover `6 * 168 = 1008` representative hours instead of a reconstructed 8760-hour series. Summary and both-mode pipeline runs automatically materialize expansion analyses at the end; use `--no-materialize-expansion` to disable this.
-
-Use `--powerflow-output both` if both raw time series and compact summaries should be written during one run.
-
-If raw time series already exist, derive compact summaries without rerunning pandapower:
-
-```bash
-uv run python -m gridexpand.analysis.expansion.materialize_powerflow_summary \
-  --run-name <raw_powerflow_run_name> \
-  --stages post \
-  --ags <AGS> \
-  --plz <PLZ> \
-  --replace
-```
-
-Create or update the expansion schema and QGIS views:
-
-```bash
-uv run gridexpand expansion --schema-only
-```
-
-Materialize expansion costs from stored compact power-flow summaries:
-
-```bash
-uv run gridexpand expansion \
-  --run-name <raw_powerflow_run_name> \
-  --stage post \
-  --ags <AGS> \
-  --plz <PLZ> \
-  --analysis-key <analysis_key> \
-  --replace
-```
-
-Materialize an equivalent real SWF analysis from compact summaries and the exported pandapower assets:
-
-```bash
-uv run gridexpand expansion \
-  --data-source real_swf \
-  --run-name <real_powerflow_run_name> \
-  --stage post \
-  --plz <PLZ> \
-  --analysis-key <analysis_key> \
-  --exclude-real-lv-id <LV_ID> \
-  --replace
-```
-
-`--data-source real_uzw` materializes ÜZW areas (pandapower JSON, `real_grid_case.source = 'uzw'`) the same way. Real selection always filters on the source; `--plz`, `--ags` and `--exclude-real-lv-id` are repeatable, grid ids are text, and `--pylovo-version-id` selects the synthetic grid cases and the real settlement type (real runs otherwise use the version recorded in the run assumptions).
-
-Materialize all four groups (SWF real, SWF synthetic, ÜZW real, ÜZW synthetic) of an aligned run (`src/gridexpand/scenario/run_aligned.py`, run names `{run_id}_{provider}_{real_<provider>|synthetic}_{case}`) with one command. Analysis keys are `{run_id}_{provider}_{real|synthetic}_{pre|post_inflex|post}`; `--dry-run` only lists the groups and their summary counts:
-
-```bash
-uv run python -m gridexpand.analysis.expansion.aligned_expansion \
-  --run-id <run_id> \
-  --providers swf uzw \
-  --cases pre post-inflex-heuristic post-hems-heuristic
-```
-
-In notebooks, `prepare_expansion_analysis(scenario_prefix=<run_id>, providers=("swf", "uzw"))` returns the four groups in `specs_by_source` and `analysis_keys_by_source`; pass `specs_by_source=...` to the power-flow loaders in `expansion.notebook_workflow`.
-
-Real grids with non-converged timesteps remain in `expansion_real_grid_status` with `cost_status=incomplete`; they are not assigned zero cost. Explicit exclusions remain visible with `cost_status=excluded`. Synthetic and real results use the same row from `expansion_cost_assumption`. Existing cables are retained; added circuits are selected from the shared `NAYY_4_150`, `NAYY_4_185`, and `NAYY_4_240` catalogue.
-
-Which Path Should I Use?
-
-- Use `--powerflow-output summary` when storage should stay small and the notebooks only need compact stress metrics; enable representative periods in the Scenario YAML for faster full-year screening. This now also creates `expansion_analysis_run` rows automatically.
-- Use `--powerflow-output raw` for detailed timestep diagnostics or custom postprocessing. Expansion-cost materialization now works from compact summary rows for both synthetic and real SWF runs.
-- Use `python -m gridexpand.analysis.expansion.materialize_powerflow_summary` only when raw time series already exist and compact notebook summaries are missing or stale.
-- Use `gridexpand expansion` manually only when you need to re-materialize or rename expansion-cost estimates; the normal summary pipeline does this automatically from compact summary rows.
-
-## Expansion Outputs
-
-`grid_expansion.py` writes one source-labelled analysis run plus derived cable and transformer expansion rows. Synthetic rows retain pylovo foreign keys; real rows retain SWF pandapower asset ids and source geometry. It also refreshes the existing synthetic QGIS views:
-
-- `surrogrid.expansion_line_qgis_mv`
-- `surrogrid.expansion_transformer_qgis_mv`
-
-Useful fields for QGIS or notebooks:
-
-- `analysis_key`: filter for one materialized analysis.
-- `requires_expansion`: true if the heuristic adds capacity.
-- `loading_percent`: critical peak loading.
-- `estimated_cost_eur`: heuristic expansion cost.
-- `additional_parallel`: total selected additional cable circuits.
-- `reinforcement_150_count`, `reinforcement_185_count`, and `reinforcement_240_count`: selected standard reinforcement cables.
-- `additional_transformer_kva`: additional transformer capacity.
-
-The default cost assumptions are documented in `docs/expansion/assumptions_costs.md`. They are screening assumptions, not construction estimates.
-
-## Notes
-
-- Compact summaries can now represent `post` electrification results. Older summary-only runs may contain only `pre` rows.
-- `grid_area_envelope_comparison.ipynb` is the dedicated spatial diagnostic for comparing convex supplied-area envelopes; it is not duplicated in the main power-flow or expansion notebooks.
-- Expansion notebook envelope plots use `gridexpand/analysis/plotting/geoplotting.py`; OSM background tiles require `contextily` and network access at plot time.
-- Keep raw run names, compact summary run names, and expansion `analysis_key`s explicit in notes or run logs. This is the easiest way to avoid mixing analysis generations.
+`audits.feeder_structure` (graph-normalized feeder, downstream-demand and path-depth comparison) and the plotting
+modules are used from notebooks; `plotting/powerflow_heatmaps.py` has an argument parser but is not runnable as a
+module. Findings of earlier audits are in [docs/research/](../research/).

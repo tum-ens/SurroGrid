@@ -1,10 +1,12 @@
+> **Historical record** (not maintained). Run: none (pylovo generator issue, decision note). pylovo version: 3 and 4 (see `2026-07-24_feeder_structure_comparison.md`). Written: 2026-07-24. Moved from `docs/audits/street_path_junction_refinement_open_issue.md` on 2026-09-25. Paths, commands and module names below are those of the code at that time; see [the documentation index](../README.md) for the current code.
+
 # Street-Path Junction Refinement: Open Methodological Issue
 
 ## Status
 
 Implementation is currently **on hold**. The structural difference documented here is real, but the available evidence does not show that adding more internal splitting joints would reduce the higher cable loading observed in the synthetic grids. This note records the problem, the previously considered topology changes, their limitations, and the analyses required before the generator is changed.
 
-This decision note complements the measured results in `feeder_structure_comparison.md` and records the relevant KVS comparison findings directly below. It supersedes the earlier interpretation that a global union of all shortest street paths should directly be introduced as the next generator change.
+This decision note complements the measured results in [`2026-07-24_feeder_structure_comparison.md`](2026-07-24_feeder_structure_comparison.md) and records the relevant KVS comparison findings directly below. It supersedes the earlier interpretation that a global union of all shortest street paths should directly be introduced as the next generator change.
 
 ## Observed Structural Difference
 

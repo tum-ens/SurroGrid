@@ -1,235 +1,113 @@
+# Step 4: time-series power flow
 
-# 4. Power Flow
+Step 4 reconstructs per-bus active and reactive demand before (`pre`) and after (`post`) electrification, solves a
+pandapower power flow for every timestep and stores the raw time series and/or compact summary statistics.
 
-This step runs time-series low-voltage power-flow calculations for each scenario/grid file created by the previous steps. It evaluates the grid **before** and **after** DER expansion (PV/HP/etc.) using active and reactive power demand time series, and writes the results back into a copy of the scenario `.h5` file.
+Entry point: `gridexpand powerflow` = `src/gridexpand/powerflow/run_pwrflw.py` (synthetic pylovo grids).
 
-At a high level:
+| module | content |
+|---|---|
+| `demands.py` | `reconstruct_demands`: pre, flexible and INFLEX post demand with reactive power |
+| `network.py` | load-bus normalization, relaxed limits, transformer handling, evaluation scopes (`full`, `backbone`) |
+| `engine.py` | `run_timeseries` (chunked, parallel), raw tables, `summarize_powerflow_matrices` |
+| `io.py` | `HDF_KEYS`, `ScenarioResultReader`, database and HDF5 sinks |
+| `config.py` | power factors |
+| `run_real_swf_powerflow.py`, `run_real_swf_scenario_powerflow.py` | real-grid (SWF, ÜZW with `--provider`) runners called by the paired runner |
 
-- Reads a pandapower network from the input `.h5`.
-- Builds *pre-expansion* and *post-expansion* per-bus $P/Q$ demand time series.
-- Runs pandapower power flow for each timestep (optionally in parallel).
-- Stores voltages, line loadings, and external-grid imports into the output `.h5`.
+## Inputs
 
-## Folder & file structure
+`inputfile_id` is a path, an exact file name in `work/powerflow/input/` or the unique prefix before the first
+underscore of one file there. With `--pre-only` it may be a Step 2 file; otherwise it is a Step 3 result. Keys read
+(`io.HDF_KEYS`):
 
-```text
-src/gridexpand/powerflow/
-  config.py
-  run_pwrflw.py                       # entry point (gridexpand powerflow)
-  run_real_swf_powerflow.py
-  run_real_swf_scenario_powerflow.py
-  demands.py
-  powerflow.py
-  save_grid.py
-  grid_topol.py
+| key | used for |
+|---|---|
+| `urbs_in/demand` (or `urbs_out/reduced_data/demand` after TSAM) | pre demand (base electricity) |
+| `urbs_out/MILP/tau_pro` | flexible post demand: `import − feed_in`, `heatpump_air`, `Rooftop*` PV |
+| `urbs_out/MILP/cap_pro`, `urbs_in` or `urbs_out/reduced_data` `eff_factor`, `supim`, `process`, `storage`, `urbs_in/ev_sessions`, `ev_session_hours` | INFLEX post demand |
+| `urbs_out/temporal_method`, `urbs_out/tsam/hoursPerPeriod` | temporal provenance and alignment (`--expect-temporal-method`) |
+| `urbs_out/solver_audit` | Step 3 provenance copied into the run assumptions |
+| `raw_data/allocation_plan` | paired inputs: projection of scenario units onto buses |
+| `raw_data/net` | the network in HDF5 mode (without it, the pylovo grid is read from the database) |
+| `metadata/timeframe` | scenario key, timeframe, model case (run assumptions) |
 
-work/powerflow/                       # runtime artifacts (gitignored)
-  input/
-    *.h5
-  output/
-    *.h5   (copied from input/ and augmented with pwrflw/* datasets)
+In DB mode the pandapower grid comes from pylovo, resolved from the file name or `--grid-case-id`.
 
-scripts/hpc/powerflow/run_cluster_serialstd.sh   # Slurm template
-```
-
-Notes:
-
-- `work/powerflow/input/` and `work/powerflow/output/` come from `gridexpand.paths` (via `config.py`: `Config.DATA_DIR`, `Config.STORAGE_DIR`).
-- `run_pwrflw.py` always reads from `work/powerflow/input/` and writes to `work/powerflow/output/`.
-- Plotting notebooks and reusable analysis helpers live in `src/gridexpand/analysis/plotting` and `notebooks/analysis`.
-
-## Required inputs
-
-### 1) Scenario `.h5` file in `work/powerflow/input/`
-
-The code expects each input file to contain (HDF5 keys / datasets):
-
-- `raw_data/net`: a pandapower network serialized as a JSON string (loaded via `pandapower.from_json_string`).
-- `urbs_in/demand`: raw household electricity demand time series (active power), used for the **pre-expansion** case.
-- `urbs_in/eff_factor`, `urbs_in/supim`, and `urbs_in/process`: required inputs for inflex reconstruction after Step 3 has produced a post-flex result file.
-- `urbs_out/MILP/tau_pro`: required for the default flexible post-expansion case and for inflex timestep alignment.
-- `urbs_out/MILP/cap_pro`: required for inflex heat reconstruction, because fixed heat demand is split with optimized post-flex `heatpump_air` and `heatpump_booster` capacities.
-
-The exact schema of these tables is defined by upstream steps; this step assumes they match what `save_grid.py` and `demands.py` read.
-
-### 2) Python environment
-
-Set up the one GridExpand environment:
+## Command line
 
 ```bash
-cd GridExpand
-uv sync
+uv run gridexpand powerflow <inputfile_id> --storage db --outputs raw,summary --n_cpu 4
+uv run gridexpand powerflow <inputfile_id> --storage db --pre-only --outputs summary
 ```
 
-Run the step:
+| option | default | meaning |
+|---|---|---|
+| `--storage` | `h5` | `h5`: raw tables into `work/powerflow/output/<file>`; `db`: runs in the `surrogrid` schema |
+| `--outputs` | `raw` | comma list of `raw`, `summary`; both come from one power-flow pass; summaries need `--storage db` |
+| `--summary-only` | | same as `--outputs summary` |
+| `--run-name`, `--summary-run-name` | DB default | run name of the raw tables (or of the summary with `--summary-only`); separate summary run with `--outputs raw,summary` |
+| `--pre-only` | off | only the pre stage from `urbs_in/demand` (no Step 3 result needed) |
+| `--post-demand-mode` | `flexible` | `flexible` (optimized urbs import) or `inflex` (fixed heat, PV and EV charging; needs EV sessions, i.e. paired inputs) |
+| `--inflex-ev-charger-kw` | none | INFLEX only: cross-check of the charger rating of every vehicle |
+| `--expect-temporal-method` | none | reject a Step 3 result that does not record `full_year_no_tsam` / `shared_weather_tsam` |
+| `--summary-grid-scope` | `full` | `full` or `backbone` (terminal service lines removed, terminal voltages mapped one bus upstream) |
+| `--summary-nonconvergence` | `auto` | summary runs: `nan`/`auto` record failed timesteps and continue, `raise` aborts; raw runs always raise |
+| `--grid-case-id`, `--pylovo-version-id` | | DB mode: explicit grid case; pylovo version (default `PYLOVO_VERSION_ID`) |
+| `--hh-only`, `--hh-annual-demand-scale` | off, 1.0 | DB mode: household components only; scale of pre household demand (needs `--hh-only --pre-only`) |
+| `--max-timesteps` | none | smoke-test limit |
+| `--n_cpu` | 1 | time chunks solved in parallel processes |
+
+## Outputs
+
+| output | HDF5 key (`--storage h5`) | database table (`--storage db`) |
+|---|---|---|
+| per-bus demand | `pwrflw/input/demand_pre`, `pwrflw/input/demand_post` | `powerflow_demand` |
+| external-grid import | `pwrflw/output/<stage>/demand_import` | `powerflow_import` |
+| bus voltage | `pwrflw/output/<stage>/vm` | `powerflow_bus_voltage` |
+| line flow and current | `pwrflw/output/<stage>/line_loads` | `powerflow_line_result` |
+| reactive components (household, heat pump, PV) | `pwrflw/urbs_out/MILP/reactive` | `powerflow_reactive_component` |
+| summary (database only) | | `powerflow_summary`, `powerflow_cable_summary`, `powerflow_bus_voltage_summary`, `powerflow_tail_value`, `powerflow_transformer_diagnostic` |
+
+`<stage>` is `pre` or `post`. The HDF5 output is a copy of the input with these keys appended (an existing output
+of the same name is replaced). In the database each run is one `powerflow_run` row with the run assumptions
+(timeframe metadata, Step 4 settings, temporal method, Step 3 solver summary). Rows are written to a staging run
+that replaces the previous run of the same name in one transaction only when the whole pass succeeded; a failed or
+cancelled Step 4 keeps the previous results ([database.md](../database.md)). INFLEX runs with a stationary battery
+also write a battery-state audit `work/powerflow/output/<file stem>[.<run name>].component_audit.h5` (key
+`component_audit/inflex_battery_state`).
+
+## Method
+
+**Demand.** Pre: base electricity from `urbs_in/demand`, reactive power with the fixed power factor
+`PF_ELC = 0.959`. Flexible post: net import `import − feed_in` per bus from `tau_pro`; heat-pump reactive power with
+`PF_HP = 0.95`; PV compensates reactive power locally within `|Q| ≤ P_PV · tan(arccos(PF_PV_MIN))`, `PF_PV_MIN =
+0.95` (a model assumption, not a voltage-dependent inverter control). INFLEX post: pre electricity plus fixed heat
+(heat pump up to its fixed electric capacity times COP, residual on the auxiliary heater), fixed PV and EV charging
+from the session table, and the fixed battery under causal self-consumption control. After TSAM the initialization
+row is dropped (6 × 168 = 1,008 simulated hours); paired inputs are projected from scenario units onto buses.
+
+**Network.** Static pylovo loads are replaced by one zeroed load row per demand bus (duplicate demand buses are
+rejected); static generators, generators and storages are switched off; line, load and voltage limits are relaxed
+(1000 kA, 1000 MW, 0–10 pu) and the rated cable currents are kept for the evaluation. Synthetic grids: the single
+MV/LV transformer is replaced by a closed bus-bus switch and the external grid bus gets the LV nominal voltage;
+transformer loading is evaluated from the external-grid import against the station rating (`sn_mva` × parallel units).
+
+**Solve.** Synthetic grids use `pandapower.runpp(algorithm="bfsw")` per timestep (real grids `nr`, then
+`iwamoto_nr`), `tolerance_mva = 1e-6`; timesteps are split into `--n_cpu` chunks solved in parallel processes, and
+results do not depend on the chunking.
+
+## Conventions
+
+- Units: demand in kW/kvar, converted to MW/Mvar for pandapower.
+- Signs (pandapower load convention): positive P consumes active power, positive Q absorbs inductive reactive power;
+  PV compensation contributes negative Q to the net load.
+- Time: `t_index` 0-based hours of the run's timeframe; database time stamps are `timeframe_start + t_index`.
+- Non-convergence is never dropped silently: summary runs record the failed timesteps (`powerflow_tail_value`,
+  metric `Power-flow convergence`), raw runs abort.
+
+## HPC
 
 ```bash
-uv run gridexpand powerflow <inputfile_id> --n_cpu <N>
-```
-
-DB-backed power-flow result storage can be enabled with the command below. Use `--pre-only` to run only the pre-expansion stage from `urbs_in/demand` without requiring Step 3 URBS output:
-
-```bash
-uv run gridexpand powerflow <inputfile_id> --storage db --pre-only
-```
-
-### Paired real/synthetic scenario power flow
-
-The active paired pipeline materializes the same physical-building scenario for both network models and calls `run_real_swf_scenario_powerflow.py` for the real target and `run_pwrflw.py` for the synthetic target. Use `src/gridexpand/paired/runner.py` rather than invoking the old one-sided materializer.
-
-Paired HDFs use `optimization_space=scenario_unit`. Step 3 therefore optimizes stable `(source LV, source connection bus, physical building)` units rather than network buses. Both Step-4 paths read `raw_data/allocation_plan` and aggregate these profiles onto the selected target buses immediately before power flow. This projection conserves active and reactive demand and prevents network partitioning from changing optimization resolution.
-
-Before solving, both target paths replace the pandapower load table with one zero-initialized row per selected scenario bus. Original static dimensioning loads and static generators are not part of a paired scenario power flow. The demand-carrying backbone and upstream voltage scope are derived only from these selected buses.
-
-This same normalization is applied to ordinary DB-backed and HDF-backed runs. A
-mixed building's Residential and Commercial/Public components are summed into
-one dynamic row at their shared bus; `run_single_pf()` rejects duplicate demand
-buses and verifies that assigned active load equals the timestep input before
-`pandapower.runpp()`.
-
-`run_real_swf_powerflow.py` remains the shared real-grid topology and status-quo implementation used by the paired projection and Step-5 audits. It is not a competing post-electrification pipeline.
-
-With the current TSAM setup, the reduced result contains six 168-hour representative weeks plus an initialization row. Shared demand reconstruction drops the initialization row, giving 1,008 simulated power-flow timesteps. The paired runner verifies identical weather-derived TSAM period selection for both targets before accepting any result.
-
-### Post-electrification demand modes
-
-Post-electrification runs support two demand modes:
-
-- `--post-demand-mode flexible` (default): use optimized URBS net-import time series from `urbs_out/MILP/tau_pro`. This is the existing HEMS/flexibility case.
-- `--post-demand-mode inflex`: reconstruct post demand without optimized URBS dispatch, but require a post-flex Step 3 result file. Heat demand is split with the optimized `urbs_out/MILP/cap_pro` capacities: `heatpump_air` covers demand up to its optimized electric capacity times COP, and high-demand residual heat at buses with optimized `heatpump_booster` capacity is assigned to auxiliary electric heating. Rooftop PV uses the exogenous `supim` profile and installed `process` capacity, and EV demand reuses the allocated mobility profiles plus charging-station availability. EV energy is redistributed inside home-availability stretches and capped by `Config.EV_HOME_CHARGER_KW` (default 11 kW) unless `--inflex-ev-charger-kw` is passed.
-
-The inflex mode intentionally reuses the existing Step 2 mobility pool and does not rerun emobpy. It is meant as a stress reference between pre-electrification and optimized post-electrification power-flow results, while keeping the same post-flex technology sizing context.
-
-Example after Step 3 has produced a post-flex result file:
-
-```bash
-uv run gridexpand powerflow <inputfile_id> --storage db --summary-only --post-demand-mode inflex
-```
-
-In DB mode Step 4 still reads `urbs_in/*` and `urbs_out/*` from the input HDF5 file, but reads the pandapower grid from PostgreSQL and writes `pwrflw/*` results to the `surrogrid` schema instead of `work/powerflow/output/*.h5`. Results are grouped under the static `baseline_static` scenario key, integer `scenario_id`, and an interpretable `run_name`; rerunning the same grid/scenario/run overwrites the previous time-series rows. Building-level joins are available through the `surrogrid.grid_building_bus` view.
-
-Dependencies are declared in `GridExpand/pyproject.toml` (one uv environment).
-
-Core runtime packages used in this step:
-
-- `pandapower`
-- `pandas`, `numpy`, `h5py`, `tables`
-- `multiprocessing` (standard library)
-
-## Generated outputs
-
-For each processed input file, an output file is created in `work/powerflow/output/` with the **same filename**. The output file is a copy of the input `.h5` augmented with additional datasets.
-
-### Written HDF5 keys
-
-`run_pwrflw.py` writes:
-
-- `/pwrflw/input/demand_pre`: per-bus pre-expansion demand time series (active + reactive).
-- `/pwrflw/input/demand_post`: per-bus post-expansion demand time series (active + reactive; either optimized-flexible or reconstructed inflex depending on `--post-demand-mode`).
-
-- `/pwrflw/output/pre/demand_import`: external grid import (p/q) per timestep.
-- `/pwrflw/output/pre/vm`: bus voltage magnitudes `vm_pu` per timestep.
-- `/pwrflw/output/pre/line_loads`: line flows and currents per timestep.
-
-- `/pwrflw/output/post/demand_import`: external grid import (p/q) per timestep.
-- `/pwrflw/output/post/vm`: bus voltage magnitudes `vm_pu` per timestep.
-- `/pwrflw/output/post/line_loads`: line flows and currents per timestep.
-
-`demands.py` additionally writes reactive-power components derived from urbs results:
-
-- `pwrflw/urbs_out/MILP/reactive`: concatenated reactive components (household, heat pump, PV) for traceability.
-
-### Logs
-
-On the HPC submission scripts, stdout/stderr are written to:
-
-- `logs/normal/<jobid>_output.log`
-- `logs/errors/<jobid>_error.log` (removed automatically if empty)
-
-## How the code works (conceptual)
-
-### Demand reconstruction (`demands.py`)
-
-- **Pre-expansion**: household active power is taken from `urbs_in/demand`, and reactive power is synthesized using a fixed power factor (`config.PF_ELC`).
-- **Flexible post-expansion**: the urbs results `urbs_out/MILP/tau_pro` are filtered to keep:
-	- `import` and `feed_in` (to compute net imports),
-	- `heatpump_air` (heat pump load),
-	- all rooftop PV technologies (`pro` starting with `Rooftop...`).
-- **INFLEX post-expansion**: fixed post demand is reconstructed from `urbs_in` / `urbs_out/reduced_data` inputs instead of optimized URBS imports. Heat, EV, and PV are added to the pre-expansion electricity demand at bus level.
-
-Reactive power post-expansion is computed using:
-
-- HP reactive demand from `config.PF_HP`.
-- PV reactive capability bounded by `config.PF_PV_MIN`. PV is assumed to produce reactive power to reduce net reactive import as much as possible within its capability.
-
-### Grid preparation (`powerflow.py`)
-
-Before running the time-series power flow, the network is “relaxed” to avoid artificial constraint binding:
-
-- Line current limits `max_i_ka` are set very high.
-- Load `max_p_mw` limits are set very high.
-- Bus voltage bounds are widened.
-- The transformer is removed and replaced by a closed bus-bus switch between HV/LV sides.
-
-### Power flow execution (`powerflow.py`)
-
-For each timestep:
-
-- Loads are updated in `grid.load` (bus-indexed update).
-- `pandapower.runpp(..., algorithm="bfsw")` is executed.
-- Results are collected:
-	- external-grid import from `res_ext_grid`
-	- bus voltages from `res_bus["vm_pu"]`
-	- line flows/currents from `res_line`
-
-Optional parallelization uses Python multiprocessing by chunking timesteps across workers.
-
-## Running
-
-### Local run
-
-1) Put one or more scenario files into `work/powerflow/input/`.
-
-2) Run for a specific *file ID prefix*:
-
-```bash
-uv run gridexpand powerflow 0 --n_cpu 8
-```
-
-The positional argument (`0` above) is matched against the prefix before the first underscore in the filename, e.g.:
-
-- `0_N2819500E4261500_... .h5` matches `inputfile_id=0`.
-
-### Cluster (Slurm)
-
-Submit a single job:
-
-```bash
-sbatch scripts/hpc/powerflow/run_cluster_serialstd.sh 0
-```
-
-Submit a range of jobs (`START`..`END`, inclusive):
-
-```bash
+sbatch scripts/hpc/powerflow/run_cluster_serialstd.sh <inputfile_id>
 bash scripts/hpc/start_batch_jobs.sh powerflow 0 24
 ```
-
-The job script runs `uv run --frozen gridexpand powerflow <INDEX> --n_cpu $SLURM_CPUS_PER_TASK`.
-
-## Details to keep in mind
-
-- **File selection logic**: if `inputfile_id` ends with `.h5`, `run_pwrflw.py` selects that exact file from `work/powerflow/input/`. Otherwise it chooses the first `.h5` whose prefix before the first `_` matches `inputfile_id`. Use the exact filename when both a Step 2 bridge file and a suffixed Step 3 URBS result exist for the same grid.
-- **Output overwrites**: if `work/powerflow/output/<filename>` already exists it will be overwritten (because the input file is copied over at start).
-- **Units**: loads are converted from kW/kVAr to MW/MVAr by dividing by `1000` before running pandapower.
-- **Parallel runs**: each worker receives a deep-copied pandapower net. This avoids shared-state issues but increases memory use.
-- **Reactive power sign convention**: the code models inductive/lagging demand as negative Q (see `demands.py`). Ensure upstream/downstream steps use consistent conventions.
-- **Performance**: runtime scales with `#timesteps × #buses/lines`. Use `--n_cpu` to distribute timesteps.
-
-## Troubleshooting
-
-- If you see `IndexError` or “no matched files”, verify that:
-	- the file exists in `work/powerflow/input/`,
-	- it ends with `.h5`,
-	- its prefix before the first `_` matches the `inputfile_id` you pass.
-- If pandapower fails to converge for some timesteps, consider checking the input demands and the integrity of the network (zero-length lines etc.). Helper utilities exist in `gridexpand/powerflow/grid_topol.py`.
-

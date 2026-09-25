@@ -1,3 +1,5 @@
+> **Historical record** (not maintained). Run: `forchheim_2045_paired_v11`. pylovo version: 11. Written: 2026-09-10. Moved from `docs/audits/forchheim_2045_paired_v11_forensic_audit.md` on 2026-09-25. Paths, commands and module names below are those of the code at that time; see [the documentation index](../README.md) for the current code.
+
 # Forchheim 2045 Paired v11 Forensic Audit
 
 ## Scope
