@@ -346,11 +346,6 @@ def _empty_tables():
     )
 
 
-def empty_tables():
-    """Public accessor for the empty (no-vehicle) session tables."""
-    return _empty_tables()
-
-
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
@@ -608,15 +603,6 @@ def write_sessions(store, sessions: pd.DataFrame, hours: pd.DataFrame) -> None:
     """
     _put_table(store, SESSIONS_HDF_KEY, sessions, SESSION_COLUMNS)
     _put_table(store, SESSION_HOURS_HDF_KEY, hours, SESSION_HOUR_COLUMNS)
-
-
-def has_sessions(hdf_path) -> bool:
-    try:
-        with pd.HDFStore(hdf_path, mode="r") as store:
-            keys = set(store.keys())
-    except (OSError, KeyError):
-        return False
-    return f"/{SESSIONS_HDF_KEY}" in keys
 
 
 def read_sessions(hdf_path):

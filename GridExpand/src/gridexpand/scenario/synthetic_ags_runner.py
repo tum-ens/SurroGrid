@@ -36,6 +36,7 @@ from gridexpand.common.electrification import (
     assignment_manifest_hash,
     validate_electrification_assignment_config,
 )
+from gridexpand.common.reproducibility import DEFAULT_PROFILE_SEED
 from gridexpand.common.orchestration import (
     CANCEL,
     Cancelled,
@@ -142,7 +143,7 @@ class BatchSettings:
     powerflow_output: str = "raw"
     powerflow_grid_scope: str = "full"
     case_qualified_output: bool = False
-    profile_seed: int = 481527
+    profile_seed: int = DEFAULT_PROFILE_SEED
     electrification_assignment: Path | None = None
     pilot_index: int = 0
     pilot_gate: bool = True
@@ -232,7 +233,7 @@ def build_parser() -> argparse.ArgumentParser:
             "prepares one before starting candidate workers."
         ),
     )
-    parser.add_argument("--profile-seed", type=int, default=481527,
+    parser.add_argument("--profile-seed", type=int, default=DEFAULT_PROFILE_SEED,
                         help="Run-level seed for the physical stochastic profile realization.")
     parser.add_argument(
         "--model-case",

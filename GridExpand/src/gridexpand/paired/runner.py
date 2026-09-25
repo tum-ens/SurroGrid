@@ -31,6 +31,7 @@ from gridexpand.common.orchestration import (
     run_command,
     utc_now,
 )
+from gridexpand.common.reproducibility import DEFAULT_PROFILE_SEED
 from gridexpand.common.timeframe import FULL_YEAR_HOURS, read_hdf_metadata
 from gridexpand.paired.comparison import (
     read_tsam_signature,
@@ -535,7 +536,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--profile-seed",
         type=int,
-        default=481527,
+        default=DEFAULT_PROFILE_SEED,
         help="Arbitrary fixed seed for reproducible stochastic input profiles.",
     )
     parser.add_argument("--workers", type=int, default=1)

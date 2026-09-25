@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from gridexpand.common.reproducibility import DEFAULT_PROFILE_SEED
 from gridexpand.common.timeframe import TIMEFRAME_MODES
 from gridexpand.paths import ALLOCATION_RESULTS_DIR, SCENARIO_CALIBRATION_OUTPUT_DIR
 from gridexpand.scenario.config_loader import _read_yaml, configuration_hash, load_scenario_config
@@ -37,7 +38,6 @@ from gridexpand.scenario.scenario_config import _only as only
 from gridexpand.scenario.scenario_config import _positive
 
 PIPELINES = ("synthetic", "paired_validation", "paired_aligned")
-DEFAULT_PROFILE_SEED = 481527
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 PAIRED_DATASET_ROOT = SCENARIO_CALIBRATION_OUTPUT_DIR
 HEAT_LIBRARY_ROOT = PAIRED_DATASET_ROOT / "profile_libraries"

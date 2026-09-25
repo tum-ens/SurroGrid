@@ -10,6 +10,10 @@ from typing import Iterator
 import numpy as np
 import pandas as pd
 
+# Run-level seed of the physical stochastic realization shared by every model
+# case (arbitrary fixed value; no geographic or scenario meaning).
+DEFAULT_PROFILE_SEED = 481527
+
 
 def stable_seed(base_seed: int, *parts: object) -> int:
     """Return a deterministic seed independent of row and execution ordering."""
