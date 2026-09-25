@@ -15,6 +15,11 @@ import pandas as pd
 
 from gridexpand.common.reproducibility import physical_building_id, stable_seed
 
+# Identity of the conservation-preserving session pool (writer:
+# generate_mobility_profile_pool --mode session; reader: paired_profiles).
+SESSION_GENERATION_VERSION = "emobpy_pool_v2_sessions"
+POOL_MANIFEST_FILENAME = "mobility_pool_manifest.json"
+
 ##############################################################
 #################### Sampling Statistics #####################
 ##############################################################
@@ -349,22 +354,34 @@ def get_pool_supported_models(metadata_path=None, weather_key=None):
     return sorted(metadata["model"].unique())
 
 
+def read_rows_for_profiles(csv_path, profile_ids, *, chunksize):
+    """Return the rows of the given profiles from a long-format pool CSV.
+
+    The file is read in chunks of ``chunksize`` rows; callers keep their own
+    chunk size because pandas infers dtypes per chunk.
+
+    Returns:
+        The matching rows, or None if no row matches.
+    """
+    profile_ids = set(profile_ids)
+    chunks = []
+    for chunk in pd.read_csv(csv_path, chunksize=chunksize):
+        subset = chunk[chunk["profile_id"].isin(profile_ids)]
+        if not subset.empty:
+            chunks.append(subset)
+    if not chunks:
+        return None
+    return pd.concat(chunks, ignore_index=True)
+
+
 def _read_pool_timeseries(csv_path, profile_ids, value_column):
     csv_path = Path(csv_path)
     if not csv_path.exists():
         raise FileNotFoundError(f"Mobility profile pool timeseries not found: {csv_path}")
 
-    profile_ids = set(profile_ids)
-    chunks = []
-    for chunk in pd.read_csv(csv_path, chunksize=200_000):
-        subset = chunk[chunk["profile_id"].isin(profile_ids)]
-        if not subset.empty:
-            chunks.append(subset)
-
-    if not chunks:
+    data = read_rows_for_profiles(csv_path, profile_ids, chunksize=200_000)
+    if data is None:
         raise ValueError(f"No selected profile rows found in {csv_path}")
-
-    data = pd.concat(chunks, ignore_index=True)
     required = {"profile_id", "t", value_column}
     missing = required - set(data.columns)
     if missing:
@@ -374,7 +391,6 @@ def _read_pool_timeseries(csv_path, profile_ids, value_column):
 
 def get_mobility_demand_from_pool(
     vehicles,
-    region=None,
     metadata_path=None,
     demand_path=None,
     availability_path=None,
@@ -587,26 +603,7 @@ def get_mobility_demand(vehicles, weather):
     conserve energy. The full-year chronological reference must use
     ``get_mobility_source_records`` and the dedicated-session contract instead.
     """
-    ### Run emobpy for all grid vehicles
-    # print(f"Running mobility generator for {len(vehicles)} vehicles...")
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", FutureWarning)
-        # all_timeseries, all_batteries = _simulate_vehicles(vehicles, weather)
-        max_retries = 3
-        for attempt in range(1, max_retries + 1):
-            try:
-                all_timeseries, all_batteries = _simulate_vehicles(vehicles, weather)
-                break
-            except Exception as e:
-                if attempt == max_retries:
-                    # give up: something in the code, not randomness, is broken
-                    raise RuntimeError(
-                        f"Vehicle(s) {vehicles.keys()} failed after {max_retries} attempts: {e}"
-                    )
-                # otherwise bump the seed and retry
-                for key, car in vehicles.items():
-                    car['seed'] += 1
-                print(f"Retry #{attempt} for vehicle(s) {vehicles.keys()}.")
+    all_timeseries, all_batteries = _simulate_vehicles_with_retry(vehicles, weather)
 
     ### Compile emobpy results to urbs friendly dataframe
     avai_dict = {}
@@ -630,14 +627,6 @@ def get_mobility_demand(vehicles, weather):
         charge = charge.clip(lower=0, upper=max_cap_allowed)
         demand_dict[key] = charge
 
-    # availability = pd.DataFrame(avai_dict).reset_index(drop=True)
-    # new_ids = [f"charging_station{id}" for id in availability.columns.levels[1]]
-    # availability.columns = availability.columns.set_levels(new_ids, level=1)
-
-    # mob_demand = pd.DataFrame(demand_dict).reset_index(drop=True)
-    # new_ids = [f"mobility{id}" for id in mob_demand.columns.levels[1]]
-    # mob_demand.columns = mob_demand.columns.set_levels(new_ids, level=1)
-
     mob_demand, availability = _format_mobility_frames(demand_dict, avai_dict)
 
     # Replace hour at end of year with predecessing 
@@ -648,13 +637,21 @@ def get_mobility_demand(vehicles, weather):
     availability.iloc[-1] = availability.iloc[-2]
     return mob_demand, availability, all_batteries
 
-def create_pro_mob(battery_dict):
+def create_pro_mob(battery_dict, parameters):
+    """Return one ``charging_station<i>`` process row per vehicle.
+
+    Args:
+        battery_dict: ``{(bus, vehicle_id): battery_kwh}``.
+        parameters: ``technologies.processes["home_charger"]`` of the scenario.
+    """
     if not battery_dict: return pd.DataFrame()
     else:
         df_pro = pd.DataFrame([(bus, f"charging_station{id}") for (bus, id) in battery_dict.keys()], columns=["Site","Process"])
         df_pro[["inst-cap","cap-up","inv-cost-fix","inv-cost","fix-cost","var-cost","wacc","depreciation","pf-min"]] = (
-                config.CS_INST_CAP, config.CS_CAP_UP, config.CS_INV_COST_FIX, config.CS_INV_COST, 
-                config.CS_FIX_COST, config.CS_VAR_COST, config.CS_WACC, config.CS_DEPRECIATION, config.CS_PF_MIN)
+                parameters["installed_capacity_kw"], parameters["capacity_upper_kw"],
+                parameters["fixed_investment_cost_eur"], parameters["investment_cost_eur_per_kw"],
+                parameters["fixed_cost_eur_per_hour"], parameters["variable_cost_eur_per_kwh"],
+                parameters["wacc"], parameters["depreciation_years"], parameters["minimum_power_factor"])
         return df_pro.reset_index(drop=True)
     
 def create_com_mob(battery_dict):
@@ -672,12 +669,20 @@ def create_pro_com_mob(battery_dict):
         df_pro_com_out = pd.DataFrame([(f"charging_station{id}", f"mobility{id}", "Out", 1) for id in range(max_id+1)], columns=["Process","Commodity","Direction","ratio"])
         return pd.concat([df_pro_com_in, df_pro_com_out], axis=0).reset_index(drop=True)
 
-def create_sto_mob(battery_dict):
+def create_sto_mob(battery_dict, parameters):
+    """Return one ``mobility_storage<i>`` row per vehicle (capacity = its battery).
+
+    Args:
+        battery_dict: ``{(bus, vehicle_id): battery_kwh}``.
+        parameters: ``technologies.storages["mobility_storage"]`` of the scenario.
+    """
     if not battery_dict: return pd.DataFrame()
     else:
         df_sto = pd.DataFrame([(bus, f"mobility_storage{id}", f"mobility{id}",cap,cap,cap,cap) for (bus, id), cap in battery_dict.items()], columns=["Site","Storage","Commodity","inst-cap-c","cap-up-c","inst-cap-p","cap-up-p"])
         df_sto[["eff-in","eff-out","discharge","ep-ratio","inv-cost-p","inv-cost-c","fix-cost-p","fix-cost-c","var-cost-p","wacc","depreciation"]] = (
-        config.MS_EFF_IN, config.MS_EFF_OUT, config.MS_DISCHARGE, config.MS_EP_RATIO,
-            config.MS_INV_COST_P, config.MS_INV_COST_C, config.MS_FIX_COST_P, config.MS_FIX_COST_C,
-            config.MS_VAR_COST_P, config.MS_WACC, config.MS_DEPRECIATION)
+            parameters["charge_efficiency"], parameters["discharge_efficiency"],
+            parameters["self_discharge_per_timestep"], parameters["energy_to_power_hours"],
+            parameters["investment_cost_eur_per_kw"], parameters["investment_cost_eur_per_kwh"],
+            parameters["fixed_investment_cost_power_eur"], parameters["fixed_investment_cost_energy_eur"],
+            parameters["variable_cost_eur_per_kwh"], parameters["wacc"], parameters["depreciation_years"])
         return df_sto.reset_index(drop=True)

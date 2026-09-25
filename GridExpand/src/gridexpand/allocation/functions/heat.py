@@ -1,21 +1,18 @@
 from gridexpand.allocation.config import config
+import functools
+
 import pandas as pd
 import numpy as np
 import warnings
 
 from gridexpand.common.reproducibility import physical_building_id, stable_seed
 
-from gridexpand.allocation.functions.infdb_ro_heat import generate_opendhw, load_space_heat
-
 ##############################################################
 ################## Obtaining GHD + HP COP ####################
 ##############################################################
-def _get_cop(hp_type, heating_type, df_heat_space, df_heat_water, air_temp, soil_temp):
-    ### Select heat pump function:
-    if hp_type=="ASHP": hp_cop_func = config.ASHP_COP
-    elif hp_type=="GSHP": hp_cop_func = config.GSHP_COP
-    # elif hp_type=="WSHP": hp_cop_func = config.WSHP_COP
-    else: raise ValueError("Unknown heat pump type!")
+def _get_cop(heating_type, df_heat_space, df_heat_water, air_temp):
+    """Return the demand-weighted air-source heat pump COP of one bus."""
+    hp_cop_func = config.ASHP_COP
 
     ### Floor heat sink temperature function:
     if heating_type=="radiator": heating_func = lambda T_amb: np.array(40-T_amb)
@@ -23,15 +20,8 @@ def _get_cop(hp_type, heating_type, df_heat_space, df_heat_water, air_temp, soil
     else: raise ValueError("Unknown heating system type!")
 
     ### Calculate T_sink-T_amb:
-    if hp_type=="ASHP":
-        dT_space = heating_func(air_temp) - air_temp
-        dT_water = 50 - air_temp
-    # if hp_type=="GSHP":
-    #     dT_space = heating_func(air_temp) - soil_temp - 5  # -5 to account for heat transfer of soil to brine
-    #     dT_water = 50 - soil_temp
-    # if hp_type=="WSHP":
-    #     dT_space = heating_func(air_temp) - 10 - 5         # assume 10°C water temperature - 5 loss for intermediate heat exchangers 
-    #     dT_water = np.ones((8760))*(50 - 10 - 5)
+    dT_space = heating_func(air_temp) - air_temp
+    dT_water = 50 - air_temp
 
     ### Clip to minimum temperature difference of 15K:
     dT_space = pd.DataFrame(dT_space).clip(lower=15)
@@ -59,15 +49,21 @@ def _get_cop(hp_type, heating_type, df_heat_space, df_heat_water, air_temp, soil
 ##############################################################
 ############## Generation, Publicly Callable #################
 ##############################################################
-def get_norm_outside_temperature(zip_code):
-    """Return the exact postcode-specific norm outside temperature."""
-    postcode = str(zip_code).zfill(5)
-    site_data = pd.read_csv(
+@functools.cache
+def site_data() -> pd.DataFrame:
+    """Return the DistrictGenerator postcode climate table, read once per process."""
+    return pd.read_csv(
         f"{config.DISTGEN_DATA_PATH}/site_data.txt",
         delimiter="\t",
         dtype={"Zip": str},
     )
-    match = site_data[site_data["Zip"].eq(postcode)]
+
+
+def get_norm_outside_temperature(zip_code):
+    """Return the exact postcode-specific norm outside temperature."""
+    postcode = str(zip_code).zfill(5)
+    sites = site_data()
+    match = sites[sites["Zip"].eq(postcode)]
     if len(match) != 1:
         raise ValueError(
             f"Expected one exact postcode climate entry for {postcode}, found {len(match)}."
@@ -105,19 +101,15 @@ def sample_statistics(df_buildings, base_seed=0):
     return df_buildings
 
 def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_seed=0):
+    """Simulate TEASER space heat and OpenDHW hot water (kWh per hour and bus).
+
+    The INFDB ``ro_heat`` source does not use this function (see
+    ``Grid.generate_heat``).
+    """
     if "residential_effective_floor_area_m2" not in df_buildings.columns:
         raise ValueError(
             "Residential heat requires residential_effective_floor_area_m2 from the component manifest."
         )
-    if getattr(config, "SPACE_HEAT_SOURCE", "teaser") == "infdb_ro_heat":
-        space_heat, audit = load_space_heat(df_buildings)
-        if audit["space_heat_source_fallback"]:
-            print(
-                "WARNING: preliminary ro_heat fallback used: "
-                f"{audit['space_heat_source_fallback']} for "
-                f"{audit['space_heat_source_fallback_buildings']} building(s)."
-            )
-        return space_heat, generate_opendhw(df_buildings, base_seed=base_seed)
 
     # Import the legacy generator lazily. The INFDB ro_heat path must not load
     # TEASER or execute any DistrictGenerator code.
@@ -155,8 +147,8 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_
 
     # Extract location data
     zip_code = str(zip)
-    site_data = pd.read_csv(f"{config.DISTGEN_DATA_PATH}/site_data.txt", delimiter='\t', dtype={'Zip': str})
-    if zip_code not in set(site_data["Zip"]):
+    sites = site_data()
+    if zip_code not in set(sites["Zip"]):
         raise ValueError(
             f"No exact postcode climate entry for {zip_code}. Numeric postcode "
             "proximity is not a geographic climate fallback."
@@ -164,7 +156,7 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_
     # print(site_data)
     # Simulate heating
     heat_data = Datahandler(scenario, scenario_name = "example", zip_code = zip_code)
-    heat_data.generateEnvironment(weather_data, site_data)
+    heat_data.generateEnvironment(weather_data, sites)
     heat_data.initializeBuildings()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", FutureWarning)
@@ -178,42 +170,41 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_
 
     return df_space_heat, df_dhw
 
+def require_heat_profiles(buses, df_heat_space, df_heat_water):
+    """Raise if a selected heat bus has no space-heat or hot-water profile.
+
+    Heat sizing treats a missing profile column as zero demand, so a building
+    dropped by a generator would otherwise be sized at 0 kW without an error.
+    """
+    missing = [
+        bus
+        for bus in dict.fromkeys(buses)
+        if (bus, "space_heat") not in df_heat_space.columns
+        or (bus, "water_heat") not in df_heat_water.columns
+    ]
+    if missing:
+        raise ValueError(
+            f"Heat generation produced no profile for selected heat bus(es) {missing[:10]}."
+        )
+
 def generate_hp_cop(df_buildings, df_heat_space, df_heat_water, df_weather):
+    """Return one air-source heat pump COP series per heat bus.
+
+    Demand columns are already shared-bus aggregates; the heating system
+    (radiator or floor) of the first building on a bus sets the sink
+    temperature.
+    """
     air_temp = df_weather["temp_air"]
-    soil_temp = df_weather["soil_temp"]
-
-    ### Generation
     cop_dict = {}
-
-    # Air-source: demand columns are already shared-bus aggregates.
     for bus, group in df_buildings.groupby("bus", sort=True):
-        hp_type = "ASHP"
         if (bus, "space_heat") not in df_heat_space.columns:
             continue
-        row = group.iloc[0]
-        heating_type = row["heating_type"]
+        heating_type = group.iloc[0]["heating_type"]
         space_heat = pd.DataFrame(df_heat_space[bus, "space_heat"])
         water_heat = pd.DataFrame(df_heat_water[bus, "water_heat"])
-        cop_dict[bus] = _get_cop(hp_type, heating_type, space_heat, water_heat, air_temp, soil_temp)
+        cop_dict[bus] = _get_cop(heating_type, space_heat, water_heat, air_temp)
     if not cop_dict:
         return pd.DataFrame(index=df_heat_space.index)
     cops_air = pd.concat([cop for _,cop in cop_dict.items()], axis=1)
     cops_air.columns = pd.MultiIndex.from_tuples([(col, "heatpump_air") for col in cop_dict.keys()])
-
-    # # Ground-source
-    # for _, row in df_buildings.iterrows():
-    #     hp_type = "GSHP"
-    #     bus = row["bus"]
-    #     # hp_type = row["hp_type"]
-    #     heating_type = row["heating_type"]
-        
-    #     space_heat = pd.DataFrame(df_heat_space[bus, "space_heat"])
-    #     water_heat = pd.DataFrame(df_heat_water[bus, "water_heat"])
-
-    #     cop_dict[bus] = _get_cop(hp_type, heating_type, space_heat, water_heat, air_temp, soil_temp)
-    # cops_grd = pd.concat([cop for _,cop in cop_dict.items()], axis=1)
-    # cops_grd.columns = pd.MultiIndex.from_tuples([(col, "heatpump_grd") for col in cop_dict.keys()])
-
-    # cops = pd.concat([cops_air, cops_grd], axis=1)
-    cops = cops_air
-    return cops
+    return cops_air

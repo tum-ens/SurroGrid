@@ -9,7 +9,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from gridexpand.common.building_components import residential_component_mask
@@ -27,9 +26,16 @@ from gridexpand.scenario.config_loader import (
 from gridexpand.allocation.assets.pv.roof_catalog import (
     building_lod2_capacity,
     load_lod2_roof_catalog,
+    roof_catalog_options,
+)
+from gridexpand.allocation.electrification import (
+    INVENTORY_COLUMNS,
+    check_heat_profile_source,
+    electrification_inventory,
+    file_sha256,
+    has_household,
 )
 import gridexpand.allocation.functions.electricity as electricity
-import gridexpand.allocation.functions.heat as heat
 import gridexpand.allocation.functions.mobility as mobility
 from gridexpand.scenario.synthetic_ags_runner import get_candidates
 
@@ -89,13 +95,8 @@ def _prepare_grid_inventory(
     components = database.read_building_components(candidate, physical)
     selected_components = _selected_components(components, demand_scope)
     selected_components["objectid"] = selected_components["objectid"].astype(str)
-    selected_components = electricity.sample_statistics(
+    selected_components, _, _ = electricity.profile_components(
         selected_components, base_seed=profile_seed
-    )
-    selected_components, _, _ = electricity.get_elec_demand(
-        selected_components,
-        base_seed=profile_seed,
-        return_component_profiles=True,
     )
 
     if demand_scope == "residential":
@@ -103,36 +104,10 @@ def _prepare_grid_inventory(
         physical = physical.loc[
             physical["objectid"].astype(str).isin(selected_ids)
         ].copy()
-    else:
-        physical = physical.copy()
+    physical = electricity.aggregate_components_to_buildings(
+        physical, selected_components, residential_area=True
+    )
     physical["building_objectid"] = physical["objectid"].astype(str)
-    annual = selected_components.groupby("objectid")[
-        "annual_electricity_kwh"
-    ].sum()
-    residential_area = (
-        selected_components.loc[
-            selected_components["component_category"].eq("Residential")
-        ]
-        .groupby("objectid")["effective_floor_area_m2"]
-        .sum()
-    )
-    occupancy = (
-        selected_components.loc[
-            selected_components["component_category"].eq("Residential")
-        ]
-        .drop_duplicates("objectid")
-        .set_index("objectid")["occ_list"]
-    )
-    physical["annual_electricity_kwh"] = (
-        physical["building_objectid"].map(annual).fillna(0.0)
-    )
-    physical["residential_effective_floor_area_m2"] = (
-        physical["building_objectid"].map(residential_area).fillna(0.0)
-    )
-    physical["occ_list"] = physical["building_objectid"].map(occupancy)
-    physical["occ_list"] = physical["occ_list"].apply(
-        lambda value: value if isinstance(value, (list, tuple)) else []
-    )
     allowed_models = (
         mobility.get_pool_supported_models()
         if mobility_source == "pool"
@@ -146,39 +121,6 @@ def _prepare_grid_inventory(
     )
     owned["candidate_index"] = int(candidate["candidate_index"])
     return owned
-
-
-def _resolve_heat_profile_eligibility(
-    physical: pd.DataFrame,
-    database: SurroGridDatabase,
-    source: str,
-) -> set[str]:
-    """Resolve valid source coverage before selecting heat adopters."""
-    residential = pd.to_numeric(
-        physical["residential_effective_floor_area_m2"], errors="coerce"
-    ).fillna(0.0).gt(0.0)
-    residential_ids = set(physical.loc[residential, "building_objectid"].astype(str))
-    if source == "teaser":
-        return residential_ids
-    if source != "infdb_ro_heat":
-        raise ValueError(f"Unknown space heat source {source!r}.")
-    if not residential_ids:
-        return set()
-
-    heat_buildings = physical.loc[residential].copy()
-    gross_area = (
-        pd.to_numeric(heat_buildings["floor_area"], errors="coerce")
-        * pd.to_numeric(heat_buildings["floor_number"], errors="coerce")
-    )
-    heat_buildings["residential_area_share"] = (
-        pd.to_numeric(
-            heat_buildings["residential_effective_floor_area_m2"],
-            errors="coerce",
-        )
-        / gross_area
-    )
-    heat.load_space_heat(heat_buildings, engine=database.engine)
-    return residential_ids
 
 
 def _build_inventory(
@@ -219,65 +161,31 @@ def _build_inventory(
     residential = pd.to_numeric(
         physical["residential_effective_floor_area_m2"], errors="coerce"
     ).fillna(0.0).gt(0.0)
-    heat_eligible_ids = _resolve_heat_profile_eligibility(
-        physical,
-        database,
+    check_heat_profile_source(
         scenario.heat.space_heat_source,
-    )
-    physical["heat_eligible"] = physical["building_objectid"].isin(
-        heat_eligible_ids
-    )
-    physical["heat_exclusion_reason"] = np.select(
-        [~residential, ~physical["heat_eligible"]],
-        ["no_residential_component", "no_valid_heat_profile_source"],
-        default=None,
-    )
-    household = physical["occ_list"].map(
-        lambda value: isinstance(value, (list, tuple)) and len(value) > 0
-    )
-    vehicles = pd.to_numeric(
-        physical["n_cars_tot"], errors="coerce"
-    ).fillna(0.0)
-    physical["mobility_eligible"] = (
-        residential & household & vehicles.gt(0.0)
-    )
-    physical["mobility_exclusion_reason"] = np.select(
-        [~residential, ~household, vehicles.le(0.0)],
-        ["no_residential_component", "no_household", "no_vehicle_inventory"],
-        default=None,
+        physical.loc[residential],
+        engine=database.engine,
     )
 
-    roof_options = {
-        "tilt_bin_deg": scenario.pv.tilt_bin_degrees,
-        "azimuth_bin_deg": scenario.pv.azimuth_bin_degrees,
-        "module_capacity_kw_per_m2": scenario.pv.module_capacity_kw_per_m2,
-        "flat_roof_utilization": scenario.pv.flat_roof_utilization,
-        "slanted_roof_utilization": scenario.pv.slanted_roof_utilization,
-        "fallback_capacity_kw": scenario.pv.fallback_capacity_kwp,
-    }
+    roof_options = roof_catalog_options(scenario.pv)
     roofs = load_lod2_roof_catalog(
         database.engine,
         physical["building_objectid"],
         **roof_options,
     )
-    roof_capacity = building_lod2_capacity(roofs)
-    physical["pv_battery_eligible"] = (
-        physical["building_objectid"].map(roof_capacity).fillna(0.0).gt(0.0)
-        & pd.to_numeric(physical["annual_electricity_kwh"], errors="coerce")
-        .fillna(0.0)
-        .gt(0.0)
+    # Exclusion reasons follow the roof-first order of the in-grid assignment
+    # (B4: a building without roof and base electricity used to be labelled
+    # no_base_electricity here and no_usable_lod2_roof in Grid).
+    inventory = electrification_inventory(
+        physical["building_objectid"],
+        residential=residential,
+        has_household=has_household(physical["occ_list"]),
+        vehicle_count=physical["n_cars_tot"],
+        roof_capacity_kw=physical["building_objectid"].map(building_lod2_capacity(roofs)),
+        annual_electricity_kwh=physical["annual_electricity_kwh"],
     )
-    physical["pv_battery_exclusion_reason"] = "no_usable_lod2_roof"
-    physical.loc[
-        physical["pv_battery_eligible"], "pv_battery_exclusion_reason"
-    ] = None
-    physical.loc[
-        ~physical["pv_battery_eligible"]
-        & pd.to_numeric(physical["annual_electricity_kwh"], errors="coerce")
-        .fillna(0.0)
-        .le(0.0),
-        "pv_battery_exclusion_reason",
-    ] = "no_base_electricity"
+    for column in INVENTORY_COLUMNS:
+        physical[column] = inventory[column]
 
     if source_evidence_path is not None:
         evidence = pd.read_csv(source_evidence_path)
@@ -343,6 +251,8 @@ def prepare_regional_electrification_assignment(
     assignment.to_csv(output_path, index=False)
     # Hash the CSV as consumers read it: empty strings become NaN on reload.
     manifest_hash = assignment_manifest_hash(pd.read_csv(output_path))
+    # Step 2 verifies this digest instead of re-hashing every row per grid.
+    file_hash = file_sha256(output_path)
     summary.to_csv(
         output_path.with_name("electrification_assignment_summary.csv"),
         index=False,
@@ -371,6 +281,7 @@ def prepare_regional_electrification_assignment(
         "physical_building_count": int(inventory["building_objectid"].nunique()),
         "roof_section_count": int(len(roofs)),
         "assignment_hash": manifest_hash,
+        "assignment_file_sha256": file_hash,
         "assignment_summary": summary.to_dict("records"),
         "candidate_grid_manifest": [
             _candidate_identity(candidate) for candidate in candidates

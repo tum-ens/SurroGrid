@@ -9,6 +9,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from gridexpand.allocation.functions.dst import dst_shift_output
+
 PF_ELC = 0.959
 MEASURED_PROFILE_SELECTION_CLOSEST = "closest"
 MEASURED_PROFILE_SELECTION_RANDOM_BAND = "random_band"
@@ -58,19 +60,7 @@ def add_output_data_daylight_saving_shift(df_ts: pd.DataFrame) -> pd.DataFrame:
     """Apply the civil-time DST exchange while preserving annual energy."""
     if df_ts.empty:
         return df_ts.copy()
-    ts_hour1 = 2090
-    ts_hour2 = 7130
-    df_ts = df_ts.copy()
-    annual_energy = df_ts.sum(axis=0)
-    new_row = df_ts.iloc[ts_hour2].copy()
-    new_row_df = pd.DataFrame([new_row], columns=df_ts.columns)
-    shifted = pd.concat(
-        [df_ts.iloc[: ts_hour2 + 1], new_row_df, df_ts.iloc[ts_hour2 + 1 :]]
-    ).reset_index(drop=True)
-    shifted = shifted.drop(index=ts_hour1).reset_index(drop=True)
-    shifted_energy = shifted.sum(axis=0)
-    scale = annual_energy.divide(shifted_energy.where(shifted_energy.ne(0.0), 1.0))
-    return shifted.mul(scale, axis=1)
+    return dst_shift_output(df_ts, preserve_energy=True)
 
 
 def select_residential_profile(

@@ -162,46 +162,35 @@ class Datahandler:
 
         # initialize buildings for scenario
         # loop over all buildings
+        # GridExpand: errors propagate. Upstream printed them and skipped the
+        # building, which left a selected heat building without a profile.
         for id in self.scenario["id"]:
+            # Check if ID is a number
             try:
-                # Check if ID is a number
-                try:
-                    # Try to convert id to float to check if it's numeric
-                    float(id)
-                except (ValueError, TypeError):
-                    raise ValueError(f"Building ID '{id}' is not a number")
+                # Try to convert id to float to check if it's numeric
+                float(id)
+            except (ValueError, TypeError):
+                raise ValueError(f"Building ID '{id}' is not a number") from None
 
-                # Create empty dict for observed building
-                building = {}
+            # Create empty dict for observed building
+            building = {}
 
-                # Store features of the observed building
-                building["buildingFeatures"] = self.scenario.loc[id]
+            # Store features of the observed building
+            building["buildingFeatures"] = self.scenario.loc[id]
 
-                # %% Create unique building name
-                # needed for loading and storing data with unique name
-                # name is composed of building id, and building type
-                name = str(id)
-                # Check if the name is already in the district
-                if name in name_pool:
-                    raise ValueError(f"Building name '{name}' is not unique. ID collision detected.")
-                name_pool.append(name)
-                # Assign the unique name to the building
-                building["unique_name"] = name
+            # %% Create unique building name
+            # needed for loading and storing data with unique name
+            # name is composed of building id, and building type
+            name = str(id)
+            # Check if the name is already in the district
+            if name in name_pool:
+                raise ValueError(f"Building name '{name}' is not unique. ID collision detected.")
+            name_pool.append(name)
+            # Assign the unique name to the building
+            building["unique_name"] = name
 
-                # Append building to district
-                self.district.append(building)
-
-            except ValueError as e:
-                # Handle the case where we have a duplicate name
-                print(f"Error: {e}")
-                print(f"The building ID must be a unique number to ensure proper identification and data tracking.")
-                print(f"Building with ID {id} will be skipped and not added to the district")
-                continue
-            except Exception as e:
-                # Handle any other unexpected errors
-                print(f"Unexpected error processing building ID {id}: {e}")
-                print(f"Building with ID {id} will be skipped and not added to the district.")
-                continue
+            # Append building to district
+            self.district.append(building)
 
 
     def generateBuildings(self):

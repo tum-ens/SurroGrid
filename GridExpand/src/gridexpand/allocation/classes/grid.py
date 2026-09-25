@@ -1,19 +1,19 @@
 from gridexpand.allocation.config import config
 
-import json
-from pathlib import Path
-
 import pandas as pd
 import numpy as np
 from multiprocessing import Pool
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_EXCEPTION
-import heapq
 
 import gridexpand.allocation.classes.save_grid as svgrd
-import gridexpand.allocation.functions.weather as wth
+import gridexpand.common.weather as weather
 import gridexpand.allocation.functions.electricity as elc
 import gridexpand.allocation.functions.heat as heat
 import gridexpand.allocation.functions.mobility as mbl
+from gridexpand.allocation.functions.dst import dst_shift_input, dst_shift_output
+from gridexpand.allocation.functions.infdb_ro_heat import generate_opendhw, load_space_heat
+from gridexpand.allocation.functions.partition import partition_df_by_cpu
+from gridexpand.allocation.summary import electrification_asset_plan_summary, selected_buildings
 from gridexpand.allocation.assets.battery.materialization import materialize_battery_urbs_inputs
 from gridexpand.allocation.assets.battery.sizing import build_battery_asset_plan
 from gridexpand.allocation.assets.heat.materialization import materialize_heat_urbs_inputs
@@ -25,6 +25,7 @@ from gridexpand.allocation.assets.pv.roof_catalog import (
     building_lod2_capacity,
     load_lod2_roof_catalog,
     read_lod2_roof_catalog_hdf,
+    roof_catalog_options,
 )
 from gridexpand.allocation.assets.pv.sizing import build_pv_asset_plan
 from gridexpand.common.reproducibility import (
@@ -33,6 +34,13 @@ from gridexpand.common.reproducibility import (
     realization_id,
 )
 from gridexpand.common.building_components import residential_component_mask
+from gridexpand.allocation.electrification import (
+    INVENTORY_COLUMNS,
+    check_heat_profile_source,
+    electrification_inventory,
+    has_household,
+    load_prepared_assignment,
+)
 from gridexpand.common.electrification import (
     assignment_manifest_hash,
     assignment_summary,
@@ -77,7 +85,6 @@ class Grid:
             raise ValueError("Missing region metadata in input file (/raw_data/region).")
 
         region_row = self.df_region.iloc[0]
-        self.region = int(region_row["regio7"])            # regiostar region used for mobility statistics
         self.plz = str(region_row["plz"]).zfill(5)         # plz of assumed grid position (not of pylovo grid used as representation)
         self.location = {"lat": float(region_row["lat"]), # latitude of transformer position used for weather data
                          "lon": float(region_row["lon"])} # longitude of transformer position used for weather data
@@ -89,7 +96,6 @@ class Grid:
         self.df_demand_elec = pd.DataFrame()
         self.df_electricity_component_profiles = pd.DataFrame()
         self.df_demand_component_audit = pd.DataFrame()
-        # self.df_demand_elec_react = pd.DataFrame()
         self.df_demand_heat_space = pd.DataFrame()
         self.df_demand_heat_water = pd.DataFrame()
         self._space_heat_source_audit = {}
@@ -206,49 +212,6 @@ class Grid:
         self.settings["scenario_assumptions"].update(values)
         self.SF.update_timeframe_metadata(self.settings["scenario_assumptions"])
 
-    def _build_demand_component_audit(self):
-        """Create compact component evidence for the current allocation run."""
-        base = self.df_building_components.copy()
-        profiled = self.df_demand_components.set_index("component_id")
-        profile_ids = [
-            str(column[0]) for column in self.df_electricity_component_profiles.columns
-        ]
-        profile_max = self.df_electricity_component_profiles.max(axis=0)
-        profile_max.index = profile_ids
-        audit = base.rename(columns={"component_category": "category"})
-        audit["scenario_unit_id"] = audit["objectid"].astype(str)
-        audit["commodity"] = "electricity"
-        audit["annual_energy_kwh"] = audit["component_id"].map(
-            profiled["annual_electricity_kwh"]
-        ).fillna(0.0)
-        audit["max_profile_value"] = audit["component_id"].map(profile_max).fillna(0.0)
-        audit["profile_hash"] = audit["component_id"].map(profiled["profile_hash"])
-        audit["profile_method"] = audit["component_id"].map(
-            profiled["profile_method"]
-        ).fillna("not_allocated")
-        audit["stable_seed"] = audit["component_id"].map(profiled["stable_seed"])
-        selected_ids = set(self.df_demand_components["component_id"].astype(str))
-        audit["suppression_reason"] = audit.apply(
-            lambda row: (
-                "outside_lv_scope" if not bool(row["included_in_lv"])
-                else None if str(row["component_id"]) in selected_ids
-                else "outside_demand_scope"
-            ),
-            axis=1,
-        )
-        audit["source_asset_count"] = pd.NA
-        audit["matched_swf_asset_count"] = pd.NA
-        audit["mv_direct"] = audit["mv_direct"].astype(bool)
-        return audit[
-            [
-                "component_id", "objectid", "scenario_unit_id", "bus", "category",
-                "commodity", "annual_energy_kwh", "max_profile_value", "profile_hash",
-                "profile_method", "stable_seed", "source_asset_count",
-                "matched_swf_asset_count", "included_in_lv", "suppression_reason",
-                "pylovo_version_id", "mix_score", "mix_rule", "mix_confidence", "mv_direct",
-            ]
-        ]
-
 
     def _electrification_scope_id(self) -> str:
         """Return the stable population identity used by the assignment manifest."""
@@ -319,49 +282,6 @@ class Grid:
             )
         self._mobility_ownership_ready = True
 
-    def _resolve_heat_profile_eligibility(
-        self,
-        physical: pd.DataFrame,
-        residential_components: pd.DataFrame,
-        residential_ids: set[str],
-    ) -> set[str]:
-        """Resolve the active heat source before selecting heat adopters."""
-        source = getattr(heat.config, "SPACE_HEAT_SOURCE", "teaser")
-        if not residential_ids:
-            return set()
-        if source == "teaser":
-            return set(residential_ids)
-        if source != "infdb_ro_heat":
-            raise ValueError(f"Unknown space heat source {source!r}.")
-
-        areas = (
-            residential_components.groupby("objectid")["effective_floor_area_m2"]
-            .sum()
-            .rename("residential_effective_floor_area_m2")
-        )
-        heat_buildings = physical.loc[
-            physical["building_objectid"].isin(residential_ids)
-        ].copy()
-        heat_buildings["residential_effective_floor_area_m2"] = (
-            heat_buildings["building_objectid"].map(areas).fillna(0.0)
-        )
-        gross_area = (
-            pd.to_numeric(heat_buildings["floor_area"], errors="coerce")
-            * pd.to_numeric(heat_buildings["floor_number"], errors="coerce")
-        )
-        heat_buildings["residential_area_share"] = (
-            pd.to_numeric(
-                heat_buildings["residential_effective_floor_area_m2"],
-                errors="coerce",
-            )
-            / gross_area
-        )
-        heat.load_space_heat(
-            heat_buildings,
-            engine=self.SF.db.engine if self.SF.db is not None else None,
-        )
-        return set(residential_ids)
-
     def prepare_electrification_assignment(
         self, roof_catalog: pd.DataFrame | None = None
     ) -> pd.DataFrame:
@@ -373,51 +293,14 @@ class Grid:
         assignment_source_hash = None
         assignment_source_summary = None
         if assignment_path:
-            path = Path(assignment_path)
-            if path.suffix.lower() in {".csv", ".txt"}:
-                existing = pd.read_csv(path)
-            else:
-                existing = pd.read_hdf(
-                    path, key="raw_data/electrification_assignment"
+            assignment, assignment_source_hash, assignment_source_summary = (
+                load_prepared_assignment(
+                    assignment_path,
+                    self.df_buildings["objectid"],
+                    scenario_hash=self.settings.get("scenario_hash"),
+                    profile_seed=self.profile_seed,
                 )
-            full_assignment_hash = assignment_manifest_hash(existing)
-            ids = set(self.df_buildings["objectid"].astype(str))
-            existing["building_objectid"] = existing["building_objectid"].astype(str)
-            existing = existing.loc[
-                existing["building_objectid"].isin(ids)
-            ].copy()
-            expected = len(ids) * 3
-            if len(existing) != expected or existing.duplicated(
-                ["building_objectid", "technology"]
-            ).any():
-                raise ValueError(
-                    "The supplied electrification assignment is not one row per "
-                    "current physical building and technology."
-                )
-            assignment = existing.reset_index(drop=True)
-            metadata_path = path.with_suffix(".json")
-            if not metadata_path.exists():
-                raise ValueError(
-                    f"Prepared electrification assignment is missing sidecar: {metadata_path}"
-                )
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            assignment_source_hash = metadata.get("assignment_hash")
-            if assignment_source_hash != full_assignment_hash:
-                raise ValueError(
-                    "Prepared electrification assignment sidecar hash does not "
-                    "match the assignment rows."
-                )
-            if metadata.get("scenario_hash") != self.settings.get("scenario_hash"):
-                raise ValueError(
-                    "Prepared electrification assignment scenario_hash differs "
-                    "from the active Step-2 scenario."
-                )
-            if int(metadata.get("profile_seed", -1)) != int(self.profile_seed):
-                raise ValueError(
-                    "Prepared electrification assignment profile_seed differs "
-                    "from the active Step-2 run."
-                )
-            assignment_source_summary = metadata.get("assignment_summary")
+            )
         else:
             self._prepare_mobility_ownership()
             physical = self.df_buildings.copy()
@@ -428,34 +311,18 @@ class Grid:
             residential_components["objectid"] = (
                 residential_components["objectid"].astype(str)
             )
-            residential_ids = set(residential_components["objectid"])
-            heat_eligible_ids = self._resolve_heat_profile_eligibility(
-                physical,
-                residential_components,
-                residential_ids,
+            residential = physical["building_objectid"].isin(
+                set(residential_components["objectid"])
             )
-            physical["heat_eligible"] = physical["building_objectid"].isin(
-                heat_eligible_ids
+            areas = residential_components.groupby("objectid")["effective_floor_area_m2"].sum()
+            heat_buildings = physical.loc[residential].copy()
+            heat_buildings["residential_effective_floor_area_m2"] = (
+                heat_buildings["building_objectid"].map(areas).fillna(0.0)
             )
-            residential_buildings = physical["building_objectid"].isin(residential_ids)
-            physical["heat_exclusion_reason"] = np.select(
-                [~residential_buildings, ~physical["heat_eligible"]],
-                ["no_residential_component", "no_valid_heat_profile_source"],
-                default=None,
-            )
-            household = physical["occ_list"].apply(
-                lambda value: isinstance(value, (list, tuple, np.ndarray)) and len(value) > 0
-            )
-            vehicles = pd.to_numeric(
-                physical["n_cars_tot"], errors="coerce"
-            ).fillna(0.0)
-            physical["mobility_eligible"] = (
-                residential_buildings & household & vehicles.gt(0.0)
-            )
-            physical["mobility_exclusion_reason"] = np.select(
-                [~residential_buildings, ~household, vehicles.le(0.0)],
-                ["no_residential_component", "no_household", "no_vehicle_inventory"],
-                default=None,
+            check_heat_profile_source(
+                self.settings["scenario_config"].heat.space_heat_source,
+                heat_buildings,
+                engine=self.SF.db.engine if self.SF.db is not None else None,
             )
             if roof_catalog is None:
                 roof_capacity = pd.Series(0.0, index=physical.index)
@@ -468,19 +335,16 @@ class Grid:
                     .fillna(0.0)
                     .set_axis(physical.index)
                 )
-            annual = pd.to_numeric(
-                physical["annual_electricity_kwh"], errors="coerce"
-            ).fillna(0.0)
-            physical["pv_roof_eligible"] = roof_capacity.gt(0.0) & annual.gt(0.0)
-            physical["pv_battery_eligible"] = physical["pv_roof_eligible"]
-            physical["pv_battery_exclusion_reason"] = np.select(
-                [
-                    roof_capacity.le(0.0),
-                    annual.le(0.0),
-                ],
-                ["no_usable_lod2_roof", "no_base_electricity"],
-                default=None,
+            inventory = electrification_inventory(
+                physical["building_objectid"],
+                residential=residential,
+                has_household=has_household(physical["occ_list"]),
+                vehicle_count=physical["n_cars_tot"],
+                roof_capacity_kw=roof_capacity,
+                annual_electricity_kwh=physical["annual_electricity_kwh"],
             )
+            for column in INVENTORY_COLUMNS:
+                physical[column] = inventory[column]
             source_columns = {
                 technology: column
                 for technology in ("heat", "mobility", "pv_battery")
@@ -531,209 +395,45 @@ class Grid:
         return assignment
 
     def _selected_buildings(self, technology: str) -> set[str]:
+        return selected_buildings(self.df_electrification_assignment, technology)
+
+    def record_asset_plan_summary(self) -> None:
+        """Add the asset-plan summary to the run assumptions (full profiles)."""
         if self.df_electrification_assignment.empty:
-            raise ValueError("Electrification assignment has not been prepared.")
-        return set(
-            self.df_electrification_assignment.loc[
-                self.df_electrification_assignment["technology"].eq(technology)
-                & self.df_electrification_assignment["selected"].astype(bool),
-                "building_objectid",
-            ].astype(str)
-        )
-
-    @staticmethod
-    def _positive_plan_count(
-        plan: pd.DataFrame,
-        building_column: str,
-        capacity_column: str,
-    ) -> int:
-        if plan.empty or building_column not in plan or capacity_column not in plan:
-            return 0
-        capacity = pd.to_numeric(plan[capacity_column], errors="coerce").fillna(0.0)
-        return int(plan.loc[capacity.gt(0.0), building_column].astype(str).nunique())
-
-    @staticmethod
-    def _plan_sum(plan: pd.DataFrame, column: str) -> float:
-        if plan.empty or column not in plan:
-            return 0.0
-        return float(pd.to_numeric(plan[column], errors="coerce").fillna(0.0).sum())
-
-    def _electrification_asset_plan_summary(self) -> dict[str, dict[str, object]]:
-        """Expose selected cohorts separately from positive materialized capacity."""
-        if self.df_electrification_assignment.empty:
-            return {}
-
-        selected_by_technology = {
-            technology: self._selected_buildings(technology)
-            for technology in ("heat", "mobility", "pv_battery")
-        }
-        summary: dict[str, dict[str, object]] = {
-            technology: {
-                "reporting_stage": "step2_urbs_input",
-                "selected_candidate_building_count": int(
-                    len(selected_by_technology[technology])
-                ),
-            }
-            for technology in selected_by_technology
-        }
-
-        pv_capacity = self._plan_sum(self.df_pv_asset_plan, "pv_max_kwp")
-        pv_installed = self._plan_sum(
-            self.df_pv_asset_plan, "pv_installed_kwp"
-        )
-        battery_capacity = self._plan_sum(
-            self.df_battery_asset_plan, "battery_capacity_upper_kwh"
-        )
-        battery_installed = self._plan_sum(
-            self.df_battery_asset_plan, "battery_installed_kwh"
-        )
-        summary["pv_battery"].update(
-            {
-                "step2_materialized_asset_count": self._positive_plan_count(
-                    self.df_pv_asset_plan,
-                    "building_objectid",
-                    "pv_max_kwp",
-                ),
-                "positive_pv_capacity_upper_bound_building_count": self._positive_plan_count(
-                    self.df_pv_asset_plan,
-                    "building_objectid",
-                    "pv_max_kwp",
-                ),
-                "positive_pv_input_installed_building_count": self._positive_plan_count(
-                    self.df_pv_asset_plan,
-                    "building_objectid",
-                    "pv_installed_kwp",
-                ),
-                "step2_input_capacity_kw": pv_capacity,
-                "step2_input_installed_capacity_kw": pv_installed,
-                "positive_battery_capacity_upper_bound_building_count": self._positive_plan_count(
-                    self.df_battery_asset_plan,
-                    "building_objectid",
-                    "battery_capacity_upper_kwh",
-                ),
-                "positive_battery_input_installed_building_count": self._positive_plan_count(
-                    self.df_battery_asset_plan,
-                    "building_objectid",
-                    "battery_installed_kwh",
-                ),
-                "step2_materialized_battery_candidate_count": self._positive_plan_count(
-                    self.df_battery_asset_plan,
-                    "building_objectid",
-                    "battery_capacity_upper_kwh",
-                ),
-                "battery_capacity_upper_bound_kwh": battery_capacity,
-                "battery_input_installed_capacity_kwh": battery_installed,
-                "pv_supply_profile_sum_hours": float(
-                    self.df_supim_solar.apply(pd.to_numeric, errors="coerce")
-                    .fillna(0.0)
-                    .to_numpy()
-                    .sum()
-                ),
-                "pv_supply_profile_basis": "per_unit_available_pv_output",
-            }
-        )
-
-        heat_capacity = self._plan_sum(
-            self.df_heat_asset_plan, "heat_pump_capacity_upper_kw_el"
-        )
-        heat_installed = self._plan_sum(
-            self.df_heat_asset_plan, "heat_pump_installed_kw_el"
-        )
-        summary["heat"].update(
-            {
-                "step2_materialized_asset_count": self._positive_plan_count(
-                    self.df_heat_asset_plan,
-                    "building_objectid",
-                    "heat_pump_capacity_upper_kw_el",
-                ),
-                "positive_heat_pump_capacity_upper_bound_building_count": self._positive_plan_count(
-                    self.df_heat_asset_plan,
-                    "building_objectid",
-                    "heat_pump_capacity_upper_kw_el",
-                ),
-                "positive_heat_pump_input_installed_building_count": self._positive_plan_count(
-                    self.df_heat_asset_plan,
-                    "building_objectid",
-                    "heat_pump_installed_kw_el",
-                ),
-                "step2_capacity_upper_kw_el": heat_capacity,
-                "step2_input_installed_capacity_kw_el": heat_installed,
-                "selected_building_base_electricity_kwh": float(
-                    self.df_buildings.loc[
-                        self.df_buildings["objectid"].astype(str).isin(
-                            selected_by_technology["heat"]
-                        ),
-                        "annual_electricity_kwh",
-                    ]
-                    .pipe(pd.to_numeric, errors="coerce")
-                    .fillna(0.0)
-                    .sum()
-                )
-                if "annual_electricity_kwh" in self.df_buildings
-                else 0.0,
-                "heat_electricity_outcome_basis": "solver_output_not_step2_input",
-                "annual_heat_demand_kwh_th": self._plan_sum(
-                    self.df_heat_asset_plan, "annual_space_heat_kwh"
-                )
-                + self._plan_sum(
-                    self.df_heat_asset_plan, "annual_water_heat_kwh"
-                ),
-            }
-        )
-
-        if not self.df_demand_mobility.empty and "n_cars_tot" in self.df_buildings:
-            selected_mobility = self.df_buildings["objectid"].astype(str).isin(
-                selected_by_technology["mobility"]
+            return
+        self.settings["scenario_assumptions"] = self._scenario_assumptions()
+        self.settings["scenario_assumptions"]["electrification_asset_plan_summary"] = (
+            electrification_asset_plan_summary(
+                self.df_electrification_assignment,
+                pv_plan=self.df_pv_asset_plan,
+                battery_plan=self.df_battery_asset_plan,
+                heat_plan=self.df_heat_asset_plan,
+                pv_supply=self.df_supim_solar,
+                buildings=self.df_buildings,
+                mobility_demand=self.df_demand_mobility,
+                battery_dict=self.battery_dict,
+                home_charger_kw=self.settings["scenario_config"].technologies.processes[
+                    "home_charger"
+                ]["installed_capacity_kw"],
             )
-            cars = pd.to_numeric(
-                self.df_buildings["n_cars_tot"], errors="coerce"
-            ).fillna(0.0).where(selected_mobility, 0.0)
-            ev_count = int(cars.sum())
-            summary["mobility"].update(
-                {
-                    "step2_materialized_asset_count": ev_count,
-                    "positive_ev_building_count": int(cars.gt(0.0).sum()),
-                    "positive_ev_vehicle_count": ev_count,
-                    "ev_profile_count": int(len(self.battery_dict)),
-                    "step2_input_capacity_kw": float(
-                        getattr(config, "CS_INST_CAP", 0.0) * ev_count
-                    ),
-                    "annual_ev_charging_demand_kwh": float(
-                        self.df_demand_mobility.apply(pd.to_numeric, errors="coerce")
-                        .fillna(0.0)
-                        .to_numpy()
-                        .sum()
-                    ),
-                    "ev_energy_basis": "charging_demand_input",
-                }
-            )
-        else:
-            summary["mobility"].update(
-                {
-                    "step2_materialized_asset_count": 0,
-                    "positive_ev_building_count": 0,
-                    "positive_ev_vehicle_count": 0,
-                    "ev_profile_count": 0,
-                    "step2_input_capacity_kw": 0.0,
-                    "annual_ev_charging_demand_kwh": 0.0,
-                    "ev_energy_basis": "charging_demand_input",
-                }
-            )
-        return summary
+        )
+        self.SF.update_timeframe_metadata(self.settings["scenario_assumptions"])
 
     ############################################
     ########### Timeseries Generators ########## 
     ############################################
     # The order of these operations has to be followed (e.g. heat depends on electric results)
     def retrieve_weather(self):
-        if self.settings["weather_data_exists"]: pass
-        else:
-            # Get TMY data from SARAH3 dataset as DataFrame
-            self.df_weather_raw, self.altitude, selected_months = wth.get_pvgis_tmy_sarah3_dataframe(self.location["lat"], self.location["lon"])
-            # Add dew point temperature necessary for vehicle simulation
-            self.df_weather_raw["dew_point"] = wth.get_dew_point(self.df_weather_raw["temp_air"], self.df_weather_raw["relative_humidity"])
-            # Add soil temperature (1.00-2.55m) necessary for ground source heat pumps
-            self.df_weather_raw["soil_temp"] = wth.get_open_meteo_soil_temperature(self.location["lat"], self.location["lon"], selected_months)
+        """Download the PVGIS TMY for the grid location unless the input has weather."""
+        if self.settings["weather_data_exists"]:
+            return
+        self.df_weather_raw, self.altitude = weather.get_pvgis_tmy_sarah3_dataframe(
+            self.location["lat"], self.location["lon"], reference_year=config.REF_YEAR
+        )
+        # Dew point for the emobpy vehicle simulation.
+        self.df_weather_raw["dew_point"] = weather.get_dew_point(
+            self.df_weather_raw["temp_air"], self.df_weather_raw["relative_humidity"]
+        )
 
     def generate_solar(self):
         """Compile and materialize LoD2 PV after base electricity generation."""
@@ -752,14 +452,7 @@ class Grid:
         building_ids = self.df_buildings[id_column].astype(str)
         if building_ids.duplicated().any():
             raise ValueError("Ordinary scenario PV requires one row per physical building object ID.")
-        roof_options = {
-            "tilt_bin_deg": pv_config.tilt_bin_degrees,
-            "azimuth_bin_deg": pv_config.azimuth_bin_degrees,
-            "module_capacity_kw_per_m2": pv_config.module_capacity_kw_per_m2,
-            "flat_roof_utilization": pv_config.flat_roof_utilization,
-            "slanted_roof_utilization": pv_config.slanted_roof_utilization,
-            "fallback_capacity_kw": pv_config.fallback_capacity_kwp,
-        }
+        roof_options = roof_catalog_options(pv_config)
         if self.settings["storage"] == "db":
             self.df_pv_roof_catalog = load_lod2_roof_catalog(
                 self.SF.db.engine, building_ids, **roof_options
@@ -843,55 +536,29 @@ class Grid:
         )
 
     def generate_electricity(self):
-        # Profile the explicit electricity components. Physical rows receive
-        # only residential occupancy and aggregate annual demand for assets.
-        self.df_demand_components = elc.sample_statistics(
-            self.df_demand_components, self.profile_seed
-        )
+        """Profile the electricity components and aggregate them to buildings.
+
+        Physical rows receive only the residential occupancy and the annual
+        demand used by the asset rules.
+        """
         (
             self.df_demand_components,
             self.df_demand_elec,
             self.df_electricity_component_profiles,
-        ) = elc.get_elec_demand(
+        ) = elc.profile_components(self.df_demand_components, self.profile_seed)
+        self.df_buildings = elc.aggregate_components_to_buildings(
+            self.df_buildings, self.df_demand_components
+        )
+        self.df_demand_component_audit = elc.demand_component_audit(
+            self.df_building_components,
             self.df_demand_components,
-            base_seed=self.profile_seed,
-            return_component_profiles=True,
+            self.df_electricity_component_profiles,
         )
-        residential = self.df_demand_components.loc[
-            self.df_demand_components["component_category"].eq("Residential")
-        ]
-        occupancy_by_building = dict(
-            zip(
-                residential["objectid"].astype(str),
-                residential["occ_list"],
-            )
-        )
-        component_ids = self.df_demand_components["objectid"].astype(str)
-        annual_by_building = (
-            self.df_demand_components.assign(_building_objectid=component_ids)
-            .groupby("_building_objectid")["annual_electricity_kwh"]
-            .sum()
-        )
-        physical_ids = self.df_buildings["objectid"].astype(str)
-        self.df_buildings = self.df_buildings.copy()
-        self.df_buildings["occ_list"] = physical_ids.map(
-            occupancy_by_building
-        ).apply(
-            lambda value: value if isinstance(value, (list, tuple, np.ndarray)) else []
-        )
-        self.df_buildings["annual_electricity_kwh"] = physical_ids.map(
-            annual_by_building
-        ).fillna(0.0)
-        self.df_demand_component_audit = self._build_demand_component_audit()
         self._record_profile_fingerprints(base_electricity=self.df_demand_elec)
-        # self.df_demand_elec_react = elc.get_elec_react_demand(self.df_demand_elec)
-
-        # Include daylight saving time effect (electricity timeseries are all UTC+1 only, thus include summer time demand shift):
-        # For normal elec demand only after heat, as still needed in this form!  
-        # self.df_demand_elec_react = self._add_output_data_daylight_saving_shift(self.df_demand_elec_react)
 
     def align_electricity_output_time(self):
-        self.df_demand_elec = self._add_output_data_daylight_saving_shift(self.df_demand_elec)
+        """Map the civil-time base electricity back to UTC+1 (DST shift)."""
+        self.df_demand_elec = dst_shift_output(self.df_demand_elec)
 
     def generate_heat(self):
         # This first sizing method intentionally electrifies residential heat only.
@@ -927,10 +594,10 @@ class Grid:
         )
 
         # Electricity is shifted here even when a grid has no residential heat.
-        df_wth_input = self._add_input_data_daylight_saving_shift(self.df_weather_raw)
+        df_wth_input = dst_shift_input(self.df_weather_raw)
         # A residential building whose sampled annual demand is 0 kWh has no
         # electricity column; its internal gains are then zero.
-        df_elec_input = self._add_input_data_daylight_saving_shift(self.df_demand_elec)
+        df_elec_input = dst_shift_input(self.df_demand_elec)
         self.align_electricity_output_time()
         if residential.empty:
             empty = pd.DataFrame(index=self.df_demand_elec.index)
@@ -953,14 +620,14 @@ class Grid:
                     )
                 self.df_buildings[column] = sampled_values
 
-        if getattr(heat.config, "SPACE_HEAT_SOURCE", "teaser") == "infdb_ro_heat":
+        if self.settings["scenario_config"].heat.space_heat_source == "infdb_ro_heat":
             # The INFDB loader aggregates by bus. Re-load with the selected
             # physical buildings so an unselected building sharing a bus cannot
             # contribute heat to the materialized profile.
             self.df_demand_heat_space, space_heat_source_audit = (
-                heat.load_space_heat(residential)
+                load_space_heat(residential)
             )
-            self.df_demand_heat_water = heat.generate_opendhw(
+            self.df_demand_heat_water = generate_opendhw(
                 residential, base_seed=self.profile_seed
             )
         elif self.settings["parallel"]:
@@ -968,7 +635,7 @@ class Grid:
                 f"Generating heat demands for {len(residential)} building(s) "
                 f"with {sum(residential["households"])} flat(s)..."
             )
-            building_subsets = self.partition_df_by_cpu(
+            building_subsets = partition_df_by_cpu(
                 residential, self.settings["n_cpu"], "households"
             )
             column_subsets = [
@@ -985,7 +652,7 @@ class Grid:
                 )
                 for index, subset in enumerate(building_subsets)
             ]
-            with Pool() as pool:
+            with Pool(processes=len(job_args)) as pool:
                 results = pool.starmap(heat.generate_heat_demands, job_args)
             self.df_demand_heat_space = pd.concat(
                 [result[0] for result in results], axis=1
@@ -1002,16 +669,15 @@ class Grid:
                 self.plz,
                 self.profile_seed,
             )
+        heat.require_heat_profiles(
+            residential["bus"], self.df_demand_heat_space, self.df_demand_heat_water
+        )
         self._space_heat_source_audit = dict(space_heat_source_audit)
         if space_heat_source_audit:
             self.settings["scenario_assumptions"].update(space_heat_source_audit)
 
-        self.df_demand_heat_space = self._add_output_data_daylight_saving_shift(
-            self.df_demand_heat_space
-        )
-        self.df_demand_heat_water = self._add_output_data_daylight_saving_shift(
-            self.df_demand_heat_water
-        )
+        self.df_demand_heat_space = dst_shift_output(self.df_demand_heat_space)
+        self.df_demand_heat_water = dst_shift_output(self.df_demand_heat_water)
 
         self._record_profile_fingerprints(
             space_heat=self.df_demand_heat_space,
@@ -1117,12 +783,11 @@ class Grid:
                 vehicles = {}
                 self.df_buildings["car_dict"].apply(lambda x: vehicles.update(x))
                 self.df_demand_mobility, self.df_tve_mobility, self.battery_dict = mbl.get_mobility_demand_from_pool(
-                    vehicles,
-                    self.region,
+                    vehicles
                 )
             elif mobility_source == "emobpy":
                 # Add daylight saving dummy shift to input data
-                wth_input = self._add_input_data_daylight_saving_shift(self.df_weather_raw)
+                wth_input = dst_shift_input(self.df_weather_raw)
                 wth_input = mbl.prepare_weather_input(wth_input)
                 vehicles = [{key: value} for build_dict in self.df_buildings["car_dict"].values for key,value in build_dict.items()]
 
@@ -1141,8 +806,9 @@ class Grid:
             else:
                 raise ValueError(f"Unknown mobility source: {mobility_source}")
         
-        self.df_demand_mobility = self._add_output_data_daylight_saving_shift(self.df_demand_mobility, mobility_dmd=True)
-        self.df_tve_mobility = self._add_output_data_daylight_saving_shift(self.df_tve_mobility)
+        # Accumulated charging demand must not be duplicated into the repeated hour.
+        self.df_demand_mobility = dst_shift_output(self.df_demand_mobility, zero_repeated_hour=True)
+        self.df_tve_mobility = dst_shift_output(self.df_tve_mobility)
         self._record_profile_fingerprints(
             mobility_demand=self.df_demand_mobility,
             mobility_availability=self.df_tve_mobility,
@@ -1221,9 +887,6 @@ class Grid:
         self.df_supim.index.name = "t"
     
     def create_demand(self):
-        # self.df_demand = pd.concat([self.df_demand_elec, self.df_demand_elec_react, 
-        #                             self.df_demand_heat_space, self.df_demand_heat_water, 
-        #                             self.df_demand_mobility], axis=1).reset_index(drop=True)
         self.df_demand = pd.concat([self.df_demand_elec, self.df_demand_heat_space, 
                                     self.df_demand_heat_water, self.df_demand_mobility], axis=1).reset_index(drop=True)
         self.df_demand.index.name = "t"
@@ -1245,15 +908,16 @@ class Grid:
         self.df_bsp = df_bsp
 
     def create_processes(self):
+        processes = self.settings["scenario_config"].technologies.processes
         consumer_buses = list(self.df_demand_elec.columns.get_level_values(0).unique())
         dfs = [
-            elc.create_pro_elec(consumer_buses),
+            elc.create_pro_elec(consumer_buses, processes["grid_connection"]),
             self.df_pv_process,
         ]
         if self.settings["include_heat"]:
             dfs.append(self.df_heat_process)
         if self.settings["include_mobility"]:
-            dfs.append(mbl.create_pro_mob(self.battery_dict))
+            dfs.append(mbl.create_pro_mob(self.battery_dict, processes["home_charger"]))
 
         self.df_pro = pd.concat(dfs, axis=0).reset_index(drop=True)
 
@@ -1287,156 +951,9 @@ class Grid:
         if self.settings["include_heat"]:
             dfs.append(self.df_heat_storage)
         if self.settings["include_mobility"]:
-            dfs.append(mbl.create_sto_mob(self.battery_dict))
+            dfs.append(mbl.create_sto_mob(
+                self.battery_dict,
+                self.settings["scenario_config"].technologies.storages["mobility_storage"],
+            ))
 
         self.df_sto = pd.concat(dfs, axis=0).reset_index(drop=True)
-    
-
-
-    ############################################
-    ########## Saving all grid data ############ 
-    ############################################
-    def save_grid_data(self):
-        if not self.df_electrification_assignment.empty:
-            self.settings["scenario_assumptions"] = self._scenario_assumptions()
-            self.settings["scenario_assumptions"]["electrification_asset_plan_summary"] = (
-                self._electrification_asset_plan_summary()
-            )
-            self.SF.update_timeframe_metadata(self.settings["scenario_assumptions"])
-
-        ### Copy input file into results to write results to it:
-        self.SF.copy_save_file()
-        self.SF.save_df(self.df_building_components, "raw_data/building_components")
-
-        ### Save other data:
-        self.SF.save_timeframe_metadata()
-        self.SF.save_df(self.df_weather_raw, "raw_data/weather")
-        self.SF.save_df(self.df_buildings,   "raw_data/buildings")
-        if not self.df_electrification_assignment.empty:
-            self.SF.save_df(
-                self.df_electrification_assignment,
-                "raw_data/electrification_assignment",
-            )
-            self.SF.save_df(
-                self.df_electrification_summary,
-                "raw_data/electrification_assignment_summary",
-            )
-        self.SF.save_df(self.df_pv_roof_catalog, "raw_data/pv_roof_sections")
-        self.SF.save_df(self.df_pv_asset_plan, "raw_data/asset_plan")
-        self.SF.save_df(self.df_pv_selected_sections, "raw_data/pv_selected_sections")
-        self.SF.save_df(self.df_pv_audit, "raw_data/pv_asset_audit")
-        self.SF.save_df(self.df_battery_asset_plan, "raw_data/battery_asset_plan")
-        self.SF.save_df(self.df_battery_audit, "raw_data/battery_asset_audit")
-        self.SF.save_df(self.df_heat_asset_plan, "raw_data/heat_asset_plan")
-        self.SF.save_df(self.df_heat_audit, "raw_data/heat_asset_audit")
-        self.SF.save_df(self.df_demand_component_audit, "raw_data/demand_component_audit")
-        self.SF.save_allocated_vehicles(self.df_buildings, self.battery_dict)
-
-        ### Saving urbs input sheets:
-        self.SF.save_df(self.df_demand,      "urbs_in/demand")
-        self.SF.save_df(self.df_supim,       "urbs_in/supim")
-        self.SF.save_df(self.df_tve,         "urbs_in/eff_factor")
-        self.SF.save_df(self.df_bsp,         "urbs_in/buy_sell_price")
-        self.SF.save_df(self.df_weather_urbs,"urbs_in/weather")
-        self.SF.save_df(self.df_pro,         "urbs_in/process")
-        self.SF.save_df(self.df_com,         "urbs_in/commodity")
-        self.SF.save_df(self.df_pro_com,     "urbs_in/process_commodity")
-        self.SF.save_df(self.df_sto,         "urbs_in/storage")
-
-    ############################################
-    ################# Helpers ################## 
-    ############################################
-    @staticmethod
-    def _add_input_data_daylight_saving_shift(df_ts):
-        """ To align human behaviour with daylight savings time:
-            - Insert a dummy row (later deleted) at 02:00-03:00AM on ts_hour1 (the hour of the year which is skipped), in order to get the human activity of one hour later with the unshifted weather
-            - Remove a row (later replaced) at 02:00-03:00AM on ts_hour2 (the hour of the year which is reapeated), in order to realign human activity with weather data
-        """
-        if len(df_ts)==0: return df_ts.copy()
-        else:
-            ts_hour1 = 2090 #(= 02:00AM-03:00AM, 29th March 2009), at this position insert previous hour (already accounted for zero indexing)
-            ts_hour2 = 7130 #(= 02:00AM-03:00AM, 10th October 2009), at this position delete hour (already accounted for zero indexing)
-            df_ts = df_ts.copy()
-
-            ### Delete alignement row
-            df_ts = df_ts.drop(index=ts_hour2).reset_index(drop=True)
-
-            ### Insert dummy row:
-            new_row = df_ts.iloc[ts_hour1-1].copy()
-            new_row_df = pd.DataFrame([new_row], columns=df_ts.columns)
-            df_ts = pd.concat([df_ts.iloc[:ts_hour1], new_row_df, df_ts.iloc[ts_hour1:]]).reset_index(drop=True)
-
-            return df_ts
-
-    @staticmethod
-    def _add_output_data_daylight_saving_shift(df_ts, mobility_dmd=False):
-        """ To align human behaviour with daylight savings time:
-            - Now delete the dummy row at 02:00-03:00AM of ts_hour1 (the hour of the year which is skipped), in order to delete the human activity which never actually occured
-            - Add a row (simply copy previous timestep) at 02:00-03:00AM of ts_hour2 (the hour of the year which is skipped), in order to get two hours with same human acitivty
-            """
-        if len(df_ts)==0: return df_ts.copy()
-        else:
-            ts_hour1 = 2090 #(= 02:00AM-03:00AM, 29th March 2009), at this position delete the dummy row (already accounted for zero indexing)
-            ts_hour2 = 7130 #(= 02:00AM-03:00AM, 10th October 2009), at this position copy the previous row and insert below to realign weather with behaviour (already accounted for zero indexing)
-            df_ts = df_ts.copy()
-
-            ### Insert copy row:
-            new_row = df_ts.iloc[ts_hour2].copy()
-            new_row_df = pd.DataFrame([new_row], columns=df_ts.columns)
-            df_ts = pd.concat([df_ts.iloc[:ts_hour2+1], new_row_df, df_ts.iloc[ts_hour2+1:]]).reset_index(drop=True)
-
-            # If mobility dataframe, we don't want to copy an existing accumulated demand (would lead to huge demand spike) -> simply set previous copied timestep to 0
-            if mobility_dmd: df_ts.iloc[ts_hour2] = 0
-
-            ### Delete dummy row
-            df_ts = df_ts.drop(index=ts_hour1).reset_index(drop=True)
-
-        return df_ts
-    
-    @staticmethod
-    def partition_df_by_cpu(df: pd.DataFrame, n_cpus: int, count_column: str ) -> list[pd.DataFrame]:
-        """
-        Partition the DataFrame `df` (one row per building, with count_column proportional to computational load e.g "n_cars_tot" or "n_flats_tot")
-        into up to `n_cpus` subsets, balancing total car counts as evenly as possible
-        without splitting any building. If any bin ends up empty, it is dropped from the result.
-
-        Uses the Longest‐Processing‐Time (LPT) greedy heuristic:
-        1. Sort buildings by descending `count_column`.
-        2. Maintain a min‐heap of (current_load, bin_id) for each of the `n_cpus` bins.
-        3. Assign each building to the bin with the smallest load, updating that bin’s load.
-        4. After assignment, discard any empty bins.
-
-        Returns:
-            A list of pandas DataFrames; each DataFrame is a subset of `df` (same columns/index),
-            and no returned DataFrame is empty.
-        """
-        # 1. Create a list of (index, cars) and sort descending by cars
-        building_list = list(df[count_column].items())  # [(idx_0, cars_0), (idx_1, cars_1), ...]
-        building_list.sort(key=lambda x: x[1], reverse=True)
-
-        # 2. Initialize a min‐heap [(current_load, bin_id), ...] for bin_id in [0 .. n_cpus-1]
-        heap: list[tuple[int, int]] = [(0, bin_id) for bin_id in range(n_cpus)]
-        heapq.heapify(heap)
-
-        # 3. Prepare a list of lists to collect row‐indices for each bin
-        bins_indices: list[list[pd.Index]] = [[] for _ in range(n_cpus)]
-
-        # 4. Greedily assign each building to the bin with the smallest current load
-        for idx, n_count in building_list:
-            if n_count == 0: pass
-            else:
-                current_load, bin_id = heapq.heappop(heap)
-                bins_indices[bin_id].append(idx)
-                new_load = current_load + n_count
-                heapq.heappush(heap, (new_load, bin_id))
-
-        # 5. Convert each non‐empty list of indices into a DataFrame slice
-        bins_dfs: list[pd.DataFrame] = []
-        for indices_list in bins_indices:
-            if not indices_list:
-                # Skip any bin that has no assigned buildings
-                continue
-            subset_df = df.loc[indices_list].copy()
-            bins_dfs.append(subset_df)
-
-        return bins_dfs

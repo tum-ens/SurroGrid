@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from ..urbs_rows import storage_parameter_fields
+
 
 @dataclass(frozen=True)
 class BatteryUrbsInputs:
@@ -61,16 +63,8 @@ def materialize_battery_urbs_inputs(
             "cap-up-c": upper_energy,
             "inst-cap-p": installed_energy / energy_to_power_hours,
             "cap-up-p": upper_energy / energy_to_power_hours,
-            "eff-in": technical_parameters["charge_efficiency"],
-            "eff-out": technical_parameters["discharge_efficiency"],
-            "discharge": technical_parameters["self_discharge_per_timestep"],
-            "ep-ratio": float(energy_to_power_hours),
-            "inv-cost-p": 0.0 if fixed else technical_parameters["investment_cost_eur_per_kw"],
-            "inv-cost-c": 0.0 if fixed else technical_parameters["investment_cost_eur_per_kwh"],
-            "fix-cost-p": 0.0 if fixed else technical_parameters["fixed_investment_cost_power_eur"],
-            "fix-cost-c": 0.0 if fixed else technical_parameters["fixed_investment_cost_energy_eur"],
-            "var-cost-p": technical_parameters["variable_cost_eur_per_kwh"],
-            "wacc": technical_parameters["wacc"],
-            "depreciation": technical_parameters["depreciation_years"],
+            **storage_parameter_fields(
+                technical_parameters, fixed=fixed, ep_ratio=float(energy_to_power_hours)
+            ),
         })
     return BatteryUrbsInputs(pd.DataFrame(rows), pd.DataFrame(audit_rows))

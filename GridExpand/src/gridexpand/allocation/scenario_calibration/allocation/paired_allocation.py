@@ -41,7 +41,12 @@ from ..profiles.profile_contract import (
 )
 from .scope_filters import build_grid_scope_summary
 from .sector_asset_calibration import build_sector_asset_calibration
-from .pv_roof_potential import building_lod2_capacity, load_lod2_roof_catalog
+from ...assets.pv.roof_catalog import (
+    FALLBACK_QUALITY_FLAG,
+    building_lod2_capacity,
+    load_lod2_roof_catalog,
+    roof_catalog_options,
+)
 from .swf_2045_building_match import (
     MatchConfig,
     _database_engine,
@@ -1062,14 +1067,7 @@ def build_paired_allocation(
     retained_buildings = sorted(
         real_plan["building_objectid"].dropna().astype(str).unique()
     )
-    roof_options = {
-        "tilt_bin_deg": scenario.pv.tilt_bin_degrees,
-        "azimuth_bin_deg": scenario.pv.azimuth_bin_degrees,
-        "module_capacity_kw_per_m2": scenario.pv.module_capacity_kw_per_m2,
-        "flat_roof_utilization": scenario.pv.flat_roof_utilization,
-        "slanted_roof_utilization": scenario.pv.slanted_roof_utilization,
-        "fallback_capacity_kw": scenario.pv.fallback_capacity_kwp,
-    }
+    roof_options = roof_catalog_options(scenario.pv)
     roof_catalog = load_lod2_roof_catalog(
         _database_engine(),
         retained_buildings,
@@ -1188,7 +1186,7 @@ def build_paired_allocation(
         ),
         "pv_fallback_buildings": int(
             roof_catalog.loc[
-                roof_catalog["quality_flag"].eq("fallback_14_5_kw"),
+                roof_catalog["quality_flag"].eq(FALLBACK_QUALITY_FLAG),
                 "building_objectid",
             ].nunique()
         ),

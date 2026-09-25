@@ -3,6 +3,7 @@ from gridexpand.allocation.config import config
 import os
 import pandas as pd
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
 
 import warnings
@@ -34,16 +35,18 @@ class SaveFile:
         self.demand_allocation_run_id = None
         self.timeframe_mode = allocation_settings.get("timeframe_mode", "full_year")
         self.timeframe_metadata = allocation_settings.get("timeframe_metadata", {})
+        self._metadata_dirty = False
+        self._store = None
         self.scenario_key = allocation_settings.get("scenario_key", "baseline_static")
         if self.storage == "db":
             if self.grid_ref is None:
                 self.grid_ref = self.db.resolve_grid_identifier(filename)
             self.db.get_or_create_grid_case(self.grid_ref)
-            filename = output_filename_for_timeframe(self.grid_ref["bridge_filename"], self.timeframe_mode)
+            filename = self.grid_ref["bridge_filename"]
             scenario_assumptions = allocation_settings.get("scenario_assumptions")
             self.demand_allocation_run_id = self.db.create_demand_allocation_run(
                 self.grid_ref,
-                bridge_filename=filename,
+                bridge_filename=output_filename_for_timeframe(filename, self.timeframe_mode),
                 profiles=allocation_settings.get("profiles", "all"),
                 mobility_source=allocation_settings.get("mobility_source", "emobpy"),
                 scenario_key=self.scenario_key,
@@ -126,18 +129,31 @@ class SaveFile:
         shutil.copy2(self.input_path, self.output_path)
 
     def update_timeframe_metadata(self, metadata):
+        """Replace the run metadata; the database copy follows at :meth:`flush_metadata`."""
         self.timeframe_metadata = dict(metadata)
-        if self.storage == "db":
-            ready = self._ready_timeframe_assumptions(self.timeframe_metadata)
-            if self.demand_allocation_run_id is not None and ready is not None:
-                self.db.update_demand_allocation_run_assumptions(
-                    self.demand_allocation_run_id,
-                    ready,
-                )
-            self.db.ensure_scenario(
-                scenario_key=self.scenario_key,
-                assumptions=ready,
+        self._metadata_dirty = True
+
+    def flush_metadata(self):
+        """Write the latest run metadata to the database run and scenario rows.
+
+        Called once before the outputs are written (the database derives the
+        time stamps of allocated time series from the run assumptions). Every
+        earlier update only replaced the in-memory copy, so the final rows
+        equal those of writing on every update.
+        """
+        if self.storage != "db" or not self._metadata_dirty:
+            return
+        ready = self._ready_timeframe_assumptions(self.timeframe_metadata)
+        if self.demand_allocation_run_id is not None and ready is not None:
+            self.db.update_demand_allocation_run_assumptions(
+                self.demand_allocation_run_id,
+                ready,
             )
+        self.db.ensure_scenario(
+            scenario_key=self.scenario_key,
+            assumptions=ready,
+        )
+        self._metadata_dirty = False
 
     @staticmethod
     def _ready_timeframe_assumptions(metadata):
@@ -187,10 +203,27 @@ class SaveFile:
                 self.db.write_allocated_demand(self.demand_allocation_run_id, df)
             elif clean_dir == "urbs_in/eff_factor":
                 self.db.write_allocated_eff_factor(self.demand_allocation_run_id, df)
+        if self._store is not None:
+            self._put(self._store, dir, df)
+            return
+        with pd.HDFStore(self.output_path, mode="a", complib='blosc', complevel=9) as store:
+            self._put(store, dir, df)
+
+    @staticmethod
+    def _put(store, key, df):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=PerformanceWarning)
-            with pd.HDFStore(self.output_path, mode="a", complib='blosc', complevel=9) as store:
-                store.put(dir, df)
+            store.put(key, df)
+
+    @contextmanager
+    def output_store(self):
+        """Keep the output HDF5 file open for a sequence of :meth:`save_df` calls."""
+        with pd.HDFStore(self.output_path, mode="a", complib='blosc', complevel=9) as store:
+            self._store = store
+            try:
+                yield store
+            finally:
+                self._store = None
 
     def save_allocated_vehicles(self, df_buildings, battery_dict):
         if self.storage != "db":

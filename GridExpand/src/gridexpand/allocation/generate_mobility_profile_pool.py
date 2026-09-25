@@ -28,7 +28,11 @@ import pandas as pd
 
 from gridexpand.allocation.config import config
 import gridexpand.allocation.functions.mobility as mbl
-import gridexpand.allocation.functions.weather as wth
+from gridexpand.allocation.functions.mobility import (
+    POOL_MANIFEST_FILENAME,
+    SESSION_GENERATION_VERSION,
+)
+import gridexpand.common.weather as wth
 from gridexpand.common.ev_sessions import build_sessions_from_source
 from gridexpand.paths import SCENARIO_CONFIG_DIR
 from gridexpand.scenario.config_loader import load_scenario_config
@@ -38,14 +42,12 @@ DEFAULT_SCENARIO_CONFIG = SCENARIO_CONFIG_DIR / "forchheim_2045_full_year.yaml"
 
 SCHEDULES = ["commuter", "non-commuter"]
 
-SESSION_GENERATION_VERSION = "emobpy_pool_v2_sessions"
 SESSION_POOL_DIRNAME = "mobility_profile_pool"
 LEGACY_POOL_DIRNAME = "mobility_profile_pool_old"
 SOURCE_RECORDS_FILENAME = "mobility_source_records.h5"
 SESSIONS_FILENAME = "mobility_sessions_pool.csv"
 SESSION_HOURS_FILENAME = "mobility_session_hours_pool.csv"
 LEDGER_FILENAME = "mobility_energy_ledger.csv"
-POOL_MANIFEST_FILENAME = "mobility_pool_manifest.json"
 POOL_MANIFEST_FORMAT = 1
 
 
@@ -75,9 +77,10 @@ def _load_or_fetch_weather(weather_csv: Path) -> pd.DataFrame:
         return pd.read_csv(weather_csv)
 
     weather_csv.parent.mkdir(parents=True, exist_ok=True)
-    df_weather, _altitude, _selected_months = wth.get_pvgis_tmy_sarah3_dataframe(
+    df_weather, _altitude = wth.get_pvgis_tmy_sarah3_dataframe(
         config.MOBILITY_PROFILE_POOL_LAT,
         config.MOBILITY_PROFILE_POOL_LON,
+        reference_year=config.REF_YEAR,
     )
     df_weather["dew_point"] = wth.get_dew_point(
         df_weather["temp_air"],
@@ -546,31 +549,7 @@ def generate_pool(args: argparse.Namespace) -> None:
 
     models = _select_models(args.market_share_threshold, args.models)
     schedules = args.schedules or SCHEDULES
-    planned = []
-    for model_index, model in models:
-        for schedule_index, schedule in enumerate(SCHEDULES):
-            if schedule not in schedules:
-                continue
-            for sample_index in _planned_sample_indexes(
-                existing,
-                model=model,
-                schedule=schedule,
-                weather_key=weather_key,
-                target_count=args.profiles_per_stratum,
-            ):
-                seed = _pool_seed(model_index, schedule_index, sample_index)
-                planned.append(
-                    {
-                        "profile_id": _profile_id(weather_key, model_index, model, schedule, sample_index),
-                        "model_index": model_index,
-                        "model": model,
-                        "schedule_index": schedule_index,
-                        "schedule": schedule,
-                        "sample_index": sample_index,
-                        "pool_seed": seed,
-                        "weather_key": weather_key,
-                    }
-                )
+    planned = _plan_tasks(args, existing, weather_key)
 
     print(
         f"Planning {len(planned)} profile(s) for {len(models)} model(s), "

@@ -19,6 +19,26 @@ DEFAULT_AZIMUTH_BIN_DEG = 15.0
 FALLBACK_TILT_DEG = 45.0
 FALLBACK_AZIMUTH_DEG = 180.0
 FLAT_TILT_TOLERANCE_DEG = 0.01
+# quality_flag values. The fallback label keeps its historical name even when
+# the scenario's fallback_capacity_kwp is not 14.5 (it is part of stored outputs).
+LOD2_QUALITY_FLAG = "lod2"
+FALLBACK_QUALITY_FLAG = "fallback_14_5_kw"
+
+
+def roof_catalog_options(pv) -> dict:
+    """Return the roof-catalog keyword arguments of a scenario's PV settings.
+
+    Args:
+        pv: ``ScenarioConfig.pv`` (asset_sizing.pv of the scenario YAML).
+    """
+    return {
+        "tilt_bin_deg": pv.tilt_bin_degrees,
+        "azimuth_bin_deg": pv.azimuth_bin_degrees,
+        "module_capacity_kw_per_m2": pv.module_capacity_kw_per_m2,
+        "flat_roof_utilization": pv.flat_roof_utilization,
+        "slanted_roof_utilization": pv.slanted_roof_utilization,
+        "fallback_capacity_kw": pv.fallback_capacity_kwp,
+    }
 
 
 ROOF_SURFACE_QUERY = text(
@@ -122,7 +142,7 @@ def normalize_lod2_roof_sections(
     result["quality_flag"] = np.select(
         [~area_valid, ~tilt_valid, ~flat & ~orientation_valid],
         ["invalid_area", "invalid_tilt", "undefined_nonflat_orientation"],
-        default="lod2",
+        default=LOD2_QUALITY_FLAG,
     )
     utilization = np.where(flat, flat_roof_utilization, slanted_roof_utilization)
     result["available_pv_kw"] = np.where(
@@ -162,7 +182,7 @@ def add_missing_building_fallbacks(
         "profile_azimuth_deg": [(round(FALLBACK_AZIMUTH_DEG / azimuth_bin_deg) * azimuth_bin_deg) % 360.0] * len(missing),
         "available_pv_kw": [float(fallback_capacity_kw)] * len(missing),
         "profile_usable": [True] * len(missing),
-        "quality_flag": ["fallback_14_5_kw"] * len(missing),
+        "quality_flag": [FALLBACK_QUALITY_FLAG] * len(missing),
     })
     return pd.concat([catalog, fallback[_catalog_columns()]], ignore_index=True).sort_values(
         ["building_objectid", "roof_surface_id"]
@@ -177,14 +197,14 @@ def building_lod2_capacity(catalog: pd.DataFrame) -> pd.Series:
     """Return genuine usable LoD2 capacity without synthetic fallbacks."""
     usable = (
         catalog["profile_usable"].astype(bool)
-        & catalog["quality_flag"].eq("lod2")
+        & catalog["quality_flag"].eq(LOD2_QUALITY_FLAG)
     )
     return catalog.loc[usable].groupby("building_objectid")["available_pv_kw"].sum()
 
 
 def assert_fallback_share(catalog: pd.DataFrame, building_ids: Iterable[object], maximum_share: float) -> float:
     ids = {str(value) for value in building_ids if pd.notna(value)}
-    fallback_ids = set(catalog.loc[catalog["quality_flag"].eq("fallback_14_5_kw"), "building_objectid"].astype(str)) & ids
+    fallback_ids = set(catalog.loc[catalog["quality_flag"].eq(FALLBACK_QUALITY_FLAG), "building_objectid"].astype(str)) & ids
     share = len(fallback_ids) / len(ids) if ids else 0.0
     if share > maximum_share + 1e-12:
         raise ValueError(f"LoD2 PV fallback share {share:.3%} exceeds configured maximum {maximum_share:.3%}.")

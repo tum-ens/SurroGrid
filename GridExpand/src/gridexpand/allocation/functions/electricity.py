@@ -1,8 +1,10 @@
 from gridexpand.allocation.config import config
 
-import pandas as pd
-import numpy as np
+import functools
 import random
+
+import numpy as np
+import pandas as pd
 
 from gridexpand.common.reproducibility import frame_fingerprint, physical_building_id, stable_seed
 
@@ -133,8 +135,10 @@ def _get_occupancy_distribution(prob:dict, n_hh:int, n_occ:int, rng=None)->list:
                 return _sample_sequence_with_tolerance(
                     n_hh, n_occ, prob, allowed_x, tol=0.95, rng=rng
                 )
-            except: 
-                return [_closest_allowed(allowed_x, n_occ/n_hh)]*n_hh
+            except ValueError:
+                # No continuation within the tolerance: give every household
+                # the allowed size closest to the building mean.
+                return [_closest_allowed(n_occ / n_hh, allowed_x)] * n_hh
 
 def _assign_household_occupancy(df_buildings, base_seed):
     df_buildings["occ_list"] = pd.NA
@@ -172,9 +176,6 @@ def _get_total_demands(cdf, occ_list, rng=None):
 
         u = (rng or np.random.default_rng()).random(len(occ_list))
         columns = cdf.columns.get_level_values(0).unique()
-
-        # for hh in cdf.columns.get_level_values(0).unique():
-        #     sampled_x = np.interp(u, cdf[hh, "Y"], cdf[hh, "X"])
 
         for i, n_occ in enumerate(occ_list):
             if n_occ > 3: n_occ = 4
@@ -255,6 +256,24 @@ def _get_single_building_elec_timeseries_ghd(building_type, floor_area, df_norma
     return df_normalized_lps_ghd[building_type] * floor_area
 
 
+@functools.cache
+def residential_load_profiles() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return the normalized household load profiles and their annual sums.
+
+    The 113 MB table is read once per process; callers must not modify it.
+    """
+    return (
+        pd.read_hdf(config.ELEC_LPS_PATH, key="df_normalized_scaled"),
+        pd.read_hdf(config.ELEC_LPS_PATH, key="df_sums"),
+    )
+
+
+@functools.cache
+def commercial_load_profiles() -> pd.DataFrame:
+    """Return the per-m2 commercial/public (GHD) load profiles, read once per process."""
+    return pd.read_csv(config.ELEC_GHD_PATH, skiprows=1, header=[0])
+
+
 ##############################################################
 ############## Generation, Publicly Callable #################
 ##############################################################
@@ -274,9 +293,8 @@ def get_elec_demand(df_components, base_seed=0, return_component_profiles=False)
     missing = sorted(required.difference(df_components.columns))
     if missing:
         raise ValueError(f"Electricity demand requires component columns: {missing}")
-    df_normalized_lps_res = pd.read_hdf(config.ELEC_LPS_PATH, key="df_normalized_scaled")
-    lps_res_total_demand = pd.read_hdf(config.ELEC_LPS_PATH, key="df_sums")
-    df_normalized_lps_ghd = pd.read_csv(config.ELEC_GHD_PATH, skiprows=1, header=[0])
+    df_normalized_lps_res, lps_res_total_demand = residential_load_profiles()
+    df_normalized_lps_ghd = commercial_load_profiles()
 
     result = df_components.copy()
     profile_by_component = {}
@@ -320,15 +338,14 @@ def get_elec_demand(df_components, base_seed=0, return_component_profiles=False)
             for component_id, profile in profile_by_component.items()
         }
     )
-    result["stable_seed"] = result["component_id"].map(
-        lambda component_id: stable_seed(
-            base_seed,
-            result.loc[result["component_id"].eq(component_id), "objectid"].iloc[0],
-            result.loc[result["component_id"].eq(component_id), "component_category"].iloc[0],
-            "electricity",
-            "profile",
+    first_rows = result.drop_duplicates("component_id")
+    seed_by_component = {
+        component_id: stable_seed(base_seed, object_id, category, "electricity", "profile")
+        for component_id, object_id, category in zip(
+            first_rows["component_id"], first_rows["objectid"], first_rows["component_category"]
         )
-    )
+    }
+    result["stable_seed"] = result["component_id"].map(seed_by_component)
 
     physical_profiles = {}
     physical_buses = {}
@@ -364,26 +381,120 @@ def get_elec_demand(df_components, base_seed=0, return_component_profiles=False)
         return result, df_elec_demand, component_profiles
     return result, df_elec_demand
 
-# def get_elec_react_demand(df_elec_demand):
-#     conversion_factor = math.tan(math.acos(config.ELEC_REACT_PF))
-#     df_elec_react_demand = df_elec_demand.copy()
-#     df_elec_react_demand*=conversion_factor
-#     df_elec_react_demand.columns = df_elec_react_demand.columns.set_levels(["electricity-reactive"]*len(df_elec_react_demand.columns.levels[1]), level=1)
-#     return df_elec_react_demand
+def profile_components(df_components, base_seed=0):
+    """Sample and profile the electricity components of one grid.
 
-def create_pro_elec(consumer_bus_list):
+    Returns:
+        ``(components, bus_demand, component_profiles)`` as from
+        :func:`get_elec_demand` after :func:`sample_statistics`.
+    """
+    sampled = sample_statistics(df_components, base_seed)
+    return get_elec_demand(sampled, base_seed=base_seed, return_component_profiles=True)
+
+
+def aggregate_components_to_buildings(physical, components, *, residential_area=False):
+    """Attach component results to one-row-per-building data.
+
+    Adds ``occ_list`` (households of the building's Residential component, at
+    most one per building, else ``[]``) and ``annual_electricity_kwh`` (sum over
+    all its components, else 0). With ``residential_area`` it also adds
+    ``residential_effective_floor_area_m2``.
+
+    Args:
+        physical: One row per physical building with ``objectid``.
+        components: Profiled components from :func:`profile_components`.
+        residential_area: Also add the residential effective floor area.
+
+    Returns:
+        A copy of ``physical`` with the added columns.
+    """
+    result = physical.copy()
+    building_ids = result["objectid"].astype(str)
+    component_ids = components["objectid"].astype(str)
+    residential = components["component_category"].eq("Residential")
+    occupancy = dict(zip(component_ids[residential], components.loc[residential, "occ_list"]))
+    annual = components.groupby(component_ids)["annual_electricity_kwh"].sum()
+    result["occ_list"] = building_ids.map(occupancy).apply(
+        lambda value: value if isinstance(value, (list, tuple, np.ndarray)) else []
+    )
+    result["annual_electricity_kwh"] = building_ids.map(annual).fillna(0.0)
+    if residential_area:
+        area = (
+            components.loc[residential]
+            .groupby(component_ids[residential])["effective_floor_area_m2"]
+            .sum()
+        )
+        result["residential_effective_floor_area_m2"] = building_ids.map(area).fillna(0.0)
+    return result
+
+def demand_component_audit(components, profiled, component_profiles):
+    """Return the per-component electricity evidence of one allocation run.
+
+    Args:
+        components: Every component of the grid (``raw_data/building_components``).
+        profiled: The profiled components of the demand scope.
+        component_profiles: Hourly profiles, columns ``(component_id, "electricity")``.
+
+    Returns:
+        One row per component, written to ``raw_data/demand_component_audit``
+        and ``surrogrid.demand_component_audit``. ``suppression_reason`` is
+        ``outside_lv_scope`` (MV-direct), ``outside_demand_scope`` (e.g. a
+        non-residential component in a residential-only run) or None.
+    """
+    indexed = profiled.set_index("component_id")
+    profile_max = component_profiles.max(axis=0)
+    profile_max.index = [str(column[0]) for column in component_profiles.columns]
+    audit = components.copy().rename(columns={"component_category": "category"})
+    audit["scenario_unit_id"] = audit["objectid"].astype(str)
+    audit["commodity"] = "electricity"
+    audit["annual_energy_kwh"] = audit["component_id"].map(
+        indexed["annual_electricity_kwh"]
+    ).fillna(0.0)
+    audit["max_profile_value"] = audit["component_id"].map(profile_max).fillna(0.0)
+    audit["profile_hash"] = audit["component_id"].map(indexed["profile_hash"])
+    audit["profile_method"] = audit["component_id"].map(
+        indexed["profile_method"]
+    ).fillna("not_allocated")
+    audit["stable_seed"] = audit["component_id"].map(indexed["stable_seed"])
+    selected_ids = set(profiled["component_id"].astype(str))
+    audit["suppression_reason"] = np.select(
+        [
+            ~audit["included_in_lv"].map(bool),
+            audit["component_id"].astype(str).isin(selected_ids),
+        ],
+        ["outside_lv_scope", None],
+        default="outside_demand_scope",
+    )
+    audit["source_asset_count"] = pd.NA
+    audit["matched_swf_asset_count"] = pd.NA
+    audit["mv_direct"] = audit["mv_direct"].astype(bool)
+    return audit[
+        [
+            "component_id", "objectid", "scenario_unit_id", "bus", "category",
+            "commodity", "annual_energy_kwh", "max_profile_value", "profile_hash",
+            "profile_method", "stable_seed", "source_asset_count",
+            "matched_swf_asset_count", "included_in_lv", "suppression_reason",
+            "pylovo_version_id", "mix_score", "mix_rule", "mix_confidence", "mv_direct",
+        ]
+    ]
+
+def create_pro_elec(consumer_bus_list, parameters):
+    """Return the grid ``import`` and ``feed_in`` process rows of every consumer bus.
+
+    Args:
+        consumer_bus_list: Buses with base electricity demand.
+        parameters: ``technologies.processes["grid_connection"]`` of the scenario.
+    """
     df_pro_base = pd.DataFrame(consumer_bus_list, columns=['Site'])
     df_pro_base[["Process","inst-cap","cap-up","inv-cost-fix","inv-cost","fix-cost","var-cost","wacc","depreciation","pf-min"]] = (
-        "import", config.IMP_INST_CAP, config.IMP_CAP_UP, config.IMP_INV_COST_FIX, config.IMP_INV_COST, 
-        config.IMP_FIX_COST, config.IMP_VAR_COST, config.IMP_WACC, config.IMP_DEPRECIATION, config.IMP_PF_MIN)
+        "import", parameters["installed_capacity_kw"], parameters["capacity_upper_kw"],
+        parameters["fixed_investment_cost_eur"], parameters["investment_cost_eur_per_kw"],
+        parameters["fixed_cost_eur_per_hour"], parameters["variable_cost_eur_per_kwh"],
+        parameters["wacc"], parameters["depreciation_years"], parameters["minimum_power_factor"])
 
     df_pro_feed = df_pro_base.copy()
     df_pro_feed["Process"] = "feed_in"
 
-    # df_pro_Q = df_pro_base.copy()
-    # df_pro_Q["Process"] = "Q_feeder_central"
-
-    # df_pro = pd.concat([df_pro_base, df_pro_feed, df_pro_Q], axis=0)
     df_pro = pd.concat([df_pro_base, df_pro_feed], axis=0)
     return df_pro.reset_index(drop=True)
 
@@ -391,26 +502,16 @@ def create_com_elec(consumer_bus_list):
     df_com_base = pd.DataFrame(consumer_bus_list, columns=['Site'])
     df_com_base[["Commodity","Type","price"]] = ("electricity", "Demand", np.nan)
 
-    # df_com_Q = df_com_base.copy()
-    # df_com_Q["Commodity"] = "electricity-reactive"
-
     df_com_imp = df_com_base.copy()
     df_com_imp[["Commodity","Type","price"]] = ("electricity_import", "Buy", 1)
 
     df_com_feed = df_com_base.copy()
     df_com_feed[["Commodity","Type","price"]] = ("electricity_feed_in", "Sell", 1)
 
-    # df_com = pd.concat([df_com_base, df_com_Q, df_com_imp, df_com_feed], axis=0)
     df_com = pd.concat([df_com_base, df_com_imp, df_com_feed], axis=0)
     return df_com.reset_index(drop=True)
 
 def create_pro_com_elec():
-    # df_pro_com = pd.DataFrame({
-    #     'Process':   ["import", "import", "feed_in", "feed_in", "Q_feeder_central"],
-    #     'Commodity': ["electricity_import", "electricity", "electricity", "electricity_feed_in", "electricity-reactive"],
-    #     'Direction': ["In", "Out", "In", "Out", "Out"],
-    #     'ratio':     [1, 1, 1, 1, 1]
-    # })
     df_pro_com = pd.DataFrame({
         'Process':   ["import",             "import",       "feed_in",     "feed_in"],
         'Commodity': ["electricity_import", "electricity",  "electricity", "electricity_feed_in"],
@@ -419,12 +520,21 @@ def create_pro_com_elec():
     })
     return df_pro_com.reset_index(drop=True)
 
-def create_sto_elec(consumer_bus_list):
+def create_sto_elec(consumer_bus_list, parameters):
+    """Return one generic ``battery_private`` storage row per bus.
+
+    Args:
+        consumer_bus_list: Buses that receive the storage.
+        parameters: ``technologies.storages["stationary_battery"]`` of the scenario.
+    """
     df_sto = pd.DataFrame(consumer_bus_list, columns=['Site'])
     df_sto[["Storage","Commodity","inst-cap-c","cap-up-c","inst-cap-p","cap-up-p","eff-in","eff-out","discharge","ep-ratio",
             "inv-cost-p","inv-cost-c","fix-cost-p","fix-cost-c","var-cost-p","wacc","depreciation"]] = (
-            "battery_private", "electricity", config.BS_INST_CAP_C, config.BS_CAP_UP_C, config.BS_INST_CAP_P, 
-            config.BS_CAP_UP_P, config.BS_EFF_IN, config.BS_EFF_OUT, config.BS_DISCHARGE, config.BS_EP_RATIO,
-            config.BS_INV_COST_P, config.BS_INV_COST_C, config.BS_FIX_COST_P, config.BS_FIX_COST_C,
-            config.BS_VAR_COST_P, config.BS_WACC, config.BS_DEPRECIATION)
+            "battery_private", "electricity", parameters["installed_energy_kwh"],
+            parameters["capacity_upper_kwh"], parameters["installed_power_kw"], parameters["power_upper_kw"],
+            parameters["charge_efficiency"], parameters["discharge_efficiency"],
+            parameters["self_discharge_per_timestep"], parameters["energy_to_power_hours"],
+            parameters["investment_cost_eur_per_kw"], parameters["investment_cost_eur_per_kwh"],
+            parameters["fixed_investment_cost_power_eur"], parameters["fixed_investment_cost_energy_eur"],
+            parameters["variable_cost_eur_per_kwh"], parameters["wacc"], parameters["depreciation_years"])
     return df_sto.reset_index(drop=True)

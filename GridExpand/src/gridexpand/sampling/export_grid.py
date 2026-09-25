@@ -5,7 +5,7 @@ import pandas as pd
 
 import gridexpand.sampling.grid_topol as grdtpl
 import gridexpand.sampling.save_grid as svgrd
-import gridexpand.sampling.weather as wth
+import gridexpand.common.weather as wth
 
 
 def build_region_row(db, plz: int, kcid: int, bcid: int) -> pd.DataFrame:
@@ -36,19 +36,10 @@ def _as_region_frame(region_specs) -> pd.DataFrame:
 
 
 def _read_weather(lat: float, lon: float) -> tuple[pd.DataFrame, float]:
-    weather_tuple = wth.get_pvgis_tmy_sarah3_dataframe(lat, lon)
-    if weather_tuple is None:
-        raise RuntimeError("PVGIS weather retrieval failed.")
-
-    df_weather, altitude, selected_months = weather_tuple
+    df_weather, altitude = wth.get_pvgis_tmy_sarah3_dataframe(lat, lon)
     df_weather["dew_point"] = wth.get_dew_point(
         df_weather["temp_air"], df_weather["relative_humidity"]
     )
-
-    df_soil = wth.get_open_meteo_soil_temperature(lat, lon, selected_months)
-    soil_series = df_soil.iloc[:, 0] if isinstance(df_soil, pd.DataFrame) else df_soil
-    df_weather["soil_temp"] = pd.Series(soil_series).reset_index(drop=True)
-
     return df_weather, float(altitude)
 
 

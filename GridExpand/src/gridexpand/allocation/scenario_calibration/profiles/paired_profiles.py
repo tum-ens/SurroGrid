@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import re
@@ -15,6 +15,11 @@ from ...assets.battery.sizing import build_battery_asset_plan
 from ...assets.heat.materialization import materialize_heat_urbs_inputs
 from ...assets.heat.sizing import build_heat_asset_plan
 from ...functions.heat import get_norm_outside_temperature
+from ...functions.mobility import (
+    POOL_MANIFEST_FILENAME,
+    SESSION_GENERATION_VERSION,
+    read_rows_for_profiles,
+)
 from ...assets.pv.materialization import materialize_pv_urbs_inputs
 from ...assets.pv.sizing import build_pv_asset_plan
 from gridexpand.common.electrification import validate_electrification_assignment
@@ -41,22 +46,60 @@ from .real_swf_electricity_profiles import (
     load_electricity_module,
     select_residential_profile,
 )
-from .real_swf_sector_profiles import (
-    DEFAULT_MOBILITY_WEATHER_KEY,
-    SectorUrbsInputs,
-    _concat_static,
-    _concat_timeseries,
-    _empty_timeseries,
-)
-
 from ..paths import DEMAND_STATISTICS_DIR, SYNTHETIC_INPUT_DIR
+
+DEFAULT_MOBILITY_WEATHER_KEY = "central_germany_tmy"
+
+
+@dataclass(frozen=True)
+class SectorUrbsInputs:
+    """Sector-coupling urbs sheets of one paired target network."""
+
+    demand: pd.DataFrame
+    supim: pd.DataFrame
+    eff_factor: pd.DataFrame
+    process: pd.DataFrame
+    commodity: pd.DataFrame
+    process_commodity: pd.DataFrame
+    storage: pd.DataFrame
+    audit: pd.DataFrame
+    metadata: dict[str, Any]
+    ev_sessions: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(columns=SESSION_COLUMNS)
+    )
+    ev_session_hours: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(columns=SESSION_HOUR_COLUMNS)
+    )
+    # Pinned content identity of the EV session pool the vehicles came from.
+    ev_pool_id: str = ""
+
+
+def _empty_timeseries(hours: int) -> pd.DataFrame:
+    df = pd.DataFrame(index=pd.RangeIndex(hours, name="t"))
+    df.columns = pd.MultiIndex(
+        levels=[[], []], codes=[[], []], names=["Site", "Commodity"]
+    )
+    return df
+
+
+def _concat_timeseries(frames: list[pd.DataFrame], hours: int) -> pd.DataFrame:
+    non_empty = [frame for frame in frames if frame is not None and not frame.empty]
+    if not non_empty:
+        return _empty_timeseries(hours)
+    out = pd.concat(non_empty, axis=1)
+    out.index = pd.RangeIndex(len(out), name="t")
+    return out
+
+
+def _concat_static(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    non_empty = [frame for frame in frames if frame is not None and not frame.empty]
+    if not non_empty:
+        return pd.DataFrame()
+    return pd.concat(non_empty, ignore_index=True, sort=False)
 
 MOBILITY_SESSION_POOL_DIR = (
     DEMAND_STATISTICS_DIR / "general" / "mobility_profile_pool"
 )
-SESSION_GENERATION_VERSION = "emobpy_pool_v2_sessions"
-
-POOL_MANIFEST_FILENAME = "mobility_pool_manifest.json"
 
 
 def read_pool_manifest(pool_dir: Path) -> dict[str, Any]:
@@ -107,14 +150,10 @@ def _read_session_pool(
             f"EV session pool file not found: {csv_path}. Generate it with "
             "generate_mobility_profile_pool.py --mode session."
         )
-    chunks = []
-    for chunk in pd.read_csv(csv_path, chunksize=500_000):
-        subset = chunk[chunk["profile_id"].isin(profile_ids)]
-        if not subset.empty:
-            chunks.append(subset)
-    if not chunks:
+    rows = read_rows_for_profiles(csv_path, profile_ids, chunksize=500_000)
+    if rows is None:
         return pd.DataFrame(columns=list(columns) if columns else ["profile_id"])
-    return pd.concat(chunks, ignore_index=True)
+    return rows
 from .heat_profile_source import load_physical_heat_profile
 from .physical_heat_profile_library import PhysicalHeatProfileLibrary
 from .pv_profile_library import read_pv_profile_library

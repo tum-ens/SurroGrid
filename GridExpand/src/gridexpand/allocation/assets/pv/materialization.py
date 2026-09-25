@@ -7,6 +7,9 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from ..urbs_rows import process_row
+from .roof_catalog import FALLBACK_QUALITY_FLAG
+
 
 @dataclass(frozen=True)
 class PvUrbsInputs:
@@ -15,22 +18,6 @@ class PvUrbsInputs:
     commodity: pd.DataFrame
     process_commodity: pd.DataFrame
     audit: pd.DataFrame
-
-
-def _process_row(site, process, installed, upper, *, fixed, parameters):
-    return {
-        "Site": int(site),
-        "Process": process,
-        "inst-cap": float(installed),
-        "cap-up": float(upper),
-        "inv-cost-fix": 0.0 if fixed else parameters["fixed_investment_cost_eur"],
-        "inv-cost": 0.0 if fixed else parameters["investment_cost_eur_per_kw"],
-        "fix-cost": parameters["fixed_cost_eur_per_hour"],
-        "var-cost": parameters["variable_cost_eur_per_kwh"],
-        "wacc": parameters["wacc"],
-        "depreciation": parameters["depreciation_years"],
-        "pf-min": parameters["minimum_power_factor"],
-    }
 
 
 def _static_tables(records):
@@ -88,7 +75,7 @@ def materialize_pv_urbs_inputs(
             fixed = sizing_method == "annual_electricity_rule"
             records.append({
                 "site": site, "commodity": commodity, "process_name": process_name,
-                "process": _process_row(
+                "process": process_row(
                     site,
                     process_name,
                     capacity if fixed else 0.0,
@@ -97,7 +84,7 @@ def materialize_pv_urbs_inputs(
                     parameters=technical_parameters,
                 ),
                 "capacity_kw": capacity,
-                "fallback_used": bool(group["quality_flag"].eq("fallback_14_5_kw").any()),
+                "fallback_used": bool(group["quality_flag"].eq(FALLBACK_QUALITY_FLAG).any()),
                 "building_objectid": str(building_id),
                 "roof_profile_count": int(group["profile_label"].nunique()),
             })

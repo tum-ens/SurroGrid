@@ -7,6 +7,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from ..urbs_rows import process_row, storage_parameter_fields
+
 
 @dataclass(frozen=True)
 class HeatUrbsInputs:
@@ -15,19 +17,6 @@ class HeatUrbsInputs:
     process_commodity: pd.DataFrame
     storage: pd.DataFrame
     audit: pd.DataFrame
-
-
-def _process_row(site, name, installed, upper, *, fixed, parameters):
-    return {
-        "Site": int(site), "Process": name,
-        "inst-cap": float(installed), "cap-up": float(upper),
-        "inv-cost-fix": 0.0 if fixed else parameters["fixed_investment_cost_eur"],
-        "inv-cost": 0.0 if fixed else parameters["investment_cost_eur_per_kw"],
-        "fix-cost": parameters["fixed_cost_eur_per_hour"],
-        "var-cost": parameters["variable_cost_eur_per_kwh"],
-        "wacc": parameters["wacc"], "depreciation": parameters["depreciation_years"],
-        "pf-min": parameters["minimum_power_factor"],
-    }
 
 
 def materialize_heat_urbs_inputs(asset_plan, *, sizing_method, process_parameters, storage_parameters):
@@ -53,10 +42,10 @@ def materialize_heat_urbs_inputs(asset_plan, *, sizing_method, process_parameter
     for row in by_site.to_dict("records"):
         site = int(row["Site"])
         process_rows.extend([
-            _process_row(site, "heatpump_air", row["heat_pump_installed_kw_el"], row["heat_pump_capacity_upper_kw_el"], fixed=fixed, parameters=process_parameters["heatpump_air"]),
-            _process_row(site, "heatpump_booster", row["auxiliary_installed_kw_el"], row["auxiliary_capacity_upper_kw_el"], fixed=fixed, parameters=process_parameters["heatpump_booster"]),
-            _process_row(site, "Heat_dummy_space", row["heat_conversion_capacity_kw_th"], row["heat_conversion_capacity_kw_th"], fixed=True, parameters=process_parameters["heat_dummy"]),
-            _process_row(site, "Heat_dummy_water", row["heat_conversion_capacity_kw_th"], row["heat_conversion_capacity_kw_th"], fixed=True, parameters=process_parameters["heat_dummy"]),
+            process_row(site, "heatpump_air", row["heat_pump_installed_kw_el"], row["heat_pump_capacity_upper_kw_el"], fixed=fixed, parameters=process_parameters["heatpump_air"]),
+            process_row(site, "heatpump_booster", row["auxiliary_installed_kw_el"], row["auxiliary_capacity_upper_kw_el"], fixed=fixed, parameters=process_parameters["heatpump_booster"]),
+            process_row(site, "Heat_dummy_space", row["heat_conversion_capacity_kw_th"], row["heat_conversion_capacity_kw_th"], fixed=True, parameters=process_parameters["heat_dummy"]),
+            process_row(site, "Heat_dummy_water", row["heat_conversion_capacity_kw_th"], row["heat_conversion_capacity_kw_th"], fixed=True, parameters=process_parameters["heat_dummy"]),
         ])
         energy_upper = float(row["buffer_capacity_upper_kwh_th"])
         power_upper = float(row["buffer_power_upper_kw_th"])
@@ -67,17 +56,9 @@ def materialize_heat_urbs_inputs(asset_plan, *, sizing_method, process_parameter
                 "cap-up-c": energy_upper,
                 "inst-cap-p": float(row["buffer_installed_power_kw_th"]),
                 "cap-up-p": power_upper,
-                "eff-in": storage_parameters["charge_efficiency"],
-                "eff-out": storage_parameters["discharge_efficiency"],
-                "discharge": storage_parameters["self_discharge_per_timestep"],
-                "ep-ratio": energy_upper / power_upper,
-                "inv-cost-p": 0.0 if fixed else storage_parameters["investment_cost_eur_per_kw"],
-                "inv-cost-c": 0.0 if fixed else storage_parameters["investment_cost_eur_per_kwh"],
-                "fix-cost-p": 0.0 if fixed else storage_parameters["fixed_investment_cost_power_eur"],
-                "fix-cost-c": 0.0 if fixed else storage_parameters["fixed_investment_cost_energy_eur"],
-                "var-cost-p": storage_parameters["variable_cost_eur_per_kwh"],
-                "wacc": storage_parameters["wacc"],
-                "depreciation": storage_parameters["depreciation_years"],
+                **storage_parameter_fields(
+                    storage_parameters, fixed=fixed, ep_ratio=energy_upper / power_upper
+                ),
             }
             if not fixed:
                 hp_upper_kw_el = float(row["heat_pump_capacity_upper_kw_el"])
