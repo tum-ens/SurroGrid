@@ -153,8 +153,14 @@ GridExpand/
 | `service/jobs/` | job history of the web service |
 
 `GRIDEXPAND_WORK_DIR`, `GRIDEXPAND_DATA_DIR` and `GRIDEXPAND_ENV_FILE` relocate `work/`, `data/` and `.env`
-(process environment only). Checkouts with files in the old step folders (`2.demand_allocation/`, `3.urbs/`, ...)
-can move them with `uv run python scripts/migrate_local_layout.py` (dry run; `--execute` moves, never overwrites).
+(process environment only).
+
+**Adopting this layout in an existing checkout** (files in the old step folders `1.grid_sampling/` ...
+`5.postprocessing/`): merge the branch first (git removes the tracked files of the old folders), then run
+`uv run python scripts/migrate_local_layout.py` as a dry run (planned moves, conflicts, uncovered files; it never
+moves git-tracked files and never overwrites), then again with `--execute`, then delete the old per-step `.venv`
+folders (and their `__pycache__` / `.ruff_cache`), which the script leaves in place.
+
 HPC: `scripts/hpc/<allocation|optimization|powerflow>/run_cluster_serialstd.sh <id>` and
 `scripts/hpc/start_batch_jobs.sh <step> <START> <END>` (templates; Steps 2 and 3 need `SCENARIO_CONFIG`).
 

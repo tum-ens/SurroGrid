@@ -233,8 +233,10 @@ configuration, 143 cancelled (SIGTERM or Ctrl-C stops the running steps and mark
 The run directory holds `inputs/run.yaml` and `inputs/scenario.yaml` (frozen copies), `identity.json` (what a
 resumed run must share: pipeline, run id, pylovo version, region or datasets, scope, timeframe, seed, output
 settings, scenario hash; a mismatch is refused), `state.json` (atomic snapshot: status, stage, jobs),
-`events.jsonl`, `plan.json`, `summary.json` and one directory per job group. Synthetic groups contain the batch's
-`status.tsv`, `events.jsonl`, `logs/candidate_<index>_<file>.log` and `summary.json`.
+`events.jsonl`, `plan.json`, `summary.json` and one directory per job group. Synthetic runs add `candidates.json`
+and `prepare/` (the regional electrification assignment `electrification_assignment.csv` with its sidecar and
+log); each synthetic group contains the batch's `status.tsv`, `events.jsonl`, `logs/candidate_<index>_<file>.log`
+and `summary.json`.
 
 ## Environment and `.env`
 
