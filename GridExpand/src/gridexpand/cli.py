@@ -43,7 +43,7 @@ COMMANDS: dict[str, tuple[str, str]] = {
     ),
     "db": (
         "gridexpand.db.maintenance",
-        "Database maintenance: init-schema, delete-scenario.",
+        "Database maintenance: init-schema, migrate, compress, relink-pylovo, delete-scenario.",
     ),
     "serve": (
         "gridexpand.service.cli",

@@ -39,7 +39,6 @@ ENV_FILE = _from_env("GRIDEXPAND_ENV_FILE", PROJECT_DIR / ".env")
 # Static inputs
 STATISTICS_DIR = DATA_DIR / "statistics"
 SAMPLING_DATA_DIR = DATA_DIR / "sampling"
-SAMPLE_GRIDS_DIR = DATA_DIR / "sample_grids"
 
 # Runtime artifacts (hand-off files between steps, logs, caches, run folders)
 SAMPLING_RESULTS_DIR = WORK_DIR / "sampling" / "results"

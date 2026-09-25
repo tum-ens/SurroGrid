@@ -12,12 +12,8 @@ dependencies = [
   "scipy>=1.15,<1.16",
   "h5py>=3.13,<4",
   "tables>=3.10,<4",
-  "blosc2>=2,<5",
-  "msgpack>=1.1,<2",
   "networkx>=3.4,<4",
   "numba>=0.61,<0.62",
-  "llvmlite>=0.44,<0.45",
-  "tqdm>=4.67,<5",
   "pyyaml>=6.0,<7",
   # Database and configuration
   "sqlalchemy>=2.0,<2.1",
@@ -28,36 +24,29 @@ dependencies = [
   "geopandas>=1.0,<1.1",
   "shapely>=2.1,<2.2",
   "pyproj>=3.7,<3.8",
-  "rasterio>=1.4,<1.6",
   "contextily>=1.6,<1.7",
-  "lxml>=5.4",
   # Step 2 (demand allocation)
-  "holidays>=0.73,<1",
   "pvlib>=0.12,<0.13",
   "opendhw>=0.2,<0.3",
   "richardsonpy>=0.2,<0.3",
   "teaser>=0.7,<0.8",
-  "pylightxl>=1.61,<2",
-  "xlrd>=2.0,<3",
   "openpyxl>=3.1,<3.2",
   # Step 3 (urbs optimization)
   "pyomo>=6.9,<7",
   "tsam>=2.3,<3",
   "scikit-learn>=1.6,<2",
-  "threadpoolctl>=3.6,<4",
   "highspy>=1.10,<2",
   "gurobipy>=13.0.2",
   # Step 4 (power flow) and Step 5 (analysis, plotting)
   "pandapower>=3.1,<3.2",
-  "deepdiff>=8.5,<9",
-  "jinja2>=3.1.6",
   "matplotlib>=3.10,<3.11",
-  "seaborn>=0.13,<0.14",
   "plotly>=5.24,<6",
 ]
 
 [project.optional-dependencies]
 notebooks = [
+  "seaborn>=0.13,<0.14",
+  "jinja2>=3.1.6",
   "jupyterlab>=4.2,<5",
   "ipykernel>=7.2.0",
   "ipywidgets>=8.1,<9",
@@ -96,4 +85,3 @@ testpaths = ["tests"]
 # Vendored third-party code (districtgenerator, emobpy, urbs) keeps its upstream
 # star imports, re-exports and idioms to ease comparison with upstream.
 "src/gridexpand/allocation/external/**" = ["F401", "F403", "F405", "F541", "F841"]
-"src/gridexpand/optimization/urbs/**" = ["F401", "F403", "F405", "F541", "F811", "F841"]

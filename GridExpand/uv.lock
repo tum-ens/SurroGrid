@@ -514,19 +514,12 @@ name = "gridexpand"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "blosc2" },
     { name = "contextily" },
-    { name = "deepdiff" },
     { name = "geopandas" },
     { name = "gurobipy" },
     { name = "h5py" },
     { name = "highspy" },
-    { name = "holidays" },
-    { name = "jinja2" },
-    { name = "llvmlite" },
-    { name = "lxml" },
     { name = "matplotlib" },
-    { name = "msgpack" },
     { name = "networkx" },
     { name = "numba" },
     { name = "numpy" },
@@ -537,34 +530,30 @@ dependencies = [
     { name = "plotly" },
     { name = "psycopg2-binary" },
     { name = "pvlib" },
-    { name = "pylightxl" },
     { name = "pyomo" },
     { name = "pyproj" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
-    { name = "rasterio" },
     { name = "requests" },
     { name = "richardsonpy" },
     { name = "scikit-learn" },
     { name = "scipy" },
-    { name = "seaborn" },
     { name = "shapely" },
     { name = "sqlalchemy" },
     { name = "tables" },
     { name = "teaser" },
-    { name = "threadpoolctl" },
-    { name = "tqdm" },
     { name = "tsam" },
-    { name = "xlrd" },
 ]
 
 [package.optional-dependencies]
 notebooks = [
     { name = "ipykernel" },
     { name = "ipywidgets" },
+    { name = "jinja2" },
     { name = "jupyterlab" },
     { name = "kaleido" },
     { name = "nbformat" },
+    { name = "seaborn" },
 ]
 service = [
     { name = "fastapi" },
@@ -581,24 +570,18 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "blosc2", specifier = ">=2,<5" },
     { name = "contextily", specifier = ">=1.6,<1.7" },
-    { name = "deepdiff", specifier = ">=8.5,<9" },
     { name = "fastapi", marker = "extra == 'service'", specifier = ">=0.115" },
     { name = "geopandas", specifier = ">=1.0,<1.1" },
     { name = "gurobipy", specifier = ">=13.0.2" },
     { name = "h5py", specifier = ">=3.13,<4" },
     { name = "highspy", specifier = ">=1.10,<2" },
-    { name = "holidays", specifier = ">=0.73,<1" },
     { name = "ipykernel", marker = "extra == 'notebooks'", specifier = ">=7.2.0" },
     { name = "ipywidgets", marker = "extra == 'notebooks'", specifier = ">=8.1,<9" },
-    { name = "jinja2", specifier = ">=3.1.6" },
+    { name = "jinja2", marker = "extra == 'notebooks'", specifier = ">=3.1.6" },
     { name = "jupyterlab", marker = "extra == 'notebooks'", specifier = ">=4.2,<5" },
     { name = "kaleido", marker = "extra == 'notebooks'", specifier = "==0.2.1" },
-    { name = "llvmlite", specifier = ">=0.44,<0.45" },
-    { name = "lxml", specifier = ">=5.4" },
     { name = "matplotlib", specifier = ">=3.10,<3.11" },
-    { name = "msgpack", specifier = ">=1.1,<2" },
     { name = "nbformat", marker = "extra == 'notebooks'", specifier = ">=5.10.4" },
     { name = "networkx", specifier = ">=3.4,<4" },
     { name = "numba", specifier = ">=0.61,<0.62" },
@@ -610,26 +593,21 @@ requires-dist = [
     { name = "plotly", specifier = ">=5.24,<6" },
     { name = "psycopg2-binary", specifier = ">=2.9,<3" },
     { name = "pvlib", specifier = ">=0.12,<0.13" },
-    { name = "pylightxl", specifier = ">=1.61,<2" },
     { name = "pyomo", specifier = ">=6.9,<7" },
     { name = "pyproj", specifier = ">=3.7,<3.8" },
     { name = "python-dotenv", specifier = ">=1.1,<2" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
-    { name = "rasterio", specifier = ">=1.4,<1.6" },
     { name = "requests", specifier = ">=2.32,<3" },
     { name = "richardsonpy", specifier = ">=0.2,<0.3" },
     { name = "scikit-learn", specifier = ">=1.6,<2" },
     { name = "scipy", specifier = ">=1.15,<1.16" },
-    { name = "seaborn", specifier = ">=0.13,<0.14" },
+    { name = "seaborn", marker = "extra == 'notebooks'", specifier = ">=0.13,<0.14" },
     { name = "shapely", specifier = ">=2.1,<2.2" },
     { name = "sqlalchemy", specifier = ">=2.0,<2.1" },
     { name = "tables", specifier = ">=3.10,<4" },
     { name = "teaser", specifier = ">=0.7,<0.8" },
-    { name = "threadpoolctl", specifier = ">=3.6,<4" },
-    { name = "tqdm", specifier = ">=4.67,<5" },
     { name = "tsam", specifier = ">=2.3,<3" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'service'", specifier = ">=0.30" },
-    { name = "xlrd", specifier = ">=2.0,<3" },
 ]
 provides-extras = ["notebooks", "service"]
 
@@ -1804,12 +1782,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl", hash = "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176", size = 1231151, upload-time = "2026-03-29T13:29:30.038Z" },
 ]
-
-[[package]]
-name = "pylightxl"
-version = "1.61"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ad/fa/7b139a186f0623d8980d4f6acabd51c824c42394a7ee8e69dc0819632740/pylightxl-1.61.tar.gz", hash = "sha256:2c59f12d2ae96b6ca7adcd15b053ec01bd881a8fcb592324bd56c0b223400463", size = 36057, upload-time = "2023-01-01T22:27:31.952Z" }
 
 [[package]]
 name = "pyogrio"
