@@ -1,4 +1,6 @@
 from gridexpand.allocation.config import config
+import functools
+
 import pandas as pd
 import numpy as np
 import warnings
@@ -49,15 +51,21 @@ def _get_cop(heating_type, df_heat_space, df_heat_water, air_temp):
 ##############################################################
 ############## Generation, Publicly Callable #################
 ##############################################################
-def get_norm_outside_temperature(zip_code):
-    """Return the exact postcode-specific norm outside temperature."""
-    postcode = str(zip_code).zfill(5)
-    site_data = pd.read_csv(
+@functools.cache
+def site_data() -> pd.DataFrame:
+    """Return the DistrictGenerator postcode climate table, read once per process."""
+    return pd.read_csv(
         f"{config.DISTGEN_DATA_PATH}/site_data.txt",
         delimiter="\t",
         dtype={"Zip": str},
     )
-    match = site_data[site_data["Zip"].eq(postcode)]
+
+
+def get_norm_outside_temperature(zip_code):
+    """Return the exact postcode-specific norm outside temperature."""
+    postcode = str(zip_code).zfill(5)
+    sites = site_data()
+    match = sites[sites["Zip"].eq(postcode)]
     if len(match) != 1:
         raise ValueError(
             f"Expected one exact postcode climate entry for {postcode}, found {len(match)}."
@@ -145,8 +153,8 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_
 
     # Extract location data
     zip_code = str(zip)
-    site_data = pd.read_csv(f"{config.DISTGEN_DATA_PATH}/site_data.txt", delimiter='\t', dtype={'Zip': str})
-    if zip_code not in set(site_data["Zip"]):
+    sites = site_data()
+    if zip_code not in set(sites["Zip"]):
         raise ValueError(
             f"No exact postcode climate entry for {zip_code}. Numeric postcode "
             "proximity is not a geographic climate fallback."
@@ -154,7 +162,7 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_
     # print(site_data)
     # Simulate heating
     heat_data = Datahandler(scenario, scenario_name = "example", zip_code = zip_code)
-    heat_data.generateEnvironment(weather_data, site_data)
+    heat_data.generateEnvironment(weather_data, sites)
     heat_data.initializeBuildings()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", FutureWarning)

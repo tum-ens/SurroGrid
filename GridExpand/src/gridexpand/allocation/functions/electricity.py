@@ -1,8 +1,10 @@
 from gridexpand.allocation.config import config
 
-import pandas as pd
-import numpy as np
+import functools
 import random
+
+import numpy as np
+import pandas as pd
 
 from gridexpand.common.reproducibility import frame_fingerprint, physical_building_id, stable_seed
 
@@ -257,6 +259,24 @@ def _get_single_building_elec_timeseries_ghd(building_type, floor_area, df_norma
     return df_normalized_lps_ghd[building_type] * floor_area
 
 
+@functools.cache
+def residential_load_profiles() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return the normalized household load profiles and their annual sums.
+
+    The 113 MB table is read once per process; callers must not modify it.
+    """
+    return (
+        pd.read_hdf(config.ELEC_LPS_PATH, key="df_normalized_scaled"),
+        pd.read_hdf(config.ELEC_LPS_PATH, key="df_sums"),
+    )
+
+
+@functools.cache
+def commercial_load_profiles() -> pd.DataFrame:
+    """Return the per-m2 commercial/public (GHD) load profiles, read once per process."""
+    return pd.read_csv(config.ELEC_GHD_PATH, skiprows=1, header=[0])
+
+
 ##############################################################
 ############## Generation, Publicly Callable #################
 ##############################################################
@@ -276,9 +296,8 @@ def get_elec_demand(df_components, base_seed=0, return_component_profiles=False)
     missing = sorted(required.difference(df_components.columns))
     if missing:
         raise ValueError(f"Electricity demand requires component columns: {missing}")
-    df_normalized_lps_res = pd.read_hdf(config.ELEC_LPS_PATH, key="df_normalized_scaled")
-    lps_res_total_demand = pd.read_hdf(config.ELEC_LPS_PATH, key="df_sums")
-    df_normalized_lps_ghd = pd.read_csv(config.ELEC_GHD_PATH, skiprows=1, header=[0])
+    df_normalized_lps_res, lps_res_total_demand = residential_load_profiles()
+    df_normalized_lps_ghd = commercial_load_profiles()
 
     result = df_components.copy()
     profile_by_component = {}
@@ -322,15 +341,14 @@ def get_elec_demand(df_components, base_seed=0, return_component_profiles=False)
             for component_id, profile in profile_by_component.items()
         }
     )
-    result["stable_seed"] = result["component_id"].map(
-        lambda component_id: stable_seed(
-            base_seed,
-            result.loc[result["component_id"].eq(component_id), "objectid"].iloc[0],
-            result.loc[result["component_id"].eq(component_id), "component_category"].iloc[0],
-            "electricity",
-            "profile",
+    first_rows = result.drop_duplicates("component_id")
+    seed_by_component = {
+        component_id: stable_seed(base_seed, object_id, category, "electricity", "profile")
+        for component_id, object_id, category in zip(
+            first_rows["component_id"], first_rows["objectid"], first_rows["component_category"]
         )
-    )
+    }
+    result["stable_seed"] = result["component_id"].map(seed_by_component)
 
     physical_profiles = {}
     physical_buses = {}
@@ -411,6 +429,57 @@ def aggregate_components_to_buildings(physical, components, *, residential_area=
         )
         result["residential_effective_floor_area_m2"] = building_ids.map(area).fillna(0.0)
     return result
+
+def demand_component_audit(components, profiled, component_profiles):
+    """Return the per-component electricity evidence of one allocation run.
+
+    Args:
+        components: Every component of the grid (``raw_data/building_components``).
+        profiled: The profiled components of the demand scope.
+        component_profiles: Hourly profiles, columns ``(component_id, "electricity")``.
+
+    Returns:
+        One row per component, written to ``raw_data/demand_component_audit``
+        and ``surrogrid.demand_component_audit``. ``suppression_reason`` is
+        ``outside_lv_scope`` (MV-direct), ``outside_demand_scope`` (e.g. a
+        non-residential component in a residential-only run) or None.
+    """
+    indexed = profiled.set_index("component_id")
+    profile_max = component_profiles.max(axis=0)
+    profile_max.index = [str(column[0]) for column in component_profiles.columns]
+    audit = components.copy().rename(columns={"component_category": "category"})
+    audit["scenario_unit_id"] = audit["objectid"].astype(str)
+    audit["commodity"] = "electricity"
+    audit["annual_energy_kwh"] = audit["component_id"].map(
+        indexed["annual_electricity_kwh"]
+    ).fillna(0.0)
+    audit["max_profile_value"] = audit["component_id"].map(profile_max).fillna(0.0)
+    audit["profile_hash"] = audit["component_id"].map(indexed["profile_hash"])
+    audit["profile_method"] = audit["component_id"].map(
+        indexed["profile_method"]
+    ).fillna("not_allocated")
+    audit["stable_seed"] = audit["component_id"].map(indexed["stable_seed"])
+    selected_ids = set(profiled["component_id"].astype(str))
+    audit["suppression_reason"] = np.select(
+        [
+            ~audit["included_in_lv"].map(bool),
+            audit["component_id"].astype(str).isin(selected_ids),
+        ],
+        ["outside_lv_scope", None],
+        default="outside_demand_scope",
+    )
+    audit["source_asset_count"] = pd.NA
+    audit["matched_swf_asset_count"] = pd.NA
+    audit["mv_direct"] = audit["mv_direct"].astype(bool)
+    return audit[
+        [
+            "component_id", "objectid", "scenario_unit_id", "bus", "category",
+            "commodity", "annual_energy_kwh", "max_profile_value", "profile_hash",
+            "profile_method", "stable_seed", "source_asset_count",
+            "matched_swf_asset_count", "included_in_lv", "suppression_reason",
+            "pylovo_version_id", "mix_score", "mix_rule", "mix_confidence", "mv_direct",
+        ]
+    ]
 
 # def get_elec_react_demand(df_elec_demand):
 #     conversion_factor = math.tan(math.acos(config.ELEC_REACT_PF))

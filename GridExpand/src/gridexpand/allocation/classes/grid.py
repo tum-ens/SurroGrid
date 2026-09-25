@@ -213,49 +213,6 @@ class Grid:
         self.settings["scenario_assumptions"].update(values)
         self.SF.update_timeframe_metadata(self.settings["scenario_assumptions"])
 
-    def _build_demand_component_audit(self):
-        """Create compact component evidence for the current allocation run."""
-        base = self.df_building_components.copy()
-        profiled = self.df_demand_components.set_index("component_id")
-        profile_ids = [
-            str(column[0]) for column in self.df_electricity_component_profiles.columns
-        ]
-        profile_max = self.df_electricity_component_profiles.max(axis=0)
-        profile_max.index = profile_ids
-        audit = base.rename(columns={"component_category": "category"})
-        audit["scenario_unit_id"] = audit["objectid"].astype(str)
-        audit["commodity"] = "electricity"
-        audit["annual_energy_kwh"] = audit["component_id"].map(
-            profiled["annual_electricity_kwh"]
-        ).fillna(0.0)
-        audit["max_profile_value"] = audit["component_id"].map(profile_max).fillna(0.0)
-        audit["profile_hash"] = audit["component_id"].map(profiled["profile_hash"])
-        audit["profile_method"] = audit["component_id"].map(
-            profiled["profile_method"]
-        ).fillna("not_allocated")
-        audit["stable_seed"] = audit["component_id"].map(profiled["stable_seed"])
-        selected_ids = set(self.df_demand_components["component_id"].astype(str))
-        audit["suppression_reason"] = audit.apply(
-            lambda row: (
-                "outside_lv_scope" if not bool(row["included_in_lv"])
-                else None if str(row["component_id"]) in selected_ids
-                else "outside_demand_scope"
-            ),
-            axis=1,
-        )
-        audit["source_asset_count"] = pd.NA
-        audit["matched_swf_asset_count"] = pd.NA
-        audit["mv_direct"] = audit["mv_direct"].astype(bool)
-        return audit[
-            [
-                "component_id", "objectid", "scenario_unit_id", "bus", "category",
-                "commodity", "annual_energy_kwh", "max_profile_value", "profile_hash",
-                "profile_method", "stable_seed", "source_asset_count",
-                "matched_swf_asset_count", "included_in_lv", "suppression_reason",
-                "pylovo_version_id", "mix_score", "mix_rule", "mix_confidence", "mv_direct",
-            ]
-        ]
-
 
     def _electrification_scope_id(self) -> str:
         """Return the stable population identity used by the assignment manifest."""
@@ -803,7 +760,11 @@ class Grid:
         self.df_buildings = elc.aggregate_components_to_buildings(
             self.df_buildings, self.df_demand_components
         )
-        self.df_demand_component_audit = self._build_demand_component_audit()
+        self.df_demand_component_audit = elc.demand_component_audit(
+            self.df_building_components,
+            self.df_demand_components,
+            self.df_electricity_component_profiles,
+        )
         self._record_profile_fingerprints(base_electricity=self.df_demand_elec)
         # self.df_demand_elec_react = elc.get_elec_react_demand(self.df_demand_elec)
 
