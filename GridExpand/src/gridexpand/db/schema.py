@@ -292,7 +292,8 @@ def _views_comment() -> str:
     return f"gridexpand views.sql sha256:{views_checksum()}"
 
 
-def _create_views(conn: Connection) -> None:
+def create_views(conn: Connection) -> None:
+    """Run ``views.sql`` and record its checksum (``conn`` must be outside a transaction)."""
     with conn.begin():
         run_sql(conn, VIEWS_SQL_PATH.read_text(encoding="utf-8"))
         # COMMENT takes no bind parameters; the checksum is hexadecimal.
@@ -322,7 +323,7 @@ def ensure_views(engine: Engine | None = None) -> bool:
                     f"be created: {status.link_problem}. Relink the grid cases first:\n"
                     "  gridexpand db relink-pylovo --plan\n  gridexpand db relink-pylovo --apply"
                 )
-            _create_views(conn)
+            create_views(conn)
             return True
         finally:
             _advisory_unlock(conn)
@@ -660,7 +661,7 @@ def migrate(
                         "  gridexpand db relink-pylovo --plan\n  gridexpand db relink-pylovo --apply"
                     )
                 else:
-                    _create_views(conn)
+                    create_views(conn)
                     echo("views created/updated from views.sql")
         finally:
             _advisory_unlock(conn)
