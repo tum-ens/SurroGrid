@@ -1,36 +1,52 @@
-"""Materialize DB-backed grid expansion heuristics for QGIS.
+"""Materialize grid-expansion estimates from compact power-flow summaries.
 
-The heavy hourly power-flow tables stay inside PostgreSQL. This script reduces
-them to peak loading and expansion-cost estimates per visible pylovo cable and
-per transformer position.
+One analysis (``surrogrid.expansion_analysis_run``) reduces the peak loading of
+one power-flow run name and stage to reinforcement needs and costs per visible
+pylovo cable and per transformer (synthetic grids, SQL in ``sql/``) or per
+cable corridor and transformer of the real SWF/ÜZW grids (``real_materialization``).
+The rules are documented in ``heuristics``. Each analysis is written in one
+transaction: a failure leaves no partial analysis behind.
+
+``gridexpand expansion --help`` lists the options. Batch callers pass
+``--no-refresh`` and refresh the QGIS views once at the end with
+``gridexpand.db.refresh_qgis_views()``.
 """
 
 from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from functools import cache
+from pathlib import Path
+from typing import Any, Mapping
 
 from sqlalchemy import text
+from sqlalchemy.engine import Connection
 
+from gridexpand.db import refresh_qgis_views
 from gridexpand.db.database import SurroGridDatabase, normalize_ags
 
-from .overview import (  # noqa: F401
-    latest_expansion_analysis_key,
-    load_expansion_overview,
-)
-from .real_materialization import materialize_real_results
+from .real_materialization import insert_real_results, prepare_real_results
 
-def _refresh_qgis_materialized_views(db: SurroGridDatabase) -> None:
-    with db.engine.begin() as conn:
-        conn.execute(text("REFRESH MATERIALIZED VIEW surrogrid.expansion_line_qgis_mv"))
-        conn.execute(text("REFRESH MATERIALIZED VIEW surrogrid.expansion_transformer_qgis_mv"))
-
-
+SQL_DIR = Path(__file__).with_name("sql")
 DATA_SOURCE_LABELS = {
     "synthetic": "Synthetic",
     "real_swf": "Real SWF",
     "real_uzw": "Real ÜZW",
 }
+
+
+@cache
+def sql_text(name: str) -> str:
+    """SQL of ``sql/<name>`` with its fragments (``/*CABLE_SELECTION*/``, ``/*TRANSFORMER_COST*/``) inlined."""
+    sql = (SQL_DIR / name).read_text(encoding="utf-8")
+    for marker, fragment in (
+        ("/*CABLE_SELECTION*/", "cable_selection.sql"),
+        ("/*TRANSFORMER_COST*/", "transformer_cost.sql"),
+    ):
+        if marker in sql:
+            sql = sql.replace(marker, sql_text(fragment))
+    return sql
 
 
 def _ags_values(args: argparse.Namespace) -> list[int] | None:
@@ -45,11 +61,16 @@ def _single(values: list[int] | None) -> int | None:
     return values[0] if values is not None and len(values) == 1 else None
 
 
-def _synthetic_scope_params(args: argparse.Namespace) -> dict[str, object]:
+def _synthetic_params(args: argparse.Namespace) -> dict[str, object]:
     return {
+        "run_name": args.run_name,
+        "stage": args.stage,
+        "scenario_id": args.scenario_id,
         "ags": _ags_values(args),
         "plz": _plz_values(args),
         "pylovo_version_id": args.pylovo_version_id,
+        "assumption_key": args.assumption_key,
+        "line_existing_duct_share": args.line_existing_duct_share,
     }
 
 
@@ -63,218 +84,124 @@ def _analysis_key(args: argparse.Namespace) -> str:
     return f"{scope}_{run}_{args.stage}_{stamp}"
 
 
+def analysis_identity(args: argparse.Namespace) -> dict[str, object]:
+    """The fields an analysis key must keep when it is replaced (``--replace``)."""
+    return {
+        "run_name": args.run_name,
+        "stage": args.stage,
+        "data_source": DATA_SOURCE_LABELS[args.data_source],
+        "ags": _single(_ags_values(args)),
+    }
+
+
+def check_replacement(
+    analysis_key: str,
+    existing: Mapping[str, Any] | None,
+    identity: Mapping[str, object],
+    *,
+    replace: bool,
+) -> bool:
+    """Decide whether an existing analysis row may be replaced.
+
+    Returns:
+        True if a row exists and is to be deleted, False if there is none.
+
+    Raises:
+        RuntimeError: a row exists and ``replace`` is False, or it belongs to a
+            different run name, stage, data source or AGS (``--replace`` never
+            deletes another analysis).
+    """
+    if existing is None:
+        return False
+    if not replace:
+        raise RuntimeError(
+            f"analysis_key={analysis_key!r} exists. Use --replace to overwrite an existing analysis."
+        )
+    mismatched = {
+        field: (existing.get(field), value)
+        for field, value in identity.items()
+        if existing.get(field) != value
+    }
+    if mismatched:
+        details = ", ".join(f"{field}: stored {old!r}, requested {new!r}" for field, (old, new) in mismatched.items())
+        raise RuntimeError(
+            f"--replace refuses to overwrite analysis_key={analysis_key!r} of another analysis ({details}). "
+            "Use a distinct --analysis-key."
+        )
+    return True
+
+
+def resolve_scenario_id(requested: int | None, selected: set[int]) -> int | None:
+    """Scenario of the analysis: the requested one, else the single scenario of the selected runs."""
+    if requested is not None:
+        return int(requested)
+    if len(selected) == 1:
+        return int(next(iter(selected)))
+    if selected:
+        print(
+            f"Warning: the selected runs belong to {len(selected)} scenarios {sorted(selected)}; "
+            "expansion_analysis_run.scenario_id stays NULL."
+        )
+    return None
+
+
 def _create_analysis_run(
-    db: SurroGridDatabase,
+    conn: Connection,
     *,
     analysis_key: str,
     args: argparse.Namespace,
+    scenario_id: int | None,
 ) -> int:
-    if args.replace:
-        with db.engine.begin() as conn:
-            conn.execute(
-                text(
-                    """
-                    DELETE FROM surrogrid.expansion_analysis_run
-                    WHERE analysis_key = :analysis_key
-                    """
-                ),
-                {"analysis_key": analysis_key},
-            )
-
-    query = text(
-        """
-        INSERT INTO surrogrid.expansion_analysis_run (
-            analysis_key, assumption_key, run_name, stage,
-            scenario_id, ags, plz, note, data_source
+    existing = conn.execute(
+        text(
+            """
+            SELECT run_name, stage, data_source, ags
+            FROM surrogrid.expansion_analysis_run
+            WHERE analysis_key = :analysis_key
+            """
+        ),
+        {"analysis_key": analysis_key},
+    ).mappings().first()
+    identity = analysis_identity(args)
+    if check_replacement(analysis_key, existing, identity, replace=args.replace):
+        conn.execute(
+            text("DELETE FROM surrogrid.expansion_analysis_run WHERE analysis_key = :analysis_key"),
+            {"analysis_key": analysis_key},
         )
-        VALUES (
-            :analysis_key, :assumption_key, :run_name, :stage,
-            :scenario_id, :ags, :plz, :note, :data_source
-        )
-        RETURNING expansion_analysis_run_id
-        """
+    return int(
+        conn.execute(
+            text(
+                """
+                INSERT INTO surrogrid.expansion_analysis_run (
+                    analysis_key, assumption_key, run_name, stage,
+                    scenario_id, ags, plz, note, data_source
+                )
+                VALUES (
+                    :analysis_key, :assumption_key, :run_name, :stage,
+                    :scenario_id, :ags, :plz, :note, :data_source
+                )
+                RETURNING expansion_analysis_run_id
+                """
+            ),
+            {
+                **identity,
+                "analysis_key": analysis_key,
+                "assumption_key": args.assumption_key,
+                "scenario_id": scenario_id,
+                "plz": _single(_plz_values(args)),
+                "note": args.note,
+            },
+        ).scalar_one()
     )
-    try:
-        with db.engine.begin() as conn:
-            return int(
-                conn.execute(
-                    query,
-                    {
-                        "analysis_key": analysis_key,
-                        "assumption_key": args.assumption_key,
-                        "run_name": args.run_name,
-                        "stage": args.stage,
-                        "scenario_id": args.scenario_id,
-                        "ags": _single(_ags_values(args)),
-                        "plz": _single(_plz_values(args)),
-                        "note": args.note,
-                        "data_source": DATA_SOURCE_LABELS[args.data_source],
-                    },
-                ).scalar_one()
-            )
-    except Exception as exc:
-        raise RuntimeError(
-            f"Could not create analysis_key={analysis_key!r}. "
-            "Use --replace to overwrite an existing analysis."
-        ) from exc
 
 
-def _audit_unmapped_line_components(db: SurroGridDatabase, *, args: argparse.Namespace) -> None:
-    """Report active electrical line components that cannot be attached to QGIS geometries.
+def check_component_audit(row: Mapping[str, Any]) -> str | None:
+    """Evaluate the unmapped-component audit; return a warning or None.
 
-    Root-adjacent connector lines can be legitimate non-asset artefacts, but
-    overloaded unmapped components would hide expansion needs. Treat those as a
-    hard failure before materializing costs.
+    Raises:
+        RuntimeError: no selected run, no component loading, or an overloaded
+            component without a visible geometry (its cost would be hidden).
     """
-    query = text(
-        """
-        WITH selected_runs AS (
-            SELECT
-                pr.powerflow_run_id,
-                pr.grid_case_id,
-                gc.ags,
-                gc.plz,
-                gc.kcid,
-                gc.bcid,
-                gc.pylovo_grid_result_id,
-                gc.pylovo_version_id
-            FROM surrogrid.powerflow_run pr
-            JOIN surrogrid.grid_case gc USING (grid_case_id)
-            WHERE pr.run_name = :run_name
-              AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
-              AND (CAST(:ags AS BIGINT[]) IS NULL OR gc.ags = ANY(CAST(:ags AS BIGINT[])))
-              AND (CAST(:plz AS INTEGER[]) IS NULL OR gc.plz = ANY(CAST(:plz AS INTEGER[])))
-              AND (
-                  CAST(:pylovo_version_id AS TEXT) IS NULL
-                  OR gc.pylovo_version_id = CAST(:pylovo_version_id AS TEXT)
-              )
-        ),
-        pp_source AS (
-            SELECT
-                sr.*,
-                pl.pp_index AS line,
-                pl.name AS component_line_name,
-                pl.length_km AS component_length_km,
-                pl.max_i_ka,
-                pl.parallel AS component_parallel,
-                pl.from_bus,
-                pl.to_bus,
-                regexp_replace(pl.name, '^Line to ', 'L') AS pylovo_line_name
-            FROM selected_runs sr
-            JOIN pylovo.pandapower_line pl
-              ON pl.grid_result_id = sr.pylovo_grid_result_id
-        ),
-        source_lines AS (
-            SELECT
-                pp.*,
-                lr.geom AS source_geom,
-                lr.line_name AS source_line_name
-            FROM pp_source pp
-            LEFT JOIN pylovo.lines_result lr
-              ON lr.grid_result_id = pp.pylovo_grid_result_id
-             AND lr.line_name = pp.pylovo_line_name
-        ),
-        visible_map AS (
-            SELECT
-                src.*,
-                COALESCE(direct.id, spatial.id) AS visible_line_id
-            FROM source_lines src
-            LEFT JOIN LATERAL (
-                SELECT v.id
-                FROM pylovo.lines_result_view v
-                WHERE v.grid_result_id = src.pylovo_grid_result_id
-                  AND v.version_id = src.pylovo_version_id
-                  AND v.plz = src.plz
-                  AND v.kcid = src.kcid
-                  AND v.bcid = src.bcid
-                  AND v.line_name = src.source_line_name
-                LIMIT 1
-            ) direct ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT v.id
-                FROM pylovo.lines_result_view v
-                WHERE direct.id IS NULL
-                  AND src.source_geom IS NOT NULL
-                  AND v.grid_result_id = src.pylovo_grid_result_id
-                  AND v.version_id = src.pylovo_version_id
-                  AND v.plz = src.plz
-                  AND v.kcid = src.kcid
-                  AND v.bcid = src.bcid
-                  AND v.line_name <> src.source_line_name
-                  AND ST_DWithin(v.geom, src.source_geom, 0.05)
-                ORDER BY
-                    ST_Length(ST_Intersection(v.geom, src.source_geom)) DESC,
-                    ST_Distance(v.geom, src.source_geom) ASC
-                LIMIT 1
-            ) spatial ON direct.id IS NULL
-        ),
-        peak_line AS (
-            SELECT
-                pcs.powerflow_run_id,
-                pcs.cable AS line,
-                pcs.cable_loading_max_time_percent
-                    / 100.0
-                    * pcs.cable_installed_capacity_ka AS max_i_from_ka
-            FROM surrogrid.powerflow_cable_summary pcs
-            JOIN selected_runs sr USING (powerflow_run_id)
-            WHERE pcs.stage = :stage
-        ),
-        active_components AS (
-            SELECT
-                vm.*,
-                peak.max_i_from_ka,
-                CASE
-                    WHEN vm.max_i_ka IS NULL OR vm.max_i_ka = 0.0 THEN NULL
-                    ELSE peak.max_i_from_ka
-                        / (vm.max_i_ka * COALESCE(vm.component_parallel, 1))
-                        * 100.0
-                END AS loading_percent
-            FROM visible_map vm
-            JOIN peak_line peak
-              ON peak.powerflow_run_id = vm.powerflow_run_id
-             AND peak.line = vm.line
-        ),
-        unmapped AS (
-            SELECT *
-            FROM active_components
-            WHERE visible_line_id IS NULL
-        )
-        SELECT
-            (SELECT COUNT(*) FROM selected_runs) AS selected_runs,
-            (SELECT COUNT(*) FROM active_components) AS active_components,
-            (SELECT COUNT(*) FROM unmapped) AS unmapped_components,
-            COUNT(*) FILTER (
-                WHERE COALESCE(loading_percent, 0.0) > 100.0
-                  AND NOT (
-                      source_line_name IS NULL
-                      AND source_geom IS NULL
-                      AND component_length_km <= 0.005
-                  )
-            ) AS overloaded_unmapped_components,
-            COUNT(*) FILTER (
-                WHERE COALESCE(loading_percent, 0.0) > 100.0
-                  AND source_line_name IS NULL
-                  AND source_geom IS NULL
-                  AND component_length_km <= 0.005
-            ) AS overloaded_root_connector_like_components,
-            COALESCE(MAX(loading_percent), 0.0) AS max_unmapped_loading_percent,
-            COUNT(*) FILTER (
-                WHERE source_line_name IS NULL
-                  AND source_geom IS NULL
-                  AND component_length_km <= 0.005
-            ) AS root_connector_like_components
-        FROM unmapped
-        """
-    )
-    params = {
-        "run_name": args.run_name,
-        "stage": args.stage,
-        "scenario_id": args.scenario_id,
-        **_synthetic_scope_params(args),
-    }
-    with db.engine.connect() as conn:
-        row = conn.execute(query, params).mappings().one()
-
     selected_runs = int(row["selected_runs"] or 0)
     active_components = int(row["active_components"] or 0)
     unmapped = int(row["unmapped_components"] or 0)
@@ -282,13 +209,12 @@ def _audit_unmapped_line_components(db: SurroGridDatabase, *, args: argparse.Nam
     root_like = int(row["root_connector_like_components"] or 0)
     overloaded_root_like = int(row["overloaded_root_connector_like_components"] or 0)
     max_loading = float(row["max_unmapped_loading_percent"] or 0.0)
-
     if selected_runs == 0:
         raise RuntimeError("No power-flow runs match the requested expansion scope.")
     if active_components == 0:
         raise RuntimeError(
-            "No raw power-flow line-result rows match the requested expansion scope. "
-            "Run Step 4 with raw DB storage before materializing expansion costs."
+            "No power-flow cable summaries (surrogrid.powerflow_cable_summary) match the requested "
+            "expansion scope and stage. Run Step 4 with --outputs summary (or raw,summary) first."
         )
     if overloaded > 0:
         raise RuntimeError(
@@ -296,640 +222,36 @@ def _audit_unmapped_line_components(db: SurroGridDatabase, *, args: argparse.Nam
             f"(max unmapped loading {max_loading:.2f}%). Refusing to hide expansion needs."
         )
     if unmapped > 0:
-        print(
+        return (
             "Warning: ignored "
             f"{unmapped} active unmapped line component(s) "
             f"({root_like} root-connector-like, {overloaded_root_like} overloaded root-connector-like; "
             f"max loading {max_loading:.2f}%)."
         )
+    return None
 
 
-def _materialize_line_results(
-    db: SurroGridDatabase,
-    *,
-    expansion_analysis_run_id: int,
-    args: argparse.Namespace,
-) -> int:
-    query = text(
-        """
-        WITH assumption AS (
-            SELECT *
-            FROM surrogrid.expansion_cost_assumption
-            WHERE assumption_key = :assumption_key
-        ),
-        selected_runs AS (
-            SELECT
-                pr.powerflow_run_id,
-                pr.grid_case_id,
-                pr.scenario_id,
-                gc.ags,
-                gc.plz,
-                gc.kcid,
-                gc.bcid,
-                gc.pylovo_grid_result_id,
-                gc.pylovo_version_id,
-                pcr.settlement_type,
-                COALESCE(
-                    NULLIF(
-                        CASE WHEN pr.assumptions <> '{}'::JSONB THEN pr.assumptions ELSE sc.assumptions END
-                            ->> 'timeframe_start',
-                        ''
-                    ),
-                    '2009-01-01 00:00:00+00:00'
-                )::TIMESTAMPTZ AS timeframe_start
-            FROM surrogrid.powerflow_run pr
-            JOIN surrogrid.grid_case gc USING (grid_case_id)
-            JOIN surrogrid.scenario sc ON sc.scenario_id = pr.scenario_id
-            LEFT JOIN pylovo.postcode_result pcr
-              ON pcr.version_id = gc.pylovo_version_id
-             AND pcr.postcode_result_plz = gc.plz
-            WHERE pr.run_name = :run_name
-              AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
-              AND (CAST(:ags AS BIGINT[]) IS NULL OR gc.ags = ANY(CAST(:ags AS BIGINT[])))
-              AND (CAST(:plz AS INTEGER[]) IS NULL OR gc.plz = ANY(CAST(:plz AS INTEGER[])))
-              AND (
-                  CAST(:pylovo_version_id AS TEXT) IS NULL
-                  OR gc.pylovo_version_id = CAST(:pylovo_version_id AS TEXT)
-              )
-        ),
-        pp_source AS (
-            SELECT
-                sr.*,
-                pl.pp_index AS line,
-                pl.name AS component_line_name,
-                pl.std_type AS component_std_type,
-                pl.length_km AS component_length_km,
-                pl.max_i_ka,
-                pl.parallel AS component_parallel,
-                regexp_replace(pl.name, '^Line to ', 'L') AS pylovo_line_name
-            FROM selected_runs sr
-            JOIN pylovo.pandapower_line pl
-              ON pl.grid_result_id = sr.pylovo_grid_result_id
-        ),
-        source_lines AS (
-            SELECT
-                pp.*,
-                lr.lines_result_id,
-                lr.geom AS source_geom,
-                lr.line_name AS source_line_name
-            FROM pp_source pp
-            LEFT JOIN pylovo.lines_result lr
-              ON lr.grid_result_id = pp.pylovo_grid_result_id
-             AND lr.line_name = pp.pylovo_line_name
-        ),
-        visible_map AS (
-            SELECT
-                src.*,
-                COALESCE(direct.id, spatial.id) AS visible_line_id
-            FROM source_lines src
-            LEFT JOIN LATERAL (
-                SELECT v.id
-                FROM pylovo.lines_result_view v
-                WHERE v.grid_result_id = src.pylovo_grid_result_id
-                  AND v.version_id = src.pylovo_version_id
-                  AND v.plz = src.plz
-                  AND v.kcid = src.kcid
-                  AND v.bcid = src.bcid
-                  AND v.line_name = src.source_line_name
-                LIMIT 1
-            ) direct ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT v.id
-                FROM pylovo.lines_result_view v
-                WHERE direct.id IS NULL
-                  AND src.source_geom IS NOT NULL
-                  AND v.grid_result_id = src.pylovo_grid_result_id
-                  AND v.version_id = src.pylovo_version_id
-                  AND v.plz = src.plz
-                  AND v.kcid = src.kcid
-                  AND v.bcid = src.bcid
-                  AND v.line_name <> src.source_line_name
-                  AND ST_DWithin(v.geom, src.source_geom, 0.05)
-                ORDER BY
-                    ST_Length(ST_Intersection(v.geom, src.source_geom)) DESC,
-                    ST_Distance(v.geom, src.source_geom) ASC
-                LIMIT 1
-            ) spatial ON direct.id IS NULL
-        ),
-        peak_line AS (
-            SELECT
-                pcs.powerflow_run_id,
-                pcs.cable AS line,
-                pcs.cable_loading_max_time_percent
-                    / 100.0
-                    * pcs.cable_installed_capacity_ka AS max_i_from_ka,
-                pcs.cable_loading_max_t_index AS critical_t_index,
-                -- Same rule as the raw tables' ts (db.writers.RunTimestamps).
-                sr.timeframe_start
-                    + pcs.cable_loading_max_t_index * INTERVAL '1 hour' AS critical_ts
-            FROM surrogrid.powerflow_cable_summary pcs
-            JOIN selected_runs sr USING (powerflow_run_id)
-            WHERE pcs.stage = :stage
-        ),
-        component_loading AS (
-            SELECT
-                vm.powerflow_run_id,
-                vm.grid_case_id,
-                vm.scenario_id,
-                vm.ags,
-                vm.plz,
-                vm.kcid,
-                vm.bcid,
-                vm.pylovo_grid_result_id,
-                vm.pylovo_version_id,
-                vm.settlement_type,
-                vm.visible_line_id,
-                vm.line AS component_line,
-                vm.component_line_name,
-                vm.component_std_type,
-                vm.component_length_km,
-                COALESCE(vm.component_parallel, 1) AS component_parallel,
-                peak.max_i_from_ka,
-                NULLIF(vm.max_i_ka, 0.0) AS max_i_ka,
-                NULLIF(vm.max_i_ka, 0.0) * COALESCE(vm.component_parallel, 1)
-                    AS installed_capacity_ka,
-                GREATEST(
-                    peak.max_i_from_ka
-                        - NULLIF(vm.max_i_ka, 0.0) * COALESCE(vm.component_parallel, 1),
-                    0.0
-                ) AS required_added_capacity_ka,
-                peak.critical_t_index,
-                peak.critical_ts,
-                CASE
-                    WHEN vm.max_i_ka IS NULL OR vm.max_i_ka = 0.0 THEN NULL
-                    ELSE peak.max_i_from_ka
-                        / (vm.max_i_ka * COALESCE(vm.component_parallel, 1))
-                        * 100.0
-                END AS loading_percent
-            FROM visible_map vm
-            JOIN peak_line peak
-              ON peak.powerflow_run_id = vm.powerflow_run_id
-             AND peak.line = vm.line
-            WHERE vm.visible_line_id IS NOT NULL
-        ),
-        component_cost AS (
-            SELECT
-                cl.*,
-                cl.component_parallel + selection.additional_parallel AS required_parallel,
-                selection.additional_parallel,
-                selection.reinforcement_150_count,
-                selection.reinforcement_185_count,
-                selection.reinforcement_240_count,
-                selection.reinforcement_added_capacity_ka,
-                'NAYY_4_150|NAYY_4_185|NAYY_4_240'::TEXT AS reinforcement_catalog,
-                selection.line_cost_eur_per_km,
-                selection.line_cost_basis,
-                selection.duct_cost_eur_per_km,
-                selection.reopen_cost_eur_per_km,
-                selection.existing_duct_share,
-                selection.trenching_share,
-                COALESCE(cl.component_length_km, 0.0)
-                    * selection.line_cost_eur_per_km AS estimated_component_cost_eur
-            FROM component_loading cl
-            CROSS JOIN assumption
-            CROSS JOIN LATERAL (
-                SELECT LEAST(
-                    GREATEST(
-                        COALESCE(:line_existing_duct_share, assumption.line_existing_duct_share),
-                        0.0
-                    ),
-                    1.0
-                ) AS existing_duct_share
-            ) share
-            CROSS JOIN LATERAL (
-                SELECT
-                    CASE
-                        WHEN cl.settlement_type = 1 THEN assumption.line_reopen_rural_eur_per_km
-                        WHEN cl.settlement_type = 3 THEN assumption.line_reopen_urban_eur_per_km
-                        ELSE assumption.line_reopen_suburban_eur_per_km
-                    END AS reopen_cost_eur_per_km,
-                    CASE
-                        WHEN cl.settlement_type = 1 THEN 'rural'
-                        WHEN cl.settlement_type = 3 THEN 'urban'
-                        ELSE 'semiurban'
-                    END AS settlement_label
-            ) route
-            CROSS JOIN LATERAL (
-                SELECT
-                    candidate.n150 AS reinforcement_150_count,
-                    candidate.n185 AS reinforcement_185_count,
-                    candidate.n240 AS reinforcement_240_count,
-                    candidate.n150 + candidate.n185 + candidate.n240 AS additional_parallel,
-                    candidate.added_capacity_ka AS reinforcement_added_capacity_ka,
-                    candidate.total_duct_cost_eur_per_km AS duct_cost_eur_per_km,
-                    route.reopen_cost_eur_per_km,
-                    share.existing_duct_share,
-                    1.0 - share.existing_duct_share AS trenching_share,
-                    candidate.total_cost_eur_per_km AS line_cost_eur_per_km,
-                    CASE
-                        WHEN candidate.n150 + candidate.n185 + candidate.n240 = 0
-                            THEN 'none_existing_capacity_sufficient'
-                        ELSE CONCAT(
-                            'catalog_', route.settlement_label,
-                            '_duct', ROUND((share.existing_duct_share * 100.0)::NUMERIC)::TEXT,
-                            '_trench', ROUND(((1.0 - share.existing_duct_share) * 100.0)::NUMERIC)::TEXT,
-                            '_150x', candidate.n150,
-                            '_185x', candidate.n185,
-                            '_240x', candidate.n240
-                        )
-                    END AS line_cost_basis
-                FROM (
-                    SELECT
-                        n150,
-                        n185,
-                        n240,
-                        n150 * assumption.line_reinforcement_150_max_i_ka
-                            + n185 * assumption.line_reinforcement_185_max_i_ka
-                            + n240 * assumption.line_reinforcement_240_max_i_ka
-                            AS added_capacity_ka,
-                        n150 * assumption.line_parallel_150_eur_per_km
-                            + n185 * assumption.line_parallel_185_eur_per_km
-                            + n240 * assumption.line_parallel_240_eur_per_km
-                            AS total_duct_cost_eur_per_km,
-                        CASE
-                            WHEN n150 + n185 + n240 = 0 THEN 0.0
-                            ELSE
-                                n150 * assumption.line_parallel_150_eur_per_km
-                                + n185 * assumption.line_parallel_185_eur_per_km
-                                + n240 * assumption.line_parallel_240_eur_per_km
-                                + (1.0 - share.existing_duct_share) * (
-                                    route.reopen_cost_eur_per_km
-                                    - GREATEST(
-                                        CASE WHEN n150 > 0 THEN assumption.line_parallel_150_eur_per_km ELSE 0.0 END,
-                                        CASE WHEN n185 > 0 THEN assumption.line_parallel_185_eur_per_km ELSE 0.0 END,
-                                        CASE WHEN n240 > 0 THEN assumption.line_parallel_240_eur_per_km ELSE 0.0 END
-                                    )
-                                )
-                        END AS total_cost_eur_per_km
-                    FROM generate_series(
-                        0,
-                        CEIL(
-                            cl.required_added_capacity_ka
-                            / assumption.line_reinforcement_150_max_i_ka
-                        )::INTEGER
-                    ) n150
-                    CROSS JOIN generate_series(
-                        0,
-                        CEIL(
-                            cl.required_added_capacity_ka
-                            / assumption.line_reinforcement_150_max_i_ka
-                        )::INTEGER
-                    ) n185
-                    CROSS JOIN generate_series(
-                        0,
-                        CEIL(
-                            cl.required_added_capacity_ka
-                            / assumption.line_reinforcement_150_max_i_ka
-                        )::INTEGER
-                    ) n240
-                    WHERE (
-                        cl.required_added_capacity_ka <= 1e-12
-                        AND n150 + n185 + n240 = 0
-                    ) OR (
-                        n150 + n185 + n240 > 0
-                        AND n150 * assumption.line_reinforcement_150_max_i_ka
-                            + n185 * assumption.line_reinforcement_185_max_i_ka
-                            + n240 * assumption.line_reinforcement_240_max_i_ka
-                            >= cl.required_added_capacity_ka - 1e-12
-                    )
-                ) candidate
-                ORDER BY
-                    candidate.total_cost_eur_per_km,
-                    candidate.n150 + candidate.n185 + candidate.n240,
-                    candidate.added_capacity_ka - cl.required_added_capacity_ka,
-                    candidate.n240 DESC,
-                    candidate.n185 DESC
-                LIMIT 1
-            ) selection
-        ),
-        visible_counts AS (
-            SELECT powerflow_run_id, visible_line_id, COUNT(*) AS mapped_component_lines
-            FROM component_cost
-            GROUP BY powerflow_run_id, visible_line_id
-        ),
-        visible_aggregate AS (
-            SELECT
-                powerflow_run_id,
-                visible_line_id,
-                MAX(required_parallel) AS required_parallel,
-                SUM(additional_parallel)::INTEGER AS additional_parallel,
-                SUM(reinforcement_150_count)::INTEGER AS reinforcement_150_count,
-                SUM(reinforcement_185_count)::INTEGER AS reinforcement_185_count,
-                SUM(reinforcement_240_count)::INTEGER AS reinforcement_240_count,
-                SUM(reinforcement_added_capacity_ka) AS reinforcement_added_capacity_ka,
-                BOOL_OR(additional_parallel > 0) AS requires_expansion,
-                BOOL_OR(COALESCE(loading_percent, 0.0) > 100.0) AS overloaded_at_100_percent,
-                COALESCE(SUM(estimated_component_cost_eur), 0.0) AS estimated_cost_eur,
-                COUNT(DISTINCT line_cost_basis) AS component_cost_basis_count,
-                COUNT(DISTINCT component_std_type) AS component_std_type_count
-            FROM component_cost
-            GROUP BY powerflow_run_id, visible_line_id
-        ),
-        critical_component AS (
-            SELECT DISTINCT ON (powerflow_run_id, visible_line_id)
-                *
-            FROM component_cost
-            ORDER BY powerflow_run_id, visible_line_id, loading_percent DESC NULLS LAST
-        )
-        INSERT INTO surrogrid.expansion_line_result (
-            expansion_analysis_run_id,
-            powerflow_run_id,
-            grid_case_id,
-            scenario_id,
-            ags,
-            plz,
-            kcid,
-            bcid,
-            pylovo_grid_result_id,
-            pylovo_version_id,
-            visible_line_id,
-            visible_line_name,
-            visible_std_type,
-            is_helper,
-            helper_type,
-            from_bus,
-            to_bus,
-            length_km,
-            settlement_type,
-            line_existing_duct_share,
-            line_trenching_share,
-            critical_component_parallel,
-            max_component_line,
-            max_component_line_name,
-            max_i_from_ka,
-            max_i_ka,
-            loading_percent,
-            required_parallel,
-            additional_parallel,
-            reinforcement_150_count,
-            reinforcement_185_count,
-            reinforcement_240_count,
-            reinforcement_added_capacity_ka,
-            reinforcement_catalog,
-            requires_expansion,
-            overloaded_at_100_percent,
-            estimated_cost_eur,
-            critical_component_cost_eur_per_km,
-            critical_component_cost_basis,
-            critical_component_duct_cost_eur_per_km,
-            critical_component_reopen_cost_eur_per_km,
-            critical_t_index,
-            critical_ts,
-            mapped_component_lines,
-            component_cost_basis_count,
-            component_std_type_count
-        )
-        SELECT
-            :expansion_analysis_run_id,
-            cc.powerflow_run_id,
-            cc.grid_case_id,
-            cc.scenario_id,
-            cc.ags,
-            cc.plz,
-            cc.kcid,
-            cc.bcid,
-            cc.pylovo_grid_result_id,
-            cc.pylovo_version_id,
-            lv.id,
-            lv.line_name,
-            lv.std_type,
-            lv.is_helper,
-            lv.helper_type,
-            lv.from_bus,
-            lv.to_bus,
-            lv.length_km,
-            cc.settlement_type,
-            cc.existing_duct_share,
-            cc.trenching_share,
-            cc.component_parallel,
-            cc.component_line,
-            cc.component_line_name,
-            cc.max_i_from_ka,
-            cc.max_i_ka,
-            cc.loading_percent,
-            va.required_parallel,
-            va.additional_parallel,
-            va.reinforcement_150_count,
-            va.reinforcement_185_count,
-            va.reinforcement_240_count,
-            va.reinforcement_added_capacity_ka,
-            cc.reinforcement_catalog,
-            va.requires_expansion,
-            va.overloaded_at_100_percent,
-            va.estimated_cost_eur,
-            cc.line_cost_eur_per_km,
-            cc.line_cost_basis,
-            cc.duct_cost_eur_per_km,
-            cc.reopen_cost_eur_per_km,
-            cc.critical_t_index,
-            cc.critical_ts,
-            vc.mapped_component_lines,
-            va.component_cost_basis_count,
-            va.component_std_type_count
-        FROM critical_component cc
-        JOIN visible_aggregate va
-          ON va.powerflow_run_id = cc.powerflow_run_id
-         AND va.visible_line_id = cc.visible_line_id
-        JOIN visible_counts vc
-          ON vc.powerflow_run_id = cc.powerflow_run_id
-         AND vc.visible_line_id = cc.visible_line_id
-        JOIN pylovo.lines_result_view lv
-          ON lv.grid_result_id = cc.pylovo_grid_result_id
-         AND lv.version_id = cc.pylovo_version_id
-         AND lv.plz = cc.plz
-         AND lv.kcid = cc.kcid
-         AND lv.bcid = cc.bcid
-         AND lv.id = cc.visible_line_id
-        """
-    )
-    with db.engine.begin() as conn:
-        result = conn.execute(
-            query,
-            {
-                "expansion_analysis_run_id": expansion_analysis_run_id,
-                "assumption_key": args.assumption_key,
-                "run_name": args.run_name,
-                "stage": args.stage,
-                "scenario_id": args.scenario_id,
-                **_synthetic_scope_params(args),
-                "line_existing_duct_share": args.line_existing_duct_share,
-            },
-        )
-        return int(result.rowcount or 0)
+def _prepare_synthetic_scope(conn: Connection, args: argparse.Namespace) -> set[int]:
+    """Create the temp tables of the selected runs and their component loading; return their scenarios."""
+    params = _synthetic_params(args)
+    conn.execute(text(sql_text("selected_runs.sql")), params)
+    conn.execute(text(sql_text("component_loading.sql")), params)
+    conn.execute(text("ANALYZE expansion_selected_run"))
+    conn.execute(text("ANALYZE expansion_component_loading"))
+    warning = check_component_audit(conn.execute(text(sql_text("component_audit.sql"))).mappings().one())
+    if warning:
+        print(warning)
+    return {
+        int(value)
+        for value in conn.execute(text("SELECT DISTINCT scenario_id FROM expansion_selected_run")).scalars()
+    }
 
 
-def _materialize_transformer_results(
-    db: SurroGridDatabase,
-    *,
-    expansion_analysis_run_id: int,
-    args: argparse.Namespace,
-) -> int:
-    query = text(
-        """
-        WITH assumption AS (
-            SELECT *
-            FROM surrogrid.expansion_cost_assumption
-            WHERE assumption_key = :assumption_key
-        ),
-        selected_runs AS (
-            SELECT
-                pr.powerflow_run_id,
-                pr.grid_case_id,
-                pr.scenario_id,
-                gc.ags,
-                gc.plz,
-                gc.kcid,
-                gc.bcid,
-                gc.pylovo_grid_result_id,
-                gc.pylovo_version_id
-            FROM surrogrid.powerflow_run pr
-            JOIN surrogrid.grid_case gc USING (grid_case_id)
-            WHERE pr.run_name = :run_name
-              AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
-              AND (CAST(:ags AS BIGINT[]) IS NULL OR gc.ags = ANY(CAST(:ags AS BIGINT[])))
-              AND (CAST(:plz AS INTEGER[]) IS NULL OR gc.plz = ANY(CAST(:plz AS INTEGER[])))
-              AND (
-                  CAST(:pylovo_version_id AS TEXT) IS NULL
-                  OR gc.pylovo_version_id = CAST(:pylovo_version_id AS TEXT)
-              )
-        ),
-        peak_import AS (
-            SELECT
-                pfs.powerflow_run_id,
-                pfs.trafo_critical_ts AS critical_ts,
-                pfs.trafo_critical_t_index AS critical_t_index,
-                pfs.trafo_max_p_mw AS p_mw,
-                pfs.trafo_max_q_mvar AS q_mvar,
-                pfs.trafo_max_s_mva AS s_mva
-            FROM surrogrid.powerflow_summary pfs
-            JOIN selected_runs sr USING (powerflow_run_id)
-            WHERE pfs.stage = :stage
-              AND pfs.trafo_max_s_mva IS NOT NULL
-        ),
-        transformer_base AS (
-            SELECT
-                sr.*,
-                gr.transformer_equipment_name,
-                COALESCE(tpwg.s_max_kva, gr.transformer_rated_power::DOUBLE PRECISION) AS rated_kva
-            FROM selected_runs sr
-            JOIN pylovo.grid_result gr
-              ON gr.grid_result_id = sr.pylovo_grid_result_id
-            LEFT JOIN pylovo.transformer_positions_with_grid tpwg
-              ON tpwg.grid_result_id = sr.pylovo_grid_result_id
-             AND tpwg.version_id = sr.pylovo_version_id
-             AND tpwg.plz = sr.plz
-             AND tpwg.kcid = sr.kcid
-             AND tpwg.bcid = sr.bcid
-        ),
-        estimated AS (
-            SELECT
-                tb.*,
-                peak.critical_ts,
-                peak.critical_t_index,
-                peak.p_mw,
-                peak.q_mvar,
-                peak.s_mva,
-                peak.s_mva * 1000.0 / NULLIF(tb.rated_kva, 0.0) * 100.0 AS loading_percent,
-                CEIL(
-                    (peak.s_mva * 1000.0)
-                    / assumption.transformer_capacity_step_kva
-                ) * assumption.transformer_capacity_step_kva AS required_kva
-            FROM transformer_base tb
-            JOIN peak_import peak USING (powerflow_run_id)
-            CROSS JOIN assumption
-            WHERE tb.rated_kva IS NOT NULL
-              AND tb.rated_kva > 0.0
-        )
-        INSERT INTO surrogrid.expansion_transformer_result (
-            expansion_analysis_run_id,
-            powerflow_run_id,
-            grid_case_id,
-            scenario_id,
-            ags,
-            plz,
-            kcid,
-            bcid,
-            pylovo_grid_result_id,
-            pylovo_version_id,
-            transformer_rated_power_kva,
-            transformer_equipment_name,
-            max_s_mva,
-            max_p_mw,
-            max_q_mvar,
-            loading_percent,
-            required_transformer_kva,
-            additional_transformer_kva,
-            requires_expansion,
-            overloaded_at_100_percent,
-            estimated_cost_eur,
-            transformer_cost_basis,
-            critical_t_index,
-            critical_ts
-        )
-        SELECT
-            :expansion_analysis_run_id,
-            estimated.powerflow_run_id,
-            estimated.grid_case_id,
-            estimated.scenario_id,
-            estimated.ags,
-            estimated.plz,
-            estimated.kcid,
-            estimated.bcid,
-            estimated.pylovo_grid_result_id,
-            estimated.pylovo_version_id,
-            estimated.rated_kva,
-            estimated.transformer_equipment_name,
-            estimated.s_mva,
-            estimated.p_mw,
-            estimated.q_mvar,
-            estimated.loading_percent,
-            GREATEST(estimated.required_kva, estimated.rated_kva),
-            GREATEST(estimated.required_kva - estimated.rated_kva, 0.0),
-            estimated.required_kva > estimated.rated_kva,
-            estimated.loading_percent > 100.0,
-            CASE
-                WHEN estimated.required_kva <= estimated.rated_kva THEN 0.0
-                WHEN estimated.required_kva <= 100.0 THEN assumption.transformer_replace_100_eur
-                WHEN estimated.required_kva <= 160.0 THEN assumption.transformer_replace_160_eur
-                WHEN estimated.required_kva <= 250.0 THEN assumption.transformer_replace_250_eur
-                WHEN estimated.required_kva <= 400.0 THEN assumption.transformer_replace_400_eur
-                WHEN estimated.required_kva <= 630.0 THEN assumption.transformer_replace_630_eur
-                WHEN estimated.required_kva <= 800.0 THEN assumption.transformer_replace_800_eur
-                WHEN estimated.required_kva <= 1000.0 THEN assumption.transformer_replace_1000_eur
-                ELSE assumption.transformer_station_rebuild_boundary_eur
-            END,
-            CASE
-                WHEN estimated.required_kva <= estimated.rated_kva THEN 'none_existing_capacity_sufficient'
-                WHEN estimated.required_kva <= 100.0 THEN 'all_in_replacement_to_100kva'
-                WHEN estimated.required_kva <= 160.0 THEN 'all_in_replacement_to_160kva'
-                WHEN estimated.required_kva <= 250.0 THEN 'all_in_replacement_to_250kva'
-                WHEN estimated.required_kva <= 400.0 THEN 'all_in_replacement_to_400kva'
-                WHEN estimated.required_kva <= 630.0 THEN 'all_in_replacement_to_630kva'
-                WHEN estimated.required_kva <= 800.0 THEN 'all_in_replacement_to_800kva'
-                WHEN estimated.required_kva <= 1000.0 THEN 'all_in_replacement_to_1000kva'
-                ELSE 'station_rebuild_boundary_case_gt_1000kva'
-            END,
-            estimated.critical_t_index,
-            estimated.critical_ts
-        FROM estimated
-        CROSS JOIN assumption
-        """
-    )
-    with db.engine.begin() as conn:
-        result = conn.execute(
-            query,
-            {
-                "expansion_analysis_run_id": expansion_analysis_run_id,
-                "assumption_key": args.assumption_key,
-                "run_name": args.run_name,
-                "stage": args.stage,
-                "scenario_id": args.scenario_id,
-                **_synthetic_scope_params(args),
-            },
-        )
-        return int(result.rowcount or 0)
-
-
+def _materialize_synthetic(conn: Connection, run_id: int, args: argparse.Namespace) -> dict[str, int]:
+    params = {**_synthetic_params(args), "expansion_analysis_run_id": run_id}
+    lines = conn.execute(text(sql_text("line_insert.sql")), params).rowcount
+    transformers = conn.execute(text(sql_text("transformer_insert.sql")), params).rowcount
+    return {"line_rows": int(lines or 0), "transformer_rows": int(transformers or 0)}
 
 
 def _print_summary(db: SurroGridDatabase, analysis_key: str) -> None:
@@ -1019,7 +341,14 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=("pre", "post"),
         help="Power-flow stage to analyze.",
     )
-    parser.add_argument("--scenario-id", type=int, help="Optional scenario_id filter.")
+    parser.add_argument(
+        "--scenario-id",
+        type=int,
+        help=(
+            "Optional scenario_id filter. The analysis records it, or else the single "
+            "scenario of the selected runs."
+        ),
+    )
     parser.add_argument(
         "--ags",
         action="append",
@@ -1065,44 +394,69 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--replace",
         action="store_true",
-        help="Delete an existing analysis with the same key before materializing.",
+        help=(
+            "Replace an existing analysis with the same key. Refused if that analysis has "
+            "another run name, stage, data source or AGS."
+        ),
+    )
+    parser.add_argument(
+        "--no-refresh",
+        action="store_true",
+        help=(
+            "Do not refresh the QGIS materialized views (batch runners refresh once at the end "
+            "with gridexpand.db.refresh_qgis_views())."
+        ),
+    )
+    parser.add_argument(
+        "--refresh-only",
+        action="store_true",
+        help="Only refresh the QGIS materialized views and exit.",
     )
     parser.add_argument(
         "--schema-only",
         action="store_true",
-        help="Only create/update expansion tables and QGIS views.",
+        help="Only initialise a fresh database (tables and views) and exit.",
     )
     return parser
 
 
 def materialize(
-    db: SurroGridDatabase, args: argparse.Namespace, *, refresh_views: bool = True
+    db: SurroGridDatabase, args: argparse.Namespace, *, refresh_views: bool = False
 ) -> str:
-    """Materialize one expansion analysis and return its analysis key."""
+    """Materialize one expansion analysis in one transaction and return its key.
+
+    Args:
+        db: database facade.
+        args: parsed ``grid_expansion`` arguments (``_build_parser``).
+        refresh_views: refresh the QGIS materialized views after the commit.
+    """
     analysis_key = _analysis_key(args)
     if args.data_source == "synthetic":
-        _audit_unmapped_line_components(db, args=args)
-    run_id = _create_analysis_run(db, analysis_key=analysis_key, args=args)
-    if args.data_source != "synthetic":
-        result = materialize_real_results(
-            db,
-            expansion_analysis_run_id=run_id,
-            args=args,
-        )
-        print(f"grid status rows inserted: {result['grid_status_rows']}")
-        print(f"line rows inserted: {result['line_rows']}")
-        print(f"transformer rows inserted: {result['transformer_rows']}")
+        with db.engine.begin() as conn:
+            scenario_ids = _prepare_synthetic_scope(conn, args)
+            run_id = _create_analysis_run(
+                conn,
+                analysis_key=analysis_key,
+                args=args,
+                scenario_id=resolve_scenario_id(args.scenario_id, scenario_ids),
+            )
+            counts = _materialize_synthetic(conn, run_id, args)
     else:
-        line_rows = _materialize_line_results(db, expansion_analysis_run_id=run_id, args=args)
-        transformer_rows = _materialize_transformer_results(
-            db,
-            expansion_analysis_run_id=run_id,
-            args=args,
-        )
-        print(f"line rows inserted: {line_rows}")
-        print(f"transformer rows inserted: {transformer_rows}")
+        # Reads and grid files first; the transaction only writes.
+        results = prepare_real_results(db, args)
+        with db.engine.begin() as conn:
+            run_id = _create_analysis_run(
+                conn,
+                analysis_key=analysis_key,
+                args=args,
+                scenario_id=resolve_scenario_id(args.scenario_id, results.scenario_ids),
+            )
+            counts = insert_real_results(conn, run_id, results)
+        print(f"grid status rows inserted: {counts['grid_status_rows']}")
+    print(f"line rows inserted: {counts['line_rows']}")
+    print(f"transformer rows inserted: {counts['transformer_rows']}")
     if refresh_views:
-        _refresh_qgis_materialized_views(db)
+        refresh_qgis_views(db.engine)
         print("QGIS materialized views refreshed.")
     _print_summary(db, analysis_key)
     return analysis_key
@@ -1117,7 +471,11 @@ def main(argv: list[str] | None = None) -> None:
     if args.schema_only:
         print("Expansion schema and QGIS views are ready.")
         return
-    materialize(db, args)
+    if args.refresh_only:
+        refresh_qgis_views(db.engine)
+        print("QGIS materialized views refreshed.")
+        return
+    materialize(db, args, refresh_views=not args.no_refresh)
 
 
 if __name__ == "__main__":

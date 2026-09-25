@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 from gridexpand.db.database import SurroGridDatabase
 from gridexpand.paths import PROJECT_DIR
-from gridexpand.analysis.expansion import grid_expansion
+from gridexpand.analysis.expansion.overview import load_expansion_overview
 from gridexpand.analysis.powerflow.comparison_data import (
     load_synthetic_powerflow_cutoff_profile,
     real_powerflow_headline_summary_db,
@@ -154,7 +154,7 @@ def load_expansion_stage_context(
 ) -> dict[str, object]:
     """Load expansion overview tables and availability metadata for all stages."""
     expansion_tables_by_stage = {
-        label: grid_expansion.load_expansion_overview(analysis_key=key)
+        label: load_expansion_overview(analysis_key=key)
         for label, key in analysis_keys.items()
     }
 

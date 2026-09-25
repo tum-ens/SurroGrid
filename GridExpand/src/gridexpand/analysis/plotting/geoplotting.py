@@ -625,7 +625,7 @@ def _canonical_real_grid_id(value: object) -> str:
 def load_real_expansion_grid_costs(*, analysis_key: str) -> pd.DataFrame:
     """Load cost-complete real-grid metrics for one expansion analysis key."""
 
-    from gridexpand.analysis.expansion.grid_expansion import load_expansion_overview
+    from gridexpand.analysis.expansion.overview import load_expansion_overview
 
     overview = load_expansion_overview(analysis_key=analysis_key)
     metrics = overview["grid_cost_summary"].copy()
