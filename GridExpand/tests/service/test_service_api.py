@@ -92,6 +92,21 @@ def test_status_without_database(client):
     assert client.get("/api/results/analyses").status_code == 503
 
 
+def test_status_without_database_configuration(client, monkeypatch, tmp_path):
+    from gridexpand.db import engine as db_engine
+    from gridexpand.service import db as service_db
+
+    monkeypatch.setattr(db_engine, "ENV_FILE", tmp_path / "missing.env")
+    monkeypatch.setattr(db_engine, "_env_loaded", True)
+    monkeypatch.delenv("DB_NAME", raising=False)
+    monkeypatch.setattr(service_db, "_engine", None)
+    database = client.get("/api/status").json()["database"]
+    assert database["connected"] is False and "DB_NAME" in database["error"]
+    assert database["database"] is None and database["host"] is None
+    response = client.get("/api/results/analyses")
+    assert response.status_code == 503 and "No database configured" in response.json()["detail"]
+
+
 def test_unknown_job(client):
     assert client.get("/api/jobs/doesnotexist").status_code == 404
     assert client.get("/api/jobs").json() == []

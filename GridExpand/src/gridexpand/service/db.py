@@ -36,8 +36,12 @@ def engine() -> Engine:
     with _lock:
         if _engine is None:
             from gridexpand.db import SurroGridDatabase
+            from gridexpand.db.engine import DatabaseNotConfigured
 
-            url = SurroGridDatabase().engine.url
+            try:
+                url = SurroGridDatabase().engine.url
+            except DatabaseNotConfigured as exc:
+                raise DatabaseUnavailable(str(exc)) from exc
             _engine = create_engine(
                 url,
                 pool_pre_ping=True,
@@ -65,8 +69,14 @@ def reset_engine() -> None:
 
 
 def connection_info() -> dict[str, Any]:
-    """Host, port, database and user of the configured database (never the password)."""
-    url = engine().url
+    """Host, port, database and user of the configured database (never the password).
+
+    All values are ``None`` when no database is configured.
+    """
+    try:
+        url = engine().url
+    except DatabaseUnavailable:
+        return {"host": None, "port": None, "database": None, "user": None}
     return {"host": url.host, "port": str(url.port or 5432), "database": url.database, "user": url.username}
 
 

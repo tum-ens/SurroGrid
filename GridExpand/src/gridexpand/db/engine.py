@@ -1,8 +1,10 @@
 """Connection settings and one cached SQLAlchemy engine per database URL.
 
-The credentials come from ``GridExpand/.env`` (or ``$GRIDEXPAND_ENV_FILE``),
+The credentials (``DB_HOST``, ``DB_PORT``, ``DB_NAME``, ``DB_USER``,
+``DB_PASSWORD``) come from ``GridExpand/.env`` (or ``$GRIDEXPAND_ENV_FILE``),
 loaded once per process; values in the file override variables of the same name
-in the environment. Engines check connections before use and are disposed in
+in the environment. Without the file the environment alone is used (containers).
+Engines check connections before use and are disposed in
 forked children (Step 2 and Step 4 use ``multiprocessing``), so a child never
 reuses a connection of its parent.
 """
@@ -34,13 +36,26 @@ def load_env() -> None:
         _env_loaded = True
 
 
+class DatabaseNotConfigured(RuntimeError):
+    """Neither the ``.env`` file nor the environment names a database (``DB_NAME``)."""
+
+
 def database_url() -> URL:
     """Return the configured PostgreSQL URL.
 
     ``URL.create`` escapes the credentials, so passwords with ``@``, ``:``,
     ``/`` or ``%`` work.
+
+    Raises:
+        DatabaseNotConfigured: If ``DB_NAME`` is empty after loading ``.env``.
     """
     load_env()
+    if not (os.getenv("DB_NAME") or "").strip():
+        source = str(ENV_FILE) if ENV_FILE.is_file() else f"{ENV_FILE} (not found)"
+        raise DatabaseNotConfigured(
+            f"No database configured: set DB_HOST, DB_PORT, DB_NAME, DB_USER and DB_PASSWORD in {source} "
+            "or in the environment"
+        )
     port = (os.getenv("DB_PORT") or "").strip() or "5432"
     return URL.create(
         "postgresql+psycopg2",
