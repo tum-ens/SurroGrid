@@ -74,12 +74,14 @@ The run YAML holds the region (`ags`, `pylovo_version_id`, `min_buildings`, opti
 | GET | `/api/status` | database, schema, pylovo versions with grid counts, solvers, large inputs, disk, jobs |
 | GET | `/api/scenarios` · `/api/scenarios/{name}` | scenario YAMLs (id, year, heat source, adoption shares, hash, scenario key) · text |
 | GET | `/api/grids?ags=&plz=&pylovo_version_id=&min_buildings=` | candidate grids with the runner's numbering and existing results |
-| POST | `/api/jobs/pipeline` | queue a pipeline job (`plz`/`ags`, `pylovo_version_id`, `scenario`, `model_cases`, `timeframe_mode`, `min_buildings`, `candidate_indexes`, `workers`, `powerflow_output`) |
+| POST | `/api/jobs/pipeline` | queue a pipeline job (`plz`/`ags`, `pylovo_version_id`, `scenario`, `model_cases`, `timeframe_mode`, `min_buildings`, `candidate_indexes` or `grid_result_id`, `workers`, `powerflow_output`) |
+| POST · GET | `/api/jobs/terminal` | write the run YAML of the same request for a run in a terminal and return it with `tmux` commands · list these runs with the status of their `state.json` |
 | GET | `/api/jobs` · `/api/jobs/{id}` · `/api/jobs/{id}/log[?format=text]` · `/api/jobs/{id}/events` (SSE) | observe jobs |
 | POST | `/api/jobs/{id}/cancel` | cancel |
 | GET | `/api/jobs/{id}/files` · `/api/jobs/{id}/files/{path}` | run-directory files (events, status, summaries, grid logs) |
 | GET | `/api/results/analyses?ags=&plz=&pylovo_version_id=` | `expansion_analysis_run` with totals (cost, cables/transformers to reinforce) |
 | GET | `/api/results/analyses/{key}/grids` · `…/geojson` | per-grid totals · cables (`action` none/add_1/add_2plus) and transformers (EPSG:4326) |
+| GET | `/api/results/analyses/{key}/assets[?features=false]` | building assets of the analysed runs: one point per building with `pv_kw`, `battery_kwh`/`_kw`, `heat_pump_kw`, `heating_rod_kw`, `heat_storage_kwh`/`_kw`, `ev_count`, `ev_kwh`, `charger_kw` and `has_<technology>` flags, plus `totals` per technology (from `powerflow_asset`; empty for pre-stage analyses) |
 | GET | `/api/results/powerflow?ags=&plz=&pylovo_version_id=&scenario_key=` | `powerflow_summary` per grid, model case and stage |
 | GET | `/ui/manifest.json` · `/ui/plugin.js` · `/ui/panels/*.js` | the pylovo-ui plugin |
 
@@ -94,14 +96,24 @@ result is taken from its power-flow run name (`<scenario key>_<profile>_<case>_<
 "csrf_header": "X-GridExpand-UI", …}`; `plugin.js` registers two panels with pylovo-ui's host API 1
 (see pylovo's `frontend/README.md`, section Plugins) and a map layer:
 
-- **GridExpand runs** — region from pylovo's selection (PLZ, pylovo version, the inspector's grid),
-  candidate grids, scenario, model cases, timeframe; jobs with per-case and per-grid progress, the
-  live log (SSE) and cancel.
+- **GridExpand runs** — three modes. *This grid*: the full pipeline (default: all three model
+  cases) for the grid selected in pylovo, by identity (`grid_result_id` → `plz`/`kcid`/`bcid` in the
+  run YAML, whatever its size; the electrification assignment then covers this grid only).
+  *Several grids*: a consecutive range of candidate grids of the PLZ. *Whole PLZ*: prepares the run
+  for a terminal — the run YAML in `WORK_DIR/service/terminal/`, `tmux` commands to start, watch,
+  check and resume it (`docker compose exec gridexpand …` when the service runs in a container), a
+  portable copy of the YAML for another checkout, and the list of these runs with their status.
+  Scenario (with an *Edit…* button for the scenario editor), model cases, timeframe; jobs with
+  per-case and per-grid progress, the live log (SSE) and cancel.
 - **Expansion results** — analyses of the region, KPIs (cost, cables and transformers to reinforce,
   P99 transformer loading per case), cost and P99 loading per grid and case (ECharts), per-grid
   table (click: pylovo's grid inspector), and the **map layer** on pylovo's MapLibre map: cables
-  coloured by the required action, transformers by their loading in the critical hour, with a
-  legend card that shows the hovered feature.
+  coloured by the required action, transformers by their loading in the critical hour, and the
+  **building assets** of post cases as small symbols (one pill per building with a badge each for
+  PV, battery, heat pump and EV; a dot where the pill does not fit). The legend card switches cables
+  and transformers and each asset type on and off, shows the totals, and the hovered building
+  (PV kWp, battery kWh/kW, heat pump and heating rod kW, buffer, EVs and home charging) or feature.
+  The KPIs include the number of buildings with assets and the installed capacities.
 
 ![Expansion results with the map layer](img/service-results.png)
 
