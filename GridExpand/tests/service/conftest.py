@@ -31,7 +31,8 @@ def settings(tmp_path: Path):
     shutil.copy(SCENARIO_CONFIG_DIR / "schweinfurt_2045.yaml", scenarios / "schweinfurt_2045.yaml")
     (scenarios / "broken.yaml").write_text("scenario: [1, 2\n", encoding="utf-8")
     return ServiceSettings(port=18766, allowed_hosts=frozenset({"testserver"}), scenario_dirs=(scenarios,),
-                           state_dir=tmp_path / "state", runs_dir=tmp_path / "runs")
+                           user_scenario_dir=tmp_path / "user_scenarios", state_dir=tmp_path / "state",
+                           runs_dir=tmp_path / "runs")
 
 
 @pytest.fixture()

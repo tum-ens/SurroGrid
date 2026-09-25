@@ -17,7 +17,8 @@ def build_parser() -> argparse.ArgumentParser:
         epilog="The service starts pipeline jobs that write to the database of GridExpand's .env. It binds to "
                "127.0.0.1 by default and accepts only the Host headers 127.0.0.1:<port> and localhost:<port> "
                "(add a reverse proxy's host with --allowed-host). Environment: GRIDEXPAND_SOLVER, "
-               "GRIDEXPAND_SERVICE_SCENARIO_DIRS, GRIDEXPAND_UI_CORS_ORIGINS (development only).",
+               "GRIDEXPAND_SERVICE_SCENARIO_DIRS, GRIDEXPAND_SERVICE_USER_SCENARIO_DIR, "
+               "GRIDEXPAND_UI_CORS_ORIGINS (development only).",
     )
     parser.add_argument("--host", default=DEFAULT_HOST, help=f"interface to bind (default: {DEFAULT_HOST})")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"port (default: {DEFAULT_PORT})")
@@ -27,6 +28,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="additional accepted Host header, e.g. 127.0.0.1:18780 of the proxy (repeatable)")
     parser.add_argument("--scenario-dir", action="append", default=[], type=Path, metavar="DIR",
                         help="additional directory with scenario YAMLs (repeatable)")
+    parser.add_argument("--user-scenario-dir", type=Path, default=None, metavar="DIR",
+                        help="where the scenario editor saves new scenarios (default: "
+                             "$GRIDEXPAND_SERVICE_USER_SCENARIO_DIR or WORK_DIR/scenarios)")
     parser.add_argument("--max-running-jobs", type=int, default=1,
                         help="pipeline jobs that run at the same time; later ones wait (default: 1)")
     parser.add_argument("--log-level", default="warning",
@@ -48,13 +52,18 @@ def main(argv: list[str] | None = None) -> int:
     from gridexpand.service.settings import ServiceSettings
 
     bind_all = args.host in ("0.0.0.0", "::")
-    base = ServiceSettings.from_env()
-    settings = ServiceSettings.from_env(
-        host=args.host, port=args.port, root_path=args.root_path.rstrip("/"),
-        allowed_hosts=frozenset(args.allowed_host), allow_any_host=bind_all,
-        scenario_dirs=base.scenario_dirs + tuple(p.expanduser().resolve() for p in args.scenario_dir),
-        max_running_jobs=max(1, args.max_running_jobs),
-    )
+    try:
+        base = ServiceSettings.from_env(user_scenario_dir=args.user_scenario_dir)
+        settings = ServiceSettings.from_env(
+            host=args.host, port=args.port, root_path=args.root_path.rstrip("/"),
+            allowed_hosts=frozenset(args.allowed_host), allow_any_host=bind_all,
+            scenario_dirs=base.shipped_scenario_dirs + tuple(p.expanduser().resolve() for p in args.scenario_dir),
+            user_scenario_dir=args.user_scenario_dir,
+            max_running_jobs=max(1, args.max_running_jobs),
+        )
+    except ValueError as exc:
+        print(f"gridexpand serve: {exc}", file=sys.stderr)
+        return 2
     app = create_app(settings)
     if bind_all:
         print("WARNING: the GridExpand service is reachable from other machines and can start pipeline jobs.",
