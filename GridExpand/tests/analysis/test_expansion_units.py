@@ -70,6 +70,12 @@ def test_refresh_flags():
     assert _args("--refresh-only").refresh_only is True
 
 
+def test_run_name_required_before_database_access(capsys):
+    with pytest.raises(SystemExit) as exc:
+        ge.main(["--stage", "post"])
+    assert exc.value.code == 2 and "--run-name is required" in capsys.readouterr().err
+
+
 def test_aligned_groups_cover_every_model_case():
     groups = aligned_expansion.aligned_groups(
         "run1", providers=("uzw",), cases=tuple(aligned_expansion.CASE_STAGES),

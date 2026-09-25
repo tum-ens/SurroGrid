@@ -331,7 +331,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--expansion-analysis-prefix",
         help=(
             "Optional prefix for automatic expansion analysis keys. Defaults to "
-            "'<ags:08d>_<timeframe_mode>_<profiles>[_hh_only][_tsam][_<model_case>]' "
+            "'<ags:08d>_<scenario identity>_<timeframe_mode>_<profiles>[_hh_only][_tsam][_<model_case>]' "
             "(the model case with --case-qualified-output)."
         ),
     )

@@ -326,8 +326,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--run-name",
-        default="baseline_static_full_powerflow",
-        help="Power-flow run name to analyze.",
+        help="Power-flow run name to analyze (the summary run of Step 4); required unless --schema-only/--refresh-only.",
     )
     parser.add_argument(
         "--data-source",
@@ -465,6 +464,8 @@ def materialize(
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if args.run_name is None and not (args.schema_only or args.refresh_only):
+        parser.error("--run-name is required")
 
     db = SurroGridDatabase()
     db.ensure_schema()

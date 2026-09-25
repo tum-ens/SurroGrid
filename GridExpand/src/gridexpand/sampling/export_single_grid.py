@@ -134,7 +134,8 @@ def main(argv: list[str] | None = None) -> None:
 
     print(f"Export complete: {output_path}")
     if args.skip_weather:
-        print("Weather skipped. For Step 2 set weather_data_exists=False or add weather later.")
+        print("Weather skipped. Step 2 in h5 mode reads the weather from this file: export again without "
+              "--skip-weather before running Step 2.")
 
 
 if __name__ == "__main__":

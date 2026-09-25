@@ -651,8 +651,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timestep", type=int, default=0, help="Timestep index (default: 0).")
     parser.add_argument(
         "--run-name",
-        default="baseline_static_full_powerflow",
-        help="DB power-flow run name (default: baseline_static_full_powerflow).",
+        help="DB power-flow run name (required with --storage db).",
     )
     parser.add_argument("--plz", type=int, help="DB mode: pin one PLZ.")
     parser.add_argument("--kcid", type=int, help="DB mode: pin one KCID.")
@@ -723,6 +722,8 @@ def _write_html_if_requested(fig, output_html: Path | None) -> None:
 def main(argv: list[str] | None = None) -> None:
     parser = _build_arg_parser()
     args = parser.parse_args(argv)
+    if args.storage == "db" and args.run_name is None:
+        parser.error("--run-name is required with --storage db")
     show = not args.no_show
 
     if args.storage == "db" and args.compare_max_loading:
@@ -779,3 +780,7 @@ def main(argv: list[str] | None = None) -> None:
         show=show,
     )
     _write_html_if_requested(fig, args.output_html)
+
+
+if __name__ == "__main__":
+    main()

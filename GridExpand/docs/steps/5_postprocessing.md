@@ -34,7 +34,7 @@ uv run gridexpand expansion --refresh-only        # refresh the QGIS materialize
 
 | option | default | meaning |
 |---|---|---|
-| `--run-name` | legacy default, always pass it | power-flow run whose compact summaries are materialized |
+| `--run-name` | required (except `--schema-only`, `--refresh-only`) | power-flow run whose compact summaries are materialized |
 | `--stage` | `post` | `pre` or `post` |
 | `--data-source` | `synthetic` | `synthetic`, `real_swf`, `real_uzw` |
 | `--ags`, `--plz` | none | filters (repeatable); synthetic AGS or grid PLZ, real majority PLZ |
@@ -114,5 +114,5 @@ uv run python -m gridexpand.analysis.audits.topology_bottleneck --real-run-name 
 `critical_path_alternative_lines.csv`.)
 
 `audits.feeder_structure` (graph-normalized feeder, downstream-demand and path-depth comparison) and the plotting
-modules are used from notebooks; `plotting/powerflow_heatmaps.py` has an argument parser but is not runnable as a
-module. Findings of earlier audits are in [docs/research/](../research/).
+modules are used from notebooks; `python -m gridexpand.analysis.plotting.powerflow_heatmaps` plots one grid from
+an HDF5 file or, with `--storage db --run-name <run>`, from the database. Findings of earlier audits are in [docs/research/](../research/).

@@ -1,8 +1,8 @@
 """Model case -> power-flow stage and expansion analysis key suffix.
 
 One table for the expansion entry points (``aligned_expansion``) and the notebook
-helpers (``notebook_workflow``); ``gridexpand run`` (``scenario.run_scenario``)
-uses the same suffixes.
+helpers (``notebook_workflow``); ``gridexpand run`` (``scenario.commands``) uses
+the same suffixes.
 """
 
 from __future__ import annotations

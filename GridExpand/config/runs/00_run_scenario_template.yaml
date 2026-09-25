@@ -4,9 +4,6 @@
 # execution group. Launch with `uv run gridexpand run config/runs/<name>.yaml`;
 # check it first with `uv run gridexpand config check config/runs/<name>.yaml`.
 # Fields marked UPDATE are mandatory identity edits for a new run.
-# post-inflex-heuristic is refused by the synthetic pipeline for now (the
-# synthetic Step 2 writes no EV sessions for the INFLEX power flow); remove it
-# from model_cases before launching.
 run:
   id: CHANGE_ME_run_id # UPDATE: unique directory-safe run identifier.
   scenario: ../scenarios/CHANGE_ME_scenario.yaml # UPDATE: copied scenario file.
@@ -38,7 +35,8 @@ execution:
   # UPDATE: choose the model cases required for this run.
   model_cases:
     - pre
-    - post-inflex-heuristic
+    # post-inflex-heuristic is not available in the synthetic pipeline yet: synthetic
+    # Step 2 uses the v1 mobility pool and writes no EV sessions for the INFLEX power flow.
     - post-hems-heuristic
     - post-hems-optimized
   # Machine-specific settings. n_cpu is the Step 2 CPU count (alias of step2_cpus).

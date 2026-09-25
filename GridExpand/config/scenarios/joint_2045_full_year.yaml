@@ -59,7 +59,7 @@ asset_sizing:
     # to its own construction-year class: 0 as built, 1 usual refurbishment,
     # 2 advanced. 1 = 2045 reference: pre-1995 stock with a complete envelope
     # refurbishment; newer classes barely change (TABULA standard ≈ retrofit).
-    # Rationale and literature: docs/scenario_pipeline/SCENARIO_METHOD.md.
+    # Rationale and literature: docs/method.md#teaser-refurbishment-level.
     teaser_retrofit_level: 1
     # Degree-day reference temperatures used to derive regional full-load hours.
     indoor_design_temperature_c: 20.0
