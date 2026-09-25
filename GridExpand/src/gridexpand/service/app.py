@@ -32,6 +32,27 @@ class NoCacheStaticFiles(StaticFiles):
         return response
 
 
+class RootPathMiddleware:
+    """Serve the app below ``root_path`` whether or not a reverse proxy strips the prefix.
+
+    ASGI expects ``path`` to include ``root_path``; Starlette resolves mounts (the plugin's
+    static files) that way. A proxy that strips ``/gridexpand`` sends ``/ui/plugin.js``, so the
+    prefix is added back; direct requests work with and without the prefix.
+    """
+
+    def __init__(self, app, root_path: str) -> None:
+        self.app = app
+        self.root_path = root_path.rstrip("/")
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket") and self.root_path:
+            path = scope["path"]
+            if path != self.root_path and not path.startswith(self.root_path + "/"):
+                path = self.root_path + path
+            scope = dict(scope, path=path, raw_path=path.encode(), root_path=self.root_path)
+        await self.app(scope, receive, send)
+
+
 def _version() -> str:
     try:
         return importlib.metadata.version("gridexpand")
@@ -60,12 +81,13 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
         db.reset_engine()
 
     app = FastAPI(
-        title="GridExpand service", version=_version(), root_path=settings.root_path, lifespan=lifespan,
+        title="GridExpand service", version=_version(), lifespan=lifespan,
         description="Job API and result queries of GridExpand (load allocation, urbs optimisation, power flow, "
                     f"grid expansion) and the pylovo-ui plugin panels. API version {API_VERSION}.",
     )
     app.state.settings = settings
     app.state.jobs = manager
+    root = settings.root_path.rstrip("/")
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
@@ -73,18 +95,23 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
         if not settings.allow_any_host and host not in hosts:
             return JSONResponse({"detail": f"Host '{host}' is not allowed"}, status_code=421)
         # State-changing calls must come from the UI itself: browsers send this custom header
-        # only from same-origin scripts (or allowed CORS origins), which blocks CSRF.
-        if (request.method not in SAFE_METHODS and request.url.path.startswith("/api/")
-                and request.headers.get(CSRF_HEADER.lower()) != "1"):
+        # only from same-origin scripts (or allowed CORS origins), which blocks CSRF. Checked for
+        # every path, so no prefix spelling can bypass it.
+        if request.method not in SAFE_METHODS and request.headers.get(CSRF_HEADER.lower()) != "1":
             return JSONResponse({"detail": f"Missing {CSRF_HEADER} header"}, status_code=403)
+        path = request.url.path
+        if root and path.startswith(root + "/"):
+            path = path[len(root):]
         response = await call_next(request)
-        if request.url.path.startswith("/api/"):
+        if path.startswith("/api/"):
             response.headers.setdefault("Cache-Control", "no-store")
         return response
 
     if settings.cors_origins:  # development only: pylovo-ui served from another origin
         app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["GET", "POST"],
                            allow_headers=["Content-Type", CSRF_HEADER, "Last-Event-ID"], max_age=600)
+    if root:  # outermost: every other layer sees the ASGI form path = root_path + route path
+        app.add_middleware(RootPathMiddleware, root_path=root)
 
     @app.exception_handler(db.DatabaseUnavailable)
     async def database_unavailable(_: Request, exc: db.DatabaseUnavailable):

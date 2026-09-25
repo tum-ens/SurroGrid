@@ -95,3 +95,21 @@ def test_status_without_database(client):
 def test_unknown_job(client):
     assert client.get("/api/jobs/doesnotexist").status_code == 404
     assert client.get("/api/jobs").json() == []
+
+
+def test_root_path_with_and_without_the_prefix(settings, fake_solvers):
+    """Behind a proxy that strips /gridexpand, and directly with or without the prefix."""
+    from dataclasses import replace
+
+    from gridexpand.service.app import create_app
+
+    with TestClient(create_app(replace(settings, root_path="/gridexpand"))) as c:
+        for prefix in ("", "/gridexpand"):
+            assert c.get(f"{prefix}/api/health").status_code == 200
+            assert c.get(f"{prefix}/api/health").headers["cache-control"] == "no-store"
+            assert c.get(f"{prefix}/ui/manifest.json").json()["entry"] == "ui/plugin.js"
+            assert "export function register" in c.get(f"{prefix}/ui/plugin.js").text
+            assert c.get(f"{prefix}/ui/panels/runs.js").status_code == 200
+            assert c.post(f"{prefix}/api/jobs/pipeline", json={}).status_code == 403  # no CSRF bypass
+        assert "/gridexpand/openapi.json" in c.get("/docs").text
+        assert c.get("/openapi.json").json()["servers"] == [{"url": "/gridexpand"}]
