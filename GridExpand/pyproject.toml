@@ -64,6 +64,11 @@ notebooks = [
   "nbformat>=5.10.4",
   "kaleido==0.2.1",
 ]
+# Web service (gridexpand serve): job API, result queries, pylovo-ui plugin panels
+service = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+]
 
 [project.scripts]
 gridexpand = "gridexpand.cli:main"
@@ -72,6 +77,9 @@ gridexpand = "gridexpand.cli:main"
 dev = [
   "ruff>=0.15.20",
   "pytest>=8",
+  # tests/service: the service modules (import test) and the FastAPI TestClient
+  "gridexpand[service]",
+  "httpx>=0.27",
 ]
 
 [build-system]

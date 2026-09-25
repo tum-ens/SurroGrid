@@ -1,0 +1,22 @@
+# Never bake credentials, runtime artifacts or large local inputs into the image.
+.env
+.env.*
+!.env.example
+gurobi.lic
+.venv
+**/__pycache__
+.pytest_cache
+.ruff_cache
+**/.ipynb_checkpoints
+work
+notebooks
+docs/img
+**/*.out
+**/*.err
+# untracked large inputs (symlinks in a checkout): mounted at run time
+data/statistics/inhabited_buildings/elec_lps.h5
+data/statistics/general/mobility_profile_pool
+data/statistics/general/mobility_profile_pool_old/mobility_demand_pool.csv
+data/statistics/general/mobility_profile_pool_old/mobility_availability_pool.csv
+data/statistics/general/sys_files
+data/statistics/general/user_files
