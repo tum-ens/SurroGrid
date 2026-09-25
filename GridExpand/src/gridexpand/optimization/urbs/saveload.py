@@ -1,115 +1,111 @@
-import pandas as pd
-from .pyomoio import get_entity, list_entities
+"""Extract the solved model entities and write them to the result HDF5 file."""
+
 import warnings
 
-def rename_duplicate_columns(df):
-    cols = pd.Series(df.columns)
-    for dup in cols[cols.duplicated()].unique():
-        cols[cols[cols == dup].index.values.tolist()] = [dup + '.' + str(i) if i != 0 else dup for i in range(sum(cols == dup))]
-    df.columns = cols
-    return df
+import pandas as pd
+
+from .pyomoio import get_entity, list_entities
+
+HDF_OPTIONS = {"complib": "blosc", "complevel": 9}
+
 
 def create_result_cache(prob):
+    """Return ``{name: Series}`` for every set, parameter, variable and expression."""
     entity_types = ['set', 'par', 'var', 'exp']
     if hasattr(prob, 'dual'):
-        entity_types.append('con') # won't have constraint for us
+        entity_types.append('con')
 
-    # list_entities: list of member names for each entitiy_type (set, par, ...) where columns are (name, doc, multiindex_domain e.g. (tm, stf, sit, com)) 
     entities = []
     for entity_type in entity_types:
         entities.extend(list_entities(prob, entity_type).index.tolist())
+    return {entity: get_entity(prob, entity) for entity in entities}
 
-    # for each entity save model results in result_cache[name]
-    result_cache = {}
-    for entity in entities:
-        result_cache[entity] = get_entity(prob, entity)
-    return result_cache
+
+def _same_structure(values):
+    first = values[0]
+    return all(
+        isinstance(value, pd.Series)
+        and value.index.nlevels == first.index.nlevels
+        and list(value.index.names) == list(first.index.names)
+        and value.dtype == first.dtype
+        and value.name == first.name
+        for value in values
+    )
+
+
+def _merge_entity(name, values):
+    """Combine one entity over the clusters exactly as the former pairwise loop did.
+
+    Leading empty results are skipped, ``costs`` are summed in cluster order, all
+    other entities are concatenated in cluster order (one ``pd.concat`` when the
+    parts share their structure).
+    """
+    first = next((i for i, value in enumerate(values) if not value.empty), None)
+    if first is None:
+        return values[-1]
+    merged = values[first]
+    rest = values[first + 1:]
+    if name == 'costs':
+        for value in rest:
+            merged += value
+        return merged
+    if not rest:
+        return merged
+    parts = [merged, *rest]
+    if all(not value.empty for value in rest) and _same_structure(parts):
+        return pd.concat(parts)
+    for value in rest:
+        merged = pd.concat([merged, value])
+    return merged
+
+
+def _drop_duplicate_rows(value):
+    # Site-indexed entities are disjoint across clusters; only the entities
+    # without a site level (dt, weight, ...) repeat once per cluster.
+    if 'sit' in list(getattr(value.index, 'names', []) or []):
+        return value
+    try:
+        return value[~value.index.duplicated(keep='first')]
+    except Exception:
+        return value
+
+
+def merge_cluster_results(cluster_results):
+    """Merge the result caches of all clusters (given in cluster order)."""
+    parts = {}
+    for cache in cluster_results:
+        for name, value in cache.items():
+            parts.setdefault(name, []).append(value)
+    return {
+        name: _drop_duplicate_rows(_merge_entity(name, values))
+        for name, values in parts.items()
+    }
 
 
 def save_reduced_data(data, save_file_name):
-    """Save reduced/filtered urbs input data without optimization results."""
-    with pd.HDFStore(save_file_name, mode='a', complib='blosc', complevel=9) as store:
-        for name in data.keys():
-            if name == "global_prop":
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
-                    store['urbs_out/reduced_data/' + name] = data[name]
-            else:
-                warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
-                store['urbs_out/reduced_data/' + name] = data[name]
+    """Write the (possibly reduced) urbs input tables to ``urbs_out/reduced_data``."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
+        with pd.HDFStore(save_file_name, mode='a', **HDF_OPTIONS) as store:
+            for name, table in data.items():
+                store['urbs_out/reduced_data/' + name] = table
 
 
-def save(data, model_results, save_file_name, manyprob=False):
-    """Save urbs model input and result cache to a HDF5 store file.
+def save(data, results, save_file_name, solver_audit=None):
+    """Write inputs (``reduced_data``), merged results (``MILP``) and the solver audit.
 
     Args:
-        - prob:     a urbs model instance containing a solution
-        - filename: HDF5 store file to be written
-        - manyprob: if prob is defined as a dictionary of Pyomo.ConcreteModel instances instead of a single one
-
-    Returns: None
+        data: urbs input dict of the whole grid.
+        results: merged entity results (see ``merge_cluster_results``).
+        save_file_name: result HDF5 file (appended to).
+        solver_audit: optional DataFrame with one row per cluster solve.
     """
-
-    ### Normal saving operation if model is not parallelized
-    if not manyprob: 
-        results_all = model_results
-    else: 
-        ### Concatenate all results of parallelly run models into one dataframe
-        results_all = {}
-        for model_res in model_results.values():
-            for name, result in model_res.items():
-                if name not in results_all or results_all[name].empty:
-                    results_all[name] = result
-                elif name == 'costs':
-                    results_all[name] += result
-                else:
-                    results_all[name] = pd.concat([results_all[name], result])
-
-    ### save data and results
-    with pd.HDFStore(save_file_name, mode='a', complib='blosc', complevel=9) as store:
-        # Save data
-        for name in data.keys(): 
-            if name=="global_prop":                 # For this it is valid to ignore as dataset is really small, otherwise check!
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
-                    store['urbs_out/reduced_data/'+name] = data[name]
-            else:
-                warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
-                store['urbs_out/reduced_data/'+name] = data[name]
-        # Save results
-        for name in results_all.keys():
-            try: results_all[name] = results_all[name][~results_all[name].index.duplicated(keep='first')]
-            except: pass
-            if name in ['dt', 'obj', 'weight']:     # For these it is valid to ignore as datasets are really small, otherwise check!
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
-                    store['urbs_out/MILP/'+name] = results_all[name]
-            else: 
-                store['urbs_out/MILP/'+name] = results_all[name]
-
-class ResultContainer(object):
-    """ Result/input data container for reporting functions. """
-    def __init__(self, data, result):
-        self._data = data
-        self._result = result
-
-
-def load(filename):
-    """Load a urbs model result container from a HDF5 store file.
-
-    Args:
-        filename: an existing HDF5 store file
-
-    Returns:
-        prob: the modified instance containing the result cache
-    """
-    with pd.HDFStore(filename, mode='r') as store:
-        data_cache = {}
-        for group in store.get_node('data'):
-            data_cache[group._v_name] = store[group._v_pathname]
-
-        result_cache = {}
-        for group in store.get_node('result'):
-            result_cache[group._v_name] = store[group._v_pathname]
-
-    return ResultContainer(data_cache, result_cache)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
+        with pd.HDFStore(save_file_name, mode='a', **HDF_OPTIONS) as store:
+            for name, table in data.items():
+                store['urbs_out/reduced_data/' + name] = table
+            for name, value in results.items():
+                store['urbs_out/MILP/' + name] = value
+            if solver_audit is not None:
+                store['urbs_out/solver_audit'] = solver_audit

@@ -1,257 +1,99 @@
-from .transmission import transmission_balance
+"""Helper functions shared by the urbs model rules."""
+
 from .storage import storage_balance
 
-import sys
 
+def invcost_factor(dep_prd, interest):
+    """Annuity factor that turns an investment into annual cost.
 
-def invcost_factor(dep_prd, interest, discount=None, year_built=None,
-                   stf_min=None):
-    """Investment cost factor formula.
-    Evaluates the factor multiplied to the invest costs
-    for depreciation duration and interest rate.
     Args:
-        dep_prd: depreciation period (years)
-        interest: interest rate (e.g. 0.06 means 6 %)
-        year_built: year utility is built
-        discount: discount rate for intertmeporal planning
+        dep_prd: depreciation period (years).
+        interest: interest rate (e.g. 0.06 means 6 %).
+
+    Returns:
+        ``1 / dep_prd`` for zero interest, else the capital recovery factor
+        ``(1 + i)^n * i / ((1 + i)^n - 1)``.
     """
-    # invcost factor for non intertemporal planning
-    if discount is None:
-        if interest == 0:
-            return 1 / dep_prd
-        else:
-            return ((1 + interest) ** dep_prd * interest /
-                    ((1 + interest) ** dep_prd - 1))
-    # invcost factor for intertemporal planning
-    elif discount == 0:
-        if interest == 0:
-            return 1
-        else:
-            return (dep_prd * ((1 + interest) ** dep_prd * interest) /
-                    ((1 + interest) ** dep_prd - 1))
+    if interest == 0:
+        return 1 / dep_prd
     else:
-        if interest == 0:
-            return ((1 + discount) ** (1 - (year_built-stf_min)) *
-                    ((1 + discount) ** dep_prd - 1) /
-                    (dep_prd * discount * (1 + discount) ** dep_prd))
-        else:
-            return ((1 + discount) ** (1 - (year_built-stf_min)) *
-                    (interest * (1 + interest) ** dep_prd *
-                    ((1 + discount) ** dep_prd - 1)) /
-                    (discount * (1 + discount) ** dep_prd *
-                    ((1+interest) ** dep_prd - 1)))
+        return ((1 + interest) ** dep_prd * interest /
+                ((1 + interest) ** dep_prd - 1))
 
 
-def overpay_factor(dep_prd, interest, discount, year_built, stf_min, stf_end):
-    """Overpay value factor formula.
-    Evaluates the factor multiplied to the invest costs
-    for all annuity payments of a unit after the end of the
-    optimization period.
-    Args:
-        dep_prd: depreciation period (years)
-        interest: interest rate (e.g. 0.06 means 6 %)
-        year_built: year utility is built
-        discount: discount rate for intertemporal planning
-        k: operational time after simulation horizon
+def _process_flow_index(m):
+    """Process inputs/outputs of each (stf, site, commodity), built once per model.
+
+    ``commodity_balance`` used to scan all ``m.pro_tuples`` for every balance row,
+    which is quadratic in the number of buildings per cluster. The lists keep the
+    ``m.pro_tuples`` order, so every balance expression (and the LP file) is
+    unchanged.
     """
-
-    op_time = (year_built + dep_prd) - stf_end - 1
-
-    if discount == 0:
-        if interest == 0:
-            return op_time / dep_prd
-        else:
-            return (op_time * ((1 + interest) ** dep_prd * interest) /
-                    ((1 + interest) ** dep_prd - 1))
-    else:
-        if interest == 0:
-            return ((1 + discount) ** (1 - (year_built - stf_min)) *
-                    ((1 + discount) ** op_time - 1) /
-                    (dep_prd * discount * (1 + discount) ** dep_prd))
-        else:
-            return ((1 + discount) ** (1 - (year_built - stf_min)) *
-                    (interest * (1 + interest) ** dep_prd *
-                    ((1 + discount) ** op_time - 1)) /
-                    (discount * (1 + discount) ** dep_prd *
-                    ((1 + interest) ** dep_prd - 1)))
-
-
-# Energy related costs
-def stf_dist(stf, m):
-    """Calculates the distance between the modeled support timeframes.
-    """
-    sorted_stf = sorted(m.stf_list)
-    dist = []
-
-    for s in sorted_stf:
-        if s == max(sorted_stf):
-            dist.append(m.global_prop.loc[(s, 'Weight')]['value'])
-        else:
-            dist.append(sorted_stf[sorted_stf.index(s) + 1] - s)
-
-    return dist[sorted_stf.index(stf)]
-
-
-def discount_factor(stf, m):
-    """Discount for any payment made in the year stf
-    """
-    discount = (m.global_prop.xs('Discount rate', level=1)
-                .loc[m.global_prop.index.min()[0]]['value'])
-
-    return (1 + discount) ** (1 - (stf - m.global_prop.index.min()[0]))
-
-
-def effective_distance(dist, m):
-    """Factor for variable, fuel, purchase, sell, and fix costs.
-    Calculated by repetition of modeled stfs and discount utility.
-    """
-    discount = (m.global_prop.xs('Discount rate', level=1)
-                .loc[m.global_prop.index.min()[0]]['value'])
-
-    if discount == 0:
-        return dist
-    else:
-        return (1 - (1 + discount) ** (-dist)) / discount
-
+    index = getattr(m, "_process_flow_index", None)
+    if index is None:
+        in_coms, out_coms = {}, {}
+        for stframe, process, com in m.r_in_dict:
+            in_coms.setdefault((stframe, process), []).append(com)
+        for stframe, process, com in m.r_out_dict:
+            out_coms.setdefault((stframe, process), []).append(com)
+        inputs, outputs = {}, {}
+        for stframe, site, process in m.pro_tuples:
+            for com in in_coms.get((stframe, process), ()):
+                inputs.setdefault((stframe, site, com), []).append((stframe, site, process))
+            for com in out_coms.get((stframe, process), ()):
+                outputs.setdefault((stframe, site, com), []).append((stframe, site, process))
+        index = m._process_flow_index = (inputs, outputs)
+    return index
 
 
 def commodity_balance(m, tm, stf, sit, com):
     """Calculate commodity balance at given timestep.
+
     For a given commodity co and timestep tm, calculate the balance of
-    consumed (to process/storage/transmission, counts positive) and provided
-    (from process/storage/transmission, counts negative) commodity flow. Used
+    consumed (to process/storage, counts positive) and provided
+    (from process/storage, counts negative) commodity flow. Used
     as helper function in create_model for constraints on demand and stock
     commodities.
+
     Args:
         m: the model object
         tm: the timestep
-        site: the site
+        stf: the support timeframe
+        sit: the site
         com: the commodity
-    Returns
+
+    Returns:
         balance: net value of consumed (positive) or provided (negative) power
     """
+    inputs, outputs = _process_flow_index(m)
     balance = (sum(m.e_pro_in[(tm, stframe, site, process, com)]
                    # usage as input for process increases balance
-                   for stframe, site, process in m.pro_tuples
-                   if site == sit and stframe == stf and
-                   (stframe, process, com) in m.r_in_dict) -
+                   for stframe, site, process in inputs.get((stf, sit, com), ())) -
                sum(m.e_pro_out[(tm, stframe, site, process, com)]
                    # output from processes decreases balance
-                   for stframe, site, process in m.pro_tuples
-                   if site == sit and stframe == stf and
-                   (stframe, process, com) in m.r_out_dict))
-    # if m.mode['tra']:
-    #     balance += transmission_balance(m, tm, stf, sit, com)
+                   for stframe, site, process in outputs.get((stf, sit, com), ())))
     if m.mode['sto']:
         balance += storage_balance(m, tm, stf, sit, com)
 
     return balance
 
-def calculate_injection(m, tm, stf, sit):
-    """Calculate commodity balance at given timestep.
-    For a given commodity co and timestep tm, calculate the balance of
-    consumed (to process/storage/transmission, counts positive) and provided
-    (from process/storage/transmission, counts negative) commodity flow. Used
-    as helper function in create_model for constraints on demand and stock
-    commodities.
-    Args:
-        m: the model object
-        tm: the timestep
-        site: the site
-        com: the commodity
-    Returns
-        balance: net value of consumed (positive) or provided (negative) power
-    """
-
-    if m.mode['uncoordinated']:
-        if m.mode['14a']:
-            injection = (m.e_pro_out[(tm, stf, sit, 'import', 'electricity')]
-                      + m.e_pro_out[(tm, stf, sit, 'import_hp', 'electricity_hp')]
-                      + m.e_pro_out[(tm, stf, sit, 'import_bev', 'electricity_bev')]
-                      - m.e_pro_in[(tm, stf, sit, 'feed_in', 'electricity')])
-        else: #for the case where 14a commodities do not exist
-            injection = (m.e_pro_out[(tm, stf, sit, 'import', 'electricity')]
-                         - m.e_pro_in[(tm, stf, sit, 'feed_in', 'electricity')])
-    else:
-        if m.mode['tra'] and not m.grid_plan_model:
-            injection = sum(m.e_tra_out[(tm,stframe,sitin,sitout,tra,com)]
-                            for (stframe,sitin,sitout,tra,com) in m.tra_tuples
-                            if sitout == sit and
-                            (com == 'electricity' or com == 'electricity_hp' or com == 'electricity_bev')) \
-                        -sum(m.e_tra_in[(tm,stframe,sitin,sitout,tra,com)]
-                            for (stframe,sitin,sitout,tra,com) in m.tra_tuples
-                            if sitin == sit and
-                            (com == 'electricity' or com == 'electricity_hp' or com == 'electricity_bev'))
-        else:
-            injection = 0
-    return injection
 
 def commodity_subset(com_tuples, type_name):
-    """ Unique list of commodity names for given type.
+    """Unique list of commodity names for given type.
+
     Args:
-        com_tuples: a list of (site, commodity, commodity type) tuples
-        type_name: a commodity type or a list of a commodity types
+        com_tuples: a list of (stf, site, commodity, commodity type) tuples
+        type_name: a commodity type or a set of commodity names
+
     Returns:
-        The set (unique elements/list) of commodity names of the desired type
+        The set of commodity names of the desired type, or, for a set of names,
+        the set of commodity tuples whose commodity is in it.
     """
     if type(type_name) is str:
         # type_name: ('Stock', 'SupIm', 'Env' or 'Demand')
         return set(com for stf, sit, com, com_type in com_tuples
                    if com_type == type_name)
     else:
-        # type(type_name) is a class 'pyomo.base.sets.SimpleSet'
-        # type_name: ('Buy')=>('Elec buy', 'Heat buy')
+        # type(type_name) is a pyomo Set of commodity names, e.g. m.com_buy
         return set((stf, sit, com, com_type) for stf, sit, com, com_type
                    in com_tuples if com in type_name)
-
-
-def op_pro_tuples(pro_tuple, m):
-    """ Tuples for operational status of units (processes, transmissions,
-    storages) for intertemporal planning.
-    Only such tuples where the unit is still operational until the next
-    support time frame are valid.
-    """
-    op_pro = []
-    sorted_stf = sorted(list(m.stf))
-
-    for (stf, sit, pro) in pro_tuple:
-        for stf_later in sorted_stf:
-            index_helper = sorted_stf.index(stf_later)
-            if stf_later == max(sorted_stf):
-                if (stf_later +
-                    m.global_prop.loc[(max(sorted_stf), 'Weight'), 'value'] -
-                    1 <= stf + m.process_dict['depreciation'][
-                                              (stf, sit, pro)]):
-                    op_pro.append((sit, pro, stf, stf_later))
-            elif ((stf_later + sorted_stf[index_helper+1]) / 2 <= stf + m.process_dict['depreciation'][(stf, sit, pro)]
-                  and stf <= stf_later):
-                op_pro.append((sit, pro, stf, stf_later))
-            else:
-                pass
-
-    return op_pro
-
-
-def inst_pro_tuples(m):
-    """ Tuples for operational status of already installed units
-    (processes, transmissions, storages) for intertemporal planning.
-    Only such tuples where the unit is still operational until the next
-    support time frame are valid.
-    """
-    inst_pro = []
-    sorted_stf = sorted(list(m.stf))
-
-    for (stf, sit, pro) in m.inst_pro.index:
-        for stf_later in sorted_stf:
-            index_helper = sorted_stf.index(stf_later)
-            if stf_later == max(m.stf):
-                if (stf_later +
-                   m.global_prop.loc[(max(sorted_stf), 'Weight'), 'value'] -
-                   1 < min(m.stf) + m.process_dict['lifetime'][
-                                                   (stf, sit, pro)]):
-                    inst_pro.append((sit, pro, stf_later))
-            elif (stf_later + sorted_stf[index_helper + 1]) / 2 <= (min(m.stf)
-                                                                    + m.process_dict['lifetime'][(stf, sit, pro)]):
-                inst_pro.append((sit, pro, stf_later))
-
-    return inst_pro

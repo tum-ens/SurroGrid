@@ -37,7 +37,13 @@ from gridexpand.common.timeframe import (
 )
 import gridexpand.powerflow.powerflow as pwrflw
 import gridexpand.powerflow.demands as dmnds
-import gridexpand.powerflow.save_grid as svgrd
+from gridexpand.powerflow import network
+from gridexpand.powerflow.io import (
+    ScenarioResultReader,
+    read_temporal_method,
+    require_temporal_method,
+    temporal_assumptions,
+)
 from gridexpand.paths import ENV_FILE, SCENARIO_CALIBRATION_OUTPUT_DIR
 from gridexpand.allocation.scenario_calibration.profiles import (
     real_swf_electricity_profiles as _electricity_profiles,
@@ -45,7 +51,6 @@ from gridexpand.allocation.scenario_calibration.profiles import (
 from gridexpand.powerflow.run_real_swf_powerflow import (
     _grid_ref,
     _select_manifest_rows,
-    transformer_rating_mva,
 )
 
 ENV_PATH = ENV_FILE
@@ -90,83 +95,6 @@ URBS_ASSUMPTION_TEXT = (
     "GridExpand Step-4 demand logic also used for synthetic grids; only the pandapower network "
     "and bus allocation differ."
 )
-
-
-class RealUrbsResultAdapter:
-    """Small SaveFile-compatible adapter for real-grid URBS result HDFs."""
-
-    def __init__(self, hdf_path: Path, run_name: str | None = None):
-        self.input_path = str(hdf_path)
-        self.run_name = run_name
-        self.output_path = str(hdf_path)
-        self.filename = hdf_path.name
-        self.raw_demand_dir = "urbs_in/demand"
-        self.reduced_demand_dir = "urbs_out/reduced_data/demand"
-        self.net_demand_dir = "urbs_out/MILP/tau_pro"
-        self.cap_pro_dir = "urbs_out/MILP/cap_pro"
-        self.raw_eff_factor_dir = "urbs_in/eff_factor"
-        self.reduced_eff_factor_dir = "urbs_out/reduced_data/eff_factor"
-        self.raw_supim_dir = "urbs_in/supim"
-        self.reduced_supim_dir = "urbs_out/reduced_data/supim"
-        self.raw_process_dir = "urbs_in/process"
-        self.reduced_process_dir = "urbs_out/reduced_data/process"
-        self.raw_storage_dir = "urbs_in/storage"
-        self.reduced_storage_dir = "urbs_out/reduced_data/storage"
-
-    def _hdf_key_exists(self, key: str) -> bool:
-        import h5py
-
-        with h5py.File(self.input_path, "r") as hdf_file:
-            return key.strip("/") in hdf_file
-
-    def _read_preferred_hdf(self, reduced_key: str, raw_key: str) -> pd.DataFrame:
-        key = reduced_key if self._hdf_key_exists(reduced_key) else raw_key
-        return pd.read_hdf(self.input_path, key=key)
-
-    def _read_required_hdf(self, key: str) -> pd.DataFrame:
-        if not self._hdf_key_exists(key):
-            raise KeyError(f"Required HDF5 key {key!r} is missing in {self.filename}.")
-        return pd.read_hdf(self.input_path, key=key)
-
-    def uses_reduced_demand(self) -> bool:
-        return self._hdf_key_exists(self.reduced_demand_dir)
-
-    def get_pre_demand(self) -> pd.DataFrame:
-        return self._read_preferred_hdf(self.reduced_demand_dir, self.raw_demand_dir)
-
-    def get_input_demands(self) -> tuple[pd.DataFrame, pd.Series]:
-        return self.get_pre_demand(), pd.read_hdf(
-            self.input_path, key=self.net_demand_dir
-        )
-
-    def has_urbs_results(self) -> bool:
-        return self._hdf_key_exists(self.net_demand_dir)
-
-    def get_inflex_inputs(self) -> dict[str, Any]:
-        """Delegate to the single shared inflex input contract.
-
-        The real adapter previously maintained its own copy of this dictionary
-        and silently lost the EV session tables when they were introduced.
-        """
-        return svgrd.read_inflex_inputs(self.input_path)
-
-    def get_ev_sessions(self):
-        return svgrd.read_ev_sessions(self.input_path)
-
-    def save_df(self, df: pd.DataFrame, dir: str) -> None:
-        # Real-grid compact summary runs do not persist intermediate reactive tables.
-        return None
-
-    def audit_path(self) -> str:
-        return svgrd.component_audit_path(self.input_path, self.run_name)
-
-    def save_component_audit(self, df: pd.DataFrame, name: str):
-        """Persist a compact component audit beside the run's result file.
-
-        Reactive time-series tables are deliberately not written for real-grid
-        compact-summary runs, but the component audits must still survive.
-        """
-        return svgrd.write_component_audit(self.audit_path(), df, name)
 
 
 def _read_hdf_metadata(hdf_path: Path) -> dict[str, Any]:
@@ -217,7 +145,7 @@ def load_real_net(source_file: Path) -> tuple[pp.pandapowerNet, float]:
         rating_kva = pd.to_numeric(root["rating_kva_total"], errors="coerce").iloc[0]
         return net, float(rating_kva) / 1000.0
     net = pp.from_excel(source_file)
-    return net, transformer_rating_mva(net)
+    return net, network.transformer_rating_mva(net)
 
 
 def _prepare_real_grid_for_allocation(
@@ -247,63 +175,12 @@ def _prepare_real_grid_for_allocation(
         )
     if not grid.line.empty:
         grid.line["max_i_ka"] = 1000.0
-    for element in ("sgen", "gen", "storage"):
-        if hasattr(grid, element) and not grid[element].empty:
-            table = grid[element]
-            table["in_service"] = False
-            # pandapower reads disabled rows too; NaN values break the solver.
-            for column in ("p_mw", "q_mvar"):
-                if column in table.columns:
-                    table[column] = table[column].fillna(0.0)
-            if "scaling" in table.columns:
-                table["scaling"] = table["scaling"].fillna(1.0)
+    network.disable_static_injections(grid, fill_missing=True)
     if not grid.bus.empty:
         grid.bus[["min_vm_pu", "max_vm_pu"]] = (0.0, 10.0)
     load_scope: dict[str, Any] = {}
-    allocation_buses = sorted({int(bus) for bus in allocation_buses})
-    missing_buses = sorted(
-        set(allocation_buses).difference(set(map(int, grid.bus.index)))
-    )
-    if missing_buses:
-        raise ValueError(
-            f"Allocation plan references buses missing from the real grid: {missing_buses[:10]}"
-        )
-
-    load_buses = pd.Index(allocation_buses, dtype=int).drop_duplicates().tolist()
-    existing_load = grid.load.copy() if hasattr(grid, "load") else pd.DataFrame()
-    template_columns = (
-        list(existing_load.columns)
-        if len(existing_load.columns)
-        else ["bus", "p_mw", "q_mvar", "name"]
-    )
-    rows = []
-    for bus in load_buses:
-        rows.append(
-            {
-                "bus": int(bus),
-                "p_mw": 0.0,
-                "q_mvar": 0.0,
-                "name": f"Scenario_Profile_{bus}",
-            }
-        )
-    grid.load = (
-        pd.DataFrame(rows).reindex(columns=template_columns).reset_index(drop=True)
-    )
-    grid.load["bus"] = grid.load["bus"].astype(int)
-    grid.load["p_mw"] = 0.0
-    grid.load["q_mvar"] = 0.0
-    grid.load["max_p_mw"] = 1000.0
-    for column, value in {
-        "const_z_percent": 0.0,
-        "const_i_percent": 0.0,
-        "const_z_p_percent": 0.0,
-        "const_z_q_percent": 0.0,
-        "const_i_p_percent": 0.0,
-        "const_i_q_percent": 0.0,
-        "scaling": 1.0,
-        "in_service": True,
-    }.items():
-        grid.load[column] = value
+    load_buses = sorted({int(bus) for bus in allocation_buses})
+    grid = network.set_scenario_load_buses(grid, load_buses)
 
     summary_cable_ids, voltage_buses = pwrflw.comparison_evaluation_scope(
         grid, load_buses, scope=summary_grid_scope
@@ -533,23 +410,16 @@ def run_one_urbs_result(
         rating_mva,
     )
 
-    adapter = RealUrbsResultAdapter(hdf_path, run_name=run_name)
+    # Compact real-grid summaries write no reactive tables; component audits go
+    # to a sidecar next to the result file.
+    adapter = ScenarioResultReader(hdf_path, output_path=hdf_path, run_name=run_name)
     metadata = _read_hdf_metadata(hdf_path)
     # Identity, not file name, decides whether this result may be consumed.
     if expect_temporal_method is not None:
-        temporal_audit = svgrd.require_temporal_method(
-            str(hdf_path), expect_temporal_method
-        )
+        temporal_audit = require_temporal_method(str(hdf_path), expect_temporal_method)
     else:
-        temporal_audit = svgrd.read_temporal_method(str(hdf_path))
-    if temporal_audit:
-        metadata = {
-            **metadata,
-            "temporal_method": str(temporal_audit.get("temporal_method")),
-            "operating_hours": temporal_audit.get("operating_hours"),
-            "storage_boundary_policy": temporal_audit.get("storage_boundary_policy"),
-            "ev_boundary_policy": temporal_audit.get("ev_boundary_policy"),
-        }
+        temporal_audit = read_temporal_method(str(hdf_path))
+    metadata = {**metadata, **temporal_assumptions(temporal_audit)}
     if post_demand_mode == "pre-only":
         df_pre_demand = dmnds.obtain_pre_demand(adapter)
         df_post_demand = None

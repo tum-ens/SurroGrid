@@ -25,22 +25,28 @@ import pandapower as pp
 import pandapower.topology as pp_top
 from dotenv import load_dotenv
 
+from gridexpand.allocation.scenario_calibration.profiles.real_swf_electricity_profiles import (
+    DEFAULT_MEASURED_PROFILE_BAND_PCT,
+    DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES,
+    MEASURED_PROFILE_SELECTION_CHOICES,
+    MEASURED_PROFILE_SELECTION_RANDOM_BAND,
+    load_electricity_module as _load_electricity_module,
+    profile_selection_summary as _profile_selection_summary,
+    select_residential_profile as _select_residential_profile,
+)
 from gridexpand.db.database import DEFAULT_SCENARIO_KEY, SurroGridDatabase
 from gridexpand.paths import ENV_FILE
 import gridexpand.powerflow.powerflow as pwrflw
+from gridexpand.powerflow import network
+from gridexpand.powerflow.config import config as pf_config
 
 ENV_PATH = ENV_FILE
 
-PF_ELC = 0.959
+PF_ELC = pf_config.PF_ELC
 RUN_NAME = "baseline_real"
 ANNUAL_DEMAND_MODE_SYNTHETIC = "synthetic"
 ANNUAL_DEMAND_MODE_MEASURED = "measured"
 ANNUAL_DEMAND_MODE_CHOICES = (ANNUAL_DEMAND_MODE_SYNTHETIC, ANNUAL_DEMAND_MODE_MEASURED)
-MEASURED_PROFILE_SELECTION_CLOSEST = "closest"
-MEASURED_PROFILE_SELECTION_RANDOM_BAND = "random_band"
-MEASURED_PROFILE_SELECTION_CHOICES = (MEASURED_PROFILE_SELECTION_CLOSEST, MEASURED_PROFILE_SELECTION_RANDOM_BAND)
-DEFAULT_MEASURED_PROFILE_BAND_PCT = 10.0
-DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES = 10
 MIN_HH_ANNUAL_DEMAND_KWH = 500.0
 ASSUMPTION_TEXT = (
     "Real SWF load rows are filtered to active low-voltage household loads "
@@ -53,13 +59,6 @@ ASSUMPTION_TEXT = (
     "Voltage metrics are evaluated at the nearest upstream retained backbone bus."
 )
 ANNUAL_DEMAND_PATTERN = re.compile(r"2022:\s*([0-9]+(?:[.,][0-9]+)?)\s*kWh", re.IGNORECASE)
-
-
-def _load_electricity_module():
-    """Return Step 2's electricity helper (its statistics paths are absolute)."""
-    import gridexpand.allocation.functions.electricity as electricity
-
-    return electricity
 
 
 def _comparison_manifest(root: Path) -> pd.DataFrame:
@@ -207,49 +206,6 @@ def _apply_measured_annual_demands(pseudo_buildings: pd.DataFrame) -> pd.Series:
     return has_measured
 
 
-def _select_residential_profile(
-    lps_total_demands: pd.DataFrame,
-    demand: float,
-    rng: np.random.Generator,
-    measured_profile_selection: str,
-    measured_profile_band_pct: float,
-    measured_profile_min_candidates: int,
-) -> dict[str, Any]:
-    profile_kwh = pd.to_numeric(lps_total_demands["kWh"], errors="coerce")
-    distances = (profile_kwh - float(demand)).abs().dropna()
-    if distances.empty:
-        raise ValueError("No residential electricity load profiles with valid annual kWh values are available.")
-
-    if measured_profile_selection == MEASURED_PROFILE_SELECTION_CLOSEST:
-        candidate_index = pd.Index([distances.idxmin()])
-        method = "closest"
-    elif measured_profile_selection == MEASURED_PROFILE_SELECTION_RANDOM_BAND:
-        band_abs = abs(float(demand)) * float(measured_profile_band_pct) / 100.0
-        candidate_index = distances[distances <= band_abs].index
-        if len(candidate_index) < int(measured_profile_min_candidates):
-            n_candidates = min(int(measured_profile_min_candidates), len(distances))
-            candidate_index = distances.nsmallest(n_candidates).index
-            method = "nearest_fallback"
-        else:
-            method = "band"
-    else:
-        raise ValueError(
-            f"measured_profile_selection must be one of {MEASURED_PROFILE_SELECTION_CHOICES}, "
-            f"got {measured_profile_selection!r}."
-        )
-
-    chosen_index = rng.choice(candidate_index.to_numpy())
-    return {
-        "chosen_index": chosen_index,
-        "chosen_profile_device": lps_total_demands.loc[chosen_index, "devicenumber"],
-        "chosen_profile_kwh": float(profile_kwh.loc[chosen_index]),
-        "candidate_count": int(len(candidate_index)),
-        "candidate_method": method,
-        "candidate_min_kwh": float(profile_kwh.loc[candidate_index].min()),
-        "candidate_max_kwh": float(profile_kwh.loc[candidate_index].max()),
-    }
-
-
 def _get_elec_demand_with_profile_selection(
     pseudo_buildings: pd.DataFrame,
     electricity_module,
@@ -294,24 +250,6 @@ def _get_elec_demand_with_profile_selection(
     df_elec = pd.DataFrame(data_dict_res).reset_index(drop=True)
     df_elec.columns = pd.MultiIndex.from_product([df_elec.columns, ["electricity"]])
     return df_elec, pd.DataFrame(selection_rows)
-
-
-def _profile_selection_summary(demand_audit: pd.DataFrame) -> dict[str, Any]:
-    if "chosen_profile_device" not in demand_audit.columns:
-        return {}
-    chosen = demand_audit["chosen_profile_device"].dropna().astype(str)
-    if chosen.empty:
-        return {}
-    counts = chosen.value_counts()
-    method_counts = demand_audit.get("candidate_method", pd.Series(dtype=object)).dropna().astype(str).value_counts()
-    return {
-        "measured_profile_unique_devices": int(counts.size),
-        "measured_profile_largest_reuse_count": int(counts.iloc[0]),
-        "measured_profile_largest_reuse_share": float(counts.iloc[0] / len(chosen)),
-        "measured_profile_top5_reuse_share": float(counts.head(5).sum() / len(chosen)),
-        "measured_profile_band_candidate_rows": int(method_counts.get("band", 0)),
-        "measured_profile_nearest_fallback_rows": int(method_counts.get("nearest_fallback", 0)),
-    }
 
 
 def _build_real_electric_demand(
@@ -433,11 +371,7 @@ def _build_real_electric_demand(
     return demand
 
 
-def transformer_rating_mva(grid: pp.pandapowerNet) -> float:
-    """Station rating: sn_mva is per unit, so parallel units multiply it."""
-    sn_mva = pd.to_numeric(grid.trafo["sn_mva"], errors="coerce")
-    parallel = pd.to_numeric(grid.trafo.get("parallel", 1), errors="coerce").fillna(1)
-    return float((sn_mva * parallel).sum())
+transformer_rating_mva = network.transformer_rating_mva
 
 
 def _prepare_real_grid(

@@ -1,24 +1,11 @@
-"""urbs: A linear optimisation model for distributed energy systems
+"""Trimmed urbs model (https://github.com/tum-ens/urbs, see LICENSE) for GridExpand Step 3.
 
-urbs minimises total cost for providing energy in form of desired commodities
-(usually electricity) to satisfy a given demand in form of timeseries. The
-model contains commodities (electricity, fossil fuels, renewable energy
-sources, greenhouse gases), processes that convert one commodity to another
-(while emitting greenhouse gases as a secondary output), transmission for
-transporting commodities between sites and storage for saving/retrieving
-commodities.
-
+Only the building-optimization path is kept: one cost-minimising LP/MILP per
+building cluster with storage, buy/sell prices, time-variable efficiency, optional
+TSAM type periods and dedicated EV charging sessions.
 """
 
-from .colorcodes import COLORS
 from .model import create_model
-from .input import *
-from .validation import validate_input
-from .output import get_constants, get_timeseries
-from .plot import plot, result_figures, to_color
-from .pyomoio import get_entity, get_entities, list_entities
-from .report import report
-from .runfunctions import *
-from .saveload import load, save
-from .scenarios import *
-from .identify import identify_mode, identify_expansion
+from .runfunctions import prepare_result_directory, run_lvds_opt
+
+__all__ = ["create_model", "prepare_result_directory", "run_lvds_opt"]
