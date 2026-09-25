@@ -19,8 +19,7 @@ from gridexpand.analysis.powerflow.comparison_data import (
     real_powerflow_headline_summary_db,
     real_powerflow_percentile_profile_db,
 )
-from gridexpand.analysis.plotting.powerflow_transformer import transformer_import_distribution_db
-from gridexpand.analysis.plotting.powerflow_voltage import voltage_deviation_summary_db
+from gridexpand.analysis.powerflow.raw import transformer_import_distribution_db, voltage_deviation_summary_db
 
 
 PROVIDER_LABELS = {"swf": "SWF", "uzw": "ÜZW"}
@@ -88,62 +87,6 @@ def display_label_from_ags(ags: str | int) -> str:
     gen = str(row["gen"]).strip()
     bez = str(row["bez"] or "").strip()
     return f"{gen} ({bez})" if bez else gen
-
-
-def output_slug_from_ags(ags: str | int) -> str:
-    """Return the directory-safe AGS slug used for plot exports."""
-    return normalize_ags_string(ags)
-
-
-def analysis_prefix_from_ags(ags: str | int, base_suffix: str) -> str:
-    """Find the newest materialized expansion-analysis prefix for a region."""
-    normalized_ags = normalize_ags_string(ags)
-    db = SurroGridDatabase()
-    query = text(
-        """
-        SELECT analysis_key, created_at
-        FROM surrogrid.expansion_analysis_run
-        WHERE ags = :ags
-          AND (
-              analysis_key = :pre_key
-              OR analysis_key = :post_key
-              OR analysis_key = :post_inflex_key
-              OR analysis_key LIKE :prefixed_pre_key
-              OR analysis_key LIKE :prefixed_post_key
-              OR analysis_key LIKE :prefixed_post_inflex_key
-          )
-        ORDER BY created_at DESC
-        """
-    )
-    params = {
-        "ags": int(normalized_ags),
-        "pre_key": f"{base_suffix}_pre",
-        "post_key": f"{base_suffix}_post",
-        "post_inflex_key": f"{base_suffix}_post_inflex",
-        "prefixed_pre_key": f"%_{base_suffix}_pre",
-        "prefixed_post_key": f"%_{base_suffix}_post",
-        "prefixed_post_inflex_key": f"%_{base_suffix}_post_inflex",
-    }
-    with db.engine.connect() as conn:
-        rows = conn.execute(query, params).mappings().all()
-
-    prefixes: list[str] = []
-    for row in rows:
-        analysis_key = str(row["analysis_key"])
-        for stage_suffix in ("_post_inflex", "_post", "_pre"):
-            ending = f"{base_suffix}{stage_suffix}"
-            if analysis_key.endswith(ending):
-                prefix = analysis_key[: -len(stage_suffix)]
-                if prefix not in prefixes:
-                    prefixes.append(prefix)
-                break
-
-    if not prefixes:
-        raise ValueError(
-            f"No materialized expansion analysis found for AGS {normalized_ags} "
-            f"and base suffix {base_suffix!r}."
-        )
-    return prefixes[0]
 
 
 def load_expansion_stage_context(
@@ -509,38 +452,6 @@ def load_powerflow_cutoff_comparison(
         "excluded_real_grids": pd.DataFrame(excluded_real_grids),
         "skipped": skipped,
     }
-
-
-def meta_filter(meta: pd.Series) -> dict[str, object]:
-    """Convert one expansion-analysis metadata row to DB loader filters."""
-    return {
-        "run_name": meta["run_name"],
-        "stage": meta["stage"],
-        "scenario_id": None
-        if pd.isna(meta["scenario_id"])
-        else int(meta["scenario_id"]),
-        "ags": None if pd.isna(meta["ags"]) else int(meta["ags"]),
-        "plz": None if pd.isna(meta["plz"]) else int(meta["plz"]),
-    }
-
-
-def load_voltage_summaries_for_analysis(
-    analysis_meta_by_stage: Mapping[str, pd.Series],
-) -> dict[str, pd.DataFrame]:
-    """Load grid-level voltage-extreme summaries for each available synthetic stage."""
-    voltage_summaries = {}
-    for label, meta in analysis_meta_by_stage.items():
-        filters = meta_filter(meta)
-        voltage_summaries[label] = voltage_deviation_summary_db(
-            run_name=filters["run_name"],
-            stages=(filters["stage"],),
-            scenario_id=filters["scenario_id"],
-            ags=filters["ags"],
-            plz=filters["plz"],
-        )
-    if not voltage_summaries:
-        raise ValueError("No available expansion analyses for voltage diagnostics.")
-    return voltage_summaries
 
 
 def load_voltage_summaries_for_powerflow_comparison(

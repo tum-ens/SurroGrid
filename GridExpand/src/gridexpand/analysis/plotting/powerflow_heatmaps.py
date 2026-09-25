@@ -14,6 +14,8 @@ from pandapower.plotting import create_generic_coordinates
 from pandapower.plotting import plotly as pp_plotly
 from sqlalchemy import text
 
+from gridexpand.analysis.ids import optional_ags
+from gridexpand.analysis.powerflow.scope import resolve_db_grid, resolve_powerflow_run
 from gridexpand.db.database import SurroGridDatabase
 
 
@@ -321,115 +323,6 @@ def plot_powerflow_heatmap(
         fig.show()
     return fig
 
-def _resolve_db_grid(
-    db: SurroGridDatabase,
-    input_id: str,
-    plz: int | None,
-    kcid: int | None,
-    bcid: int | None,
-    candidate_index: int,
-    min_buildings: int,
-) -> dict:
-    return db.resolve_grid_identifier(
-        input_id,
-        plz=plz,
-        kcid=kcid,
-        bcid=bcid,
-        candidate_index=candidate_index,
-        min_buildings=min_buildings,
-    )
-
-def _resolve_powerflow_run(
-    db: SurroGridDatabase,
-    grid_ref: dict,
-    run_name: str,
-    scenario_id: int | None = None,
-) -> dict:
-    query = text(
-        """
-        SELECT pr.powerflow_run_id, pr.run_name, pr.pre_only, pr.scenario_id, sc.scenario_key, pr.updated_at
-        FROM surrogrid.grid_case gc
-        JOIN surrogrid.powerflow_run pr
-          ON pr.grid_case_id = gc.grid_case_id
-        JOIN surrogrid.scenario sc
-          ON sc.scenario_id = pr.scenario_id
-        WHERE gc.ags = :ags
-          AND gc.plz = :plz
-          AND gc.kcid = :kcid
-          AND gc.bcid = :bcid
-          AND gc.pylovo_grid_result_id = :grid_result_id
-          AND pr.run_name = :run_name
-          AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
-        ORDER BY pr.updated_at DESC, pr.powerflow_run_id DESC
-        LIMIT 1
-        """
-    )
-    with db.engine.connect() as conn:
-        row = conn.execute(
-            query,
-            {
-                "ags": grid_ref["ags"],
-                "plz": grid_ref["plz"],
-                "kcid": grid_ref["kcid"],
-                "bcid": grid_ref["bcid"],
-                "grid_result_id": grid_ref["grid_result_id"],
-                "run_name": run_name,
-                "scenario_id": scenario_id,
-            },
-        ).mappings().first()
-
-    if row is None:
-        raise ValueError(
-            f"No DB power-flow run named {run_name!r} found for "
-            f"scenario_id={scenario_id!r}, PLZ={grid_ref['plz']}, "
-            f"KCID={grid_ref['kcid']}, BCID={grid_ref['bcid']}."
-        )
-    return dict(row)
-
-def db_powerflow_timestep_bounds(
-    input_id: str,
-    stage: str,
-    run_name: str = "baseline_static_full_powerflow",
-    scenario_id: int | None = None,
-    plz: int | None = None,
-    kcid: int | None = None,
-    bcid: int | None = None,
-    candidate_index: int = 0,
-    min_buildings: int = 5,
-) -> dict:
-    db = SurroGridDatabase()
-    grid_ref = _resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
-    run = _resolve_powerflow_run(db, grid_ref, run_name, scenario_id)
-
-    query = text(
-        """
-        SELECT MIN(t_index) AS min_timestep,
-               MAX(t_index) AS max_timestep,
-               COUNT(DISTINCT t_index) AS n_timesteps
-        FROM surrogrid.powerflow_bus_voltage
-        WHERE powerflow_run_id = :run_id
-          AND stage = :stage
-        """
-    )
-    with db.engine.connect() as conn:
-        row = conn.execute(
-            query,
-            {"run_id": int(run["powerflow_run_id"]), "stage": stage},
-        ).mappings().one()
-
-    if row["n_timesteps"] == 0:
-        raise ValueError(
-            f"No DB power-flow voltage results found for run "
-            f"{run['powerflow_run_id']}, stage {stage!r}."
-        )
-
-    return {
-        "grid_ref": grid_ref,
-        "run": run,
-        "min_timestep": int(row["min_timestep"]),
-        "max_timestep": int(row["max_timestep"]),
-        "n_timesteps": int(row["n_timesteps"]),
-    }
 
 def _read_db_timestep_results(
     db: SurroGridDatabase,
@@ -500,8 +393,8 @@ def plot_powerflow_heatmap_db(
     ``grid_loading_stress_summary`` rows and passing the selected grid/stage.
     """
     db = SurroGridDatabase()
-    grid_ref = _resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
-    run = _resolve_powerflow_run(db, grid_ref, run_name, scenario_id)
+    grid_ref = resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
+    run = resolve_powerflow_run(db, grid_ref, run_name, scenario_id)
     net = db.read_pandapower_grid(grid_ref)
 
     bus_vm, i_from_ka = _read_db_timestep_results(
@@ -532,10 +425,6 @@ def plot_powerflow_heatmap_db(
         fig.show()
     return fig
 
-def _normalize_optional_ags(ags: str | int | None) -> int | None:
-    if ags is None:
-        return None
-    return int(str(ags).lstrip("0") or "0")
 
 def available_powerflow_results_db(
     run_name: str | None = None,
@@ -550,71 +439,19 @@ def available_powerflow_results_db(
 
     The returned ``grid`` column is the bridge-style grid identifier used by
     single-grid heatmap helpers. Population plots can use this catalog to choose
-    all results or filter by scenario, AGS, PLZ, KCID, and BCID.
+    all results or filter by scenario, AGS, PLZ, KCID, and BCID. Timestep counts
+    come from ``powerflow_import`` (``db.list_powerflow_runs``), not from a scan of
+    the per-bus tables.
     """
-    db = SurroGridDatabase()
-    query = text(
-        """
-        SELECT pr.powerflow_run_id,
-               pr.run_name,
-               pr.pre_only,
-               pr.scenario_id,
-               sc.scenario_key,
-               sc.scenario_label,
-               gc.grid_case_id,
-               gc.ags,
-               gc.plz,
-               gc.kcid,
-               gc.bcid,
-               gc.cell_id,
-               gc.pylovo_grid_result_id,
-               MIN(pbv.t_index) AS min_timestep,
-               MAX(pbv.t_index) AS max_timestep,
-               COUNT(DISTINCT pbv.t_index) AS n_timesteps,
-               ARRAY_AGG(DISTINCT pbv.stage ORDER BY pbv.stage) AS stages,
-               pr.updated_at
-        FROM surrogrid.powerflow_run pr
-        JOIN surrogrid.grid_case gc USING (grid_case_id)
-        JOIN surrogrid.scenario sc USING (scenario_id)
-        JOIN surrogrid.powerflow_bus_voltage pbv USING (powerflow_run_id)
-        WHERE (:run_name IS NULL OR pr.run_name = :run_name)
-          AND (:scenario_id IS NULL OR pr.scenario_id = :scenario_id)
-          AND (:ags IS NULL OR gc.ags = :ags)
-          AND (:plz IS NULL OR gc.plz = :plz)
-          AND (:kcid IS NULL OR gc.kcid = :kcid)
-          AND (:bcid IS NULL OR gc.bcid = :bcid)
-          AND pbv.stage = ANY(:stages)
-        GROUP BY pr.powerflow_run_id,
-                 pr.run_name,
-                 pr.pre_only,
-                 pr.scenario_id,
-                 sc.scenario_key,
-                 sc.scenario_label,
-                 gc.grid_case_id,
-                 gc.ags,
-                 gc.plz,
-                 gc.kcid,
-                 gc.bcid,
-                 gc.cell_id,
-                 gc.pylovo_grid_result_id,
-                 pr.updated_at
-        ORDER BY gc.ags, gc.plz, gc.kcid, gc.bcid, pr.run_name, pr.powerflow_run_id
-        """
+    df = SurroGridDatabase().list_powerflow_runs(
+        run_name=run_name,
+        stages=tuple(stages),
+        scenario_id=scenario_id,
+        ags=optional_ags(ags),
+        plz=plz,
+        kcid=kcid,
+        bcid=bcid,
     )
-    with db.engine.connect() as conn:
-        df = pd.read_sql_query(
-            query,
-            conn,
-            params={
-                "run_name": run_name,
-                "stages": list(stages),
-                "scenario_id": scenario_id,
-                "ags": _normalize_optional_ags(ags),
-                "plz": plz,
-                "kcid": kcid,
-                "bcid": bcid,
-            },
-        )
 
     if df.empty:
         raise ValueError("No DB power-flow results found for the selected filters.")
@@ -677,8 +514,8 @@ def max_line_loading_summary_db(
     min_buildings: int = 5,
 ) -> pd.DataFrame:
     db = SurroGridDatabase()
-    grid_ref = _resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
-    run = _resolve_powerflow_run(db, grid_ref, run_name, scenario_id)
+    grid_ref = resolve_db_grid(db, input_id, plz, kcid, bcid, candidate_index, min_buildings)
+    run = resolve_powerflow_run(db, grid_ref, run_name, scenario_id)
     net = db.read_pandapower_grid(grid_ref)
 
     query = text(
