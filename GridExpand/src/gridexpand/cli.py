@@ -11,19 +11,31 @@ from __future__ import annotations
 import importlib
 import sys
 
-# command -> (module with main(argv), one-line description)
+# command -> ("module" or "module:function" with main(argv), one-line description)
 COMMANDS: dict[str, tuple[str, str]] = {
     "run": (
-        "gridexpand.scenario.run_scenario",
-        "Run one scenario or paired-validation run YAML (config/runs/*.yaml).",
+        "gridexpand.scenario.run",
+        "Run one run YAML (config/runs/*.yaml): synthetic, paired_validation or paired_aligned.",
+    ),
+    "status": (
+        "gridexpand.scenario.tools:status_main",
+        "Show the state of a run directory (state.json); no database.",
+    ),
+    "grids": (
+        "gridexpand.scenario.tools:grids_main",
+        "List the candidate grids of an AGS with the runner's numbering.",
+    ),
+    "config": (
+        "gridexpand.scenario.tools:config_main",
+        "config check <yaml...>: validate run/scenario YAMLs, print hashes and keys; no database.",
     ),
     "run-aligned": (
-        "gridexpand.scenario.run_aligned",
-        "Prepare and run the aligned SWF/ÜZW paired comparison of one run YAML.",
+        "gridexpand.scenario.run",
+        "Older name of 'run' for paired_aligned YAMLs (same options).",
     ),
     "synthetic": (
         "gridexpand.scenario.synthetic_ags_runner",
-        "Run Steps 2-4 (+ expansion) for the synthetic grids of one AGS.",
+        "Run Steps 2-4 (+ expansion) for the synthetic grids of one AGS and one model case.",
     ),
     "allocate": (
         "gridexpand.allocation.main",
@@ -80,9 +92,10 @@ def main(argv: list[str] | None = None) -> int:
         print(_usage(), file=sys.stderr)
         print(f"\ngridexpand: unknown command {command!r}", file=sys.stderr)
         return 2
-    module = importlib.import_module(COMMANDS[command][0])
+    module_name, _, function = COMMANDS[command][0].partition(":")
+    entry = getattr(importlib.import_module(module_name), function or "main")
     sys.argv = [f"gridexpand {command}", *rest]
-    result = module.main(rest)
+    result = entry(rest)
     return int(result or 0)
 
 

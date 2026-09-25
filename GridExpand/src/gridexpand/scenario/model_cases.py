@@ -71,6 +71,14 @@ MODEL_CASES: dict[str, ModelCase] = {
 POST_MODEL_CASES = tuple(name for name in MODEL_CASES if name != "pre")
 # Heuristic cases share one asset plan; this fixed order is their result order.
 HEURISTIC_CASES = ("post-inflex-heuristic", "post-hems-heuristic")
+# review-optpf B3: the synthetic Step 2 writes no urbs_in/ev_sessions, which the
+# INFLEX power flow needs; the methodological fix is an open question.
+SYNTHETIC_UNSUPPORTED_CASES = {
+    "post-inflex-heuristic": (
+        "The synthetic INFLEX power flow cannot run: the synthetic Step 2 writes no "
+        "urbs_in/ev_sessions (INFLEX needs the EV sessions of the paired pipeline)."
+    ),
+}
 # The case whose Step 2 materialization and Step 3 solve serve an asset plan.
 MATERIALIZATION_CASE = {
     "none": "pre",

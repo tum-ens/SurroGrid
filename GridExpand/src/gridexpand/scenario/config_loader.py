@@ -9,7 +9,6 @@ from typing import Any
 
 import yaml
 
-from .run_config import RunConfig
 from .scenario_config import ScenarioConfig
 
 
@@ -24,6 +23,7 @@ def _read_yaml(path: Path) -> dict[str, Any]:
 
 
 def configuration_hash(raw: dict[str, Any]) -> str:
+    """SHA-256 of the parsed YAML (sorted-key JSON): any value or key change changes it."""
     payload = json.dumps(raw, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -34,11 +34,13 @@ def scenario_identity_key(scenario_id: str, scenario_hash: str) -> str:
 
 
 def load_scenario_config(path: str | Path) -> tuple[ScenarioConfig, str]:
+    """Load and validate a scenario YAML; returns the config and its hash."""
     raw = _read_yaml(Path(path))
     return ScenarioConfig.from_dict(raw), configuration_hash(raw)
 
 
-def load_run_config(path: str | Path) -> tuple[RunConfig, str]:
-    resolved = Path(path).resolve()
-    raw = _read_yaml(resolved)
-    return RunConfig.from_dict(raw, base_dir=resolved.parent), configuration_hash(raw)
+def load_run_config(path: str | Path):
+    """Load a run YAML (see :func:`gridexpand.scenario.run_config.load_run_config`)."""
+    from .run_config import load_run_config as _load
+
+    return _load(path)
