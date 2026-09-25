@@ -366,6 +366,52 @@ def get_elec_demand(df_components, base_seed=0, return_component_profiles=False)
         return result, df_elec_demand, component_profiles
     return result, df_elec_demand
 
+def profile_components(df_components, base_seed=0):
+    """Sample and profile the electricity components of one grid.
+
+    Returns:
+        ``(components, bus_demand, component_profiles)`` as from
+        :func:`get_elec_demand` after :func:`sample_statistics`.
+    """
+    sampled = sample_statistics(df_components, base_seed)
+    return get_elec_demand(sampled, base_seed=base_seed, return_component_profiles=True)
+
+
+def aggregate_components_to_buildings(physical, components, *, residential_area=False):
+    """Attach component results to one-row-per-building data.
+
+    Adds ``occ_list`` (households of the building's Residential component, at
+    most one per building, else ``[]``) and ``annual_electricity_kwh`` (sum over
+    all its components, else 0). With ``residential_area`` it also adds
+    ``residential_effective_floor_area_m2``.
+
+    Args:
+        physical: One row per physical building with ``objectid``.
+        components: Profiled components from :func:`profile_components`.
+        residential_area: Also add the residential effective floor area.
+
+    Returns:
+        A copy of ``physical`` with the added columns.
+    """
+    result = physical.copy()
+    building_ids = result["objectid"].astype(str)
+    component_ids = components["objectid"].astype(str)
+    residential = components["component_category"].eq("Residential")
+    occupancy = dict(zip(component_ids[residential], components.loc[residential, "occ_list"]))
+    annual = components.groupby(component_ids)["annual_electricity_kwh"].sum()
+    result["occ_list"] = building_ids.map(occupancy).apply(
+        lambda value: value if isinstance(value, (list, tuple, np.ndarray)) else []
+    )
+    result["annual_electricity_kwh"] = building_ids.map(annual).fillna(0.0)
+    if residential_area:
+        area = (
+            components.loc[residential]
+            .groupby(component_ids[residential])["effective_floor_area_m2"]
+            .sum()
+        )
+        result["residential_effective_floor_area_m2"] = building_ids.map(area).fillna(0.0)
+    return result
+
 # def get_elec_react_demand(df_elec_demand):
 #     conversion_factor = math.tan(math.acos(config.ELEC_REACT_PF))
 #     df_elec_react_demand = df_elec_demand.copy()

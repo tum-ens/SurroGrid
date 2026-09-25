@@ -34,6 +34,12 @@ from gridexpand.common.reproducibility import (
     realization_id,
 )
 from gridexpand.common.building_components import residential_component_mask
+from gridexpand.allocation.electrification import (
+    INVENTORY_COLUMNS,
+    check_heat_profile_source,
+    electrification_inventory,
+    has_household,
+)
 from gridexpand.common.electrification import (
     assignment_manifest_hash,
     assignment_summary,
@@ -320,49 +326,6 @@ class Grid:
             )
         self._mobility_ownership_ready = True
 
-    def _resolve_heat_profile_eligibility(
-        self,
-        physical: pd.DataFrame,
-        residential_components: pd.DataFrame,
-        residential_ids: set[str],
-    ) -> set[str]:
-        """Resolve the active heat source before selecting heat adopters."""
-        source = getattr(heat.config, "SPACE_HEAT_SOURCE", "teaser")
-        if not residential_ids:
-            return set()
-        if source == "teaser":
-            return set(residential_ids)
-        if source != "infdb_ro_heat":
-            raise ValueError(f"Unknown space heat source {source!r}.")
-
-        areas = (
-            residential_components.groupby("objectid")["effective_floor_area_m2"]
-            .sum()
-            .rename("residential_effective_floor_area_m2")
-        )
-        heat_buildings = physical.loc[
-            physical["building_objectid"].isin(residential_ids)
-        ].copy()
-        heat_buildings["residential_effective_floor_area_m2"] = (
-            heat_buildings["building_objectid"].map(areas).fillna(0.0)
-        )
-        gross_area = (
-            pd.to_numeric(heat_buildings["floor_area"], errors="coerce")
-            * pd.to_numeric(heat_buildings["floor_number"], errors="coerce")
-        )
-        heat_buildings["residential_area_share"] = (
-            pd.to_numeric(
-                heat_buildings["residential_effective_floor_area_m2"],
-                errors="coerce",
-            )
-            / gross_area
-        )
-        heat.load_space_heat(
-            heat_buildings,
-            engine=self.SF.db.engine if self.SF.db is not None else None,
-        )
-        return set(residential_ids)
-
     def prepare_electrification_assignment(
         self, roof_catalog: pd.DataFrame | None = None
     ) -> pd.DataFrame:
@@ -429,34 +392,18 @@ class Grid:
             residential_components["objectid"] = (
                 residential_components["objectid"].astype(str)
             )
-            residential_ids = set(residential_components["objectid"])
-            heat_eligible_ids = self._resolve_heat_profile_eligibility(
-                physical,
-                residential_components,
-                residential_ids,
+            residential = physical["building_objectid"].isin(
+                set(residential_components["objectid"])
             )
-            physical["heat_eligible"] = physical["building_objectid"].isin(
-                heat_eligible_ids
+            areas = residential_components.groupby("objectid")["effective_floor_area_m2"].sum()
+            heat_buildings = physical.loc[residential].copy()
+            heat_buildings["residential_effective_floor_area_m2"] = (
+                heat_buildings["building_objectid"].map(areas).fillna(0.0)
             )
-            residential_buildings = physical["building_objectid"].isin(residential_ids)
-            physical["heat_exclusion_reason"] = np.select(
-                [~residential_buildings, ~physical["heat_eligible"]],
-                ["no_residential_component", "no_valid_heat_profile_source"],
-                default=None,
-            )
-            household = physical["occ_list"].apply(
-                lambda value: isinstance(value, (list, tuple, np.ndarray)) and len(value) > 0
-            )
-            vehicles = pd.to_numeric(
-                physical["n_cars_tot"], errors="coerce"
-            ).fillna(0.0)
-            physical["mobility_eligible"] = (
-                residential_buildings & household & vehicles.gt(0.0)
-            )
-            physical["mobility_exclusion_reason"] = np.select(
-                [~residential_buildings, ~household, vehicles.le(0.0)],
-                ["no_residential_component", "no_household", "no_vehicle_inventory"],
-                default=None,
+            check_heat_profile_source(
+                self.settings["scenario_config"].heat.space_heat_source,
+                heat_buildings,
+                engine=self.SF.db.engine if self.SF.db is not None else None,
             )
             if roof_catalog is None:
                 roof_capacity = pd.Series(0.0, index=physical.index)
@@ -469,19 +416,16 @@ class Grid:
                     .fillna(0.0)
                     .set_axis(physical.index)
                 )
-            annual = pd.to_numeric(
-                physical["annual_electricity_kwh"], errors="coerce"
-            ).fillna(0.0)
-            physical["pv_roof_eligible"] = roof_capacity.gt(0.0) & annual.gt(0.0)
-            physical["pv_battery_eligible"] = physical["pv_roof_eligible"]
-            physical["pv_battery_exclusion_reason"] = np.select(
-                [
-                    roof_capacity.le(0.0),
-                    annual.le(0.0),
-                ],
-                ["no_usable_lod2_roof", "no_base_electricity"],
-                default=None,
+            inventory = electrification_inventory(
+                physical["building_objectid"],
+                residential=residential,
+                has_household=has_household(physical["occ_list"]),
+                vehicle_count=physical["n_cars_tot"],
+                roof_capacity_kw=roof_capacity,
+                annual_electricity_kwh=physical["annual_electricity_kwh"],
             )
+            for column in INVENTORY_COLUMNS:
+                physical[column] = inventory[column]
             source_columns = {
                 technology: column
                 for technology in ("heat", "mobility", "pv_battery")
@@ -846,45 +790,19 @@ class Grid:
         )
 
     def generate_electricity(self):
-        # Profile the explicit electricity components. Physical rows receive
-        # only residential occupancy and aggregate annual demand for assets.
-        self.df_demand_components = elc.sample_statistics(
-            self.df_demand_components, self.profile_seed
-        )
+        """Profile the electricity components and aggregate them to buildings.
+
+        Physical rows receive only the residential occupancy and the annual
+        demand used by the asset rules.
+        """
         (
             self.df_demand_components,
             self.df_demand_elec,
             self.df_electricity_component_profiles,
-        ) = elc.get_elec_demand(
-            self.df_demand_components,
-            base_seed=self.profile_seed,
-            return_component_profiles=True,
+        ) = elc.profile_components(self.df_demand_components, self.profile_seed)
+        self.df_buildings = elc.aggregate_components_to_buildings(
+            self.df_buildings, self.df_demand_components
         )
-        residential = self.df_demand_components.loc[
-            self.df_demand_components["component_category"].eq("Residential")
-        ]
-        occupancy_by_building = dict(
-            zip(
-                residential["objectid"].astype(str),
-                residential["occ_list"],
-            )
-        )
-        component_ids = self.df_demand_components["objectid"].astype(str)
-        annual_by_building = (
-            self.df_demand_components.assign(_building_objectid=component_ids)
-            .groupby("_building_objectid")["annual_electricity_kwh"]
-            .sum()
-        )
-        physical_ids = self.df_buildings["objectid"].astype(str)
-        self.df_buildings = self.df_buildings.copy()
-        self.df_buildings["occ_list"] = physical_ids.map(
-            occupancy_by_building
-        ).apply(
-            lambda value: value if isinstance(value, (list, tuple, np.ndarray)) else []
-        )
-        self.df_buildings["annual_electricity_kwh"] = physical_ids.map(
-            annual_by_building
-        ).fillna(0.0)
         self.df_demand_component_audit = self._build_demand_component_audit()
         self._record_profile_fingerprints(base_electricity=self.df_demand_elec)
         # self.df_demand_elec_react = elc.get_elec_react_demand(self.df_demand_elec)

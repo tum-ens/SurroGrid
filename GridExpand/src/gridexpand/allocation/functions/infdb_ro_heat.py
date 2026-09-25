@@ -338,6 +338,26 @@ def load_space_heat(
     return result, audit
 
 
+def validate_space_heat_coverage(buildings: pd.DataFrame, *, engine=None) -> None:
+    """Raise if ``ro_heat`` cannot supply space heat for every given building.
+
+    ``buildings`` needs ``floor_area``, ``floor_number`` and
+    ``residential_effective_floor_area_m2`` besides the columns read by
+    :func:`load_space_heat`; the residential area share is derived from them.
+    The loaded profiles are discarded.
+    """
+    heat_buildings = buildings.copy()
+    gross_area = (
+        pd.to_numeric(heat_buildings["floor_area"], errors="coerce")
+        * pd.to_numeric(heat_buildings["floor_number"], errors="coerce")
+    )
+    heat_buildings["residential_area_share"] = (
+        pd.to_numeric(heat_buildings["residential_effective_floor_area_m2"], errors="coerce")
+        / gross_area
+    )
+    load_space_heat(heat_buildings, engine=engine)
+
+
 def _temperature_difference(hours: int) -> np.ndarray:
     if hours != EXPECTED_HOURS:
         raise ValueError("OpenDHW generation requires 8,760 hourly values.")
