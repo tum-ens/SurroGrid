@@ -15,6 +15,8 @@ from matplotlib.colors import LinearSegmentedColormap, LogNorm, Normalize
 from scipy.spatial import ConvexHull
 from sqlalchemy import text
 
+from gridexpand.analysis.expansion.overview import latest_expansion_analysis_key, load_expansion_overview
+from gridexpand.analysis.ids import canonical_real_grid_id
 from gridexpand.db.database import SurroGridDatabase
 
 COST_CMAP = LinearSegmentedColormap.from_list(
@@ -152,8 +154,8 @@ def _make_envelopes(
 
 def load_synthetic_grid_points(
     *,
-    plz: int = 91301,
-    synthetic_run_name: str | None = "baseline_synthetic_hh_only",
+    plz: int,
+    synthetic_run_name: str | None,
     pylovo_version_id: str | None = None,
     building_use: str | Sequence[str] | None = "Residential",
     target_epsg: int = 25832,
@@ -162,7 +164,8 @@ def load_synthetic_grid_points(
 
     Synthetic centroids are stored in EPSG:4326. They are transformed in PostGIS
     to ``target_epsg`` so that they can be plotted together with SWF Excel
-    coordinates, which are stored in projected metre coordinates.
+    coordinates, which are stored in projected metre coordinates. With
+    ``synthetic_run_name=None`` every grid case of the postcode is included.
     """
 
     db = SurroGridDatabase()
@@ -214,7 +217,7 @@ def load_synthetic_grid_points(
 
 def load_real_grid_points(
     *,
-    real_grid_data_path: str | Path = "/home/breveron/data/swf_split_hybrid",
+    real_grid_data_path: str | Path,
     real_load_type: str | Sequence[str] | None = "HH",
     variant: str = "radialized",
     category: str = "regular",
@@ -378,11 +381,11 @@ def _add_envelopes(
 
 def plot_grid_area_envelope_comparison(
     *,
-    plz: int = 91301,
-    synthetic_run_name: str | None = "baseline_synthetic_hh_only",
+    plz: int,
+    synthetic_run_name: str | None,
+    real_grid_data_path: str | Path,
     pylovo_version_id: str | None = None,
     synthetic_building_use: str | Sequence[str] | None = "Residential",
-    real_grid_data_path: str | Path = "/home/breveron/data/swf_split_hybrid",
     real_load_type: str | Sequence[str] | None = "HH",
     target_epsg: int = 25832,
     show_points: bool = False,
@@ -505,22 +508,6 @@ def plot_grid_area_envelope_comparison(
     )
 
 
-def _latest_expansion_analysis_key(db: SurroGridDatabase) -> str:
-    query = text(
-        """
-        SELECT analysis_key
-        FROM surrogrid.expansion_analysis_run
-        ORDER BY created_at DESC, expansion_analysis_run_id DESC
-        LIMIT 1
-        """
-    )
-    with db.engine.connect() as conn:
-        key = conn.execute(query).scalar_one_or_none()
-    if key is None:
-        raise ValueError("No expansion analysis run found.")
-    return str(key)
-
-
 def load_synthetic_expansion_envelope_points(
     *,
     analysis_key: str | None = None,
@@ -530,7 +517,7 @@ def load_synthetic_expansion_envelope_points(
     """Load synthetic building points with grid-level expansion costs."""
 
     db = SurroGridDatabase()
-    analysis_key = analysis_key or _latest_expansion_analysis_key(db)
+    analysis_key = analysis_key or latest_expansion_analysis_key(db)
     params: dict[str, object] = {
         "analysis_key": analysis_key,
         "target_epsg": int(target_epsg),
@@ -612,20 +599,8 @@ def load_synthetic_expansion_envelope_points(
     return points
 
 
-def _canonical_real_grid_id(value: object) -> str:
-    """Return the numeric LV id without an ``LV_`` prefix or zero padding."""
-
-    text_value = str(value).strip().removeprefix("LV_")
-    try:
-        return str(int(float(text_value)))
-    except (TypeError, ValueError):
-        return text_value
-
-
 def load_real_expansion_grid_costs(*, analysis_key: str) -> pd.DataFrame:
     """Load cost-complete real-grid metrics for one expansion analysis key."""
-
-    from gridexpand.analysis.expansion.overview import load_expansion_overview
 
     overview = load_expansion_overview(analysis_key=analysis_key)
     metrics = overview["grid_cost_summary"].copy()
@@ -640,7 +615,7 @@ def load_real_expansion_grid_costs(*, analysis_key: str) -> pd.DataFrame:
             f"found data_source values {sorted(sources)!r}."
         )
 
-    metrics["lv_id"] = metrics["lv_id"].map(_canonical_real_grid_id)
+    metrics["lv_id"] = metrics["lv_id"].map(canonical_real_grid_id)
     metrics = metrics[metrics["cost_status"].eq("complete")].copy()
     metrics.attrs["analysis_key"] = analysis_key
     return metrics
@@ -955,7 +930,7 @@ def plot_synthetic_expansion_envelope_panels(
             real_load_type=real_load_type,
         ).copy()
         if not real_points.empty:
-            real_points["lv_id"] = real_points["lv_id"].map(_canonical_real_grid_id)
+            real_points["lv_id"] = real_points["lv_id"].map(canonical_real_grid_id)
         if real_analysis_keys is not None:
             real_items = dict(_ordered_analysis_items(real_analysis_keys))
             synthetic_labels = [label for label, _ in analysis_items]

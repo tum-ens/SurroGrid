@@ -503,7 +503,7 @@ REAL_COMPARISON_GROUPS = {"swf": "Real SWF", "uzw": "Real ÜZW"}
 
 
 def real_powerflow_headline_summary_db(
-    run_name: str = "baseline_static_pre_powerflow_real_swf_hh_only_backbone",
+    run_name: str,
     stage: str = "pre",
     scenario_id: int | None = None,
     plz: int | None = None,
@@ -649,7 +649,7 @@ def real_powerflow_headline_summary_db(
     ].reset_index(drop=True)
 
 def real_powerflow_percentile_profile_db(
-    run_name: str = "baseline_static_pre_powerflow_real_swf_hh_only_backbone",
+    run_name: str,
     stage: str = "pre",
     scenario_id: int | None = None,
     plz: int | None = None,

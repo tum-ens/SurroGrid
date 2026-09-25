@@ -91,3 +91,28 @@ def test_parse_exclusions():
     }
     with pytest.raises(SystemExit):
         aligned_expansion._parse_exclusions(["xyz:1"])
+
+
+def test_case_table_matches_notebook_keys():
+    from gridexpand.analysis.expansion import notebook_workflow as nw
+    from gridexpand.analysis.expansion.cases import CASE_STAGES
+
+    specs = nw.scenario_powerflow_specs("p", nw.ALL_MODEL_CASE_STAGE_LABELS)
+    assert specs["Synthetic"]["HEMS optimized"] == {"run_name": "p_synthetic_post-hems-optimized", "stage": "post"}
+    assert list(specs["Real SWF"]) == ["status-quo", "INFLEX", "HEMS heuristic", "HEMS optimized"]
+    keys = nw.scenario_analysis_keys("p", nw.ALL_MODEL_CASE_STAGE_LABELS, data_source="Real ÜZW", provider="uzw")
+    assert keys == {
+        "status-quo": "p_uzw_real_pre",
+        "INFLEX": "p_uzw_real_post_inflex",
+        "HEMS heuristic": "p_uzw_real_post",
+        "HEMS optimized": "p_uzw_real_post_hems_optimized",
+    }
+    assert set(CASE_STAGES) == set(aligned_expansion.CASE_STAGES)
+
+
+def test_exclusions_are_canonical():
+    from gridexpand.analysis.expansion import notebook_workflow as nw
+
+    assert nw._excluded_ids((113, "LV_007"), "Real SWF") == {"113", "7"}
+    assert nw._excluded_ids({"Real ÜZW": ("area-12",)}, "Real ÜZW") == {"12"}
+    assert nw._excluded_ids({"Real ÜZW": ("area-12",)}, "Real SWF") == set()

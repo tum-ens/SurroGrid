@@ -27,17 +27,10 @@ from gridexpand.db import refresh_qgis_views
 from gridexpand.db.database import SurroGridDatabase
 
 from . import grid_expansion
+from .cases import CASE_STAGES
 
 # DSO providers of an aligned run.
 PROVIDERS = ("swf", "uzw")
-# Model case -> (power-flow stage, analysis key suffix); the suffixes are the ones of
-# ``gridexpand.run`` (run_scenario) and of ``notebook_workflow.scenario_analysis_keys``.
-CASE_STAGES = {
-    "pre": ("pre", "pre"),
-    "post-inflex-heuristic": ("post", "post_inflex"),
-    "post-hems-heuristic": ("post", "post"),
-    "post-hems-optimized": ("post", "post_hems_optimized"),
-}
 DEFAULT_CASES = ("pre", "post-inflex-heuristic", "post-hems-heuristic")
 
 
