@@ -15,6 +15,11 @@ import pandas as pd
 
 from gridexpand.common.reproducibility import physical_building_id, stable_seed
 
+# Identity of the conservation-preserving session pool (writer:
+# generate_mobility_profile_pool --mode session; reader: paired_profiles).
+SESSION_GENERATION_VERSION = "emobpy_pool_v2_sessions"
+POOL_MANIFEST_FILENAME = "mobility_pool_manifest.json"
+
 ##############################################################
 #################### Sampling Statistics #####################
 ##############################################################
@@ -349,22 +354,34 @@ def get_pool_supported_models(metadata_path=None, weather_key=None):
     return sorted(metadata["model"].unique())
 
 
+def read_rows_for_profiles(csv_path, profile_ids, *, chunksize):
+    """Return the rows of the given profiles from a long-format pool CSV.
+
+    The file is read in chunks of ``chunksize`` rows; callers keep their own
+    chunk size because pandas infers dtypes per chunk.
+
+    Returns:
+        The matching rows, or None if no row matches.
+    """
+    profile_ids = set(profile_ids)
+    chunks = []
+    for chunk in pd.read_csv(csv_path, chunksize=chunksize):
+        subset = chunk[chunk["profile_id"].isin(profile_ids)]
+        if not subset.empty:
+            chunks.append(subset)
+    if not chunks:
+        return None
+    return pd.concat(chunks, ignore_index=True)
+
+
 def _read_pool_timeseries(csv_path, profile_ids, value_column):
     csv_path = Path(csv_path)
     if not csv_path.exists():
         raise FileNotFoundError(f"Mobility profile pool timeseries not found: {csv_path}")
 
-    profile_ids = set(profile_ids)
-    chunks = []
-    for chunk in pd.read_csv(csv_path, chunksize=200_000):
-        subset = chunk[chunk["profile_id"].isin(profile_ids)]
-        if not subset.empty:
-            chunks.append(subset)
-
-    if not chunks:
+    data = read_rows_for_profiles(csv_path, profile_ids, chunksize=200_000)
+    if data is None:
         raise ValueError(f"No selected profile rows found in {csv_path}")
-
-    data = pd.concat(chunks, ignore_index=True)
     required = {"profile_id", "t", value_column}
     missing = required - set(data.columns)
     if missing:
@@ -587,26 +604,7 @@ def get_mobility_demand(vehicles, weather):
     conserve energy. The full-year chronological reference must use
     ``get_mobility_source_records`` and the dedicated-session contract instead.
     """
-    ### Run emobpy for all grid vehicles
-    # print(f"Running mobility generator for {len(vehicles)} vehicles...")
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", FutureWarning)
-        # all_timeseries, all_batteries = _simulate_vehicles(vehicles, weather)
-        max_retries = 3
-        for attempt in range(1, max_retries + 1):
-            try:
-                all_timeseries, all_batteries = _simulate_vehicles(vehicles, weather)
-                break
-            except Exception as e:
-                if attempt == max_retries:
-                    # give up: something in the code, not randomness, is broken
-                    raise RuntimeError(
-                        f"Vehicle(s) {vehicles.keys()} failed after {max_retries} attempts: {e}"
-                    )
-                # otherwise bump the seed and retry
-                for key, car in vehicles.items():
-                    car['seed'] += 1
-                print(f"Retry #{attempt} for vehicle(s) {vehicles.keys()}.")
+    all_timeseries, all_batteries = _simulate_vehicles_with_retry(vehicles, weather)
 
     ### Compile emobpy results to urbs friendly dataframe
     avai_dict = {}

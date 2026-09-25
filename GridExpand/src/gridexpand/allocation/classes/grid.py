@@ -23,6 +23,7 @@ from gridexpand.allocation.assets.pv.roof_catalog import (
     building_lod2_capacity,
     load_lod2_roof_catalog,
     read_lod2_roof_catalog_hdf,
+    roof_catalog_options,
 )
 from gridexpand.allocation.assets.pv.sizing import build_pv_asset_plan
 from gridexpand.common.reproducibility import (
@@ -617,14 +618,7 @@ class Grid:
         building_ids = self.df_buildings[id_column].astype(str)
         if building_ids.duplicated().any():
             raise ValueError("Ordinary scenario PV requires one row per physical building object ID.")
-        roof_options = {
-            "tilt_bin_deg": pv_config.tilt_bin_degrees,
-            "azimuth_bin_deg": pv_config.azimuth_bin_degrees,
-            "module_capacity_kw_per_m2": pv_config.module_capacity_kw_per_m2,
-            "flat_roof_utilization": pv_config.flat_roof_utilization,
-            "slanted_roof_utilization": pv_config.slanted_roof_utilization,
-            "fallback_capacity_kw": pv_config.fallback_capacity_kwp,
-        }
+        roof_options = roof_catalog_options(pv_config)
         if self.settings["storage"] == "db":
             self.df_pv_roof_catalog = load_lod2_roof_catalog(
                 self.SF.db.engine, building_ids, **roof_options

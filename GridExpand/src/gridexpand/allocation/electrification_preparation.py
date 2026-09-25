@@ -26,6 +26,7 @@ from gridexpand.scenario.config_loader import (
 from gridexpand.allocation.assets.pv.roof_catalog import (
     building_lod2_capacity,
     load_lod2_roof_catalog,
+    roof_catalog_options,
 )
 from gridexpand.allocation.electrification import (
     INVENTORY_COLUMNS,
@@ -166,14 +167,7 @@ def _build_inventory(
         engine=database.engine,
     )
 
-    roof_options = {
-        "tilt_bin_deg": scenario.pv.tilt_bin_degrees,
-        "azimuth_bin_deg": scenario.pv.azimuth_bin_degrees,
-        "module_capacity_kw_per_m2": scenario.pv.module_capacity_kw_per_m2,
-        "flat_roof_utilization": scenario.pv.flat_roof_utilization,
-        "slanted_roof_utilization": scenario.pv.slanted_roof_utilization,
-        "fallback_capacity_kw": scenario.pv.fallback_capacity_kwp,
-    }
+    roof_options = roof_catalog_options(scenario.pv)
     roofs = load_lod2_roof_catalog(
         database.engine,
         physical["building_objectid"],

@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from .labels import profile_label
-from .roof_catalog import building_roof_capacity
+from .roof_catalog import FALLBACK_QUALITY_FLAG, building_roof_capacity
 
 
 def heuristic_pv_capacity(annual_electricity_kwh, maximum_pv_kwp, demand_multiplier=2.0):
@@ -109,6 +109,6 @@ def build_pv_asset_plan(
     selected["pv_sizing_method"] = sizing_method
     plan["pv_sizing_method"] = sizing_method
     plan["pv_fallback_used"] = plan["building_objectid"].isin(
-        set(roof_catalog.loc[roof_catalog["quality_flag"].eq("fallback_14_5_kw"), "building_objectid"].astype(str))
+        set(roof_catalog.loc[roof_catalog["quality_flag"].eq(FALLBACK_QUALITY_FLAG), "building_objectid"].astype(str))
     )
     return plan, selected

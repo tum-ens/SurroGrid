@@ -15,6 +15,11 @@ from ...assets.battery.sizing import build_battery_asset_plan
 from ...assets.heat.materialization import materialize_heat_urbs_inputs
 from ...assets.heat.sizing import build_heat_asset_plan
 from ...functions.heat import get_norm_outside_temperature
+from ...functions.mobility import (
+    POOL_MANIFEST_FILENAME,
+    SESSION_GENERATION_VERSION,
+    read_rows_for_profiles,
+)
 from ...assets.pv.materialization import materialize_pv_urbs_inputs
 from ...assets.pv.sizing import build_pv_asset_plan
 from gridexpand.common.electrification import validate_electrification_assignment
@@ -54,9 +59,6 @@ from ..paths import DEMAND_STATISTICS_DIR, SYNTHETIC_INPUT_DIR
 MOBILITY_SESSION_POOL_DIR = (
     DEMAND_STATISTICS_DIR / "general" / "mobility_profile_pool"
 )
-SESSION_GENERATION_VERSION = "emobpy_pool_v2_sessions"
-
-POOL_MANIFEST_FILENAME = "mobility_pool_manifest.json"
 
 
 def read_pool_manifest(pool_dir: Path) -> dict[str, Any]:
@@ -107,14 +109,10 @@ def _read_session_pool(
             f"EV session pool file not found: {csv_path}. Generate it with "
             "generate_mobility_profile_pool.py --mode session."
         )
-    chunks = []
-    for chunk in pd.read_csv(csv_path, chunksize=500_000):
-        subset = chunk[chunk["profile_id"].isin(profile_ids)]
-        if not subset.empty:
-            chunks.append(subset)
-    if not chunks:
+    rows = read_rows_for_profiles(csv_path, profile_ids, chunksize=500_000)
+    if rows is None:
         return pd.DataFrame(columns=list(columns) if columns else ["profile_id"])
-    return pd.concat(chunks, ignore_index=True)
+    return rows
 from .heat_profile_source import load_physical_heat_profile
 from .physical_heat_profile_library import PhysicalHeatProfileLibrary
 from .pv_profile_library import read_pv_profile_library

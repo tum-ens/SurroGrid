@@ -51,7 +51,12 @@ from .paired_allocation import (
     _paired_profile_hash,
     _pv_scenario_unit_assignments,
 )
-from .pv_roof_potential import building_lod2_capacity, load_lod2_roof_catalog
+from ...assets.pv.roof_catalog import (
+    LOD2_QUALITY_FLAG,
+    building_lod2_capacity,
+    load_lod2_roof_catalog,
+    roof_catalog_options,
+)
 
 PROVIDERS = ("swf", "uzw")
 UZW_INDEX_FILE = "index.json"
@@ -334,14 +339,7 @@ def build_aligned_allocation(
     )
 
     # LoD2 roofs.
-    roof_options = {
-        "tilt_bin_deg": scenario.pv.tilt_bin_degrees,
-        "azimuth_bin_deg": scenario.pv.azimuth_bin_degrees,
-        "module_capacity_kw_per_m2": scenario.pv.module_capacity_kw_per_m2,
-        "flat_roof_utilization": scenario.pv.flat_roof_utilization,
-        "slanted_roof_utilization": scenario.pv.slanted_roof_utilization,
-        "fallback_capacity_kw": scenario.pv.fallback_capacity_kwp,
-    }
+    roof_options = roof_catalog_options(scenario.pv)
     roof_catalog = load_lod2_roof_catalog(
         database.engine, sorted(population), **roof_options
     )
@@ -547,7 +545,7 @@ def build_aligned_allocation(
         "pv_adoption_mode": "deterministic_share",
         "pv_roof_parameters": roof_options,
         "pv_fallback_buildings": int(
-            roof_catalog.loc[roof_catalog["quality_flag"].ne("lod2"), "building_objectid"].nunique()
+            roof_catalog.loc[roof_catalog["quality_flag"].ne(LOD2_QUALITY_FLAG), "building_objectid"].nunique()
         ),
         "electrification_assignment_hash": assignment_hash,
         "electrification_assignment_summary": summary.to_dict("records"),

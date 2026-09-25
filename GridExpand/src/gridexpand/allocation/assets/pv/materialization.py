@@ -7,6 +7,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from .roof_catalog import FALLBACK_QUALITY_FLAG
+
 
 @dataclass(frozen=True)
 class PvUrbsInputs:
@@ -97,7 +99,7 @@ def materialize_pv_urbs_inputs(
                     parameters=technical_parameters,
                 ),
                 "capacity_kw": capacity,
-                "fallback_used": bool(group["quality_flag"].eq("fallback_14_5_kw").any()),
+                "fallback_used": bool(group["quality_flag"].eq(FALLBACK_QUALITY_FLAG).any()),
                 "building_objectid": str(building_id),
                 "roof_profile_count": int(group["profile_label"].nunique()),
             })
