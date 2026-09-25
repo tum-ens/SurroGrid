@@ -59,11 +59,12 @@ All GridExpand steps communicate through a **single `.h5` file per grid/scenario
 
 ## Repository layout
 
-- [GridExpand/](GridExpand): LV grid sampling → demand allocation → optimization → power flow
-  - [GridExpand/1.grid_sampling/](GridExpand/1.grid_sampling): notebook-driven grid sampling/export
-  - [GridExpand/2.demand_allocation/](GridExpand/2.demand_allocation): generate demands + write `/urbs_in/*`
-  - [GridExpand/3.urbs/](GridExpand/3.urbs): run URBS optimization + write `/urbs_out/*`
-  - [GridExpand/4.powerflow/](GridExpand/4.powerflow): run pandapower PF + write `/pwrflw/*`
+- [GridExpand/](GridExpand): LV grid sampling → demand allocation → optimization → power flow (one Python package, `gridexpand`)
+  - [GridExpand/src/gridexpand/sampling/](GridExpand/src/gridexpand/sampling): grid sampling/export (notebooks in [GridExpand/notebooks/sampling/](GridExpand/notebooks/sampling))
+  - [GridExpand/src/gridexpand/allocation/](GridExpand/src/gridexpand/allocation): generate demands + write `/urbs_in/*`
+  - [GridExpand/src/gridexpand/optimization/](GridExpand/src/gridexpand/optimization): run URBS optimization + write `/urbs_out/*`
+  - [GridExpand/src/gridexpand/powerflow/](GridExpand/src/gridexpand/powerflow): run pandapower PF + write `/pwrflw/*`
+  - [GridExpand/docs/steps/](GridExpand/docs/steps): one document per step
 
 - [GridForecast/](GridForecast): preprocessing + ML training for forecasting
   - [GridForecast/0_preprocessing/](GridForecast/0_preprocessing): build `ts_train.h5` / `ts_test.h5`
@@ -79,21 +80,23 @@ Each subfolder contains a more detailed README describing its inputs/outputs and
 ### A) If you want to run GridExpand end-to-end
 
 1) **Create/obtain input grids**
-	- Either run Step 1 sampling in [GridExpand/1.grid_sampling/](GridExpand/1.grid_sampling) (notebook-driven, often requires pylovo DB access),
+	- Either run Step 1 sampling ([GridExpand/docs/steps/1_grid_sampling.md](GridExpand/docs/steps/1_grid_sampling.md); notebook-driven, often requires pylovo DB access),
 	- Or start from existing compatible `.h5` grid files.
 
 2) **Demand allocation (Step 2)**
-	- Place your Step-1 `.h5` files into `GridExpand/2.demand_allocation/gridalloc/data/grids/`.
-	- Run the entrypoint described in [GridExpand/2.demand_allocation/README.md](GridExpand/2.demand_allocation/README.md).
+	- Place your Step-1 `.h5` files into `GridExpand/work/allocation/grids/`.
+	- Run `uv run gridexpand allocate <id>` as described in [GridExpand/docs/steps/2_demand_allocation.md](GridExpand/docs/steps/2_demand_allocation.md).
 
 3) **Optimization (Step 3: urbs)**
-	- Copy Step-2 result `.h5` files into `GridExpand/3.urbs/Input/`.
-	- Run the entrypoint described in [GridExpand/3.urbs/README.md](GridExpand/3.urbs/README.md).
+	- Copy Step-2 result `.h5` files into `GridExpand/work/optimization/input/`.
+	- Run `uv run gridexpand optimize <id>` as described in [GridExpand/docs/steps/3_urbs.md](GridExpand/docs/steps/3_urbs.md).
 	- This step typically requires a MILP solver (the code is configured for Gurobi by default).
 
 4) **Power flow (Step 4)**
-	- Copy Step-3 scenario `.h5` files into `GridExpand/4.powerflow/Input/`.
-	- Run the entrypoint described in [GridExpand/4.powerflow/README.md](GridExpand/4.powerflow/README.md).
+	- Copy Step-3 scenario `.h5` files into `GridExpand/work/powerflow/input/`.
+	- Run `uv run gridexpand powerflow <id>` as described in [GridExpand/docs/steps/4_powerflow.md](GridExpand/docs/steps/4_powerflow.md).
+
+The DB-backed orchestrators (`uv run gridexpand synthetic ...`, `uv run gridexpand run --run-config ...`) run Steps 2-4 in one go; see [GridExpand/README.md](GridExpand/README.md).
 
 At the end, you will have `.h5` files containing raw grid data plus `/urbs_*` and `/pwrflw/*` groups.
 
@@ -125,18 +128,16 @@ GridExpand’s contract between steps is the **HDF5 file structure**. At a high 
 For the precise keys and expectations, refer to:
 
 - [GridExpand/README.md](GridExpand/README.md) (overview + interface)
-- [GridExpand/2.demand_allocation/README.md](GridExpand/2.demand_allocation/README.md)
-- [GridExpand/3.urbs/README.md](GridExpand/3.urbs/README.md)
-- [GridExpand/4.powerflow/README.md](GridExpand/4.powerflow/README.md)
+- [GridExpand/docs/steps/2_demand_allocation.md](GridExpand/docs/steps/2_demand_allocation.md)
+- [GridExpand/docs/steps/3_urbs.md](GridExpand/docs/steps/3_urbs.md)
+- [GridExpand/docs/steps/4_powerflow.md](GridExpand/docs/steps/4_powerflow.md)
 
 ---
 
 ## Environments / dependencies
 
-- GridExpand provides per-step conda environments (see each step’s `environment.yml` and optional `environment_HPC.yml`).
+- GridExpand is one uv project (`GridExpand/pyproject.toml`, `uv.lock`): run `uv sync` in `GridExpand/`.
 - GridForecast does not ship a single canonical environment file; the Slurm scripts and training scripts may install packages at runtime.
-
-If conda complains about a `prefix:` entry in an environment file, remove that line (it may point to a different machine).
 
 ---
 
