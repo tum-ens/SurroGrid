@@ -1,95 +1,84 @@
-"""Readout helpers for the pylovo grid database.
+"""pylovo readers of Step 1 (grid sampling and the HDF5 export).
 
-This module provides the `DataBase` class, a thin SQLAlchemy wrapper around a
-PostgreSQL database that stores:
-
-- pandapower grid JSON blobs
-- transformer positions / grid identifiers (PLZ/KCID/BCID)
-- building attributes used to map buildings to consumer buses
-
-Connection credentials are taken from environment variables loaded in
-`gridexpand.sampling.config`.
+``DataBase`` reads from the database of ``GridExpand/.env`` through
+``gridexpand.db`` (shared engine, the SQL of ``gridexpand.db.grids``). Without
+``PYLOVO_VERSION_ID`` the numerically latest pylovo version of a grid is used.
+Nothing is written to the database.
 """
 
-from gridexpand.common.building_components import validate_physical_buildings
-from gridexpand.sampling.config import config
+from __future__ import annotations
 
-from sqlalchemy import text
-from sqlalchemy.engine import URL
-
-from gridexpand.db.engine import get_engine
-import pandapower as pp
-from pyproj import Transformer
+from typing import Any
 
 import pandas as pd
-import json
-import re
+from sqlalchemy import text
+
+from gridexpand.common.building_components import validate_physical_buildings
+from gridexpand.db.engine import get_engine
+from gridexpand.db.grids import (
+    BUILDINGS_SQL,
+    MEAN_HOUSEHOLD_SIZE,
+    get_pylovo_version_id,
+    grid_ref_from_specs,
+    read_pandapower_grid,
+)
+
+# pylovo stores 25832 today; the census grid of the sampling notebooks is EPSG:3035.
+CENSUS_SRID = 3035
+_LATEST_VERSION = "CASE WHEN gr.version_id::text ~ '^[0-9]+$' THEN gr.version_id::text::numeric END DESC NULLS LAST, gr.version_id DESC"
+
+
+def consumer_bus_frame(df_bus: pd.DataFrame) -> pd.DataFrame:
+    """``vertice_id -> bus`` of the ``Consumer Nodebus <vertice_id>`` buses of a pandapower bus table."""
+    vertice = df_bus["name"].astype(str).str.extract(r"^Consumer Nodebus (\d+)$")[0].dropna().astype(int)
+    return pd.DataFrame({"vertice_id": vertice.to_numpy(), "bus": vertice.index.astype(int)})
+
+
+def impute_missing_occupants(df_buildings: pd.DataFrame, mean_household_size: float = MEAN_HOUSEHOLD_SIZE) -> pd.DataFrame:
+    """Occupants of residential buildings with households but none recorded (flag ``occupants_imputed``).
+
+    Same rule as ``gridexpand.db.grids.read_buildings`` (pylovo fills households but
+    not occupants, 58 ÜZW buildings in v1).
+    """
+    missing = (
+        pd.to_numeric(df_buildings["residential_floor_area"], errors="coerce").gt(0)
+        & pd.to_numeric(df_buildings["households"], errors="coerce").gt(0)
+        & df_buildings["occupants"].isna()
+    )
+    df_buildings["occupants_imputed"] = missing
+    df_buildings.loc[missing, "occupants"] = (
+        pd.to_numeric(df_buildings.loc[missing, "households"]) * mean_household_size
+    )
+    return df_buildings
+
 
 class DataBase:
-    def __init__(self):
-        self.connection_settings = {
-            "host": config.DB_HOST,
-            "port": config.DB_PORT,
-            "name": config.DB_NAME,
-            "user": config.DB_USER,
-            "password": config.DB_PASSWORD
-        }
-        self.engine = self._get_engine()
+    """Read-only pylovo access for the sampling notebooks and ``export_single_grid``."""
 
+    def __init__(self) -> None:
+        self.engine = get_engine()
 
-    def _get_engine(self):
-        """Engine for the configured database (escaped URL, shared per process)."""
-        s = self.connection_settings
-        return get_engine(
-            URL.create(
-                "postgresql+psycopg2",
-                username=s["user"],
-                password=s["password"],
-                host=s["host"],
-                port=s["port"],
-                database=s["name"],
-            )
-        )
-
-
-    def show_contents(self):
-        """ Show all database sheets """
-        schema_name = "pylovo"
+    def show_contents(self) -> None:
+        """Print the tables of the pylovo schema."""
         with self.engine.connect() as conn:
             result = conn.execute(
                 text(
                     "SELECT table_name FROM information_schema.tables "
                     "WHERE table_schema = :schema_name ORDER BY table_name;"
                 ),
-                {"schema_name": schema_name},
+                {"schema_name": "pylovo"},
             )
             tables = [row[0] for row in result]
-            print(f"Available tables in schema '{schema_name}':")
-            print(tables)
+        print("Available tables in schema 'pylovo':")
+        print(tables)
 
+    def read_grid_identifiers_from_positions(self, min_buildings: int = 5) -> pd.DataFrame:
+        """Candidate grids ``(plz, kcid, bcid, loc)`` with at least ``min_buildings`` buildings.
 
-    def read_all_grid_identifiers(self):
-        """Retrieve all available pylovo grid identifiers (PLZ, KCID, BCID)."""
-
-        query = """
-            SELECT DISTINCT plz, kcid, bcid
-            FROM pylovo.grid_result;
+        ``loc`` is the transformer position as WKT in EPSG:3035 (the census grid).
         """
-        # Execute the query with Pandas. This will only read data.
-        df_generated_grids = pd.read_sql_query(query, self.engine)
-        print(f"Retrieved {len(df_generated_grids)} generated grids!")
-
-
-        return df_generated_grids
-
-    def read_grid_identifiers_from_positions(self, min_buildings=5):
-        """Retrieve candidate grids from pylovo transformer positions.
-
-        Only grids with at least `min_buildings` associated buildings are
-        returned.
-        """
-
-        query = text("""
+        query = text(
+            f"""
             WITH building_counts AS (
                 SELECT
                     b.grid_result_id,
@@ -102,8 +91,7 @@ class DataBase:
                 gr.plz,
                 gr.kcid,
                 gr.bcid,
-                ST_AsText(tp.geom) AS loc,
-                bc.n_buildings
+                ST_AsText(ST_Transform(tp.geom, {CENSUS_SRID})) AS loc
             FROM pylovo.grid_result gr
             JOIN pylovo.transformer_positions tp
               ON tp.grid_result_id = gr.grid_result_id
@@ -112,253 +100,95 @@ class DataBase:
               ON bc.grid_result_id = gr.grid_result_id
              AND bc.version_id = gr.version_id
             WHERE bc.n_buildings >= :min_buildings
-              AND (:pylovo_version_id IS NULL OR gr.version_id::text = :pylovo_version_id)
-            ORDER BY gr.plz, gr.kcid, gr.bcid, gr.version_id DESC;
-        """)
+              AND (CAST(:pylovo_version_id AS TEXT) IS NULL OR gr.version_id::text = CAST(:pylovo_version_id AS TEXT))
+            ORDER BY gr.plz, gr.kcid, gr.bcid, {_LATEST_VERSION};
+            """
+        )
         df_generated_grids = pd.read_sql_query(
             query,
             self.engine,
-            params={
-                "min_buildings": int(min_buildings),
-                "pylovo_version_id": config.PYLOVO_VERSION_ID,
-            },
+            params={"min_buildings": int(min_buildings), "pylovo_version_id": get_pylovo_version_id()},
         )
-        if "n_buildings" in df_generated_grids.columns:
-            df_generated_grids = df_generated_grids.drop(columns=["n_buildings"])
         print(
             "Retrieved "
             f"{len(df_generated_grids)} generated grids from transformer_positions (global pool) "
             f"with >= {min_buildings} buildings!"
         )
-
         return df_generated_grids
 
-    def read_single_ppgrid(self, grid_specs):
-        """ Reads out single database grid based on plz, kcid, bcid
-            
-            Args:
-                engine: SQLAlchemy engine to connect to database
-                grid_specs: dict including plz, kcid, bcid
-
-            Returns:
-                net: pandapower grid topology (with lines, transformer, buses)
-        """
-
-        query = text("""
-            SELECT grid
-            FROM pylovo.grid_result
-            WHERE (plz= :plz) AND (kcid= :kcid) AND (bcid= :bcid)
-              AND (:pylovo_version_id IS NULL OR version_id::text = :pylovo_version_id)
-            ORDER BY version_id DESC
-            LIMIT 1;
-        """)
-
-        # Execute the query with Pandas. This will only read data.
-        with self.engine.connect() as conn:
-            df_grid = pd.read_sql(query, conn, params={
-                "plz": int(grid_specs["plz"]),
-                "kcid": int(grid_specs["kcid"]),
-                "bcid": int(grid_specs["bcid"]),
-                "pylovo_version_id": config.PYLOVO_VERSION_ID,
-            })
-
-        if df_grid.empty:
-            raise ValueError(
-                f"No grid found for PLZ={grid_specs['plz']}, KCID={grid_specs['kcid']}, BCID={grid_specs['bcid']}."
-            )
-
-        grid_payload = df_grid.loc[0, "grid"]
-        if isinstance(grid_payload, (dict, list)):
-            grid_json = json.dumps(grid_payload)
-        else:
-            grid_json = str(grid_payload)
-
-        # Transform to pandapower net
-        net = pp.from_json_string(grid_json)
-
-        return net
-
-
-    def read_trafo_pos(self, grid_specs):
-        """ Read out position of transformer position for given grid from database """
-
-        query = text("""
-            SELECT ST_AsText(tp.geom) as loc
-            FROM pylovo.transformer_positions tp
-            JOIN pylovo.grid_result gr
-              ON gr.grid_result_id = tp.grid_result_id
-             AND gr.version_id = tp.version_id
-            WHERE (gr.plz= :plz) AND (gr.kcid= :kcid) AND (gr.bcid= :bcid)
-              AND (:pylovo_version_id IS NULL OR gr.version_id::text = :pylovo_version_id)
-            ORDER BY gr.version_id DESC
-            LIMIT 1;
-        """)
-
-        # Execute the query with Pandas. This will only read data.
-        with self.engine.connect() as conn:
-            df_trafo = pd.read_sql(query, conn, params={
-                "plz": int(grid_specs["plz"]),
-                "kcid": int(grid_specs["kcid"]),
-                "bcid": int(grid_specs["bcid"]),
-                "pylovo_version_id": config.PYLOVO_VERSION_ID,
-            })
-
-        if df_trafo.empty:
-            raise ValueError(
-                f"No transformer position found for PLZ={grid_specs['plz']}, KCID={grid_specs['kcid']}, BCID={grid_specs['bcid']}."
-            )
-
-        # Read out location string
-        loc = df_trafo.loc[0, "loc"]
-        match = re.match(r"POINT\(([-+]?[0-9]*\.?[0-9]+)\s*([-+]?[0-9]*\.?[0-9]+)\)", loc)
-        if match:
-            x = float(match.group(1))
-            y = float(match.group(2))
-            # print(f"EPSG-3035:")
-            # print(f"x: {x}, y: {y}")
-
-        # Define the projections
-        transformer = Transformer.from_crs(config.PYLOVO_COORD_FORMAT, config.TARGET_COORD_FORMAT, always_xy=True)
-        # Convert from EPSG:3857 to EPSG:4326
-        lon, lat = transformer.transform(x, y)
-        # print(f"EPSG-4326:")
-        # print(f"lat: {lat}, lon: {lon}")
-
-        trafo_pos = {
-            "lat": lat,
-            "lon": lon
-        }
-
-        return trafo_pos
-    
-    def read_regional_stats(self, plz):
-        query = text("""
-            SELECT plz, pop, area, name_city, pop_den, regio7
-            FROM pylovo.municipal_register
-            WHERE plz=:plz;
-        """)
-
-        # Execute the query with Pandas. This will only read data.
-        with self.engine.connect() as conn:
-            df_region_specs = pd.read_sql(query, conn, params={"plz":int(plz)})
-
-        return df_region_specs
-
-
-    def read_buildings(self, grid_specs, df_bus):
-        select_parts = [
-            "b.grid_result_id AS pylovo_grid_result_id",
-            "b.version_id AS pylovo_version_id",
-            "b.objectid",
-            "b.id",
-            "b.feature_id",
-            "b.vertice_id",
-            "b.height",
-            "b.floor_area",
-            "b.floor_number",
-            "b.residential_floor_area",
-            "b.nonresidential_floor_area",
-            "b.nonresidential_use",
-            "b.mix_score",
-            "b.mix_rule",
-            "b.mix_confidence",
-            "b.building_use",
-            "b.building_use_id",
-            "b.building_type",
-            "b.type",
-            "b.occupants",
-            "b.households",
-            "CAST(b.construction_year AS VARCHAR) AS construction_year",
-            "b.postcode",
-            "b.address_street_id",
-            "b.street",
-            "b.house_number",
-            "b.gemeindeschluessel",
-            "b.assigned_way_id",
-            "b.residential_peak_load_in_kw",
-            "b.nonresidential_peak_load_in_kw",
-            "b.nonresidential_mv_direct",
-            "b.peak_load_in_kw",
-            "b.connection_point",
-            "b.vertice_id AS consumer_vertex",
-            "ST_AsText(b.centroid) AS centroid",
-        ]
-
-        query = text(
-            """
-            WITH selected_grid AS (
-                SELECT grid_result_id, version_id
-                FROM pylovo.grid_result
-                WHERE plz = :plz AND kcid = :kcid AND bcid = :bcid
-                  AND (:pylovo_version_id IS NULL OR version_id::text = :pylovo_version_id)
-                ORDER BY version_id DESC
-                LIMIT 1
-            )
-            SELECT
-                """
-            + ",\n                ".join(select_parts)
-            + """
-            FROM selected_grid sg
-            JOIN pylovo.buildings_result b
-              ON b.grid_result_id = sg.grid_result_id
-             AND b.version_id = sg.version_id
-            ;
-            """
+    def _grid_ref(self, grid_specs: dict[str, Any]) -> dict[str, Any]:
+        return grid_ref_from_specs(
+            self.engine,
+            ags=0,
+            plz=int(grid_specs["plz"]),
+            kcid=int(grid_specs["kcid"]),
+            bcid=int(grid_specs["bcid"]),
+            candidate_index=0,
+            pylovo_version_id=get_pylovo_version_id(),
         )
 
-        with self.engine.connect() as conn:
-            df_buildings = pd.read_sql(
-                query,
-                conn,
-                params={
-                    "plz": int(grid_specs["plz"]),
-                    "kcid": int(grid_specs["kcid"]),
-                    "bcid": int(grid_specs["bcid"]),
-                    "pylovo_version_id": config.PYLOVO_VERSION_ID,
-                },
-            )
+    def read_single_ppgrid(self, grid_specs: dict[str, Any]):
+        """pandapower network of one grid (``plz``, ``kcid``, ``bcid``)."""
+        return read_pandapower_grid(self.engine, self._grid_ref(grid_specs))
 
+    def read_trafo_pos(self, grid_specs: dict[str, Any]) -> dict[str, float]:
+        """Transformer position ``{"lat", "lon"}`` (EPSG:4326) of one grid."""
+        grid_ref = self._grid_ref(grid_specs)
+        query = text(
+            """
+            SELECT ST_Y(ST_Transform(tp.geom, 4326)) AS lat, ST_X(ST_Transform(tp.geom, 4326)) AS lon
+            FROM pylovo.transformer_positions tp
+            WHERE tp.grid_result_id = :grid_result_id
+              AND tp.version_id = :version_id
+            LIMIT 1
+            """
+        )
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                query, {"grid_result_id": grid_ref["grid_result_id"], "version_id": grid_ref["version_id"]}
+            ).mappings().first()
+        if row is None or row["lat"] is None:
+            raise ValueError(
+                f"No transformer position found for PLZ={grid_specs['plz']}, KCID={grid_specs['kcid']}, "
+                f"BCID={grid_specs['bcid']}."
+            )
+        return {"lat": float(row["lat"]), "lon": float(row["lon"])}
+
+    def read_regional_stats(self, plz: int) -> pd.DataFrame:
+        """``pylovo.municipal_register`` rows of one postcode."""
+        query = text(
+            """
+            SELECT plz, pop, area, name_city, pop_den, regio7
+            FROM pylovo.municipal_register
+            WHERE plz = :plz;
+            """
+        )
+        with self.engine.connect() as conn:
+            return pd.read_sql(query, conn, params={"plz": int(plz)})
+
+    def read_buildings(self, grid_specs: dict[str, Any], df_bus: pd.DataFrame) -> pd.DataFrame:
+        """Physical buildings of one grid with their consumer bus (the DB-mode reader's columns).
+
+        ``lat``/``lon`` come from the pylovo centroid (EPSG:4326; NULL centroids stay NaN),
+        missing occupants are imputed as in DB mode.
+        """
+        grid_ref = self._grid_ref(grid_specs)
+        with self.engine.connect() as conn:
+            df_buildings = pd.read_sql_query(
+                text(BUILDINGS_SQL),
+                conn,
+                params={"grid_result_id": grid_ref["grid_result_id"], "version_id": grid_ref["version_id"]},
+            )
         if df_buildings.empty:
             raise ValueError(
                 f"No buildings found for PLZ={grid_specs['plz']}, KCID={grid_specs['kcid']}, BCID={grid_specs['bcid']}."
             )
-
-        ### Match bus to building
-        df_id = pd.DataFrame()
-        df_id["vertice_id"] = df_bus['name'].str.extract(r'^Consumer Nodebus (\d+)$')[0].dropna().astype(int)
-        df_id = df_id.reset_index().rename(columns={"index":"bus"})
-        df_buildings = df_buildings.merge(df_id, on='vertice_id', how="left")
+        df_buildings = df_buildings.merge(consumer_bus_frame(df_bus), on="vertice_id", how="left")
         if "connection_point" in df_buildings.columns:
             df_buildings["bus"] = df_buildings["bus"].fillna(df_buildings["connection_point"])
-
+        df_buildings = impute_missing_occupants(df_buildings)
         validate_physical_buildings(df_buildings)
 
-        ### Take bus to front and order by it
         cols = df_buildings.columns.tolist()
-        cols.insert(0, cols.pop(cols.index('bus')))
-        df_buildings = df_buildings[cols]
-        df_buildings = df_buildings.sort_values(by='bus').reset_index(drop=True)
-
-
-        ### Read out location from string
-        def _get_loc(loc_string):
-            # Set dummy to Munich
-            lat = 48.1351
-            lon = 11.5820
-
-            match = re.match(r"POINT\(([-+]?[0-9]*\.?[0-9]+)\s*([-+]?[0-9]*\.?[0-9]+)\)", str(loc_string))
-            if match:
-                x = float(match.group(1))
-                y = float(match.group(2))
-
-                # Define the projections
-                transformer = Transformer.from_crs(config.PYLOVO_COORD_FORMAT, config.TARGET_COORD_FORMAT, always_xy=True)
-                # Convert from EPSG:3857 to EPSG:4326
-                lon, lat = transformer.transform(x, y)
-
-            return lat, lon
-
-        df_buildings[["lat", "lon"]] = df_buildings["centroid"].apply(_get_loc).apply(pd.Series)
-        df_buildings.drop(columns=["centroid"], inplace=True)
-
-        return df_buildings
+        cols.insert(0, cols.pop(cols.index("bus")))
+        return df_buildings[cols].sort_values(by="bus").reset_index(drop=True)

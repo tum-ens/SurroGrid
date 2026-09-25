@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export exactly one pylovo grid to Step-1 HDF5 format.
+"""Export exactly one pylovo grid to the Step 1 HDF5 format (read-only on the database).
 
 This helper is intended for low-cost pilot runs (for example one Munich PLZ)
 without modifying the sampling notebooks.
@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--skip-weather",
         action="store_true",
-        help="Skip PVGIS/Open-Meteo weather retrieval and do not write /raw_data/weather.",
+        help="Skip the PVGIS weather download and do not write /raw_data/weather.",
     )
     parser.add_argument(
         "--list-candidates",

@@ -6,20 +6,19 @@ This module writes one `.h5` file per grid. It stores:
 - Tabular data (region metadata, consumer bus mapping, buildings, weather, …)
     stored via `pandas.HDFStore`.
 
-The notebooks in `gridreadout/` use `SaveFile` to create the output that is
-consumed by downstream pipeline steps.
+The sampling notebooks and ``export_single_grid`` use ``SaveFile``; files go to
+``gridexpand.paths.SAMPLING_RESULTS_DIR`` (``work/sampling/results``).
 """
 
-from gridexpand.sampling.config import config
-from gridexpand.sampling.grid_topol import get_consumers
-
-import pandapower as pp
-
 import os
-import h5py
-import pandas as pd
 import warnings
 
+import h5py
+import pandapower as pp
+import pandas as pd
+
+from gridexpand.paths import SAMPLING_RESULTS_DIR
+from gridexpand.sampling.grid_topol import get_consumers
 
 
 class SaveFile:
@@ -29,8 +28,8 @@ class SaveFile:
         
 
     def _generate_savepath(self, grid_specs):
-        directory = config.STORAGE_DIR
-        os.makedirs(directory, exist_ok=True)  
+        directory = str(SAMPLING_RESULTS_DIR)
+        os.makedirs(directory, exist_ok=True)
         filename = f"{grid_specs['cell_id']}_{grid_specs['plz']}_{grid_specs['kcid']}_{grid_specs['bcid']}.h5"
         return os.path.join(directory, filename)
 
