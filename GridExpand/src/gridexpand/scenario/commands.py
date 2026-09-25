@@ -91,9 +91,11 @@ def electrification_preparation_command(
     scenario_config: Path,
     output: Path,
     plz: int | None = None,
+    kcid: int | None = None,
+    bcid: int | None = None,
     python: str | None = None,
 ) -> list[str]:
-    """Regional electrification assignment of the candidate grids of an AGS (or one PLZ)."""
+    """Regional electrification assignment of the candidate grids of an AGS (one PLZ, one grid)."""
     argv = module_command(
         ELECTRIFICATION_PREPARATION,
         "--ags", ags,
@@ -107,6 +109,8 @@ def electrification_preparation_command(
         python=python,
     )
     _flag(argv, "--plz", plz)
+    _flag(argv, "--kcid", kcid)
+    _flag(argv, "--bcid", bcid)
     return argv
 
 

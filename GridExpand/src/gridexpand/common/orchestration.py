@@ -123,7 +123,10 @@ class StatusLog:
             if self.echo:
                 print(line, flush=True)
         if self.listener is not None:
-            self.listener(payload)
+            try:
+                self.listener(payload)
+            except Exception as exc:  # a broken observer must never fail a grid
+                print(f"[{utc_now()}] status listener failed: {exc!r}", file=sys.stderr, flush=True)
 
     def failed_grid(self, **payload: object) -> None:
         payload = {"ts": utc_now(), **payload}

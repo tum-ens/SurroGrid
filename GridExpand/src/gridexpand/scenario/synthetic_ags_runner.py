@@ -67,7 +67,7 @@ from gridexpand.paths import (
 )
 from gridexpand.scenario import commands
 from gridexpand.scenario.config_loader import load_scenario_config, scenario_identity_key
-from gridexpand.scenario.model_cases import MODEL_CASES, get_model_case
+from gridexpand.scenario.model_cases import MODEL_CASES, SYNTHETIC_UNSUPPORTED_CASES, get_model_case
 from gridexpand.scenario.scenario_config import ScenarioConfig
 
 EXPECTED_POWERFLOW_TABLES = {
@@ -92,13 +92,9 @@ GRID_SCOPE_CHOICES = ("full", "backbone")
 MOBILITY_SOURCE = "pool"
 EXIT_CANCELLED = 143
 
-# review-optpf B3: the synthetic Step 2 writes the legacy mobility rows but no
-# urbs_in/ev_sessions, which the INFLEX power flow needs. The methodological fix
-# is an open question; until then synthetic INFLEX is refused up front.
 SYNTHETIC_INFLEX_UNSUPPORTED = (
-    "The synthetic INFLEX power flow cannot run: the synthetic Step 2 writes no "
-    "urbs_in/ev_sessions (INFLEX needs the EV sessions of the paired pipeline). "
-    "Run post-hems-heuristic without INFLEX, or use a paired pipeline."
+    SYNTHETIC_UNSUPPORTED_CASES["post-inflex-heuristic"]
+    + " Run post-hems-heuristic without INFLEX, or use a paired pipeline."
 )
 
 _BATCH_IDENTITY_FILE = "batch_identity.json"
@@ -1203,6 +1199,8 @@ def ensure_electrification_assignment(
             cmd=commands.electrification_preparation_command(
                 settings.ags,
                 plz=settings.plz,
+                kcid=settings.kcid,
+                bcid=settings.bcid,
                 min_buildings=settings.min_buildings,
                 pylovo_version_id=settings.pylovo_version_id,
                 demand_scope=settings.demand_scope,
