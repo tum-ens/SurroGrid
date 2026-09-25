@@ -20,6 +20,7 @@ import json
 import math
 import os
 import shutil
+import sys
 import time
 import traceback
 from collections.abc import Callable
@@ -1497,7 +1498,11 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
     install_cancel_handlers()
-    return run_batch(settings, cleanup_completed_only=args.cleanup_completed_only)
+    try:
+        return run_batch(settings, cleanup_completed_only=args.cleanup_completed_only)
+    except Cancelled as exc:  # e.g. during the regional electrification preparation
+        print(f"gridexpand synthetic: cancelled ({exc})", file=sys.stderr, flush=True)
+        return EXIT_CANCELLED
 
 
 if __name__ == "__main__":
