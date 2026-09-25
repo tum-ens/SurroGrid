@@ -196,6 +196,19 @@ def res_storage_linked_process_capacity_rule(m, stf, sit, sto, com):
 
 
 # storage balance
+def _storage_index(m):
+    """Storages of each (stf, site, commodity) in ``m.sto_tuples`` order (built once)."""
+    index = getattr(m, "_storage_index", None)
+    if index is None:
+        index = {}
+        for stframe, site, storage, commodity in m.sto_tuples:
+            index.setdefault((stframe, site, commodity), []).append(
+                (stframe, site, storage, commodity)
+            )
+        m._storage_index = index
+    return index
+
+
 def storage_balance(m, tm, stf, sit, com):
     """Storage input minus output of commodity ``com`` at one site and timestep.
 
@@ -205,8 +218,7 @@ def storage_balance(m, tm, stf, sit, com):
                m.e_sto_out[(tm, stframe, site, storage, com)]
                # usage as input for storage increases consumption
                # output from storage decreases consumption
-               for stframe, site, storage, commodity in m.sto_tuples
-               if site == sit and stframe == stf and commodity == com)
+               for stframe, site, storage, commodity in _storage_index(m).get((stf, sit, com), ()))
 
 
 # storage costs

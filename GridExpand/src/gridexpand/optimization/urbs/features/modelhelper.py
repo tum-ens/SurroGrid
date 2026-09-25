@@ -21,6 +21,31 @@ def invcost_factor(dep_prd, interest):
                 ((1 + interest) ** dep_prd - 1))
 
 
+def _process_flow_index(m):
+    """Process inputs/outputs of each (stf, site, commodity), built once per model.
+
+    ``commodity_balance`` used to scan all ``m.pro_tuples`` for every balance row,
+    which is quadratic in the number of buildings per cluster. The lists keep the
+    ``m.pro_tuples`` order, so every balance expression (and the LP file) is
+    unchanged.
+    """
+    index = getattr(m, "_process_flow_index", None)
+    if index is None:
+        in_coms, out_coms = {}, {}
+        for stframe, process, com in m.r_in_dict:
+            in_coms.setdefault((stframe, process), []).append(com)
+        for stframe, process, com in m.r_out_dict:
+            out_coms.setdefault((stframe, process), []).append(com)
+        inputs, outputs = {}, {}
+        for stframe, site, process in m.pro_tuples:
+            for com in in_coms.get((stframe, process), ()):
+                inputs.setdefault((stframe, site, com), []).append((stframe, site, process))
+            for com in out_coms.get((stframe, process), ()):
+                outputs.setdefault((stframe, site, com), []).append((stframe, site, process))
+        index = m._process_flow_index = (inputs, outputs)
+    return index
+
+
 def commodity_balance(m, tm, stf, sit, com):
     """Calculate commodity balance at given timestep.
 
@@ -40,16 +65,13 @@ def commodity_balance(m, tm, stf, sit, com):
     Returns:
         balance: net value of consumed (positive) or provided (negative) power
     """
+    inputs, outputs = _process_flow_index(m)
     balance = (sum(m.e_pro_in[(tm, stframe, site, process, com)]
                    # usage as input for process increases balance
-                   for stframe, site, process in m.pro_tuples
-                   if site == sit and stframe == stf and
-                   (stframe, process, com) in m.r_in_dict) -
+                   for stframe, site, process in inputs.get((stf, sit, com), ())) -
                sum(m.e_pro_out[(tm, stframe, site, process, com)]
                    # output from processes decreases balance
-                   for stframe, site, process in m.pro_tuples
-                   if site == sit and stframe == stf and
-                   (stframe, process, com) in m.r_out_dict))
+                   for stframe, site, process in outputs.get((stf, sit, com), ())))
     if m.mode['sto']:
         balance += storage_balance(m, tm, stf, sit, com)
 

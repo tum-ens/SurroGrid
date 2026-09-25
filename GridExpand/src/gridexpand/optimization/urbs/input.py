@@ -217,22 +217,27 @@ def pyomo_model_prep(data, timesteps):
 
 
 def get_cluster_data(data, cluster):
-    # keeps original global, process-commodity, bsp
-    # extract commodities, process, site, storage, demand, supim, eff_factor for node list stored in cluster
-    cluster_data = copy.deepcopy(data)
-    cluster_data['commodity'] = cluster_data['commodity'][cluster_data['commodity'].index.get_level_values(1).isin(cluster)]
-    cluster_data['process'] = cluster_data['process'][cluster_data['process'].index.get_level_values(1).isin(cluster)]
-    cluster_data['site'] = cluster_data['site'][cluster_data['site'].index.get_level_values(1).isin(cluster)]
-    cluster_data['storage'] = cluster_data['storage'][cluster_data['storage'].index.get_level_values(1).isin(cluster)]
-    cluster_data['demand'] = cluster_data['demand'][[(sit, com) for (sit, com) in cluster_data['demand'].columns if sit in cluster]]
-    cluster_data['supim'] = cluster_data['supim'][[(sit, com) for (sit, com) in cluster_data['supim'].columns if sit in cluster]]
-    cluster_data['eff_factor'] = cluster_data['eff_factor'][[(sit, pro) for (sit, pro) in cluster_data['eff_factor'].columns if sit in cluster]]
-    if 'ev_sessions' in cluster_data and not cluster_data['ev_sessions'].empty:
-        sessions = cluster_data['ev_sessions']
-        keep = sessions['site'].isin(cluster)
-        cluster_data['ev_sessions'] = sessions[keep]
-        retained = set(cluster_data['ev_sessions']['session_id'])
-        cluster_data['ev_session_hours'] = cluster_data['ev_session_hours'][
-            cluster_data['ev_session_hours']['session_id'].isin(retained)
-        ]
+    """Return the input dict restricted to the buildings (sites) in ``cluster``.
+
+    Site-indexed tables, site columns and EV sessions are filtered (the results
+    are copies); all other tables (global properties, process-commodity ratios,
+    prices, weather, type periods) are deep-copied unchanged. Key order is kept.
+    """
+    sites = set(cluster)
+    filter_sessions = 'ev_sessions' in data and not data['ev_sessions'].empty
+    if filter_sessions:
+        sessions = data['ev_sessions'][data['ev_sessions']['site'].isin(cluster)]
+        retained = set(sessions['session_id'])
+    cluster_data = {}
+    for key, value in data.items():
+        if key in ('commodity', 'process', 'site', 'storage'):
+            cluster_data[key] = value[value.index.get_level_values(1).isin(cluster)]
+        elif key in ('demand', 'supim', 'eff_factor'):
+            cluster_data[key] = value[[column for column in value.columns if column[0] in sites]]
+        elif filter_sessions and key == 'ev_sessions':
+            cluster_data[key] = sessions
+        elif filter_sessions and key == 'ev_session_hours':
+            cluster_data[key] = value[value['session_id'].isin(retained)]
+        else:
+            cluster_data[key] = copy.deepcopy(value)
     return cluster_data

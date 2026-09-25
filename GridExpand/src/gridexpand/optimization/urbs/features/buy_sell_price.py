@@ -60,58 +60,34 @@ def bsp_surplus(m, tm, stf, sit, com, com_type):
     return power_surplus
 
 
+def _price_series(m, c):
+    """Price time series of commodity tuple ``c`` in ``m.buy_sell_price_dict``.
+
+    The dict is keyed by commodity name, by a one-level tuple or by
+    (site, commodity), depending on the column layout of the input table.
+    """
+    prices = m.buy_sell_price_dict
+    for key in (c[2], (c[2],), (c[1], c[2])):
+        if key in prices:
+            return prices[key]
+    raise KeyError(f"No buy/sell price time series for commodity {c!r}.")
+
+
+def _weighted_price_sum(m, flow, com_tuples):
+    return sum(
+        flow[(tm,) + c] *
+        _price_series(m, c)[(c[0], tm)] * m.weight *  m.typeperiod['weight_typeperiod'][(m.stf_list[0],tm)] *
+        m.commodity_dict['price'][c] *
+        m.commodity_dict['cost_factor'][c]
+        for tm in m.tm
+        for c in com_tuples)
+
+
 def revenue_costs(m):
-    sell_tuples = commodity_subset(m.com_tuples, m.com_sell)
-    try:
-        return -sum(
-            m.e_co_sell[(tm,) + c] *
-            m.buy_sell_price_dict[c[2]][(c[0], tm)] * m.weight *  m.typeperiod['weight_typeperiod'][(m.stf_list[0],tm)] *
-            m.commodity_dict['price'][c] *
-            m.commodity_dict['cost_factor'][c]
-            for tm in m.tm
-            for c in sell_tuples)
-    except KeyError:
-        try:
-            return -sum(
-                m.e_co_sell[(tm,) + c] *
-                m.buy_sell_price_dict[c[2], ][(c[0], tm)] * m.weight *  m.typeperiod['weight_typeperiod'][(m.stf_list[0],tm)] *
-                m.commodity_dict['price'][c] *
-                m.commodity_dict['cost_factor'][c]
-                for tm in m.tm
-                for c in sell_tuples)
-        except KeyError:
-            return -sum(
-                m.e_co_sell[(tm,) + c] *
-                m.buy_sell_price_dict[c[1], c[2]][(c[0], tm)] * m.weight *  m.typeperiod['weight_typeperiod'][(m.stf_list[0],tm)] *
-                m.commodity_dict['price'][c] *
-                m.commodity_dict['cost_factor'][c]
-                for tm in m.tm
-                for c in sell_tuples)
+    """Feed-in revenue (negative cost) over all sell commodities and timesteps."""
+    return -_weighted_price_sum(m, m.e_co_sell, commodity_subset(m.com_tuples, m.com_sell))
+
 
 def purchase_costs(m):
-    buy_tuples = commodity_subset(m.com_tuples, m.com_buy)
-    try:
-        return sum(
-            m.e_co_buy[(tm,) + c] *
-            m.buy_sell_price_dict[c[2]][(c[0], tm)] * m.weight *  m.typeperiod['weight_typeperiod'][(m.stf_list[0],tm)] *
-            m.commodity_dict['price'][c] *
-            m.commodity_dict['cost_factor'][c]
-            for tm in m.tm
-            for c in buy_tuples)
-    except KeyError:
-        try:
-            return sum(
-                m.e_co_buy[(tm,) + c] *
-                m.buy_sell_price_dict[c[2], ][(c[0], tm)] * m.weight *  m.typeperiod['weight_typeperiod'][(m.stf_list[0],tm)] *
-                m.commodity_dict['price'][c] *
-                m.commodity_dict['cost_factor'][c]
-                for tm in m.tm
-                for c in buy_tuples)
-        except KeyError:
-            return sum(
-                m.e_co_buy[(tm,) + c] *
-                m.buy_sell_price_dict[c[1],c[2]][(c[0], tm)] * m.weight *  m.typeperiod['weight_typeperiod'][(m.stf_list[0],tm)] *
-                m.commodity_dict['price'][c] *
-                m.commodity_dict['cost_factor'][c]
-                for tm in m.tm
-                for c in buy_tuples)
+    """Grid purchase cost over all buy commodities and timesteps."""
+    return _weighted_price_sum(m, m.e_co_buy, commodity_subset(m.com_tuples, m.com_buy))
