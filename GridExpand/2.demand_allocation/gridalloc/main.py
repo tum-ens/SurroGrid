@@ -185,7 +185,7 @@ if __name__ == '__main__':
             "scenario_id": scenario_config.scenario_id,
             "scenario_hash": scenario_hash,
             "electrification_assignment_path": (
-                args.electrification_assignment.resolve()
+                str(args.electrification_assignment.resolve())
                 if args.electrification_assignment is not None
                 else None
             ),
