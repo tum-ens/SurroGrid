@@ -1,82 +1,39 @@
+"""Run the urbs building optimization of one Step 2 input: prepare, solve, save."""
+
 import multiprocessing as mp
 import os
+import shutil
 import time
 import traceback
 import warnings
+from pathlib import Path
 
 import pandas as pd
-from pyomo.environ import SolverFactory
+from pyomo.opt import check_optimal_termination
 
+from ..solver import audit_record, make_solver, resolve_solver_name, solver_log_folder
 from .features.typeperiod import run_tsam, select_predefined_timesteps
 from .identify import get_parallel_building_clusters, identify_mode
 from .input import get_cluster_data, read_input_h5
 from .model import create_model
-from .saveload import create_result_cache, save, save_reduced_data
+from .saveload import (
+    HDF_OPTIONS,
+    create_result_cache,
+    merge_cluster_results,
+    save,
+    save_reduced_data,
+)
 from .scenarios import insert_scenario, read_scenario_name
 
-def run_worker(data_cluster, global_settings, log_dir, scenario_name, return_dict=None, i=""):
-    """ run 
-    Args:
-        - cluster: assigned list of building nodes to solve (parallelized by parent process)
-        - data: data to extract clusters from
-        - global_settings: dict with global settings
-        - result_dir: directory in which results should be saved 
-        - scenario_name: scenario name string
-        - return_dict: shared dictionary among parent and child processes in which data is written
-        - i: which index to save results in in return dict
+CONCURRENCY_ENV = "URBS_CLUSTER_CONCURRENCY"
 
-    Returns:
-        dataframe dict with results
-    """
-    try:
-        return _run_worker(data_cluster, global_settings, log_dir, scenario_name, return_dict, i)
-    except Exception:
-        if return_dict is not None:
-            return_dict[i] = {"__error__": traceback.format_exc()}
-            return None
-        raise
-
-def _run_worker(data_cluster, global_settings, log_dir, scenario_name, return_dict=None, i=""):
-    ###################### Setup pyomo model instance + solver ###########################
-    start_time=time.time()   # Timer for measuring model setup duration
-
-    ### returns pyomo model instance (objective, constraints, parameters, variables, expressions) 
-    # IMPLEMENT: no fixed costs in output
-    prob_cluster = create_model(data_cluster,               # selected model data subset
-                                global_settings)            # settings to apply
+# Settings recorded in urbs_out/reduced_data/global_prop after the run settings.
+# 'parallel', 'vartariff' and 'power_price_kw' are no longer read by the code; they
+# keep the stored settings table unchanged.
+_RECORDED_SETTINGS = {"dt": 1, "parallel": True, "vartariff": 0, "power_price_kw": 0}
 
 
-    ### Setup solver
-    optim = SolverFactory(global_settings["solver_name"])   # Create solver
-    # logfile = repr(os.path.join(result_dir, f'{scenario_name}_{i}.log'))
-    os.makedirs(log_dir, exist_ok=True)
-    logfile = os.path.join(log_dir, f'{global_settings["input_file"][:-3]}_{scenario_name}_{i}.log')
-    if os.path.exists(logfile): os.remove(logfile)
-    optim = setup_solver_mip(optim,                # solver instance
-                             logfile = logfile)    # logfile save path + name
-    
-    end_time=time.time()    # Timer for measuring model setup duration
-    print(f"Model setup {i} took {(end_time-start_time)/60:.2f} minutes to run!")
-    
-
-    ##################### Solve the pyomo model instance ##########################
-    start_time=time.time()     # Timer for measuring model solve duration
-
-    result = optim.solve(prob_cluster, tee=False, report_timing=False)
-    if str(result.solver.termination_condition) == 'infeasibleOrUnbounded': raise ValueError(f"Problem infeasible or unbounded!")
-    
-    end_time=time.time()       # Timer for measuring model solve duration
-    print(f"Model solve {i} took {(end_time-start_time)/60:.2f} minutes to run")
-
-    
-    ################### Extract and return results ####################
-    model_results = create_result_cache(prob_cluster)
-
-    return_dict[i] = model_results   # Insert this workers pyomo model instance
-    return None
-   
-
-def prepare_result_directory(input_file, script_name, scenario_key=None, result_root="result"):
+def prepare_result_directory(input_file=None, script_name=None, scenario_key=None, result_root="result"):
     """Create and return ``result_root/<scenario_key>`` (``result_root`` if no key)."""
     key = str(scenario_key).strip() if scenario_key is not None else ""
     if scenario_key is not None and (
@@ -93,95 +50,166 @@ def prepare_result_directory(input_file, script_name, scenario_key=None, result_
     return result_dir
 
 
-def setup_solver_mip(optim, logfile='solver.log'):
-    ### Gurobi settings
-    if optim.name == 'gurobi': # http://www.gurobi.com/documentation/5.6/reference-manual/parameters
-        optim.set_options(f"logfile={logfile}")
-        optim.set_options("Method=4")                 # -1 automatic, 0 Primal Simplex, 1 Dual Simplex, 2 Barrier Method, 3 Concurrent Optimization, 4 Deterministic Concurrent
-        optim.set_options("MIPFocus=2")               # 0 default balance, 1 Feasibility focus, 2 Optimality focus, 3 Bound tightening focus
-        optim.set_options("MIPGap=0.05")
-        optim.set_options("Presolve=2")
-        optim.set_options("Threads=4")
+def solve_cluster(data_cluster, global_settings, logfile, solver_name, cluster_index=0):
+    """Build and solve one cluster model; return its result cache and solver audit.
 
-    return optim
-
-
-def run_lvds_opt(input_path,        # path to input file  
-                 result_path,        # path to output directory
-                 result_dir,
-                 global_settings,   # global input settings
-                 log_dir="logs"):   # directory for solver log files
-    """ Run an urbs model for given input path, result directory and global settings
-    
-    Args:
-        - input_path: path string to input file which is used to setup model
-        - result_dir: path string to output directory where model results are saved
-        - global_settings: dictionary including user adjustable global run settings
+    Raises:
+        RuntimeError: the solver did not end with an optimal termination (for the
+            MIP: optimal within the configured gap).
     """
-    ### Ignore selected warnings:
-    start_time = time.time()
-    warnings.filterwarnings("ignore", category=FutureWarning, module="tsam.timeseriesaggregation")
+    start = time.time()
+    model = create_model(data_cluster, global_settings)
+    if os.path.exists(logfile):
+        os.remove(logfile)
+    solver = make_solver(solver_name, logfile)
+    build_seconds = time.time() - start
+    print(f"Model setup {cluster_index} took {build_seconds / 60:.2f} minutes to run!")
 
-    ################# Extract and modify input data ###################
-    ### Add additional input settings: ###
-    forced_settings = {
-        # only change if you know what you are doing
-        "dt": 1,                    # length of time steps in hours
-        "solver_name": "gurobi",    # "gurobi"  # current code optimized for gurobi, might need to adjust hyperparameters down the pipeline
-        "parallel": True,           # True      # makes no sense to not be parallel anymore, as then just increased computation time for building models 
+    start = time.time()
+    result = solver.solve(model, tee=False, report_timing=False)
+    solve_seconds = time.time() - start
+    if not check_optimal_termination(result):
+        raise RuntimeError(
+            f"Cluster {cluster_index}: {solver_name} ended with status="
+            f"{result.solver.status}, termination={result.solver.termination_condition}; "
+            f"see {logfile}."
+        )
+    print(f"Model solve {cluster_index} took {solve_seconds / 60:.2f} minutes to run")
 
-        # Currently not implemented
-        "vartariff": 0,         # 0             # % of building nodes opting into a variable tariff with low, normal, high pricing (0-100)
-        "power_price_kw": 0     # 0             # % additional pricing proportional to imported/feed-in power (€/kW)
+    sites = sorted(str(site) for site in model.sit)
+    audit = {
+        "cluster": int(cluster_index),
+        "n_sites": len(sites),
+        "first_site": sites[0] if sites else "",
+        **audit_record(solver_name, solver, result),
+        "build_seconds": float(build_seconds),
+        "solve_seconds": float(solve_seconds),
     }
-    global_settings.update(forced_settings)
+    return {"results": create_result_cache(model), "audit": audit}
 
 
-    ### Read out, validate and modify input_file data: ###
+def _cluster_worker(connection, data_cluster, global_settings, logfile, solver_name, cluster_index):
+    try:
+        payload = ("ok", solve_cluster(data_cluster, global_settings, logfile, solver_name, cluster_index))
+    except BaseException:
+        payload = ("error", traceback.format_exc())
+    try:
+        connection.send(payload)
+    finally:
+        connection.close()
+
+
+def solve_partitions(data, global_settings, *, log_dir, scenario_name, solver_name, concurrency=None):
+    """Solve every building cluster in its own process and return the outputs in cluster order.
+
+    Args:
+        data: prepared urbs input of the whole grid.
+        global_settings: run settings (``n_cpu`` is the number of clusters).
+        log_dir: directory for one solver log per cluster.
+        scenario_name: scenario key (part of the log file names).
+        solver_name: see ``gridexpand.optimization.solver``.
+        concurrency: clusters solved at the same time; default
+            ``$URBS_CLUSTER_CONCURRENCY`` or all clusters.
+    """
+    clusters = get_parallel_building_clusters(data, global_settings["n_cpu"])
+    if concurrency is None:
+        concurrency = int(os.getenv(CONCURRENCY_ENV, len(clusters)))
+    concurrency = max(1, min(int(concurrency), len(clusters)))
+    print(f"Running up to {concurrency} optimization worker(s) concurrently.")
+    os.makedirs(log_dir, exist_ok=True)
+    stem = global_settings["input_file"][:-3]
+
+    outputs = {}
+    running = []
+
+    def collect(index, process, connection):
+        try:
+            status, payload = connection.recv()
+        except EOFError:
+            status, payload = None, None
+        finally:
+            connection.close()
+        process.join()
+        if status == "error":
+            raise RuntimeError(f"Worker {index} failed:\n{payload}")
+        if status != "ok":
+            raise RuntimeError(
+                f"Worker {index} exited without returning a result "
+                f"(exitcode={process.exitcode})."
+            )
+        outputs[index] = payload
+
+    for index, cluster in enumerate(clusters):
+        data_cluster = get_cluster_data(data, cluster)
+        logfile = os.path.join(str(log_dir), f"{stem}_{scenario_name}_{index}.log")
+        receiver, sender = mp.Pipe(duplex=False)
+        process = mp.Process(
+            target=_cluster_worker,
+            args=(sender, data_cluster, global_settings, logfile, solver_name, index),
+        )
+        process.start()
+        sender.close()
+        running.append((index, process, receiver))
+        if len(running) >= concurrency:
+            collect(*running.pop(0))
+    for item in running:
+        collect(*item)
+    return [outputs[index] for index in range(len(clusters))]
+
+
+def _check_full_year_input(mode, data):
+    # A fresh Step-2 input initializes weight_typeperiod to NaN, so mode['tdy']
+    # must be False here. Asserting it prevents a stale or hand-edited input from
+    # silently reintroducing representative-period storage resets.
+    if mode["tdy"]:
+        raise ValueError(
+            "Time aggregation is disabled but type-period weights are active. "
+            "Full-year runs must not carry representative-period weights or "
+            "the weekly storage-state constraints they enable."
+        )
+    occurrences = data["type_period"]["weight_typeperiod"].dropna()
+    if not occurrences.empty and not (occurrences == 1).all():
+        raise ValueError(
+            "Full-year runs require unit timestep occurrence weights; found "
+            f"{sorted(occurrences.unique())[:5]}."
+        )
+
+
+def load_and_prepare(input_path, global_settings, solver_name):
+    """Read the input, record the run settings and identify the model features.
+
+    Returns:
+        ``(data, mode, scenario_name)``; ``global_settings`` gains ``dt``,
+        ``solver_name``, the recorded constants and ``timesteps``.
+    """
+    global_settings.update({"dt": _RECORDED_SETTINGS["dt"], "solver_name": solver_name})
+    global_settings.update({key: value for key, value in _RECORDED_SETTINGS.items() if key != "dt"})
+
     print("Reading and validating input data...")
     data = read_input_h5(input_path)
-
     max_timestep = int(data["demand"].index.get_level_values("t").max())
     global_settings["timesteps"] = range(0, max_timestep + 1)
     print(f"Using {max_timestep} modeled demand hour(s) plus storage initialization timestep.")
 
-
-    ### Insert settings into data and read out modes/name: ###
     print("\nReading running modes...")
     scenario_name = read_scenario_name(global_settings, data)
-    data = insert_scenario(data, global_settings)             # insert global settings as df into input data
-
-    mode = identify_mode(data)   # check whether intertemporal, transmission, storage, dsm, bsp, tve, availability, acpf/dcpf, type period weight, tsam, tsam season, onoff, minfraction, power_price, uncoordinated, transdist, 14a, uhp
-    print(f"Identified running modes: {mode}")               # for us should be present: sto, bsp, tve, ava, tsam, exp(pro, sto-c, sto-p), uncoordinated
-
-    ### Full-year chronological reference: no aggregation may be active. ###
-    # A fresh Step-2 input initializes weight_typeperiod to NaN, so mode['tdy']
-    # must be False here. Asserting it prevents a stale or hand-edited input from
-    # silently reintroducing representative-period storage resets.
+    data = insert_scenario(data, global_settings)
+    mode = identify_mode(data)
+    print(f"Identified running modes: {mode}")
     if not mode["tsam"]:
-        if mode["tdy"]:
-            raise ValueError(
-                "Time aggregation is disabled but type-period weights are active. "
-                "Full-year runs must not carry representative-period weights or "
-                "the weekly storage-state constraints they enable."
-            )
-        occurrences = data["type_period"]["weight_typeperiod"].dropna()
-        if not occurrences.empty and not (occurrences == 1).all():
-            raise ValueError(
-                "Full-year runs require unit timestep occurrence weights; found "
-                f"{sorted(occurrences.unique())[:5]}."
-            )
-
-    end_time = time.time()
-    print(f"Preprocesssing took {(end_time-start_time)/60:.2f} minutes to run!\n")
+        _check_full_year_input(mode, data)
+    return data, mode, scenario_name
 
 
-    ######################### Apply input settings ###################################
-    ##### Conduct time series aggregation (TSAM) #####
-    if mode["tsam"]: 
+def apply_temporal_method(data, mode, global_settings):
+    """Run TSAM (type periods) or keep the chronological horizon.
+
+    Returns:
+        ``(data, tsam_data)``; ``global_settings['timesteps']`` is updated for TSAM.
+    """
+    if mode["tsam"]:
         print("Running time series aggregation (TSAM)...")
-        start_time=time.time()  # Timer for measuring tsam duration
-        # run timeseries aggregation method before creating model (to reduce computational load by reducing considered weeks)
+        start = time.time()
         data, global_settings["timesteps"], tsam_data = run_tsam(
             data,
             global_settings["noTypicalPeriods"],
@@ -189,33 +217,34 @@ def run_lvds_opt(input_path,        # path to input file
             global_settings.get("tsamExtremePeriodMethod", "replace_cluster_center"),
             global_settings.get("tsamMethodSettings"),
         )
-        end_time = time.time()  # Timer for measuring tsam duration
-        if mode["tsam"]: print(f"TSAM took {(end_time-start_time)/60:.2f} minutes to run!\n") 
-    else: # tsam disabled, just filter the time series according to the defined time steps
+        print(f"TSAM took {(time.time() - start) / 60:.2f} minutes to run!\n")
+    else:
         data, tsam_data = select_predefined_timesteps(data, global_settings["timesteps"])
+    return data, tsam_data
 
-    ###### Safe tsam data ######
-    with pd.HDFStore(result_path, mode='a', complib='blosc', complevel=9) as store:
-        for name in tsam_data.keys():
-            store['urbs_out/tsam/' + name] = tsam_data[name]
 
-    ###### Temporal-method provenance ######
-    # Written for every run so Step 4 and the post-processing can reject a stale
-    # result on identity instead of guessing from filenames or the presence of
-    # the 'reduced_data' group, which is written in both modes.
-    temporal_audit = pd.Series(
+def temporal_audit(mode, data, global_settings):
+    """The ``urbs_out/temporal_method`` record read by Step 4 and the paired checks.
+
+    ``annual_weight`` and ``storage_boundary_policy`` describe the model that is
+    solved: with TSAM type periods the model weight is 1 (the type-period weights
+    carry the annual scaling) and storages close per period.
+    """
+    solved_mode = identify_mode(data)
+    operating_hours = int(len(global_settings["timesteps"]) - 1)
+    return pd.Series(
         {
             "temporal_method": (
                 "shared_weather_tsam" if mode["tsam"] else "full_year_no_tsam"
             ),
-            "operating_hours": int(len(global_settings["timesteps"]) - 1),
+            "operating_hours": operating_hours,
             "initialization_rows": 1,
             "delta_t_hours": float(global_settings["dt"]),
-            "annual_weight": float(8760) / (len(global_settings["timesteps"]) - 1),
+            "annual_weight": 1.0 if solved_mode["tdy"] else float(8760) / operating_hours,
             "source_reference_year": int(global_settings.get("source_reference_year", 2009)),
             "storage_boundary_policy": (
                 "typeperiod_common_initial_state"
-                if mode["tdy"]
+                if solved_mode["tdy"]
                 else "annual_equality"
             ),
             "ev_boundary_policy": (
@@ -228,91 +257,74 @@ def run_lvds_opt(input_path,        # path to input file
         },
         dtype=object,
     )
-    with pd.HDFStore(result_path, mode='a', complib='blosc', complevel=9) as store:
+
+
+def final_result_path(result_dir, input_file, scenario_name):
+    """``<result_dir>/<input stem>_<scenario key>.h5``."""
+    stem = os.path.splitext(os.path.basename(input_file))[0]
+    return Path(result_dir) / f"{stem}_{scenario_name}.h5"
+
+
+def run_lvds_opt(input_path, result_dir, global_settings, *, log_dir, solver=None, concurrency=None):
+    """Run Step 3 for one input and return the path of the result HDF5 file.
+
+    The input is copied to ``<result>.partial``; TSAM tables, the temporal audit,
+    the reduced inputs, all cluster results and the solver audit are appended, and
+    the file is renamed to its final name only on success (removed on failure).
+
+    Args:
+        input_path: Step 2 HDF5 file.
+        result_dir: directory of the scenario's results.
+        global_settings: run settings (see ``run_urbs_cluster.build_global_settings``).
+        log_dir: directory of the solver log files.
+        solver: solver name (default ``$GRIDEXPAND_SOLVER`` or ``gurobi``).
+        concurrency: clusters solved concurrently (default: all).
+    """
+    solver_name = resolve_solver_name(solver)
+    warnings.filterwarnings("ignore", category=FutureWarning, module="tsam.timeseriesaggregation")
+    start = time.time()
+    data, mode, scenario_name = load_and_prepare(input_path, global_settings, solver_name)
+    print(f"Preprocesssing took {(time.time() - start) / 60:.2f} minutes to run!\n")
+
+    data, tsam_data = apply_temporal_method(data, mode, global_settings)
+    audit = temporal_audit(mode, data, global_settings)
+
+    final_path = final_result_path(result_dir, global_settings["input_file"], scenario_name)
+    partial_path = final_path.with_name(final_path.name + ".partial")
+    try:
+        shutil.copyfile(input_path, partial_path)
+        with pd.HDFStore(partial_path, mode='a', **HDF_OPTIONS) as store:
+            for name, table in tsam_data.items():
+                store['urbs_out/tsam/' + name] = table
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
-            store['urbs_out/temporal_method'] = temporal_audit
-    print(f"Temporal method: {temporal_audit.to_dict()}\n")
+            with pd.HDFStore(partial_path, mode='a', **HDF_OPTIONS) as store:
+                store['urbs_out/temporal_method'] = audit
+        print(f"Temporal method: {audit.to_dict()}\n")
 
-
-    if global_settings.get("reduce_only"):
-        print("Reduce-only mode active: saving TSAM/reduced input data and skipping optimization.")
-        start_time = time.time()
-        save_reduced_data(data, result_path)
-        file_name, file_extension = os.path.splitext(result_path)
-        new_result_path = f"{file_name}_{scenario_name}{file_extension}"
-        if os.path.exists(new_result_path):
-            os.remove(new_result_path)
-        os.rename(result_path, new_result_path)
-        end_time = time.time()
-        print(f"Reduced input data saving took {(end_time-start_time)/60:.2f} minutes\n")
-        return None
-
-
-    ############### Carry out building optimization ###############
-    # Launch parallel processes equal to previously given thread count (= cpu_count)
-    print("Setting up and running parallel pyomo models...")
-    time_A=time.time()
-
-    model_results = {}
-    if global_settings["parallel"]:
-        ### Assign building nodes to paralelly solved threads: ###
-        print(f"Parallelize building nodes...")
-        clusters = get_parallel_building_clusters(data, global_settings["n_cpu"])
-
-        manager = mp.Manager()         # parallel process manager
-        return_dict = manager.dict()   # shared dictionary among parent and daughter processes in which date can be written
-        cluster_concurrency = int(os.getenv("URBS_CLUSTER_CONCURRENCY", len(clusters)))
-        cluster_concurrency = max(1, min(cluster_concurrency, len(clusters)))
-        print(f"Running up to {cluster_concurrency} optimization worker(s) concurrently.")
-        running = []
-
-        def collect_worker(worker_i, worker_proc):
-            worker_proc.join()
-            result = return_dict.get(worker_i)
-            if isinstance(result, dict) and "__error__" in result:
-                raise RuntimeError(f"Worker {worker_i} failed:\n{result['__error__']}")
-            if result is None:
-                raise RuntimeError(
-                    f"Worker {worker_i} exited without returning a result "
-                    f"(exitcode={worker_proc.exitcode})."
-                )
-            model_results[worker_i] = result
-
-        for i, cluster in enumerate(clusters):
-            data_cluster = get_cluster_data(data, cluster)  # only data for selected buildings for this thread
-
-            proc = mp.Process(target=run_worker,
-                                args=(data_cluster,
-                                    global_settings,        # settings of the run
-                                    os.path.join(str(log_dir), "gurobi"),  # output directory in which to save logfiles
-                                    scenario_name,          # name of the scenario for saving files
-                                    return_dict,            # shared dict in which to save data 
-                                    i))                     # location in dict in which to save    
-            running.append((i, proc))
-            proc.start()
-            if len(running) >= cluster_concurrency:
-                collect_worker(*running.pop(0))
-
-        for i, proc in running:
-            collect_worker(i, proc)
-
-    time_B=time.time()
-    print(f"Solving process took {(time_B-time_A)/60:.2f} minutes to run!\n")
-
-
-    ################ Save optimization results ###############
-    start_time=time.time()      # Timer for measuring saving durations
-
-    save(data, model_results, result_path, global_settings["parallel"])
-    file_name, file_extension = os.path.splitext(result_path)
-    new_result_path = f"{file_name}_{scenario_name}{file_extension}"
-    if os.path.exists(new_result_path): os.remove(new_result_path)
-    os.rename(result_path, new_result_path)
-
-    end_time=time.time()        # Timer to measure duration of model results saving
-    print(f"Model results saving took {(end_time-start_time)/60:.2f} minutes\n")
-
-
-    ############## Exit ###############
-    return None
+        if global_settings.get("reduce_only"):
+            print("Reduce-only mode active: saving TSAM/reduced input data and skipping optimization.")
+            save_reduced_data(data, partial_path)
+        else:
+            print("Setting up and running parallel pyomo models...")
+            start = time.time()
+            outputs = solve_partitions(
+                data,
+                global_settings,
+                log_dir=os.path.join(str(log_dir), solver_log_folder(solver_name)),
+                scenario_name=scenario_name,
+                solver_name=solver_name,
+                concurrency=concurrency,
+            )
+            print(f"Solving process took {(time.time() - start) / 60:.2f} minutes to run!\n")
+            start = time.time()
+            results = merge_cluster_results([output["results"] for output in outputs])
+            solver_audit = pd.DataFrame([output["audit"] for output in outputs])
+            save(data, results, partial_path, solver_audit=solver_audit)
+            print(f"Model results saving took {(time.time() - start) / 60:.2f} minutes\n")
+        os.replace(partial_path, final_path)
+    except BaseException:
+        if partial_path.exists():
+            partial_path.unlink()
+        raise
+    return final_path
