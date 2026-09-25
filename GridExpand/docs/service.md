@@ -1,7 +1,7 @@
 # GridExpand service and pylovo-ui plugin
 
-`gridexpand serve` runs a small web service: a **job API** that starts the ordinary
-synthetic pipeline (`gridexpand run`) as subprocesses, **read endpoints** for expansion analyses and
+`gridexpand serve` runs a small web service: a **job API** that starts the ordinary synthetic
+pipeline (`gridexpand run`) as subprocesses, **read endpoints** for expansion analyses and
 power-flow summaries, and the **plugin panels** that pylovo-ui loads (one UI for "generate LV grids,
 then allocate loads, optimise, run power flow and analyse grid expansion"). The composition of both
 tools (proxy, images, compose) lives in the GridPlanner repository.
@@ -35,35 +35,34 @@ and 60 s statement timeout. There is no destructive endpoint.
 
 ## Jobs
 
-A pipeline job becomes one `pipeline: synthetic` run YAML in its run directory, and every selected model case
-is one step `gridexpand run <run.yaml> --model-case <case>` in that directory, one after another
-(`gridexpand.service.commands.pipeline_steps`, the only place that builds the command lines). The steps share the
-run's identity, `state.json` and the regional electrification assignment; each case's batch writes
-`<run dir>/<case>/`:
+A pipeline job is one generated run YAML (`pipeline: synthetic`, written to
+`WORK_DIR/runs/<job>/run.yaml`) and one `gridexpand run` step per selected model case, one after
+another (`gridexpand.service.commands.pipeline_steps`, the only place that builds the command lines):
 
 ```text
 python -m gridexpand run WORK_DIR/runs/<job>/run.yaml --run-dir WORK_DIR/runs/<job> --model-case <case>
-
-# run.yaml
-run:        {id: service_<job>, scenario: <scenario yaml>, pipeline: synthetic}
-resources:  {pylovo_version_id: <v>, ags: <AGS>, min_buildings: <n>[, start_index: <i>, limit: <k>]}
-execution:  {model_cases: [...], timeframe_mode: <mode>, powerflow_output: <summary|both>, workers: <w>
-             [, pilot_index: <i>]}
 ```
 
+The run YAML holds the region (`ags`, `pylovo_version_id`, `min_buildings`, optional `start_index`
+/ `limit`), the scenario file and the execution settings (`model_cases`, `timeframe_mode`,
+`powerflow_output: summary`, `workers`, `pilot_index`). The steps share the run identity,
+`state.json` and one regional electrification assignment; each case's batch writes
+`WORK_DIR/runs/<job>/<case>/` (`events.jsonl`, `status.tsv`, grid logs).
+
 - Grids: all candidates of the AGS, of one PLZ, or a consecutive range of candidate numbers (the
-  runner's numbering, `list_grid_candidates`); the first selected grid is the pilot.
+  runner's numbering, `gridexpand.db.grids.list_grid_candidates`); the first selected grid is the pilot.
 - Model cases: `pre`, `post-hems-heuristic`, `post-hems-optimized`. `post-inflex-heuristic` is not
-  offered (the synthetic Step 2 writes no EV sessions). Post cases need Step 3: the service refuses
-  them when the solver is not usable (Gurobi licence check with a model above the size limit of the
-  licence bundled with gurobipy).
+  offered (the synthetic Step 2 writes no EV sessions). Post cases need Step 3 with the solver of
+  `GRIDEXPAND_SOLVER` (`gurobi` default, or `appsi_highs`): the service refuses them when it is not
+  usable (Gurobi: licence check with a model above the size limit of the licence bundled with
+  gurobipy; HiGHS: `highspy` importable).
 - At most `--max-running-jobs` (default 1) jobs run; later jobs wait in a queue.
 - Each step runs in its own process group. Cancel sends SIGTERM to the group (the runner and every
-  step it started), SIGKILL after 20 s. Step 4 writes into a staging run and replaces the previous results only
-  when the pass completes, so a grid cancelled during its power flow keeps its earlier results (the
-  cancel dialog of the UI still warns about lost results; that text predates the staging runs).
-- Progress comes from the run's `state.json` and `events.jsonl` and each case's `events.jsonl`; the
-  per-grid table from the case's `status.tsv`. The job log shows the runner's events as readable lines plus the step logs of every
+  step it started), SIGKILL after 20 s. Finished grids keep their results, and a grid stopped during
+  its power flow keeps its earlier ones: Step 4 writes a staging run and swaps it in only when it is
+  complete (the service ignores leftover staging runs).
+- Progress comes from the runner's `events.jsonl` in each case directory (before a batch starts, from
+  `state.json`); the per-grid table from `status.tsv`. The job log shows the runner's events as readable lines plus the step logs of every
   grid (`#<grid> │ …`, muted). Metadata and logs are kept in `WORK_DIR/service/jobs/`; after a
   restart the history is reloaded and jobs that were still active are marked failed.
 
@@ -111,12 +110,13 @@ result is taken from its power-flow run name (`<scenario key>_<profile>_<case>_<
 `docker/Dockerfile` (python:3.12-slim + uv, `uv sync --locked --no-dev --extra service`) and
 `docker/compose.yaml` (standalone service, host networking, runs as your uid). Mounted at run time:
 `.env` (read-only, `GRIDEXPAND_ENV_FILE`), `work/`, `config/`, and the untracked large inputs as
-explicit read-only file mounts (`elec_lps.h5`, the two mobility pool CSVs). Step 3 in a container
-uses gurobipy (Pyomo's `gurobi` interface falls back to it when `gurobi.sh` is absent) and needs a
-Gurobi WLS licence file (`WLSACCESSID`, `WLSSECRET`, `LICENSEID`) mounted read-only with
-`GRB_LICENSE_FILE` pointing to it; without a licence the service offers the `pre` case only.
-`GRIDEXPAND_SOLVER=appsi_highs` runs Step 3 without a licence (it can return a different optimal solution
-than Gurobi, see [Step 3](steps/3_urbs.md)).
+explicit read-only file mounts (`elec_lps.h5`, the two mobility pool CSVs). Step 3 in a container:
+`GRIDEXPAND_SOLVER=appsi_highs` (HiGHS, in the image, no licence) runs every case; `gurobi` uses
+gurobipy (Pyomo's `gurobi` interface falls back to it when `gurobi.sh` is absent) and needs a Gurobi
+WLS licence file (`WLSACCESSID`, `WLSSECRET`, `LICENSEID`) mounted read-only with `GRB_LICENSE_FILE`
+pointing to it. The heuristic case is a degenerate LP and the optimised case a MIP stopped at a 5 %
+gap, so HiGHS and Gurobi can return different, equally optimal solutions; the solver is recorded in
+`urbs_out/solver_audit` and belongs to the scenario when results are compared.
 
 ## Tests
 

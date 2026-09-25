@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy.engine import Connection
 
 from gridexpand.common.timeframe import TIMEFRAME_MODES
+from gridexpand.db.runs import STAGING_MARKER
 from gridexpand.service.db import (
     DatabaseUnavailable,
     connect,
@@ -156,7 +157,8 @@ def grid_candidates(ags: int, pylovo_version_id: str, min_buildings: int, plz: i
                        JOIN surrogrid.scenario s ON s.scenario_id = pr.scenario_id
                        JOIN surrogrid.powerflow_summary ps ON ps.powerflow_run_id = pr.powerflow_run_id
                        WHERE gc.pylovo_grid_result_id = ANY(:ids)
-                       GROUP BY 1, 2, 3 ORDER BY 1, 4""", conn, ids=ids)
+                         AND position(:staging IN pr.run_name) = 0
+                       GROUP BY 1, 2, 3 ORDER BY 1, 4""", conn, ids=ids, staging=STAGING_MARKER)
                 for row in rows:
                     parsed = parse_run_name(row["run_name"])
                     results.setdefault(int(row["grid_result_id"]), []).append(
@@ -393,6 +395,7 @@ WHERE (CAST(:ags AS bigint) IS NULL OR gc.ags = CAST(:ags AS bigint))
   AND (CAST(:plz AS integer) IS NULL OR gc.plz = CAST(:plz AS integer))
   AND (CAST(:version AS text) IS NULL OR gc.pylovo_version_id = CAST(:version AS text))
   AND (CAST(:scenario_key AS text) IS NULL OR s.scenario_key = CAST(:scenario_key AS text))
+  AND position(:staging IN pr.run_name) = 0  -- unfinished Step 4 attempts (gridexpand.db.runs)
 ORDER BY gc.plz, gc.kcid, gc.bcid, pr.run_name, ps.stage
 """
 
@@ -404,6 +407,6 @@ def powerflow_summaries(ags: int | None = None, plz: int | None = None, pylovo_v
         if not surrogrid_ready(conn):
             return []
         rows = fetch_all(_POWERFLOW_SQL, conn, ags=ags, plz=plz, version=pylovo_version_id,
-                         scenario_key=scenario_key)
+                         scenario_key=scenario_key, staging=STAGING_MARKER)
     return [_clean_row(row) | parse_run_name(row["run_name"]) | split_scenario_key(row["scenario_key"])
             for row in rows]

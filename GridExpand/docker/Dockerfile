@@ -14,6 +14,9 @@ COPY pyproject.toml uv.lock README.md LICENSE ./
 RUN uv sync --locked --no-dev --no-install-project --extra service
 COPY . .
 RUN uv sync --locked --no-dev --extra service
+# TEASER opens its shipped JSON input files with mode "r+" although it only reads them; the
+# container runs as the caller's uid, so these files (and only these) must be writable.
+RUN find /app/.venv -path "*/teaser/data/input/inputdata/*.json" -exec chmod a+w {} +
 
 # Runtime locations (gridexpand.paths): work/ and .env are mounted; caches go to /tmp so the
 # container can run as any user id.
