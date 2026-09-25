@@ -1,7 +1,9 @@
 # GridExpand service in a container next to an existing database (e.g. InfDB):
 #   GRIDEXPAND_UID=$(id -u) GRIDEXPAND_GID=$(id -g) docker compose -f docker/compose.yaml up --build
 # Then http://127.0.0.1:18766/docs. Uses this checkout's .env, config/, work/ and the large inputs
-# under data/ (symlinks are fine). For the whole GridPlanner stack see the GridPlanner repository.
+# under data/ (symlinks are fine). Instead of the .env mount the container also accepts DB_HOST,
+# DB_PORT, DB_NAME, DB_USER and DB_PASSWORD as environment variables (as GridPlanner passes them).
+# For the whole GridPlanner stack see the GridPlanner repository.
 services:
   gridexpand:
     build:
