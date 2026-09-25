@@ -1,6 +1,0 @@
-# Ignore sensitive data
-.env
-
-# Ignore logs, results, input data
-gridreadout/results/*
-!gridreadout/results/.gitkeep

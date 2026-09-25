@@ -1,7 +1,0 @@
-# Inputs and results
-Input/*
-!Input/.gitkeep
-result/*
-!result/.gitkeep
-logs/*
-!logs/.gitkeep
