@@ -10,6 +10,7 @@ paper_draft_pylovo-validation/*
 __pycache__/
 *.py[cod]
 *.png
+!GridExpand/docs/img/*.png
 *.pdf
 *.svg
 GridExpand/5.postprocessing/paper.md

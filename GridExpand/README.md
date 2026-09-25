@@ -168,7 +168,7 @@ HPC: `scripts/hpc/<allocation|optimization|powerflow>/run_cluster_serialstd.sh <
 
 ```bash
 uv run pytest -q                   # unit tests; no database (tests point gridexpand at an unreachable one)
-uvx ruff check src tests scripts
+uv run ruff check src tests scripts   # lint with the project config
 ```
 
 Opt-in database tests use a sandbox database only: `GRIDEXPAND_ANALYSIS_TEST_DATABASE=<sandbox db> uv run pytest
