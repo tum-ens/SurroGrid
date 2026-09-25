@@ -141,8 +141,8 @@ export function createRunsPanel(ctx) {
         if (job.status === 'running') {
           const ok = await host.ui.confirmDialog({
             title: 'Cancel this GridExpand job?', danger: true, confirmText: 'Cancel job',
-            body: 'The runner and every step it started are stopped (SIGTERM to the process group). Finished grids keep their results. '
-              + 'A grid that is in its power-flow step loses its earlier results of the same run until it is run again.',
+            body: 'The runner and every step it started are stopped (SIGTERM to the process group). Finished grids keep their results; '
+              + 'a grid stopped during its power flow keeps its earlier results (Step 4 swaps a new run in only when it is complete).',
           });
           if (!ok) return;
         }
