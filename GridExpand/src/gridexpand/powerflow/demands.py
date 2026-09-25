@@ -4,7 +4,7 @@ This module converts the scenario demand data stored in the input `.h5` file
 into per-bus active and reactive power time series that can be fed into
 pandapower.
 
-Inputs (via `SaveFile.get_input_demands()`):
+Inputs (via `io.ScenarioResultReader`):
 
 - `urbs_in/demand`: pre-expansion household electricity demand (active power)
 - `urbs_out/MILP/tau_pro`: post-expansion urbs results used to reconstruct:
@@ -257,12 +257,6 @@ def _columns_with_component(df, component):
     if df.empty or getattr(df.columns, "nlevels", 1) < 2:
         return []
     return [column for column in df.columns if str(column[1]) == component]
-
-
-def _columns_starting_with(df, prefix):
-    if df.empty or getattr(df.columns, "nlevels", 1) < 2:
-        return []
-    return [column for column in df.columns if str(column[1]).startswith(prefix)]
 
 
 def _sum_columns_by_bus(df, component="electricity"):
@@ -772,13 +766,17 @@ def _reactive_from_inflex_components(df_pre_demand_react, df_heat_elec, df_pv_el
     )
 
 
-def _process_inflex_demands(inflex_inputs, df_pre_demand_elec, df_pre_demand_react):
+def _inflex_timesteps(inflex_inputs):
+    """Timestep count of the inflex reconstruction and the label of its reference."""
     reference = inflex_inputs.get("reference")
     timesteps = _reference_timestep_count(reference, inflex_inputs.get("drop_initial_timestep", False))
     reference_label = "urbs output" if reference is not None else "raw inflex demand"
     if timesteps is None:
         timesteps = len(_use_t_as_index(inflex_inputs["demand"]))
+    return timesteps, reference_label
 
+
+def _process_inflex_demands(inflex_inputs, df_raw_demand, df_pre_demand_elec, df_pre_demand_react, *, timesteps, reference_label):
     delta_t = inflex_inputs.get("delta_t_hours")
     if delta_t is not None and abs(float(delta_t) - 1.0) > 1e-9:
         raise ValueError(
@@ -787,7 +785,6 @@ def _process_inflex_demands(inflex_inputs, df_pre_demand_elec, df_pre_demand_rea
             "EV scheduling and battery control before advertising other "
             "resolutions."
         )
-    df_raw_demand = _align_table_to_timesteps(inflex_inputs["demand"], timesteps, "INFLEX demand", reference_label)
     df_eff_factor = _align_table_to_timesteps(inflex_inputs["eff_factor"], timesteps, "INFLEX eff_factor", reference_label)
     df_supim = _align_table_to_timesteps(inflex_inputs["supim"], timesteps, "INFLEX supim", reference_label)
     df_process = inflex_inputs["process"]
@@ -837,10 +834,22 @@ def obtain_pre_demand(SF):
     df_pre_demand_elec, df_pre_demand_react = _process_pre_demands(df_raw_demand)
     return pd.concat([df_pre_demand_elec, df_pre_demand_react], axis=1)
 
-def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charger_kw=None):
+def reconstruct_demands(SF, post_demand_mode="flexible", ev_charger_kw=None):
+    """Pre and post demand of one scenario result (no side effects).
+
+    Args:
+        SF: reader with ``get_input_demands`` / ``get_inflex_inputs``
+            (``io.ScenarioResultReader``).
+        post_demand_mode: ``flexible`` (optimized URBS net import) or ``inflex``.
+        ev_charger_kw: optional inflex cross-check of every charger rating.
+
+    Returns:
+        ``(df_pre_demand, df_post_demand, df_reactive_components, battery_diagnostics)``.
+    """
     if post_demand_mode not in {"flexible", "inflex"}:
         raise ValueError("post_demand_mode must be 'flexible' or 'inflex'.")
 
+    battery_diagnostics = pd.DataFrame()
     if post_demand_mode == "flexible":
         df_raw_demand, df_urbs_demand = SF.get_input_demands()
         df_raw_demand = _align_pre_demand_to_urbs(df_raw_demand, df_urbs_demand)
@@ -848,11 +857,7 @@ def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charge
         df_post_demand_elec, df_post_demand_react, df_react_save = _process_post_demands(df_urbs_demand, df_pre_demand_react)
     else:
         inflex_inputs = SF.get_inflex_inputs()
-        reference = inflex_inputs.get("reference")
-        timesteps = _reference_timestep_count(reference, inflex_inputs.get("drop_initial_timestep", False))
-        if timesteps is None:
-            timesteps = len(_use_t_as_index(inflex_inputs["demand"]))
-        reference_label = "urbs output" if reference is not None else "raw inflex demand"
+        timesteps, reference_label = _inflex_timesteps(inflex_inputs)
         df_raw_demand = _align_table_to_timesteps(inflex_inputs["demand"], timesteps, "INFLEX demand", reference_label)
         # Charger power is per vehicle and comes from the session table, which is
         # validated against the scenario process rows. A run-level override is
@@ -884,32 +889,47 @@ def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charge
         df_post_demand_elec, df_post_demand_react, df_react_save, battery_diagnostics = (
             _process_inflex_demands(
                 inflex_inputs,
+                df_raw_demand,
                 df_pre_demand_elec,
                 df_pre_demand_react,
+                timesteps=timesteps,
+                reference_label=reference_label,
             )
         )
-        # Component audits are retained regardless of whether the reactive
-        # time-series tables are written: the paired compact-summary paths
-        # disable those, and the database has no matching table.
-        if not battery_diagnostics.empty:
-            saver = getattr(SF, "save_component_audit", None)
-            if saver is None:
-                print(
-                    "No component-audit sink on this adapter; stationary-battery "
-                    "diagnostics were not retained.",
-                    flush=True,
-                )
-            else:
-                location = saver(battery_diagnostics, "inflex_battery_state")
-                print(
-                    f"INFLEX stationary-battery audit retained at {location}.",
-                    flush=True,
-                )
-    if save_reactive:
-        SF.save_df(df_react_save, "pwrflw/urbs_out/MILP/reactive")
 
-    # Concat demands
     df_pre_demand = pd.concat([df_pre_demand_elec, df_pre_demand_react], axis=1)
     df_post_demand = pd.concat([df_post_demand_elec, df_post_demand_react], axis=1)
+    return df_pre_demand, df_post_demand, df_react_save, battery_diagnostics
 
+
+def save_battery_audit(SF, battery_diagnostics):
+    """Keep the inflex stationary-battery diagnostics in the run's audit sidecar.
+
+    Component audits are retained regardless of whether the reactive time-series
+    tables are written: the compact-summary paths disable those, and the
+    database has no matching table.
+    """
+    if battery_diagnostics is None or battery_diagnostics.empty:
+        return None
+    saver = getattr(SF, "save_component_audit", None)
+    if saver is None:
+        print(
+            "No component-audit sink on this adapter; stationary-battery "
+            "diagnostics were not retained.",
+            flush=True,
+        )
+        return None
+    location = saver(battery_diagnostics, "inflex_battery_state")
+    print(f"INFLEX stationary-battery audit retained at {location}.", flush=True)
+    return location
+
+
+def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charger_kw=None):
+    """Pre and post demand; saves the battery audit and (optionally) the reactive table via ``SF``."""
+    df_pre_demand, df_post_demand, df_react_save, battery_diagnostics = reconstruct_demands(
+        SF, post_demand_mode=post_demand_mode, ev_charger_kw=ev_charger_kw
+    )
+    save_battery_audit(SF, battery_diagnostics)
+    if save_reactive:
+        SF.save_df(df_react_save, "pwrflw/urbs_out/MILP/reactive")
     return df_pre_demand, df_post_demand
