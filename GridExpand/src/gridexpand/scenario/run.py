@@ -268,7 +268,8 @@ def run_synthetic(ctx: RunContext) -> int:
              "log": f"{group}/logs/candidate_{int(c['candidate_index']):03d}_{runner.step2_filename(c, s)}.log"}
             for group, s in settings.items() for c in selected
         ]
-        state.plan(jobs, resume=False)
+        # The batches resume by grid themselves (status.tsv of each group); the state keeps done records.
+        state.plan(jobs, resume=ctx.resume)
         write_json_atomic(ctx.run_dir / "plan.json", {
             "pipeline": run.pipeline, "groups": [g.__dict__ for g in groups],
             "commands": {group: synthetic_equivalent_command(s) for group, s in settings.items()},
