@@ -160,7 +160,7 @@ def main(argv: list[str] | None = None) -> None:
             )
         return
 
-    grid_expansion._execute_sql_file(db, grid_expansion.SCHEMA_SQL_PATH)
+    db.ensure_schema()
     failures = []
     for group in group_args:
         print(f"\n=== {group.analysis_key} ({group.run_name}, stage {group.stage})")
