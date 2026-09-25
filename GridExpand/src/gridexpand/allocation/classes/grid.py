@@ -13,6 +13,7 @@ import gridexpand.common.weather as weather
 import gridexpand.allocation.functions.electricity as elc
 import gridexpand.allocation.functions.heat as heat
 import gridexpand.allocation.functions.mobility as mbl
+from gridexpand.allocation.functions.dst import dst_shift_input, dst_shift_output
 from gridexpand.allocation.functions.partition import partition_df_by_cpu
 from gridexpand.allocation.assets.battery.materialization import materialize_battery_urbs_inputs
 from gridexpand.allocation.assets.battery.sizing import build_battery_asset_plan
@@ -893,7 +894,8 @@ class Grid:
         # self.df_demand_elec_react = self._add_output_data_daylight_saving_shift(self.df_demand_elec_react)
 
     def align_electricity_output_time(self):
-        self.df_demand_elec = self._add_output_data_daylight_saving_shift(self.df_demand_elec)
+        """Map the civil-time base electricity back to UTC+1 (DST shift)."""
+        self.df_demand_elec = dst_shift_output(self.df_demand_elec)
 
     def generate_heat(self):
         # This first sizing method intentionally electrifies residential heat only.
@@ -929,10 +931,10 @@ class Grid:
         )
 
         # Electricity is shifted here even when a grid has no residential heat.
-        df_wth_input = self._add_input_data_daylight_saving_shift(self.df_weather_raw)
+        df_wth_input = dst_shift_input(self.df_weather_raw)
         # A residential building whose sampled annual demand is 0 kWh has no
         # electricity column; its internal gains are then zero.
-        df_elec_input = self._add_input_data_daylight_saving_shift(self.df_demand_elec)
+        df_elec_input = dst_shift_input(self.df_demand_elec)
         self.align_electricity_output_time()
         if residential.empty:
             empty = pd.DataFrame(index=self.df_demand_elec.index)
@@ -1011,12 +1013,8 @@ class Grid:
         if space_heat_source_audit:
             self.settings["scenario_assumptions"].update(space_heat_source_audit)
 
-        self.df_demand_heat_space = self._add_output_data_daylight_saving_shift(
-            self.df_demand_heat_space
-        )
-        self.df_demand_heat_water = self._add_output_data_daylight_saving_shift(
-            self.df_demand_heat_water
-        )
+        self.df_demand_heat_space = dst_shift_output(self.df_demand_heat_space)
+        self.df_demand_heat_water = dst_shift_output(self.df_demand_heat_water)
 
         self._record_profile_fingerprints(
             space_heat=self.df_demand_heat_space,
@@ -1127,7 +1125,7 @@ class Grid:
                 )
             elif mobility_source == "emobpy":
                 # Add daylight saving dummy shift to input data
-                wth_input = self._add_input_data_daylight_saving_shift(self.df_weather_raw)
+                wth_input = dst_shift_input(self.df_weather_raw)
                 wth_input = mbl.prepare_weather_input(wth_input)
                 vehicles = [{key: value} for build_dict in self.df_buildings["car_dict"].values for key,value in build_dict.items()]
 
@@ -1146,8 +1144,9 @@ class Grid:
             else:
                 raise ValueError(f"Unknown mobility source: {mobility_source}")
         
-        self.df_demand_mobility = self._add_output_data_daylight_saving_shift(self.df_demand_mobility, mobility_dmd=True)
-        self.df_tve_mobility = self._add_output_data_daylight_saving_shift(self.df_tve_mobility)
+        # Accumulated charging demand must not be duplicated into the repeated hour.
+        self.df_demand_mobility = dst_shift_output(self.df_demand_mobility, zero_repeated_hour=True)
+        self.df_tve_mobility = dst_shift_output(self.df_tve_mobility)
         self._record_profile_fingerprints(
             mobility_demand=self.df_demand_mobility,
             mobility_availability=self.df_tve_mobility,
@@ -1347,53 +1346,3 @@ class Grid:
         self.SF.save_df(self.df_com,         "urbs_in/commodity")
         self.SF.save_df(self.df_pro_com,     "urbs_in/process_commodity")
         self.SF.save_df(self.df_sto,         "urbs_in/storage")
-
-    ############################################
-    ################# Helpers ################## 
-    ############################################
-    @staticmethod
-    def _add_input_data_daylight_saving_shift(df_ts):
-        """ To align human behaviour with daylight savings time:
-            - Insert a dummy row (later deleted) at 02:00-03:00AM on ts_hour1 (the hour of the year which is skipped), in order to get the human activity of one hour later with the unshifted weather
-            - Remove a row (later replaced) at 02:00-03:00AM on ts_hour2 (the hour of the year which is reapeated), in order to realign human activity with weather data
-        """
-        if len(df_ts)==0: return df_ts.copy()
-        else:
-            ts_hour1 = 2090 #(= 02:00AM-03:00AM, 29th March 2009), at this position insert previous hour (already accounted for zero indexing)
-            ts_hour2 = 7130 #(= 02:00AM-03:00AM, 10th October 2009), at this position delete hour (already accounted for zero indexing)
-            df_ts = df_ts.copy()
-
-            ### Delete alignement row
-            df_ts = df_ts.drop(index=ts_hour2).reset_index(drop=True)
-
-            ### Insert dummy row:
-            new_row = df_ts.iloc[ts_hour1-1].copy()
-            new_row_df = pd.DataFrame([new_row], columns=df_ts.columns)
-            df_ts = pd.concat([df_ts.iloc[:ts_hour1], new_row_df, df_ts.iloc[ts_hour1:]]).reset_index(drop=True)
-
-            return df_ts
-
-    @staticmethod
-    def _add_output_data_daylight_saving_shift(df_ts, mobility_dmd=False):
-        """ To align human behaviour with daylight savings time:
-            - Now delete the dummy row at 02:00-03:00AM of ts_hour1 (the hour of the year which is skipped), in order to delete the human activity which never actually occured
-            - Add a row (simply copy previous timestep) at 02:00-03:00AM of ts_hour2 (the hour of the year which is skipped), in order to get two hours with same human acitivty
-            """
-        if len(df_ts)==0: return df_ts.copy()
-        else:
-            ts_hour1 = 2090 #(= 02:00AM-03:00AM, 29th March 2009), at this position delete the dummy row (already accounted for zero indexing)
-            ts_hour2 = 7130 #(= 02:00AM-03:00AM, 10th October 2009), at this position copy the previous row and insert below to realign weather with behaviour (already accounted for zero indexing)
-            df_ts = df_ts.copy()
-
-            ### Insert copy row:
-            new_row = df_ts.iloc[ts_hour2].copy()
-            new_row_df = pd.DataFrame([new_row], columns=df_ts.columns)
-            df_ts = pd.concat([df_ts.iloc[:ts_hour2+1], new_row_df, df_ts.iloc[ts_hour2+1:]]).reset_index(drop=True)
-
-            # If mobility dataframe, we don't want to copy an existing accumulated demand (would lead to huge demand spike) -> simply set previous copied timestep to 0
-            if mobility_dmd: df_ts.iloc[ts_hour2] = 0
-
-            ### Delete dummy row
-            df_ts = df_ts.drop(index=ts_hour1).reset_index(drop=True)
-
-        return df_ts
