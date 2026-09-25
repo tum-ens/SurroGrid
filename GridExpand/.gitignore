@@ -1,13 +1,26 @@
-# Compiled code
-**/__pycache__/
+# Compiled code, environments, tool caches
+__pycache__/
 *.py[cod]
 .venv/
-**/.venv/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
 
 # Sensitive data
 .env
-0.data_preparation
 gurobi.lic
+0.data_preparation
+
+# Runtime artifacts (hand-off HDF5 files, logs, caches, run folders); see src/gridexpand/paths.py
+/work/
+
+# Large static inputs that are not tracked (copy or symlink them locally)
+/data/statistics/inhabited_buildings/elec_lps.h5
+/data/statistics/general/mobility_profile_pool
+/data/statistics/general/mobility_profile_pool_old/mobility_demand_pool.csv
+/data/statistics/general/mobility_profile_pool_old/mobility_availability_pool.csv
+/data/statistics/general/sys_files/
+/data/statistics/general/user_files/
 
 *.out
 *.err
@@ -18,4 +31,3 @@ gurobi.lic
 Archive/
 Plots/
 **/logs_0/
-2.demand_allocation/gridalloc/outputs/

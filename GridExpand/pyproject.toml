@@ -1,0 +1,85 @@
+[project]
+name = "gridexpand"
+version = "0.1.0"
+description = "GridExpand: LV grid sampling, demand allocation, urbs optimization, power flow and grid-expansion analysis."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  # Core numerics (pins of the former Step 2/4/5 environments)
+  "numpy>=2.2,<2.3",
+  "pandas>=2.2,<2.3",
+  "scipy>=1.15,<1.16",
+  "h5py>=3.13,<4",
+  "tables>=3.10,<4",
+  "blosc2>=2,<5",
+  "msgpack>=1.1,<2",
+  "networkx>=3.4,<4",
+  "numba>=0.61,<0.62",
+  "llvmlite>=0.44,<0.45",
+  "tqdm>=4.67,<5",
+  "pyyaml>=6.0,<7",
+  # Database and configuration
+  "sqlalchemy>=2.0,<2.1",
+  "psycopg2-binary>=2.9,<3",
+  "python-dotenv>=1.1,<2",
+  "requests>=2.32,<3",
+  # Step 1 (sampling) and geodata
+  "geopandas>=1.0,<1.1",
+  "shapely>=2.1,<2.2",
+  "pyproj>=3.7,<3.8",
+  "rasterio>=1.4,<1.6",
+  "contextily>=1.6,<1.7",
+  "lxml>=5.4",
+  # Step 2 (demand allocation)
+  "holidays>=0.73,<1",
+  "pvlib>=0.12,<0.13",
+  "opendhw>=0.2,<0.3",
+  "richardsonpy>=0.2,<0.3",
+  "teaser>=0.7,<0.8",
+  "pylightxl>=1.61,<2",
+  "xlrd>=2.0,<3",
+  "openpyxl>=3.1,<3.2",
+  # Step 3 (urbs optimization)
+  "pyomo>=6.9,<7",
+  "tsam>=2.3,<3",
+  "scikit-learn>=1.6,<2",
+  "threadpoolctl>=3.6,<4",
+  "highspy>=1.10,<2",
+  "gurobipy>=13.0.2",
+  # Step 4 (power flow) and Step 5 (analysis, plotting)
+  "pandapower>=3.1,<3.2",
+  "deepdiff>=8.5,<9",
+  "jinja2>=3.1.6",
+  "matplotlib>=3.10,<3.11",
+  "seaborn>=0.13,<0.14",
+  "plotly>=5.24,<6",
+]
+
+[project.optional-dependencies]
+notebooks = [
+  "jupyterlab>=4.2,<5",
+  "ipykernel>=7.2.0",
+  "ipywidgets>=8.1,<9",
+  "nbformat>=5.10.4",
+  "kaleido==0.2.1",
+]
+
+[project.scripts]
+gridexpand = "gridexpand.cli:main"
+
+[dependency-groups]
+dev = [
+  "ruff>=0.15.20",
+  "pytest>=8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gridexpand"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
