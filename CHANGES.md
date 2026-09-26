@@ -321,3 +321,37 @@ Removed from the repository (agent handovers, per `AGENTS.md`): the two `*_AGENT
 - Agent briefs, reviews and reports: `../AI/SurroGrid/GridExpand/fable-review/` (a copy of this file too).
 - pylovo: branch `fable/ui-plugins-dev-review` (plugin loader) is not merged; it merges cleanly onto the current
   `feature/dev-review` (`c3020e8`). Your pylovo checkout (`local-grid-preparation-new`) was not touched.
+
+---
+
+## 12. Round 2: GridPlanner case-study workflow (2026-09-26)
+
+Your feedback: asset symbols on the map, scenario settings in the UI, a simpler setup from built images,
+and one grid's full pipeline in the UI (a whole PLZ stays a terminal job).
+
+| Change | Where |
+|---|---|
+| **Building assets on the map.** Step 4 stores the assets each post-case power flow simulated (new table `powerflow_asset`, migration `0005`): PV per building, battery, heat pump, heating rod, heat storage and EVs per bus, from the Step 3 capacities (heuristic rules or optimisation). The map layer draws one small pill per building with a badge for PV, battery, heat pump and EV, a dot where the pill does not fit; the legend switches each asset type and shows totals; hovering shows the sizes (kWp, kWh/kW, kW el, buffer, EVs and home charging). The results panel has a building-asset KPI. | `powerflow/assets.py`, `db/sql/0005_powerflow_asset.sql`, `service/queries.py`, `service/ui/assets.js`, `maplayer.js` |
+| **Full pipeline for one grid.** The runs panel has three modes: *This grid* (the grid selected in pylovo, by identity: `plz/kcid/bcid` in the run YAML, any size, all three model cases by default), *Several grids* (the old candidate table), *Whole PLZ* (prepares a terminal run: run YAML, `tmux` commands to start, watch, check and resume — via `docker compose exec` in GridPlanner — and a list of these runs with their `state.json` status). | `service/routers/jobs.py`, `service/commands.py`, `ui/panels/runs.js` |
+| **Scenario editor.** A panel like pylovo's config editor: 31 key assumptions in 7 sections (adoption, prices, PV, battery, heat, mobility, time aggregation) with units and the YAML comments as help, a YAML tab, live validation with the loader the runs use, the new scenario key, *Save as new scenario* into a user folder (never over shipped files; own files only with confirmation and a backup). Comments and layout of the YAML are kept (`ruamel.yaml` in the `service` extra). | `service/scenario_form.py`, `service/routers/scenarios.py`, `ui/panels/scenarios.js` |
+| **One-command setup.** GridPlanner has `./gridplanner init` (one set of database keys, uid, data files found automatically, pylovo config copied from the image) and `./gridplanner up` (pull the images, or build from checkouts), plus `down`, `status`, `logs`, `update`, `doctor`. No `.env` is mounted into the containers any more; `scenarios/` is writable. GitHub Actions workflows publish `ghcr.io/tum-ens/gridexpand` and `ghcr.io/tum-ens/pylovo-ui` (branch, version and sha tags) — **not pushed**. The GridExpand image is 1.6 GB smaller (uv cache out of the image). | `../GridPlanner`, `.github/workflows/gridexpand-image.yml`, pylovo `.github/workflows/pylovo-ui-image.yml`, `db/engine.py` |
+
+Verified: the regression harness is unchanged apart from the new `powerflow_asset` rows (IDENTICAL without them);
+`pytest` 589 passed; in containers through the proxy, on a fresh sandbox database: `init` 0.2 s, `up --build`
+51 s, `doctor` all green, one grid (63 buildings) with all three cases from the browser in 1 min 52 s, assets,
+hover and the scenario editor without page errors (screenshots in `GridPlanner/docs/img/`).
+
+Where the UI lives: the shell is **pylovo-ui** in the pylovo repository (`frontend/pylovo_ui`, plugin loader on
+branch `fable/ui-plugins-dev-review`); GridExpand's panels and API are in this repository
+(`GridExpand/src/gridexpand/service/`, served by `gridexpand serve`); GridPlanner has no UI code, only the
+composition.
+
+New decisions for you:
+
+22. A single-grid run selects the electrified buildings **within that grid** (as a run YAML with `kcid/bcid`
+    does), so it replaces that grid's earlier results of the same scenario, possibly with other buildings
+    electrified. The expansion analyses stay AGS-wide and add grids up. Keep (case-study semantics) or
+    select within the AGS?
+23. The image tags pinned in `GridPlanner/.env.example` assume pylovo `feature/dev-review` (after merging
+    `fable/ui-plugins-dev-review`) and SurroGrid `feature/update-pipeline`; nothing is published before you
+    push. GHCR packages start private.
