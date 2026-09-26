@@ -12,7 +12,7 @@ grids for validation.
 | 3 optimization | `gridexpand.optimization` | urbs building model: dispatch (and sizing for the optimized case) |
 | 4 power flow | `gridexpand.powerflow` | pandapower time series before and after electrification |
 | 5 analysis | `gridexpand.analysis` | cable and transformer expansion costs, loaders, plots, notebooks |
-| service | `gridexpand.service` | web job API and pylovo-ui plugin panels |
+| API | `gridexpand.api` | HTTP API for the GridPlanner UI: jobs, results, scenario files |
 
 Everything is one Python package (`src/gridexpand/`) with one uv environment and one command, `gridexpand`.
 Results go to the `surrogrid` schema of the same database and to HDF5 hand-off files below `work/`.
@@ -24,7 +24,7 @@ Requires [uv](https://docs.astral.sh/uv/) (it installs Python 3.12 if needed). F
 ```bash
 uv sync                          # environment in .venv, incl. the dev tools (pytest, ruff)
 uv sync --extra notebooks        # + JupyterLab, seaborn, kaleido
-uv sync --extra service          # + FastAPI/uvicorn for gridexpand serve
+uv sync --extra api          # + FastAPI/uvicorn for gridexpand api
 cp .env.example .env             # database credentials (DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT)
 uv run gridexpand --help
 ```
@@ -90,16 +90,17 @@ uv run gridexpand run config/runs/joint_2045_v1_smoke24.yaml --skip-prepare   # 
 `pipeline: paired_validation` compares SWF grids, `pipeline: paired_aligned` SWF and ÜZW grids of a pylovo
 alignment bundle with their synthetic counterparts. See [docs/paired_validation.md](docs/paired_validation.md).
 
-## Quick start: web service and Docker
+## Quick start: API and Docker
 
 ```bash
-uv sync --extra service
-uv run gridexpand serve                                                   # http://127.0.0.1:18766/docs
+uv sync --extra api
+uv run gridexpand api                                                   # http://127.0.0.1:18766/docs
 GRIDEXPAND_UID=$(id -u) GRIDEXPAND_GID=$(id -g) docker compose -f docker/compose.yaml up --build
 ```
 
-The service starts synthetic pipeline jobs, serves expansion results, edits copies of scenario YAMLs and the pylovo-ui plugin panels:
-[docs/service.md](docs/service.md).
+The API starts synthetic pipeline jobs, serves expansion results and building assets, and edits copies of
+scenario YAMLs: [docs/api.md](docs/api.md). The browser UI for pylovo and GridExpand lives in the GridPlanner
+repository, which runs both images behind one proxy.
 
 ## Commands
 
@@ -115,7 +116,7 @@ The service starts synthetic pipeline jobs, serves expansion results, edits copi
 | `gridexpand powerflow <id>` | Step 4 for one scenario file ([docs](docs/steps/4_powerflow.md)) |
 | `gridexpand expansion --run-name ... --stage ...` | Step 5 expansion materialization ([docs](docs/steps/5_postprocessing.md)) |
 | `gridexpand db <init-schema\|migrate\|compress\|relink-pylovo\|delete-scenario>` | database maintenance |
-| `gridexpand serve` | web service (`service` extra) |
+| `gridexpand api` | HTTP API for the GridPlanner UI (`api` extra) |
 
 `gridexpand <command> --help` lists the options. Module entry points without a command:
 `python -m gridexpand.sampling.export_single_grid` (Step 1),
@@ -130,12 +131,12 @@ GridExpand/
   pyproject.toml, uv.lock   one environment (Python 3.12)
   .env.example              database credentials template (copy to .env)
   src/gridexpand/           cli.py, paths.py (the only module that knows directories), common/, db/ (+ sql/),
-                            sampling/, allocation/, optimization/, powerflow/, analysis/, scenario/, paired/, service/
+                            sampling/, allocation/, optimization/, powerflow/, analysis/, scenario/, paired/, api/
   config/                   scenarios/ and runs/ YAMLs
   data/                     static inputs: sampling/, statistics/
   notebooks/                sampling/, analysis/, archive/ (historical)
   docs/                     documentation (index: docs/README.md)
-  docker/                   Dockerfile and compose.yaml of the image (CLI + service)
+  docker/                   Dockerfile and compose.yaml of the image (CLI + API)
   scripts/                  hpc/ Slurm templates, migrate_local_layout.py
   tests/                    unit tests, regression/ harness
   work/                     runtime artifacts (gitignored)
@@ -150,7 +151,7 @@ GridExpand/
 | `powerflow/{input,output}/` | Step 4 inputs and HDF5 outputs |
 | `analysis/output/` | Step 5 plots and audit exports |
 | `runs/<run id>/` | run directories of `gridexpand run` / `synthetic` (state, logs); `runs/slurm/` Slurm logs |
-| `service/jobs/` | job history of the web service |
+| `api/jobs/`, `api/terminal/` | job history of the API; run YAMLs prepared for terminal runs |
 
 `GRIDEXPAND_WORK_DIR`, `GRIDEXPAND_DATA_DIR` and `GRIDEXPAND_ENV_FILE` relocate `work/`, `data/` and `.env`
 (process environment only).
@@ -172,7 +173,7 @@ uv run ruff check src tests scripts   # lint with the project config
 ```
 
 Opt-in database tests use a sandbox database only: `GRIDEXPAND_ANALYSIS_TEST_DATABASE=<sandbox db> uv run pytest
-tests/analysis` (SQL parity), `GRIDEXPAND_SERVICE_TEST_DATABASE=<sandbox db> uv run pytest tests/service`.
+tests/analysis` (SQL parity), `GRIDEXPAND_API_TEST_DATABASE=<sandbox db> uv run pytest tests/api`.
 `tests/regression/` runs the whole synthetic pipeline on a sandbox demo region and compares database snapshots
 ([tests/regression/README.md](tests/regression/README.md)); it drops and recreates its database.
 
@@ -187,7 +188,7 @@ tests/analysis` (SQL parity), `GRIDEXPAND_SERVICE_TEST_DATABASE=<sandbox db> uv 
 | [docs/paired_validation.md](docs/paired_validation.md) | paired SWF and aligned SWF/ÜZW pipelines |
 | [docs/database.md](docs/database.md) | `surrogrid` schema, migrations, maintenance |
 | [docs/expansion_costs.md](docs/expansion_costs.md) | reinforcement rules and cost assumptions |
-| [docs/service.md](docs/service.md) | web service, API, plugin, container |
+| [docs/api.md](docs/api.md) | HTTP API, its contract, container |
 | [docs/research/](docs/research/) | historical run notes and audits |
 
 ## Licences

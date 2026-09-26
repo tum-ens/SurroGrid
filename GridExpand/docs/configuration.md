@@ -20,7 +20,7 @@ uv run gridexpand config check config/scenarios config/runs     # no database: v
 ```
 
 The scientific reasoning behind the values is in [method.md](method.md). A short checklist for new files is in
-[config/README.md](../config/README.md). The scenario editor of the web service ([service.md](service.md#scenario-editor))
+[config/README.md](../config/README.md). The scenario editor of the GridPlanner UI ([api.md](api.md#scenario-editor))
 saves edited copies of these files, with their own `scenario.id`, into its user scenario directory; it never
 changes the shipped files.
 
@@ -254,7 +254,7 @@ is loaded with override: its values win over variables of the same name in the p
 | `GRIDEXPAND_DATA_DIR` | relocate `data/` (static inputs) |
 | `GRIDEXPAND_SOLVER` | default Step 3 solver (`gurobi` or `appsi_highs`) |
 | `URBS_CLUSTER_CONCURRENCY` | default of `gridexpand optimize --cluster-concurrency` |
-| `GRIDEXPAND_SERVICE_SCENARIO_DIRS`, `GRIDEXPAND_SERVICE_USER_SCENARIO_DIR`, `GRIDEXPAND_UI_CORS_ORIGINS` | web service, see [service.md](service.md) |
+| `GRIDEXPAND_API_SCENARIO_DIRS`, `GRIDEXPAND_API_USER_SCENARIO_DIR`, `GRIDEXPAND_API_CORS_ORIGINS` | API, see [api.md](api.md) |
 
 The `GRIDEXPAND_*_DIR`/`_FILE` variables are read from the process environment when `gridexpand.paths` is first
 imported (not from `.env`); child processes of the orchestrators inherit them.
