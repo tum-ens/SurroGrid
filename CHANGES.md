@@ -355,3 +355,20 @@ New decisions for you:
 23. The image tags pinned in `GridPlanner/.env.example` assume pylovo `feature/dev-review` (after merging
     `fable/ui-plugins-dev-review`, done 2026-09-26) and SurroGrid `feature/update-pipeline-opus`; nothing is
     published before you push. GHCR packages start private.
+
+---
+
+## 13. Round 3: the UI moves to GridPlanner, GridExpand is an API (2026-09-26)
+
+Your decision (architecture B): all UI code lives in GridPlanner; pylovo and GridExpand are headless
+APIs in their images, pinned by GridPlanner.
+
+| Change | Where |
+|---|---|
+| `gridexpand serve` → **`gridexpand api`**; package `gridexpand.service` → `gridexpand.api`; extra `service` → `api`; `GRIDEXPAND_SERVICE_*` / `GRIDEXPAND_UI_CORS_ORIGINS` → `GRIDEXPAND_API_*`; job state in `work/api/` | `src/gridexpand/api/`, `pyproject.toml`, `docker/` |
+| The panels (runs, expansion results, map layer with building assets, scenario editor) moved to the GridPlanner repository (`ui/static/js/gridexpand/`); the API serves no browser files | `GridPlanner/ui/` |
+| **Contract:** `/api/health` reports `service`, `api` (contract version 1), package version and git revision; `docs/openapi.json` is the committed schema (snapshot test, `scripts/export_openapi.py`), CI runs `oasdiff breaking` on pull requests unless `API_VERSION` was bumped | `api/contract.py`, `.github/workflows/gridexpand-api-contract.yml` |
+| Terminal-run commands use the compose service `gridexpand-api` | `api/commands.py` |
+
+Tests: 590 passed. The GridPlanner stack with images built from these branches passed `doctor`, the
+smoke test and the browser walk-through (see `GridPlanner/docs/ARCHITECTURE.md`, *Verified*).
