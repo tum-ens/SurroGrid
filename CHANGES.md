@@ -1,9 +1,10 @@
-# CHANGES on `gridexpand-fable` (GridExpand review, 2026-09-25)
+# CHANGES of the GridExpand review (2026-09-25/26, on `feature/update-pipeline-opus`)
 
 This file summarises one autonomous review session of **GridExpand** (GridForecast was not touched). It is written
-for the maintainer who reviews and merges the branch. Delete it (or fold it into `CHANGELOG.md`) before merging.
+for the maintainer. Delete it (or fold it into `CHANGELOG.md`) once reviewed.
 
-- Base: `feature/update-pipeline-opus` (`87ed13f`). Branch `gridexpand-fable`: 121 commits (109 non-merge), nothing
+- Base: `feature/update-pipeline-opus` (`87ed13f`). The work was collected on the integration branch
+  `gridexpand-fable` and fast-forwarded into `feature/update-pipeline-opus` on 2026-09-26 (140 commits), nothing
   pushed, `main`/`develop` untouched. Every area was developed on its own branch and merged with `--no-ff`
   (`fable/restructure`, `fable/impl-{db,alloc,optpf,orch,post,service,docs}`, `fable/pf-staging`), so one area can
   be reverted with `git revert -m 1 <merge>`.
@@ -49,10 +50,9 @@ runs **and between the heuristic and optimized case of the same grid** (up to 63
 building), contrary to the `profile_seed` contract. It is now seeded per building (`4faeb56`). New runs therefore
 differ once from old runs; the paired heat libraries you already prepared stay valid as files.
 
-### 0.3 How to adopt the branch
+### 0.3 How to adopt the changes
 
-1. Merge (or check out) `gridexpand-fable`. `feature/update-pipeline-opus` has no commits since the branch point,
-   so this is a fast-forward. Directories changed completely (section 5); git does not move your untracked files
+1. The code is on `feature/update-pipeline-opus` (fast-forwarded). Directories changed completely (section 5); git does not move your untracked files
    (results, prepared paired datasets, run logs, the large statistics files).
 2. `cd GridExpand && uv sync` (one environment now; add `--extra service` for the web service).
 3. `uv run python scripts/migrate_local_layout.py` shows the moves (dry run), `--execute` moves them into `work/` and
@@ -353,5 +353,5 @@ New decisions for you:
     electrified. The expansion analyses stay AGS-wide and add grids up. Keep (case-study semantics) or
     select within the AGS?
 23. The image tags pinned in `GridPlanner/.env.example` assume pylovo `feature/dev-review` (after merging
-    `fable/ui-plugins-dev-review`) and SurroGrid `feature/update-pipeline`; nothing is published before you
-    push. GHCR packages start private.
+    `fable/ui-plugins-dev-review`, done 2026-09-26) and SurroGrid `feature/update-pipeline-opus`; nothing is
+    published before you push. GHCR packages start private.
