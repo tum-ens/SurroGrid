@@ -6,8 +6,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from gridexpand.service import queries
-from gridexpand.service.routers.meta import parse_ags
+from gridexpand.api import queries
+from gridexpand.api.routers.meta import parse_ags
 
 router = APIRouter(prefix="/api/results", tags=["results"])
 

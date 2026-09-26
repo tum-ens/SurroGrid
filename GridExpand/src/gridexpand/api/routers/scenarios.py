@@ -9,8 +9,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from gridexpand.service import scenario_form, scenarios
-from gridexpand.service.settings import ServiceSettings
+from gridexpand.api import scenario_form, scenarios
+from gridexpand.api.settings import ServiceSettings
 
 router = APIRouter(prefix="/api/scenarios", tags=["scenarios"])
 

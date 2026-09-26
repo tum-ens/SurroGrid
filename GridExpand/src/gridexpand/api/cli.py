@@ -1,4 +1,4 @@
-"""``gridexpand serve``: start the GridExpand web service."""
+"""``gridexpand api``: start the GridExpand HTTP API."""
 
 from __future__ import annotations
 
@@ -6,19 +6,19 @@ import argparse
 import sys
 from pathlib import Path
 
-from gridexpand.service.settings import DEFAULT_HOST, DEFAULT_PORT
+from gridexpand.api.settings import DEFAULT_HOST, DEFAULT_PORT
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="gridexpand serve",
-        description="Web service of GridExpand: job API (pipeline runs as gridexpand subprocesses), result "
-                    "queries and the plugin panels for pylovo-ui.",
-        epilog="The service starts pipeline jobs that write to the database of GridExpand's .env. It binds to "
+        prog="gridexpand api",
+        description="HTTP API of GridExpand for the GridPlanner UI: pipeline jobs (gridexpand run as "
+                    "subprocesses), result queries and scenario files. The UI itself lives in GridPlanner.",
+        epilog="The API starts pipeline jobs that write to the database of GridExpand's .env. It binds to "
                "127.0.0.1 by default and accepts only the Host headers 127.0.0.1:<port> and localhost:<port> "
                "(add a reverse proxy's host with --allowed-host). Environment: GRIDEXPAND_SOLVER, "
-               "GRIDEXPAND_SERVICE_SCENARIO_DIRS, GRIDEXPAND_SERVICE_USER_SCENARIO_DIR, "
-               "GRIDEXPAND_UI_CORS_ORIGINS (development only).",
+               "GRIDEXPAND_API_SCENARIO_DIRS, GRIDEXPAND_API_USER_SCENARIO_DIR, "
+               "GRIDEXPAND_API_CORS_ORIGINS (development only).",
     )
     parser.add_argument("--host", default=DEFAULT_HOST, help=f"interface to bind (default: {DEFAULT_HOST})")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"port (default: {DEFAULT_PORT})")
@@ -30,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="additional directory with scenario YAMLs (repeatable)")
     parser.add_argument("--user-scenario-dir", type=Path, default=None, metavar="DIR",
                         help="where the scenario editor saves new scenarios (default: "
-                             "$GRIDEXPAND_SERVICE_USER_SCENARIO_DIR or WORK_DIR/scenarios)")
+                             "$GRIDEXPAND_API_USER_SCENARIO_DIR or WORK_DIR/scenarios)")
     parser.add_argument("--max-running-jobs", type=int, default=1,
                         help="pipeline jobs that run at the same time; later ones wait (default: 1)")
     parser.add_argument("--log-level", default="warning",
@@ -45,11 +45,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         import uvicorn
     except ImportError:
-        print("gridexpand serve needs the 'service' extra: uv sync --extra service", file=sys.stderr)
+        print("gridexpand api needs the 'api' extra: uv sync --extra api", file=sys.stderr)
         return 1
 
-    from gridexpand.service.app import create_app
-    from gridexpand.service.settings import ServiceSettings
+    from gridexpand.api.app import create_app
+    from gridexpand.api.settings import ServiceSettings
 
     bind_all = args.host in ("0.0.0.0", "::")
     try:
@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
             max_running_jobs=max(1, args.max_running_jobs),
         )
     except ValueError as exc:
-        print(f"gridexpand serve: {exc}", file=sys.stderr)
+        print(f"gridexpand api: {exc}", file=sys.stderr)
         return 2
     app = create_app(settings)
     if bind_all:

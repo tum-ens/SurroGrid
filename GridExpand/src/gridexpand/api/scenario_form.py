@@ -3,7 +3,7 @@
 The editor never changes a file in place. :func:`preview` applies form changes (dotted YAML paths of
 :data:`SECTIONS`) and/or a whole edited text to a copy of a base file and validates the result with
 :func:`~gridexpand.scenario.config_loader.load_scenario_config`, the loader of every run;
-:mod:`gridexpand.service.scenarios` writes accepted texts as new files into the user scenario directory.
+:mod:`gridexpand.api.scenarios` writes accepted texts as new files into the user scenario directory.
 Form changes go through ruamel.yaml's round trip, so comments, key order and formatting of the base
 file stay as they are.
 """

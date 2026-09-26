@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import platform
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from gridexpand import paths
-from gridexpand.service import API_VERSION, environment, queries
-from gridexpand.service.settings import ServiceSettings
+from gridexpand.api import API_VERSION, environment, queries
+from gridexpand.api.settings import ServiceSettings
 
 router = APIRouter(prefix="/api", tags=["status"])
 
@@ -44,9 +45,14 @@ def resolve_ags(ags: int | str | None, plz: int | None) -> tuple[int, list[int]]
 
 
 @router.get("/health")
-def health() -> dict[str, Any]:
-    """Liveness probe (no database access)."""
-    return {"ok": True, "service": "gridexpand", "api": API_VERSION}
+def health(request: Request) -> dict[str, Any]:
+    """Liveness probe and contract version (no database access).
+
+    ``api`` is the contract version of the ``/api`` routes: it changes only with a breaking
+    change, and the GridPlanner UI refuses a major version it does not know.
+    """
+    return {"ok": True, "service": "gridexpand-api", "api": API_VERSION, "version": request.app.version,
+            "revision": os.getenv("GRIDEXPAND_REVISION") or None}
 
 
 @router.get("/status")

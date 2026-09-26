@@ -15,9 +15,9 @@ from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gridexpand.common.timeframe import TIMEFRAME_MODES
-from gridexpand.service import environment, queries, runlog, scenarios
+from gridexpand.api import environment, queries, runlog, scenarios
 from gridexpand.paths import PROJECT_DIR, RUNS_DIR
-from gridexpand.service.commands import (
+from gridexpand.api.commands import (
     MODEL_CASES,
     POST_CASES,
     PipelineSpec,
@@ -26,8 +26,8 @@ from gridexpand.service.commands import (
     run_yaml_text,
     terminal_commands,
 )
-from gridexpand.service.jobs import Job, JobManager, JobNotFound
-from gridexpand.service.routers.meta import resolve_ags, settings_of
+from gridexpand.api.jobs import Job, JobManager, JobNotFound
+from gridexpand.api.routers.meta import resolve_ags, settings_of
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 

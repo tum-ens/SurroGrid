@@ -16,7 +16,7 @@ def save(client, **body):
 
 def test_user_directory_is_the_last_scenario_directory(settings, tmp_path, monkeypatch):
     from gridexpand.paths import SCENARIO_CONFIG_DIR
-    from gridexpand.service.settings import ENV_USER_SCENARIO_DIR, ServiceSettings
+    from gridexpand.api.settings import ENV_USER_SCENARIO_DIR, ServiceSettings
 
     assert settings.scenario_dirs[-1] == settings.user_scenario_dir == (tmp_path / "user_scenarios").resolve()
     assert settings.shipped_scenario_dirs == (tmp_path / "scenarios",)
@@ -33,7 +33,7 @@ def test_serve_option_for_the_user_directory(capsys):
     from pathlib import Path
 
     from gridexpand.paths import SCENARIO_CONFIG_DIR
-    from gridexpand.service.cli import build_parser, main
+    from gridexpand.api.cli import build_parser, main
 
     assert build_parser().parse_args(["--user-scenario-dir", "gp/scenarios"]).user_scenario_dir == Path("gp/scenarios")
     assert build_parser().parse_args([]).user_scenario_dir is None
@@ -169,7 +169,7 @@ def test_delete_only_user_files(client, settings):
 def test_state_changing_scenario_calls_need_the_ui_header(settings, fake_solvers):
     from fastapi.testclient import TestClient
 
-    from gridexpand.service.app import create_app
+    from gridexpand.api.app import create_app
 
     with TestClient(create_app(settings)) as c:
         body = {"base": BASE, "file_name": "mine.yaml", "scenario_id": "mine", "changes": CHANGE}

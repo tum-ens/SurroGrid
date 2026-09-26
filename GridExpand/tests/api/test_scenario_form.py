@@ -10,7 +10,7 @@ import yaml
 from gridexpand.paths import SCENARIO_CONFIG_DIR
 from gridexpand.scenario.config_loader import configuration_hash, load_scenario_config
 from gridexpand.scenario.scenario_config import ADOPTION_MODES
-from gridexpand.service import scenario_form as sf
+from gridexpand.api import scenario_form as sf
 
 SHIPPED = sorted(SCENARIO_CONFIG_DIR.glob("*.yaml"))
 SCHWEINFURT = SCENARIO_CONFIG_DIR / "schweinfurt_2045.yaml"

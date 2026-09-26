@@ -1,21 +1,21 @@
-# GridExpand service in a container next to an existing database (e.g. InfDB):
+# GridExpand API (and pipeline CLI) in a container next to an existing database (e.g. InfDB):
 #   GRIDEXPAND_UID=$(id -u) GRIDEXPAND_GID=$(id -g) docker compose -f docker/compose.yaml up --build
 # Then http://127.0.0.1:18766/docs. Uses this checkout's .env, config/, work/ and the large inputs
 # under data/ (symlinks are fine). Instead of the .env mount the container also accepts DB_HOST,
 # DB_PORT, DB_NAME, DB_USER and DB_PASSWORD as environment variables (as GridPlanner passes them).
 # For the whole GridPlanner stack see the GridPlanner repository.
 services:
-  gridexpand:
+  gridexpand-api:
     build:
       context: ..
       dockerfile: docker/Dockerfile
     image: ${GRIDEXPAND_IMAGE:-gridexpand}:${GRIDEXPAND_TAG:-dev}
-    # Host networking: the service keeps listening on 127.0.0.1 only, and a database on the host
+    # Host networking: the API keeps listening on 127.0.0.1 only, and a database on the host
     # (DB_HOST=localhost or the host's address in .env) is reachable as it is for the CLI.
     network_mode: host
     # Files in work/ belong to you, not to root.
     user: "${GRIDEXPAND_UID:-1000}:${GRIDEXPAND_GID:-1000}"
-    command: ["gridexpand", "serve", "--host", "127.0.0.1", "--port", "${GRIDEXPAND_PORT:-18766}"]
+    command: ["gridexpand", "api", "--host", "127.0.0.1", "--port", "${GRIDEXPAND_PORT:-18766}"]
     environment:
       GRIDEXPAND_ENV_FILE: /run/gridexpand/.env
       GRIDEXPAND_WORK_DIR: /work

@@ -1,4 +1,4 @@
-"""Runtime settings of the GridExpand service."""
+"""Runtime settings of the GridExpand API."""
 
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 18766
 
 # Environment variables read by the service (all optional).
-ENV_CORS_ORIGINS = "GRIDEXPAND_UI_CORS_ORIGINS"  # development only: comma-separated origins
-ENV_SCENARIO_DIRS = "GRIDEXPAND_SERVICE_SCENARIO_DIRS"  # extra scenario directories (os.pathsep)
-ENV_USER_SCENARIO_DIR = "GRIDEXPAND_SERVICE_USER_SCENARIO_DIR"  # where the scenario editor saves files
+ENV_CORS_ORIGINS = "GRIDEXPAND_API_CORS_ORIGINS"  # development only: comma-separated origins
+ENV_SCENARIO_DIRS = "GRIDEXPAND_API_SCENARIO_DIRS"  # extra scenario directories (os.pathsep)
+ENV_USER_SCENARIO_DIR = "GRIDEXPAND_API_USER_SCENARIO_DIR"  # where the scenario editor saves files
 ENV_SOLVER = "GRIDEXPAND_SOLVER"  # solver of Step 3 (default: gurobi)
 
 
@@ -54,7 +54,7 @@ class ServiceSettings:
     cors_origins: tuple[str, ...] = ()
     scenario_dirs: tuple[Path, ...] = (SCENARIO_CONFIG_DIR,)
     user_scenario_dir: Path = WORK_DIR / "scenarios"
-    state_dir: Path = WORK_DIR / "service"
+    state_dir: Path = WORK_DIR / "api"
     runs_dir: Path = RUNS_DIR
     python: str = field(default_factory=lambda: sys.executable)
     solver: str = "gurobi"

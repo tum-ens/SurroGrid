@@ -1,4 +1,4 @@
-"""HTTP API of the service without a database: guards, plugin files, scenarios, validation."""
+"""HTTP API without a database: guards, health and contract, scenarios, validation."""
 
 from __future__ import annotations
 
@@ -6,12 +6,14 @@ from fastapi.testclient import TestClient
 
 
 def test_health_and_index(client):
-    assert client.get("/api/health").json() == {"ok": True, "service": "gridexpand", "api": 1}
-    assert client.get("/").json()["plugin_manifest"] == "ui/manifest.json"
+    health = client.get("/api/health").json()
+    assert {k: health[k] for k in ("ok", "service", "api")} == {"ok": True, "service": "gridexpand-api", "api": 1}
+    assert health["version"] and "revision" in health
+    assert client.get("/").json()["openapi"] == "openapi.json"
 
 
 def test_host_allowlist(settings, fake_solvers):
-    from gridexpand.service.app import create_app
+    from gridexpand.api.app import create_app
 
     with TestClient(create_app(settings)) as c:
         assert c.get("/api/health", headers={"Host": "127.0.0.1:18766"}).status_code == 200
@@ -21,7 +23,7 @@ def test_host_allowlist(settings, fake_solvers):
 
 
 def test_state_changing_calls_need_the_ui_header(settings, fake_solvers):
-    from gridexpand.service.app import create_app
+    from gridexpand.api.app import create_app
 
     with TestClient(create_app(settings)) as c:
         response = c.post("/api/jobs/pipeline", json={})
@@ -32,7 +34,7 @@ def test_state_changing_calls_need_the_ui_header(settings, fake_solvers):
 def test_cors_only_when_configured(settings, fake_solvers):
     from dataclasses import replace
 
-    from gridexpand.service.app import create_app
+    from gridexpand.api.app import create_app
 
     preflight = {"Origin": "http://127.0.0.1:18765", "Access-Control-Request-Method": "POST",
                  "Access-Control-Request-Headers": "x-gridexpand-ui,content-type"}
@@ -46,18 +48,10 @@ def test_cors_only_when_configured(settings, fake_solvers):
             "access-control-allow-origin"] == "http://127.0.0.1:18765"
 
 
-def test_plugin_manifest_and_modules(client):
-    manifest = client.get("/ui/manifest.json").json()
-    assert manifest["schema"] == 1 and manifest["name"] == "gridexpand"
-    assert manifest["entry"] == "ui/plugin.js" and manifest["api"] == "api/"
-    assert manifest["csrf_header"] == "X-GridExpand-UI"
-    for path in ("/ui/plugin.js", "/ui/lib.js", "/ui/maplayer.js", "/ui/panels/runs.js", "/ui/panels/results.js",
-                 "/ui/panels/scenarios.js"):
-        response = client.get(path)
-        assert response.status_code == 200, path
-        assert response.headers["cache-control"] == "no-cache"
-        assert "javascript" in response.headers["content-type"]
-    assert "export function register(host)" in client.get("/ui/plugin.js").text
+def test_no_ui_is_served(client):
+    """The UI lives in GridPlanner; the API serves no browser files."""
+    for path in ("/ui/manifest.json", "/ui/plugin.js", "/static/index.html"):
+        assert client.get(path).status_code == 404, path
 
 
 def test_scenarios(client):
@@ -95,7 +89,7 @@ def test_status_without_database(client):
 
 def test_status_without_database_configuration(client, monkeypatch, tmp_path):
     from gridexpand.db import engine as db_engine
-    from gridexpand.service import db as service_db
+    from gridexpand.api import db as service_db
 
     monkeypatch.setattr(db_engine, "ENV_FILE", tmp_path / "missing.env")
     monkeypatch.setattr(db_engine, "_env_loaded", True)
@@ -117,22 +111,19 @@ def test_root_path_with_and_without_the_prefix(settings, fake_solvers):
     """Behind a proxy that strips /gridexpand, and directly with or without the prefix."""
     from dataclasses import replace
 
-    from gridexpand.service.app import create_app
+    from gridexpand.api.app import create_app
 
     with TestClient(create_app(replace(settings, root_path="/gridexpand"))) as c:
         for prefix in ("", "/gridexpand"):
             assert c.get(f"{prefix}/api/health").status_code == 200
             assert c.get(f"{prefix}/api/health").headers["cache-control"] == "no-store"
-            assert c.get(f"{prefix}/ui/manifest.json").json()["entry"] == "ui/plugin.js"
-            assert "export function register" in c.get(f"{prefix}/ui/plugin.js").text
-            assert c.get(f"{prefix}/ui/panels/runs.js").status_code == 200
             assert c.post(f"{prefix}/api/jobs/pipeline", json={}).status_code == 403  # no CSRF bypass
         assert "/gridexpand/openapi.json" in c.get("/docs").text
         assert c.get("/openapi.json").json()["servers"] == [{"url": "/gridexpand"}]
 
 
 def test_terminal_run_for_one_grid(client, monkeypatch):
-    from gridexpand.service import queries
+    from gridexpand.api import queries
 
     grid = {"grid_result_id": 7, "plz": 85653, "kcid": 1, "bcid": 3, "candidate_index": 2, "n_buildings": 3, "results": []}
     monkeypatch.setattr(queries, "ags_for_plz", lambda plz: [9184137])

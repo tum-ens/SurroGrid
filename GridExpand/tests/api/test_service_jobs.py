@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from gridexpand.service.jobs import JobManager, JobStep
+from gridexpand.api.jobs import JobManager, JobStep
 
 
 def py(code: str) -> list[str]:

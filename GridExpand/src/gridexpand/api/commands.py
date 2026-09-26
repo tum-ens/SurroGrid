@@ -18,7 +18,7 @@ from typing import Any
 import yaml
 
 from gridexpand.scenario.model_cases import MODEL_CASES as ALL_MODEL_CASES
-from gridexpand.service.jobs import JobStep
+from gridexpand.api.jobs import JobStep
 
 # Model cases the service offers. ``post-inflex-heuristic`` is left out: the synthetic
 # Step 2 writes no ``urbs_in/ev_sessions``, so the synthetic INFLEX power flow cannot run.
@@ -129,8 +129,8 @@ def terminal_commands(run_yaml_path: Path, run_id: str, *, in_container: bool, p
     """
     session = re.sub(r"[^\w-]", "-", run_id)[:40]
     if in_container:
-        run = f"docker compose exec gridexpand gridexpand run {run_yaml_path}"
-        status = f"docker compose exec gridexpand gridexpand status {run_id}"
+        run = f"docker compose exec gridexpand-api gridexpand run {run_yaml_path}"
+        status = f"docker compose exec gridexpand-api gridexpand status {run_id}"
         where = "in the GridPlanner folder"
     else:
         run = f"uv run gridexpand run {run_yaml_path}"

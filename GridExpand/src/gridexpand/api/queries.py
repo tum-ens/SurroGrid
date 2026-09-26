@@ -19,7 +19,7 @@ from sqlalchemy.engine import Connection
 
 from gridexpand.common.timeframe import TIMEFRAME_MODES
 from gridexpand.db.runs import STAGING_MARKER
-from gridexpand.service.db import (
+from gridexpand.api.db import (
     DatabaseUnavailable,
     connect,
     connection_info,
@@ -138,7 +138,7 @@ def grid_candidates(ags: int, pylovo_version_id: str, min_buildings: int, plz: i
     Every candidate lists the model cases that already have power-flow summaries.
     """
     from gridexpand.db.grids import list_grid_candidates
-    from gridexpand.service.db import engine
+    from gridexpand.api.db import engine
 
     candidates = list_grid_candidates(engine(), ags, min_buildings=int(min_buildings), demand_scope="all",
                                       pylovo_version_id=str(pylovo_version_id))

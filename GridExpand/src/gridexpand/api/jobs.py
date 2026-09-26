@@ -1,6 +1,6 @@
 """Background jobs: the service runs ``gridexpand`` commands as subprocesses.
 
-Modelled on pylovo-ui's job runner (``pylovo_ui/jobs.py``) so both tools behave alike:
+Modelled on pylovo's API job runner (``pylovo_api/jobs.py``) so both tools behave alike:
 a job does exactly what the same commands do in a terminal, its output is kept in memory
 and in ``<state>/jobs/<id>.log``, browsers follow it through Server-Sent Events, and it
 can be cancelled. Differences:
@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from gridexpand.service.runlog import (
+from gridexpand.api.runlog import (
     RunTracker,
     classify_line,
     format_event,

@@ -1,4 +1,4 @@
-# GridExpand (CLI + web service) in one image. Build from GridExpand/:
+# GridExpand (CLI + HTTP API) in one image. Build from GridExpand/:
 #   docker build -f docker/Dockerfile -t gridexpand .
 # Nothing private is baked in: the database credentials (DB_* environment variables, or a .env
 # mounted at $GRIDEXPAND_ENV_FILE), the runtime folder (work/) and the large untracked inputs
@@ -14,9 +14,9 @@ WORKDIR /app
 # manylinux wheels with their native libraries (GDAL, PROJ, GEOS, HDF5, libpq, HiGHS, Gurobi).
 # uv's download cache stays out of the image (a build cache mount; ~1 GB).
 COPY pyproject.toml uv.lock README.md LICENSE ./
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-install-project --extra service
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-install-project --extra api
 COPY . .
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --extra service
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --extra api
 # TEASER opens its shipped JSON input files with mode "r+" although it only reads them; the
 # container runs as the caller's uid, so these files (and only these) must be writable.
 RUN find /app/.venv -path "*/teaser/data/input/inputdata/*.json" -exec chmod a+w {} +
@@ -28,7 +28,11 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     GRIDEXPAND_ENV_FILE=/run/gridexpand/.env \
     HOME=/tmp MPLCONFIGDIR=/tmp/matplotlib NUMBA_CACHE_DIR=/tmp/numba \
     PYTHONUNBUFFERED=1
+# The git revision reported by /api/health (set by CI: --build-arg GRIDEXPAND_REVISION=<sha>).
+ARG GRIDEXPAND_REVISION=""
+ENV GRIDEXPAND_REVISION=${GRIDEXPAND_REVISION}
 EXPOSE 18766
-# Binds 127.0.0.1: run the container with host networking (see compose.yaml) so the service
-# stays local and a database on the host is reachable as for the CLI.
-CMD ["gridexpand", "serve", "--host", "127.0.0.1", "--port", "18766"]
+# Binds 127.0.0.1: run the container with host networking (see compose.yaml) so the API stays
+# local and a database on the host is reachable as for the CLI. The image also holds the
+# pipeline CLI: `docker compose exec gridexpand-api gridexpand run <run.yaml>`.
+CMD ["gridexpand", "api", "--host", "127.0.0.1", "--port", "18766"]

@@ -57,9 +57,9 @@ COMMANDS: dict[str, tuple[str, str]] = {
         "gridexpand.db.maintenance",
         "Database maintenance: init-schema, migrate, compress, relink-pylovo, delete-scenario.",
     ),
-    "serve": (
-        "gridexpand.service.cli",
-        "Start the web service (job API, results, pylovo-ui plugin); needs the 'service' extra.",
+    "api": (
+        "gridexpand.api.cli",
+        "Start the HTTP API for the GridPlanner UI (jobs, results, scenarios); needs the 'api' extra.",
     ),
 }
 

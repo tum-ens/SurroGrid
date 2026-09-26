@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from gridexpand.service.commands import (
+from gridexpand.api.commands import (
     PipelineSpec,
     contiguous_range,
     pipeline_steps,
     run_yaml,
 )
-from gridexpand.service.queries import parse_run_name, split_scenario_key
-from gridexpand.service.runlog import (
+from gridexpand.api.queries import parse_run_name, split_scenario_key
+from gridexpand.api.runlog import (
     RunProgress,
     classify_line,
     format_event,
@@ -105,7 +105,7 @@ def test_commands(tmp_path):
 
 def test_single_grid_run_yaml_and_terminal_commands(tmp_path):
     from gridexpand.scenario.run_config import load_run_config
-    from gridexpand.service.commands import run_yaml_text, terminal_commands
+    from gridexpand.api.commands import run_yaml_text, terminal_commands
 
     scenario = Path(__file__).resolve().parents[2] / "config" / "scenarios" / "schweinfurt_2045.yaml"
     spec = PipelineSpec(ags=9184137, pylovo_version_id="1", scenario_config=scenario, model_cases=("pre",),
@@ -120,13 +120,13 @@ def test_single_grid_run_yaml_and_terminal_commands(tmp_path):
     assert local[0]["command"] == f"tmux new-session -d -s ui_grid 'uv run gridexpand run {path}; exec bash'"
     assert local[-1]["command"].endswith("--resume")
     docker = terminal_commands(path, "ui grid!", in_container=True, project_dir=tmp_path)
-    assert "docker compose exec gridexpand gridexpand run" in docker[0]["command"] and "-s ui-grid-" in docker[0]["command"]
+    assert "docker compose exec gridexpand-api gridexpand run" in docker[0]["command"] and "-s ui-grid-" in docker[0]["command"]
 
 
 def test_status_rows_and_stage_from_state(tmp_path):
     import json
 
-    from gridexpand.service.runlog import RunTracker, read_state, read_status_rows
+    from gridexpand.api.runlog import RunTracker, read_state, read_status_rows
 
     root = tmp_path / "job"
     (root / "pre").mkdir(parents=True)

@@ -1,4 +1,4 @@
-"""FastAPI application of the GridExpand service."""
+"""FastAPI application of the GridExpand API (``gridexpand api``)."""
 
 from __future__ import annotations
 
@@ -10,34 +10,23 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import DBAPIError, OperationalError, ProgrammingError
 
 from gridexpand import paths
-from gridexpand.service import API_VERSION, CSRF_HEADER, db, environment
-from gridexpand.service.jobs import JobManager
-from gridexpand.service.routers import jobs, meta, results, scenarios, ui
-from gridexpand.service.settings import ServiceSettings
+from gridexpand.api import API_VERSION, CSRF_HEADER, db, environment
+from gridexpand.api.jobs import JobManager
+from gridexpand.api.routers import jobs, meta, results, scenarios
+from gridexpand.api.settings import ServiceSettings
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-log = logging.getLogger("gridexpand.service")
-
-
-class NoCacheStaticFiles(StaticFiles):
-    """Static plugin modules: always revalidated, so a new service version is picked up."""
-
-    async def get_response(self, path, scope):
-        response = await super().get_response(path, scope)
-        response.headers["Cache-Control"] = "no-cache"
-        return response
+log = logging.getLogger("gridexpand.api")
 
 
 class RootPathMiddleware:
     """Serve the app below ``root_path`` whether or not a reverse proxy strips the prefix.
 
-    ASGI expects ``path`` to include ``root_path``; Starlette resolves mounts (the plugin's
-    static files) that way. A proxy that strips ``/gridexpand`` sends ``/ui/plugin.js``, so the
-    prefix is added back; direct requests work with and without the prefix.
+    ASGI expects ``path`` to include ``root_path``. A proxy that strips ``/gridexpand`` sends
+    ``/api/health``, so the prefix is added back; direct requests work with and without it.
     """
 
     def __init__(self, app, root_path: str) -> None:
@@ -61,7 +50,7 @@ def _version() -> str:
 
 
 def create_app(settings: ServiceSettings | None = None) -> FastAPI:
-    """Build the service app.
+    """Build the API app.
 
     Args:
         settings: Runtime settings (default: :meth:`ServiceSettings.from_env`).
@@ -81,9 +70,9 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
         db.reset_engine()
 
     app = FastAPI(
-        title="GridExpand service", version=_version(), lifespan=lifespan,
-        description="Job API and result queries of GridExpand (load allocation, urbs optimisation, power flow, "
-                    f"grid expansion) and the pylovo-ui plugin panels. API version {API_VERSION}.",
+        title="GridExpand API", version=_version(), lifespan=lifespan,
+        description="Jobs, results and scenario files of GridExpand (load allocation, urbs optimisation, power "
+                    f"flow, grid expansion) for the GridPlanner UI. API version {API_VERSION}.",
     )
     app.state.settings = settings
     app.state.jobs = manager
@@ -107,7 +96,7 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
             response.headers.setdefault("Cache-Control", "no-store")
         return response
 
-    if settings.cors_origins:  # development only: pylovo-ui served from another origin
+    if settings.cors_origins:  # development only: a UI served from another origin
         app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["GET", "POST", "DELETE"],
                            allow_headers=["Content-Type", CSRF_HEADER, "Last-Event-ID"], max_age=600)
     if root:  # outermost: every other layer sees the ASGI form path = root_path + route path
@@ -130,13 +119,12 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
     async def database_error(_: Request, exc: DBAPIError):
         return JSONResponse({"detail": f"Database error: {db.error_message(exc)}"}, status_code=500)
 
-    for router in (meta.router, scenarios.router, jobs.router, results.router, ui.router):
+    for router in (meta.router, scenarios.router, jobs.router, results.router):
         app.include_router(router)
 
     @app.get("/", include_in_schema=False)
     def index() -> dict:
-        return {"service": "gridexpand", "version": app.version, "api": API_VERSION,
-                "docs": "docs", "plugin_manifest": "ui/manifest.json"}
+        return {"service": "gridexpand-api", "version": app.version, "api": API_VERSION,
+                "docs": "docs", "openapi": "openapi.json"}
 
-    app.mount("/ui", NoCacheStaticFiles(directory=ui.UI_DIR), name="ui")
     return app

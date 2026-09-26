@@ -1,0 +1,55 @@
+# Contract of the GridExpand API (the GridPlanner UI calls these routes).
+#   1. docs/openapi.json must match the app (a unit test runs the same comparison);
+#   2. on pull requests: no breaking change against the target branch's schema, unless the
+#      API version (info.x-api-version, gridexpand.api.API_VERSION) was bumped on purpose.
+name: GridExpand API contract
+
+on:
+  pull_request:
+    paths:
+      - "GridExpand/src/gridexpand/api/**"
+      - "GridExpand/docs/openapi.json"
+      - ".github/workflows/gridexpand-api-contract.yml"
+  push:
+    branches: ["main", "develop", "feature/**"]
+    paths:
+      - "GridExpand/src/gridexpand/api/**"
+      - "GridExpand/docs/openapi.json"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: GridExpand
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Snapshot matches the app
+        run: |
+          uv sync --locked --extra api
+          uv run --locked pytest -q tests/api/test_openapi_snapshot.py
+
+      - name: No breaking change without an API version bump
+        if: github.event_name == 'pull_request'
+        run: |
+          base="origin/${{ github.base_ref }}"
+          if ! git cat-file -e "$base:GridExpand/docs/openapi.json" 2>/dev/null; then
+            echo "no schema on $base yet: nothing to compare"; exit 0
+          fi
+          git show "$base:GridExpand/docs/openapi.json" > "$RUNNER_TEMP/base.json"
+          old=$(jq -r '.info["x-api-version"]' "$RUNNER_TEMP/base.json")
+          new=$(jq -r '.info["x-api-version"]' docs/openapi.json)
+          if [ "$old" != "$new" ]; then
+            echo "API version $old -> $new: breaking changes are intended"; exit 0
+          fi
+          docker run --rm -v "$RUNNER_TEMP:/base:ro" -v "$PWD/docs:/head:ro" tufin/oasdiff \
+            breaking /base/base.json /head/openapi.json --fail-on ERR

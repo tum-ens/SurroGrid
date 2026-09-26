@@ -2,7 +2,7 @@
 
 Database tests run only when you name the sandbox database of ``GridExpand/.env``::
 
-    GRIDEXPAND_SERVICE_TEST_DATABASE=sg_impl_service_demo uv run pytest tests/service
+    GRIDEXPAND_API_TEST_DATABASE=sg_impl_service_demo uv run pytest tests/api
 
 They only read (the engine uses read-only transactions); no job is started against the
 database. Everything else uses the unreachable database of ``tests/conftest.py``.
@@ -24,7 +24,7 @@ REAL_DATABASE_PORT = "54327"  # the user's InfDB: never used by tests
 @pytest.fixture()
 def settings(tmp_path: Path):
     from gridexpand.paths import SCENARIO_CONFIG_DIR
-    from gridexpand.service.settings import ServiceSettings
+    from gridexpand.api.settings import ServiceSettings
 
     scenarios = tmp_path / "scenarios"
     scenarios.mkdir()
@@ -38,7 +38,7 @@ def settings(tmp_path: Path):
 @pytest.fixture()
 def fake_solvers(monkeypatch):
     """No Gurobi licence check (a subprocess) in unit tests."""
-    from gridexpand.service import environment
+    from gridexpand.api import environment
 
     info = {"installed": False, "package_version": None, "usable": False, "detail": "test", "checked_at": 0}
     monkeypatch.setattr(environment, "check_gurobi", lambda: info)
@@ -49,7 +49,7 @@ def fake_solvers(monkeypatch):
 def client(settings, fake_solvers):
     from fastapi.testclient import TestClient
 
-    from gridexpand.service.app import create_app
+    from gridexpand.api.app import create_app
 
     with TestClient(create_app(settings), headers={"X-GridExpand-UI": "1"}) as test_client:
         yield test_client
@@ -58,17 +58,17 @@ def client(settings, fake_solvers):
 @pytest.fixture()
 def sandbox_db(monkeypatch):
     """Point the service (and get_candidates) at the sandbox database of GridExpand/.env."""
-    wanted = os.getenv("GRIDEXPAND_SERVICE_TEST_DATABASE")
+    wanted = os.getenv("GRIDEXPAND_API_TEST_DATABASE")
     if not wanted:
-        pytest.skip("set GRIDEXPAND_SERVICE_TEST_DATABASE=<sandbox db of GridExpand/.env> to run database tests")
+        pytest.skip("set GRIDEXPAND_API_TEST_DATABASE=<sandbox db of GridExpand/.env> to run database tests")
     env = dotenv_values(PROJECT_DIR / ".env")
     if env.get("DB_NAME") != wanted or env.get("DB_PORT") == REAL_DATABASE_PORT:
-        pytest.skip(f"GRIDEXPAND_SERVICE_TEST_DATABASE={wanted} is not the sandbox database of GridExpand/.env")
+        pytest.skip(f"GRIDEXPAND_API_TEST_DATABASE={wanted} is not the sandbox database of GridExpand/.env")
     from sqlalchemy import URL, create_engine
 
     from gridexpand.db import SurroGridDatabase
     from gridexpand.scenario import synthetic_ags_runner
-    from gridexpand.service import db as service_db
+    from gridexpand.api import db as service_db
 
     url = URL.create("postgresql+psycopg2", username=env["DB_USER"], password=env["DB_PASSWORD"],
                      host=env["DB_HOST"], port=int(env["DB_PORT"]), database=env["DB_NAME"])

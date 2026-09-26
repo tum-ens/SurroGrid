@@ -72,6 +72,7 @@ jobs:
           context: GridExpand
           file: GridExpand/docker/Dockerfile
           platforms: linux/amd64
+          build-args: GRIDEXPAND_REVISION=${{ github.sha }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

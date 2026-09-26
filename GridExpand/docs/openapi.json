@@ -1,0 +1,1616 @@
+{
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "PipelineBody": {
+        "additionalProperties": false,
+        "description": "A synthetic pipeline run for the grids of one region.",
+        "properties": {
+          "ags": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "AGS; resolved from the PLZ when omitted",
+            "title": "Ags"
+          },
+          "candidate_indexes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "consecutive candidate numbers of the AGS",
+            "title": "Candidate Indexes"
+          },
+          "grid_result_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "exactly this pylovo grid (ignores min_buildings)",
+            "title": "Grid Result Id"
+          },
+          "min_buildings": {
+            "default": 5,
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Min Buildings",
+            "type": "integer"
+          },
+          "model_cases": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Model Cases",
+            "type": "array"
+          },
+          "plz": {
+            "anyOf": [
+              {
+                "maximum": 99999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "only the grids of this PLZ",
+            "title": "Plz"
+          },
+          "powerflow_output": {
+            "default": "summary",
+            "pattern": "^(summary|both)$",
+            "title": "Powerflow Output",
+            "type": "string"
+          },
+          "pylovo_version_id": {
+            "pattern": "^[\\w.-]{1,10}$",
+            "title": "Pylovo Version Id",
+            "type": "string"
+          },
+          "scenario": {
+            "description": "file name from GET /api/scenarios",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Scenario",
+            "type": "string"
+          },
+          "timeframe_mode": {
+            "default": "max_base_electricity_demand_week",
+            "title": "Timeframe Mode",
+            "type": "string"
+          },
+          "workers": {
+            "default": 1,
+            "maximum": 16.0,
+            "minimum": 1.0,
+            "title": "Workers",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pylovo_version_id",
+          "scenario"
+        ],
+        "title": "PipelineBody",
+        "type": "object"
+      },
+      "PreviewBody": {
+        "additionalProperties": false,
+        "description": "An edited copy of a base scenario: form ``changes`` (dotted keys) on top of ``text`` or the base file.",
+        "properties": {
+          "base": {
+            "description": "file name from GET /api/scenarios",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Base",
+            "type": "string"
+          },
+          "base_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "text_sha256 of GET …/form: refuse if the base file changed since",
+            "title": "Base Sha256"
+          },
+          "changes": {
+            "additionalProperties": true,
+            "description": "dotted YAML path -> value (fields of GET …/form)",
+            "maxProperties": 200,
+            "title": "Changes",
+            "type": "object"
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "target file name (checked, not written)",
+            "title": "File Name"
+          },
+          "scenario_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "sets scenario.id",
+            "title": "Scenario Id"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 200000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "edited YAML text (default: the base file)",
+            "title": "Text"
+          }
+        },
+        "required": [
+          "base"
+        ],
+        "title": "PreviewBody",
+        "type": "object"
+      },
+      "SaveBody": {
+        "additionalProperties": false,
+        "description": "Save the edited copy as ``file_name`` in the user scenario directory.",
+        "properties": {
+          "base": {
+            "description": "file name from GET /api/scenarios",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Base",
+            "type": "string"
+          },
+          "base_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "text_sha256 of GET …/form: refuse if the base file changed since",
+            "title": "Base Sha256"
+          },
+          "changes": {
+            "additionalProperties": true,
+            "description": "dotted YAML path -> value (fields of GET …/form)",
+            "maxProperties": 200,
+            "title": "Changes",
+            "type": "object"
+          },
+          "file_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "File Name",
+            "type": "string"
+          },
+          "overwrite": {
+            "default": false,
+            "description": "replace an own file of the same name (a backup is kept)",
+            "title": "Overwrite",
+            "type": "boolean"
+          },
+          "scenario_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Scenario Id",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 200000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "edited YAML text (default: the base file)",
+            "title": "Text"
+          }
+        },
+        "required": [
+          "base",
+          "scenario_id",
+          "file_name"
+        ],
+        "title": "SaveBody",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Jobs, results and scenario files of GridExpand (load allocation, urbs optimisation, power flow, grid expansion) for the GridPlanner UI. API version 1.",
+    "title": "GridExpand API",
+    "version": "api-1",
+    "x-api-version": 1
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/grids": {
+      "get": {
+        "description": "Candidate grids with the runner's numbering (all of the AGS, or one PLZ).",
+        "operationId": "grids_api_grids_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ags",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ags"
+            }
+          },
+          {
+            "in": "query",
+            "name": "plz",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 99999,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plz"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pylovo_version_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[\\w.-]{1,10}$",
+              "title": "Pylovo Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_buildings",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Min Buildings",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Grids Api Grids Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Grids",
+        "tags": [
+          "status"
+        ]
+      }
+    },
+    "/api/health": {
+      "get": {
+        "description": "Liveness probe and contract version (no database access).\n\n``api`` is the contract version of the ``/api`` routes: it changes only with a breaking\nchange, and the GridPlanner UI refuses a major version it does not know.",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Health Api Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "status"
+        ]
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "description": "All jobs (newest first), including the recent history.",
+        "operationId": "list_jobs_api_jobs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Jobs Api Jobs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Jobs",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/pipeline": {
+      "post": {
+        "description": "Queue ``gridexpand run`` for each selected model case (one after another).",
+        "operationId": "start_pipeline_api_jobs_pipeline_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PipelineBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Start Pipeline Api Jobs Pipeline Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Pipeline",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/terminal": {
+      "get": {
+        "description": "Runs prepared for a terminal (newest first) with the state of their run directory.",
+        "operationId": "terminal_runs_api_jobs_terminal_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Terminal Runs Api Jobs Terminal Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Terminal Runs",
+        "tags": [
+          "jobs"
+        ]
+      },
+      "post": {
+        "description": "Write the run YAML of a request for a run in a terminal (``tmux``) instead of a job.\n\nReturns the YAML, the commands to start and follow it, and a portable copy of the YAML\n(scenario referenced as ``../scenarios/<file>``) for another GridExpand checkout.",
+        "operationId": "prepare_terminal_run_api_jobs_terminal_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PipelineBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Prepare Terminal Run Api Jobs Terminal Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prepare Terminal Run",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}": {
+      "get": {
+        "description": "One job with the per-grid status of every step (and the last ``tail`` log lines).",
+        "operationId": "get_job_api_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tail",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 5000,
+              "minimum": 0,
+              "title": "Tail",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Job Api Jobs  Job Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}/cancel": {
+      "post": {
+        "description": "Cancel a queued job, or stop a running one (SIGTERM to its process group).",
+        "operationId": "cancel_job_api_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cancel Job Api Jobs  Job Id  Cancel Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}/events": {
+      "get": {
+        "description": "Server-Sent Events: ``log`` (new lines), ``status`` (summary changes), final ``end``.",
+        "operationId": "job_events_api_jobs__job_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Job Events",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}/files": {
+      "get": {
+        "description": "Files in the job's run directories (events, status, summaries, per-grid logs).",
+        "operationId": "job_files_api_jobs__job_id__files_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Job Files Api Jobs  Job Id  Files Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Job Files",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}/files/{path}": {
+      "get": {
+        "description": "One file of the job's run directories (text files only).",
+        "operationId": "job_file_api_jobs__job_id__files__path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Job File",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}/log": {
+      "get": {
+        "description": "Log lines after a sequence number (``format=text`` downloads the whole log).",
+        "operationId": "job_log_api_jobs__job_id__log_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Job Log",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/results/analyses": {
+      "get": {
+        "description": "``expansion_analysis_run`` rows with totals (cost, cables and transformers to reinforce).\n\nWith ``plz`` (and/or ``pylovo_version_id``) the totals cover only those grids and\nanalyses without such grids are left out.",
+        "operationId": "analyses_api_results_analyses_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ags",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ags"
+            }
+          },
+          {
+            "in": "query",
+            "name": "plz",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 99999,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plz"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pylovo_version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[\\w.-]{1,10}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pylovo Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Analyses Api Results Analyses Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyses",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/api/results/analyses/{analysis_key}/assets": {
+      "get": {
+        "description": "Building assets of the analysed power-flow runs: one point per building (EPSG:4326)\nwith PV, battery, heat pump, heating rod, heat storage and EV capacities, plus totals\n(``features=false``: totals only).",
+        "operationId": "analysis_assets_api_results_analyses__analysis_key__assets_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_key",
+            "required": true,
+            "schema": {
+              "title": "Analysis Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "plz",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 99999,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plz"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pylovo_version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[\\w.-]{1,10}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pylovo Version Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "features",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Features",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Analysis Assets Api Results Analyses  Analysis Key  Assets Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analysis Assets",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/api/results/analyses/{analysis_key}/geojson": {
+      "get": {
+        "description": "Cables (``action``: none / add_1 / add_2plus) and transformers of one analysis (EPSG:4326).",
+        "operationId": "analysis_geojson_api_results_analyses__analysis_key__geojson_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_key",
+            "required": true,
+            "schema": {
+              "title": "Analysis Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "plz",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 99999,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plz"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pylovo_version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[\\w.-]{1,10}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pylovo Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Analysis Geojson Api Results Analyses  Analysis Key  Geojson Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analysis Geojson",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/api/results/analyses/{analysis_key}/grids": {
+      "get": {
+        "description": "Per-grid cost, cables to reinforce and transformer loading of one analysis.",
+        "operationId": "analysis_grids_api_results_analyses__analysis_key__grids_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_key",
+            "required": true,
+            "schema": {
+              "title": "Analysis Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "plz",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 99999,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plz"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pylovo_version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[\\w.-]{1,10}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pylovo Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Analysis Grids Api Results Analyses  Analysis Key  Grids Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analysis Grids",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/api/results/powerflow": {
+      "get": {
+        "description": "``powerflow_summary`` per grid, run (model case) and stage: loading percentiles, voltage p05, hours above limits.",
+        "operationId": "powerflow_api_results_powerflow_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ags",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ags"
+            }
+          },
+          {
+            "in": "query",
+            "name": "plz",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 99999,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plz"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pylovo_version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[\\w.-]{1,10}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pylovo Version Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scenario_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scenario Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Powerflow Api Results Powerflow Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Powerflow",
+        "tags": [
+          "results"
+        ]
+      }
+    },
+    "/api/scenarios": {
+      "get": {
+        "description": "Scenario YAMLs (``config/scenarios``, extra and user directories) with their key values.",
+        "operationId": "list_scenarios_api_scenarios_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Scenarios Api Scenarios Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Scenarios",
+        "tags": [
+          "scenarios"
+        ]
+      },
+      "post": {
+        "description": "Save the edited copy as a new file in the user scenario directory.\n\nShipped files are never written; replacing an own file needs ``overwrite: true`` and keeps\n``<name>.bak-<timestamp>``. Returns the new ``GET /api/scenarios`` entry with ``backup``.",
+        "operationId": "save_api_scenarios_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Save Api Scenarios Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/scenarios/preview": {
+      "post": {
+        "description": "Apply the changes to a copy of the base file and validate it with the loader of the runs.\n\nNothing is written. Returns ``{ok, issues: [{level, message, key?, line?}], text, diff (unified),\nchanges, values, id, configuration_hash, scenario_key, unchanged, target}``.",
+        "operationId": "preview_api_scenarios_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Preview Api Scenarios Preview Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/scenarios/{name}": {
+      "delete": {
+        "description": "Remove one of the user's scenario files (renamed to ``<name>.bak-<timestamp>``, not erased).",
+        "operationId": "delete_api_scenarios__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Api Scenarios  Name  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete",
+        "tags": [
+          "scenarios"
+        ]
+      },
+      "get": {
+        "description": "The YAML text of one listed scenario file.",
+        "operationId": "scenario_text_api_scenarios__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scenario Text",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/scenarios/{name}/form": {
+      "get": {
+        "description": "Editable fields of a scenario file with their values and YAML help texts, and its text.\n\n``writable``: the file is one of the user's own (it can be replaced or deleted); ``user_dir``\ntells whether new files can be saved; ``proposal`` is the default file name and scenario id.",
+        "operationId": "scenario_form_state_api_scenarios__name__form_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Scenario Form State Api Scenarios  Name  Form Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scenario Form State",
+        "tags": [
+          "scenarios"
+        ]
+      }
+    },
+    "/api/status": {
+      "get": {
+        "description": "Database, schema, pylovo versions, solvers, large input files, disk and jobs.",
+        "operationId": "status_api_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Status Api Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Status",
+        "tags": [
+          "status"
+        ]
+      }
+    }
+  }
+}
