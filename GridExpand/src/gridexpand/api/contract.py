@@ -27,7 +27,9 @@ def openapi_document() -> dict[str, Any]:
 
     with tempfile.TemporaryDirectory() as tmp:  # the job manager creates its folders
         schema = create_app(ServiceSettings(state_dir=Path(tmp) / "api", runs_dir=Path(tmp) / "runs")).openapi()
-    schema["info"] = {**schema["info"], "version": f"api-{API_VERSION}", "x-api-version": API_VERSION}
+    # info.version is the contract version (as in pylovo's api/openapi.json), not the package version,
+    # so the snapshot changes only with the routes; x-api-version is the same number for scripts.
+    schema["info"] = {**schema["info"], "version": str(API_VERSION), "x-api-version": API_VERSION}
     return schema
 
 

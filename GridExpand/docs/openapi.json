@@ -321,7 +321,7 @@
   "info": {
     "description": "Jobs, results and scenario files of GridExpand (load allocation, urbs optimisation, power flow, grid expansion) for the GridPlanner UI. API version 1.",
     "title": "GridExpand API",
-    "version": "api-1",
+    "version": "1",
     "x-api-version": 1
   },
   "openapi": "3.1.0",
