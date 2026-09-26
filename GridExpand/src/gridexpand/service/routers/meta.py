@@ -1,4 +1,4 @@
-"""Health, status, scenarios and candidate grids."""
+"""Health, status and candidate grids (scenario files: :mod:`.scenarios`)."""
 
 from __future__ import annotations
 
@@ -6,10 +6,9 @@ import platform
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
 
 from gridexpand import paths
-from gridexpand.service import API_VERSION, environment, queries, scenarios
+from gridexpand.service import API_VERSION, environment, queries
 from gridexpand.service.settings import ServiceSettings
 
 router = APIRouter(prefix="/api", tags=["status"])
@@ -70,22 +69,6 @@ def status(request: Request) -> dict[str, Any]:
         "disk": environment.disk_usage(paths.WORK_DIR),
         "jobs": request.app.state.jobs.counts(),
     }
-
-
-@router.get("/scenarios")
-def list_scenarios(request: Request) -> list[dict[str, Any]]:
-    """Scenario YAMLs (``config/scenarios`` and extra directories) with their key values."""
-    return scenarios.list_scenarios(settings_of(request).scenario_dirs)
-
-
-@router.get("/scenarios/{name}", response_class=PlainTextResponse)
-def scenario_text(name: str, request: Request) -> str:
-    """The YAML text of one listed scenario file."""
-    try:
-        path = scenarios.resolve(settings_of(request).scenario_dirs, name)
-    except KeyError as exc:
-        raise HTTPException(404, f"Scenario '{name}' not found") from exc
-    return path.read_text(encoding="utf-8")
 
 
 @router.get("/grids")

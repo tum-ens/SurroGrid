@@ -51,7 +51,8 @@ def test_plugin_manifest_and_modules(client):
     assert manifest["schema"] == 1 and manifest["name"] == "gridexpand"
     assert manifest["entry"] == "ui/plugin.js" and manifest["api"] == "api/"
     assert manifest["csrf_header"] == "X-GridExpand-UI"
-    for path in ("/ui/plugin.js", "/ui/lib.js", "/ui/maplayer.js", "/ui/panels/runs.js", "/ui/panels/results.js"):
+    for path in ("/ui/plugin.js", "/ui/lib.js", "/ui/maplayer.js", "/ui/panels/runs.js", "/ui/panels/results.js",
+                 "/ui/panels/scenarios.js"):
         response = client.get(path)
         assert response.status_code == 200, path
         assert response.headers["cache-control"] == "no-cache"

@@ -16,7 +16,7 @@ from sqlalchemy.exc import DBAPIError, OperationalError, ProgrammingError
 from gridexpand import paths
 from gridexpand.service import API_VERSION, CSRF_HEADER, db, environment
 from gridexpand.service.jobs import JobManager
-from gridexpand.service.routers import jobs, meta, results, ui
+from gridexpand.service.routers import jobs, meta, results, scenarios, ui
 from gridexpand.service.settings import ServiceSettings
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -108,7 +108,7 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
         return response
 
     if settings.cors_origins:  # development only: pylovo-ui served from another origin
-        app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["GET", "POST"],
+        app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_methods=["GET", "POST", "DELETE"],
                            allow_headers=["Content-Type", CSRF_HEADER, "Last-Event-ID"], max_age=600)
     if root:  # outermost: every other layer sees the ASGI form path = root_path + route path
         app.add_middleware(RootPathMiddleware, root_path=root)
@@ -130,7 +130,7 @@ def create_app(settings: ServiceSettings | None = None) -> FastAPI:
     async def database_error(_: Request, exc: DBAPIError):
         return JSONResponse({"detail": f"Database error: {db.error_message(exc)}"}, status_code=500)
 
-    for router in (meta.router, jobs.router, results.router, ui.router):
+    for router in (meta.router, scenarios.router, jobs.router, results.router, ui.router):
         app.include_router(router)
 
     @app.get("/", include_in_schema=False)

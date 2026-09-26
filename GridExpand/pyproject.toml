@@ -57,6 +57,8 @@ notebooks = [
 service = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
+  # scenario editor: comment-preserving YAML round trip
+  "ruamel.yaml>=0.18,<0.19",
 ]
 
 [project.scripts]
