@@ -1,9 +1,4 @@
 thesis.md
-GridExpand/2.demand_allocation/gridalloc/data/statistics/general/mobility_profile_pool_old/mobility_availability_pool.csv
-GridExpand/2.demand_allocation/gridalloc/data/statistics/general/mobility_profile_pool_old/mobility_demand_pool.csv
-GridExpand/2.demand_allocation/gridalloc/data/statistics/general/mobility_profile_pool/
-GridExpand/5.postprocessing/plotting/thesis_plots.ipynb
-GridExpand/run_logs/*
 swf_usage.md
 pylovo_paper.tex
 paper_draft_pylovo-validation/*
@@ -13,14 +8,18 @@ __pycache__/
 !GridExpand/docs/img/*.png
 *.pdf
 *.svg
-GridExpand/5.postprocessing/paper.md
-GridExpand/4.powerflow/plots/reactive_sign_pre_ab_grid_case_10/delta_summary.json
-GridExpand/4.powerflow/plots/reactive_sign_pre_ab_grid_case_10/experiment_metadata.json
-GridExpand/4.powerflow/plots/reactive_sign_pre_ab_grid_case_10/summary.csv
-GridExpand/4.powerflow/plots/reactive_sign_pre_ab_grid_case_10/voltage_results.npz
-GridExpand/4.powerflow/plots/service_impedance_grid_case_10/diagnostics.json
-GridExpand/4.powerflow/plots/service_impedance_grid_case_10/summary.csv
-GridExpand/4.powerflow/plots/service_impedance_grid_case_10/voltage_results.npz
-GridExpand/4.powerflow/analysis/reactive_sign_ab.py
-GridExpand/4.powerflow/analysis/service_impedance_counterfactual.py
 paper
+
+# Folders of the pre-restructure GridExpand layout: runtime artifacts only, nothing tracked.
+# The package writes to GridExpand/work/ (ignored in GridExpand/.gitignore);
+# GridExpand/scripts/migrate_local_layout.py moves leftovers of old checkouts there.
+/GridExpand/1.grid_sampling/
+/GridExpand/2.demand_allocation/
+/GridExpand/3.urbs/
+/GridExpand/4.powerflow/
+/GridExpand/5.postprocessing/
+/GridExpand/common/
+/GridExpand/maintenance/
+/GridExpand/paired_validation/
+/GridExpand/scenario_pipeline/
+/GridExpand/run_logs/
