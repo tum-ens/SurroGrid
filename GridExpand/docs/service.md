@@ -163,9 +163,17 @@ unified diff, the configuration hash and the scenario key the copy gets.
 ## Container
 
 `docker/Dockerfile` (python:3.12-slim + uv, `uv sync --locked --no-dev --extra service`) and
-`docker/compose.yaml` (standalone service, host networking, runs as your uid). Mounted at run time:
-`.env` (read-only, `GRIDEXPAND_ENV_FILE`), `work/`, `config/`, and the untracked large inputs as
-explicit read-only file mounts (`elec_lps.h5`, the two mobility pool CSVs). Step 3 in a container:
+`docker/compose.yaml` (standalone service, host networking, runs as your uid). The database comes from
+`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` in the environment (GridPlanner) or from a
+`.env` mounted read-only at `GRIDEXPAND_ENV_FILE` (standalone compose; the file wins over the
+environment); without either, database calls fail with "No database configured". Mounted at run
+time: `work/`, `config/` (standalone), and the untracked large inputs as explicit read-only file mounts
+(`elec_lps.h5`, the two mobility pool CSVs). The image contains no `.env`, licence or data file.
+
+CI (`.github/workflows/gridexpand-image.yml`) publishes `ghcr.io/tum-ens/gridexpand` for pushes to
+`main`, `develop` and `feature/**` (tag = branch name with `/` → `-`, e.g. `feature-update-pipeline`;
+`latest` = `main`), for version tags `vX.Y.Z` (tags `X.Y.Z` and `X.Y`) and on manual dispatch; every
+build is also tagged `sha-<commit>`. Step 3 in a container:
 `GRIDEXPAND_SOLVER=appsi_highs` (HiGHS, in the image, no licence) runs every case; `gurobi` uses
 gurobipy (Pyomo's `gurobi` interface falls back to it when `gurobi.sh` is absent) and needs a Gurobi
 WLS licence file (`WLSACCESSID`, `WLSSECRET`, `LICENSEID`) mounted read-only with `GRB_LICENSE_FILE`

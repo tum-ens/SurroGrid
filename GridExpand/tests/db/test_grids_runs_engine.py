@@ -74,6 +74,26 @@ def test_database_url_escapes_credentials(monkeypatch: pytest.MonkeyPatch) -> No
     assert make_url(url.render_as_string(hide_password=False)).password == "p@ss:w/rd%"
 
 
+def test_database_url_from_the_environment_without_env_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    # Containers pass DB_* as environment variables and mount no .env file.
+    monkeypatch.setattr(engine, "ENV_FILE", tmp_path / "missing.env")
+    monkeypatch.setattr(engine, "_env_loaded", False)
+    for name, value in {
+        "DB_USER": "u", "DB_PASSWORD": "pw", "DB_HOST": "db.example", "DB_PORT": "5433", "DB_NAME": "infdb",
+    }.items():
+        monkeypatch.setenv(name, value)
+    url = engine.database_url()
+    assert (url.host, url.port, url.database, url.username, url.password) == ("db.example", 5433, "infdb", "u", "pw")
+
+
+def test_database_url_without_database_name_is_a_clear_error(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setattr(engine, "ENV_FILE", tmp_path / "missing.env")
+    monkeypatch.setattr(engine, "_env_loaded", False)
+    monkeypatch.delenv("DB_NAME", raising=False)
+    with pytest.raises(engine.DatabaseNotConfigured, match=r"DB_NAME.*missing\.env \(not found\)"):
+        engine.database_url()
+
+
 def test_get_engine_is_cached_per_url() -> None:
     url = make_url("postgresql+psycopg2://a:b@127.0.0.1:9/one")
     assert engine.get_engine(url) is engine.get_engine(url)

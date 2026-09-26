@@ -60,7 +60,7 @@ def status(request: Request) -> dict[str, Any]:
             "python": platform.python_version(),
             "project_dir": str(paths.PROJECT_DIR),
             "work_dir": str(paths.WORK_DIR),
-            "env_file": str(paths.ENV_FILE),
+            "env_file": str(paths.ENV_FILE) if paths.ENV_FILE.is_file() else None,  # None: environment only
             "root_path": settings.root_path,
         },
         "database": queries.database_status(),

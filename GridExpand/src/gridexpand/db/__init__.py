@@ -7,10 +7,11 @@ Modules: ``engine`` (connection settings, cached engines), ``schema``
 """
 
 from gridexpand.db.database import SurroGridDatabase, normalize_ags
-from gridexpand.db.engine import get_engine
+from gridexpand.db.engine import DatabaseNotConfigured, get_engine
 from gridexpand.db.schema import SchemaMigrationRequired, ensure_schema, refresh_qgis_views
 
 __all__ = [
+    "DatabaseNotConfigured",
     "SchemaMigrationRequired",
     "SurroGridDatabase",
     "ensure_schema",
