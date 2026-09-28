@@ -1,5 +1,6 @@
 -- Transformer expansion rows of one synthetic analysis (one per selected power-flow run).
--- Rating: pylovo equipment (transformer_positions_with_grid.s_max_kva), else the grid's rating.
+-- Rating: the station rating of the pylovo grid (grid_result.transformer_rated_power). The equipment
+-- columns of transformer_positions_with_grid describe one unit (an 800 kVA station has two 400 kVA units).
 WITH assumption AS (
     SELECT *
     FROM surrogrid.expansion_cost_assumption
@@ -30,16 +31,10 @@ transformer_base AS (
         sr.pylovo_grid_result_id,
         sr.pylovo_version_id,
         gr.transformer_equipment_name,
-        COALESCE(tpwg.s_max_kva, gr.transformer_rated_power::DOUBLE PRECISION) AS rated_kva
+        gr.transformer_rated_power::DOUBLE PRECISION AS rated_kva
     FROM expansion_selected_run sr
     JOIN pylovo.grid_result gr
       ON gr.grid_result_id = sr.pylovo_grid_result_id
-    LEFT JOIN pylovo.transformer_positions_with_grid tpwg
-      ON tpwg.grid_result_id = sr.pylovo_grid_result_id
-     AND tpwg.version_id = sr.pylovo_version_id
-     AND tpwg.plz = sr.plz
-     AND tpwg.kcid = sr.kcid
-     AND tpwg.bcid = sr.bcid
 ),
 transformer_peak AS (
     SELECT

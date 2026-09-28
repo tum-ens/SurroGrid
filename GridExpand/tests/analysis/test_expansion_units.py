@@ -16,6 +16,9 @@ def test_sql_fragments_are_inlined():
     assert "/*CABLE_SELECTION*/" not in line_sql and "generate_series" in line_sql
     transformer_sql = ge.sql_text("transformer_insert.sql")
     assert "/*TRANSFORMER_COST*/" not in transformer_sql and "all_in_replacement_to_100kva" in transformer_sql
+    # Station rating, not the unit rating s_max_kva of transformer_positions_with_grid.
+    assert "gr.transformer_rated_power::DOUBLE PRECISION AS rated_kva" in transformer_sql
+    assert "s_max_kva" not in transformer_sql
     # Deterministic tie-break of the critical component (B8).
     assert "loading_percent DESC NULLS LAST, component_line" in line_sql
 
