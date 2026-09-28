@@ -116,3 +116,50 @@ def test_results_equal_urbs(solved, key):
     pd.testing.assert_index_equal(actual.index, expected.index, check_exact=True)
     np.testing.assert_allclose(actual.to_numpy(), expected.to_numpy(), atol=1e-5, rtol=1e-7,
                                err_msg=f"{variant}: {key}")
+
+
+def test_no_optimum_charges_while_the_car_is_away(tmp_path):
+    """Availability limits the charging-station input in both optimizers.
+
+    At a feed-in tariff of 0 surplus PV is free, so without that limit an optimal
+    solution could burn it in a station whose car is away. Maximise exactly that
+    over the optimal solutions: it must be 0.
+    """
+    import pyomo.environ as pyo
+    from pyomo.environ import SolverFactory
+
+    from gridexpand.optimization.pypsa_model.solve import solve_network
+    from gridexpand.optimization.urbs.model import create_model
+
+    data, mode, settings = read_prepared(write_input(tmp_path / "input.h5", "heuristic"))
+    data["buy_sell_price"] = data["buy_sell_price"].assign(electricity_feed_in=0.0)
+    eff = data["eff_factor"]
+    away = {(int(t), site, pro): 1.0 - float(v) for (site, pro) in eff.columns if pro.startswith("charging_station")
+            for (_, t), v in eff[(site, pro)].items() if t > 0 and v < 1.0}
+    assert away
+
+    # urbs
+    model = create_model(copy.deepcopy(data), settings)
+    solver = SolverFactory("appsi_highs")
+    solver.options = dict(EXACT)
+    solver.solve(model)
+    optimum = pyo.value(model.objective_function)
+    model.face = pyo.Constraint(expr=model.objective_function.expr <= optimum + 1e-9 * abs(optimum))
+    model.objective_function.deactivate()
+    stf = next(iter(model.stf))
+    model.lost = pyo.Objective(expr=sum(share * model.tau_pro[t, stf, site, pro] for (t, site, pro), share in away.items()),
+                               sense=pyo.maximize)
+    solver.solve(model)
+    assert pyo.value(model.lost) == pytest.approx(0.0, abs=1e-6)
+
+    # PyPSA
+    network, parts, _ = solve_network(copy.deepcopy(data), mode, solver_name="appsi_highs", options=EXACT)
+    m = network.model
+    optimum = float(m.objective.value)
+    m.add_constraints(m.objective.expression <= optimum + 1e-9 * abs(optimum), name="face")
+    names = [f"{site}|{pro}" for site, pro in eff.columns if pro.startswith("charging_station")]
+    share = xr.DataArray(1.0 - eff.loc[eff.index.get_level_values("t") > 0, [c for c in eff.columns if c[1].startswith("charging_station")]].to_numpy(),
+                         coords={"snapshot": parts.snapshots, "name": names}, dims=("snapshot", "name"))
+    m.objective = -1 * (m["Link-p"].sel(name=names) * share).sum()
+    m.solve(solver_name="highs", io_api="direct", set_names=False, output_flag=False, **EXACT)
+    assert -float(m.objective.value) == pytest.approx(0.0, abs=1e-6)

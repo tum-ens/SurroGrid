@@ -15,7 +15,7 @@ heuristic cases, sized capacities where the optimized case invests):
         StorageUnit battery           energy = ep-ratio * power
         Link        heat pump         -> common_heat, efficiency = COP(t)
         Link        heating rod       -> common_heat, efficiency 1
-        Link        charging station  -> mobility<i>, efficiency = availability(t)   (legacy EVs)
+        Link        charging station  -> mobility<i>, efficiency and p_max_pu = availability(t)  (legacy EVs)
         Generator   EV charger        p = -charging within the sessions              (EV sessions)
     bus <site>|common_heat
         Link        -> space_heat, -> water_heat (urbs' Heat_dummy pass-throughs)
@@ -40,6 +40,8 @@ from gridexpand.optimization.urbs.features.modelhelper import invcost_factor
 
 EPS = 1e-9
 HOURS_PER_YEAR = 8760.0
+# processes whose eff_factor is an availability: it limits their input as well
+CHARGING_STATION_PREFIX = "charging_station"
 
 # ModelParts.processes['kind']
 IMPORT, FEED_IN, PV, LINK, EV_CHARGER = "import", "feed_in", "pv", "link", "ev_charger"
@@ -158,8 +160,10 @@ def build_building_model(data: dict, mode: dict):
         if not outputs:
             if not mode.get("evs") or row["ext"]:
                 raise unsupported(f"process {process!r} without output (only fixed EV-session chargers have none).")
-            # urbs bounds a charger only in the hours of its sessions (none: unbounded)
+            # a charger charges only in its sessions; without sessions only while available
             fraction = fractions.get(name)
+            if fraction is None:
+                fraction = _availability(data, site, process, snapshots)
             row.update(kind=EV_CHARGER, component="Generator")
             generators.append({**spec, "bus": bus[(site, cin)], "marginal_cost": 0.0,
                                "p_min_pu": -1.0 if fraction is None else -fraction, "p_max_pu": 0.0})
@@ -188,9 +192,10 @@ def build_building_model(data: dict, mode: dict):
                 efficiency = ratio_out
                 if (site, process) in data["eff_factor"].columns:  # COP or availability
                     efficiency = _series(data["eff_factor"], (site, process), snapshots) * ratio_out
+                availability = _availability(data, site, process, snapshots)
                 row.update(kind=LINK, component="Link")
                 links.append({**spec, "bus0": bus[(site, cin)], "bus1": bus[(site, cout)],
-                              "efficiency": efficiency})
+                              "efficiency": efficiency, "p_max_pu": 1.0 if availability is None else availability})
         rows.append(row)
 
     processes = pd.DataFrame(rows).set_index("name")
@@ -207,6 +212,13 @@ def build_building_model(data: dict, mode: dict):
         linked=_linked_storages(data, storages, processes), ev_label=ev_label, ev_energy=ev_energy,
     )
     return network, parts
+
+
+def _availability(data, site, process, snapshots) -> pd.Series | None:
+    """Connected share of the hour of a charging station (its eff_factor), else None."""
+    if not str(process).startswith(CHARGING_STATION_PREFIX) or (site, process) not in data["eff_factor"].columns:
+        return None
+    return _series(data["eff_factor"], (site, process), snapshots)
 
 
 def _price_series(data, site, commodity, com_price, snapshots) -> pd.Series:

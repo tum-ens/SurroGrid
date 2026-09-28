@@ -136,7 +136,7 @@ energy/power ratio; a heat storage and its heat pump of which only one is sized.
 | grid import (Buy commodity, `import` process) | `Generator`, marginal cost = buy price(t) × commodity price |
 | feed-in (`feed_in` process, Sell commodity) | `Generator` with `p_min_pu = -1`, `p_max_pu = 0`; marginal cost = sell price(t): revenue for p < 0 |
 | rooftop PV (SupIm, `e_pro_in == cap · supim`) | `Generator` with `p_min_pu = p_max_pu = supim(t)` (must-take, no curtailment) |
-| heat pump, heating rod, heat dummies, legacy charging stations | `Link`, efficiency = output ratio × `eff_factor(t)` (COP, availability) |
+| heat pump, heating rod, heat dummies, legacy charging stations | `Link`, efficiency = output ratio × `eff_factor(t)` (COP, availability); charging stations also `p_max_pu = eff_factor(t)` |
 | charger with dedicated EV sessions (no output) | electricity sink `Generator`, `p_min_pu = -fraction(t)` (0 outside sessions) |
 | storage | `StorageUnit` (`max_hours` = energy/power, cyclic, self-discharge, efficiencies) |
 | expansion with annuity, `cap-up` | `p_nom_extendable`, `capital_cost`, `p_nom_max` |
@@ -198,17 +198,21 @@ buildings (full year) with the same tie-breaks, urbs (one model) and PyPSA (eigh
 With the real scenarios the objective, all capacities, the use of every storage and the annual import of every
 building are identical, but the hourly split of surplus PV can differ. Self-consumption is optimized: PV that a
 storage can use profitably is stored the same way in every solution. What is left has no value at a feed-in
-tariff of 0 EUR/kWh, and the model can feed it in, run the heating rod instead of the heat pump, or draw it with a
-legacy charging station while the car is away (the station's availability scales only its output, so it can
-consume electricity with zero output; the dedicated EV sessions of the paired pipeline do not allow this). These
-all cost nothing, so the LP has many optimal solutions and every solver, interface or partition returns another
-one (urbs does the same when the solver changes). With a constant import price, the hour in which stored energy
-is used is free as well, so hourly imports differ while annual imports do not. On grid 84180/2/14 (heuristic case,
-urbs vs PyPSA, both Gurobi) charging stations lose 43.9 vs 27.8 MWh while the cars are away, the annual feed-in
-is 101.7 vs 116.5 MWh and the peak feed-in at the transformer 164 vs 191 kW.
+tariff of 0 EUR/kWh, and the model can feed it in or run the heating rod instead of the heat pump. Both cost
+nothing, so the LP has many optimal solutions and every solver, interface or partition returns another one (urbs
+does the same when the solver changes). With a constant import price, the hour in which stored energy is used is
+free as well, so hourly imports differ while annual imports do not. On grid 84180/2/14 (heuristic case, both
+optimizers with Gurobi) the annual feed-in is 147.3 vs 146.3 MWh.
+
+**Charging stations (legacy mobility buffer).** Their `eff_factor` is the connected share of the hour. It scales
+the output and, since 2026-09-28, also limits the input (`tau_pro <= dt * cap_pro * eff_factor`, urbs
+`res_process_availability`, PyPSA `p_max_pu`). Before that a station could draw electricity with zero output while
+the car was away, a free sink for surplus PV at a tariff of 0: on grid 84180/2/14 urbs lost 43.9 MWh a year this
+way (objective unchanged). Chargers of dedicated EV sessions are limited by their sessions; a charger without
+sessions is limited by its `eff_factor` in the same way.
 
 A small positive feed-in tariff removes the choice for the surplus: with 0.001 EUR/kWh, urbs + Gurobi, PyPSA +
-Gurobi and PyPSA + HiGHS give identical annual flows (feed-in 147.9 MWh, no charging while a car is away), but the
+Gurobi and PyPSA + HiGHS give identical annual flows (feed-in 147.9 MWh; measured before the charger fix), but the
 hours still differ (import in 6-12 % of the building-hours, peak import 959-995 kW), because with a flat import
 price and a flat tariff it is free when a car or battery charges from the grid and which surplus hours are stored.
 Unique hourly results need prices that differ from hour to hour or an explicit tie-break rule; the deterministic
