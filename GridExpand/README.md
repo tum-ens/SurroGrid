@@ -9,7 +9,7 @@ grids for validation.
 |---|---|---|
 | 1 grid sampling | `gridexpand.sampling` | export pylovo grids to HDF5 (optional; the database pipelines read pylovo directly) |
 | 2 demand allocation | `gridexpand.allocation` | hourly building/bus time series and asset plans, urbs inputs |
-| 3 optimization | `gridexpand.optimization` | urbs building model: dispatch (and sizing for the optimized case) |
+| 3 optimization | `gridexpand.optimization` | building model (urbs or PyPSA optimizer): dispatch (and sizing for the optimized case) |
 | 4 power flow | `gridexpand.powerflow` | pandapower time series before and after electrification |
 | 5 analysis | `gridexpand.analysis` | cable and transformer expansion costs, loaders, plots, notebooks |
 | API | `gridexpand.api` | HTTP API for the GridPlanner UI: jobs, results, scenario files |
@@ -33,6 +33,9 @@ Step 3 uses Gurobi by default (gurobipy is installed; a licence is needed for mo
 bundled licence). `GUROBI_HOME` and `GRB_LICENSE_FILE` are taken from `.env` or the environment, otherwise
 `/opt/gurobi1302/linux64` and `~/gurobi.lic` when they exist. Without a licence use
 `GRIDEXPAND_SOLVER=appsi_highs` (HiGHS; results may differ, see [Step 3](docs/steps/3_urbs.md)).
+Step 3 has two optimizers for the same building model: `urbs` (Pyomo, default) and `pypsa` (PyPSA/linopy, several
+times faster, full-year inputs only); select one with `--optimizer`, `execution.optimizer` or
+`GRIDEXPAND_OPTIMIZER` ([Step 3](docs/steps/3_urbs.md#pypsa-optimizer)).
 
 ### Large data assets
 

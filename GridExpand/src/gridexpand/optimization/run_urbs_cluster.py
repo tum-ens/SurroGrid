@@ -1,8 +1,10 @@
-"""Step 3 entry point: run the urbs building optimization for one Step 2 HDF5 file.
+"""Step 3 entry point: run the building optimization for one Step 2 HDF5 file.
 
-This urbs version deviates from urbs-lvds (04 Feb 2025): no grid optimization,
-14a/bui-react, uhp, coordination, curtailment, microgrids, CO2 limits,
-intertemporal support timeframes, reactive power or Excel/LP outputs.
+Two optimizers solve the same model: ``urbs`` (Pyomo; this urbs version deviates
+from urbs-lvds (04 Feb 2025): no grid optimization, 14a/bui-react, uhp,
+coordination, curtailment, microgrids, CO2 limits, intertemporal support
+timeframes, reactive power or Excel/LP outputs) and ``pypsa`` (PyPSA/linopy,
+``gridexpand.optimization.pypsa_model``; full-year chronological inputs only).
 """
 
 from __future__ import annotations
@@ -17,7 +19,13 @@ from gridexpand.common.resource_report import resource_report
 from gridexpand.common.timeframe import read_hdf_metadata
 from gridexpand.optimization import urbs
 from gridexpand.optimization.identity import resolve_input_file, validate_step2_input
-from gridexpand.optimization.solver import SOLVER_ENV, SUPPORTED_SOLVERS
+from gridexpand.optimization.solver import (
+    OPTIMIZER_ENV,
+    SOLVER_ENV,
+    SUPPORTED_OPTIMIZERS,
+    SUPPORTED_SOLVERS,
+    resolve_optimizer_name,
+)
 from gridexpand.paths import (
     OPTIMIZATION_INPUT_DIR,
     OPTIMIZATION_LOGS_DIR,
@@ -39,15 +47,23 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--optimizer", choices=SUPPORTED_OPTIMIZERS, default=None,
+        help=f"Optimizer (default ${OPTIMIZER_ENV}, else urbs).",
+    )
+    parser.add_argument(
         "--n_cpu", "--partitions", dest="n_cpu", type=int, default=1,
         help=(
-            "Number of building clusters (partitions); each cluster is one model "
-            "solved in its own process. It changes the result, it is not a CPU limit."
+            "urbs only: number of building clusters (partitions); each cluster is one "
+            "model solved in its own process. It changes the result, it is not a CPU "
+            "limit. The pypsa optimizer solves one model per building."
         ),
     )
     parser.add_argument(
         "--cluster-concurrency", type=int, default=None,
-        help="Clusters solved at the same time (default $URBS_CLUSTER_CONCURRENCY, else all).",
+        help=(
+            "Models solved at the same time (urbs default: $URBS_CLUSTER_CONCURRENCY, "
+            "else all clusters; pypsa default: CPUs / solver threads)."
+        ),
     )
     parser.add_argument(
         "--solver", choices=SUPPORTED_SOLVERS, default=None,
@@ -83,6 +99,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     scenario, scenario_hash = load_scenario_config(args.scenario_config)
     if args.reduce_only and not (args.tsam or scenario.time_aggregation.enabled):
         parser.error("--reduce-only requires time_aggregation.enabled in the scenario YAML.")
+    args.optimizer = resolve_optimizer_name(args.optimizer)
+    if args.optimizer == "pypsa" and (args.tsam or scenario.time_aggregation.enabled):
+        parser.error("The pypsa optimizer supports full-year chronological inputs only (no TSAM).")
     args.scenario, args.scenario_hash = scenario, scenario_hash
     return args
 
@@ -143,7 +162,14 @@ def main(argv: list[str] | None = None) -> None:
         result_dir = urbs.prepare_result_directory(
             scenario_key=identity.scenario_key, result_root=OPTIMIZATION_RESULT_DIR
         )
-        result_path = urbs.run_lvds_opt(
+        if args.optimizer == "pypsa":
+            from gridexpand.optimization.pypsa_model import run_pypsa_opt
+
+            run = run_pypsa_opt
+        else:
+            run = urbs.run_lvds_opt
+        print(f"Optimizer: {args.optimizer}")
+        result_path = run(
             os.fspath(input_path),
             result_dir,
             global_settings,

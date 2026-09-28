@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -31,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from gridexpand.common.orchestration import CANCEL, Cancelled, install_cancel_handlers, run_step, utc_now
+from gridexpand.optimization.solver import OPTIMIZER_ENV
 from gridexpand.paths import RUNS_DIR
 from gridexpand.scenario import commands
 from gridexpand.scenario.config_loader import load_scenario_config, scenario_identity_key
@@ -149,6 +151,7 @@ def synthetic_settings(ctx: RunContext, group: ExecutionGroup):
         dynamic_step3=run.dynamic_step3,
         step4_cpus=run.step4_cpus,
         solver=run.solver,
+        optimizer=run.optimizer,
         powerflow_output=run.powerflow_output,
         powerflow_grid_scope=run.powerflow_grid_scope,
         case_qualified_output=True,
@@ -172,7 +175,6 @@ def synthetic_equivalent_command(settings) -> list[str]:
         "--workers", settings.workers, "--step2-cpus", settings.step2_cpus,
         "--step3-cpus", settings.step3_cpus, "--step3-max-cpus", settings.step3_max_cpus,
         "--step3-target-columns", settings.step3_target_columns,
-        "--step3-cluster-concurrency", settings.step3_cluster_concurrency,
         "--step4-cpus", settings.step4_cpus,
         "--scenario-config", settings.scenario_config,
         "--timeframe-mode", settings.timeframe_mode,
@@ -188,7 +190,7 @@ def synthetic_equivalent_command(settings) -> list[str]:
         "--electrification-assignment", settings.assignment_path,
         "--run-dir", settings.run_dir,
     ]
-    for name in ("plz", "kcid", "bcid", "start_index", "limit", "solver"):
+    for name in ("plz", "kcid", "bcid", "start_index", "limit", "step3_cluster_concurrency", "solver", "optimizer"):
         value = getattr(settings, name)
         if value is not None:
             argv += [f"--{name.replace('_', '-')}", value]
@@ -676,8 +678,12 @@ def execute(ctx: RunContext) -> int:
     check_identity(ctx.run_dir, run_identity(ctx), info={"run_hash": ctx.run_hash, "git": git_revision()})
     freeze_inputs(ctx.run_dir, ctx.run_yaml, ctx.run.scenario_path)
     ctx.state = RunState(ctx.run_dir, ctx.run.run_id, ctx.run.pipeline)
+    if ctx.run.optimizer:
+        # Every Step 3 job of the run inherits the optimizer (like GRIDEXPAND_SOLVER).
+        os.environ[OPTIMIZER_ENV] = ctx.run.optimizer
     ctx.state.event(event="run_start", run_hash=ctx.run_hash, scenario_hash=ctx.scenario_hash,
-                    model_cases=list(ctx.run.model_cases), resume=ctx.resume, until=ctx.until)
+                    model_cases=list(ctx.run.model_cases), resume=ctx.resume, until=ctx.until,
+                    optimizer=os.environ.get(OPTIMIZER_ENV) or "urbs")
     runner = {"synthetic": run_synthetic, "paired_validation": run_paired, "paired_aligned": run_aligned}
     try:
         code = runner[ctx.run.pipeline](ctx)

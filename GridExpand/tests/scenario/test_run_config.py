@@ -121,3 +121,18 @@ def test_aligned_run(tmp_path):
     raw["execution"]["parallel_providers"] = "false"
     with pytest.raises(ValueError, match="true or false"):
         run_config_from_dict(raw, base_dir=tmp_path)
+
+
+def test_optimizer_for_every_pipeline(tmp_path):
+    assert synthetic().optimizer is None  # $GRIDEXPAND_OPTIMIZER, else urbs
+    assert synthetic().step3_cluster_concurrency is None  # the optimizer's default
+    assert synthetic(execution__step3_cluster_concurrency=3).step3_cluster_concurrency == 3
+    assert synthetic(execution__optimizer="pypsa").optimizer == "pypsa"
+    with pytest.raises(ValueError, match="execution.optimizer"):
+        synthetic(execution__optimizer="oemof")
+    for name in ("forchheim_2045_paired_full_year.yaml", "joint_2045_v1_islands.yaml"):
+        raw = yaml.safe_load((RUN_CONFIG_DIR / name).read_text(encoding="utf-8"))
+        raw["run"]["scenario"] = str(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")
+        assert run_config_from_dict(raw, base_dir=tmp_path).optimizer is None
+        raw["execution"]["optimizer"] = "pypsa"
+        assert run_config_from_dict(raw, base_dir=tmp_path).optimizer == "pypsa"

@@ -1,4 +1,8 @@
-"""Solver selection, options and provenance for the Step 3 cluster models.
+"""Optimizer and solver selection, options and provenance for the Step 3 models.
+
+Two optimizers solve the same building model: ``urbs`` (Pyomo, the reference)
+and ``pypsa`` (PyPSA/linopy, ``gridexpand.optimization.pypsa_model``); select one
+with ``--optimizer`` or ``$GRIDEXPAND_OPTIMIZER`` (default ``urbs``).
 
 The default ``gurobi`` is Pyomo's LP-file interface to gurobipy (``_gurobi_file``)
 with the options GridExpand has always used. ``appsi_highs`` needs no licence (open
@@ -15,6 +19,10 @@ import math
 import os
 from typing import Any
 
+OPTIMIZER_ENV = "GRIDEXPAND_OPTIMIZER"
+DEFAULT_OPTIMIZER = "urbs"
+SUPPORTED_OPTIMIZERS = ("urbs", "pypsa")
+
 SOLVER_ENV = "GRIDEXPAND_SOLVER"
 DEFAULT_SOLVER = "gurobi"
 SUPPORTED_SOLVERS = ("gurobi", "appsi_highs")
@@ -28,6 +36,28 @@ GUROBI_OPTIONS = (
     ("Threads", 4),
 )
 HIGHS_OPTIONS = (("mip_rel_gap", 0.05),)
+
+
+def resolve_optimizer_name(requested: str | None = None) -> str:
+    """Optimizer from the CLI value, else ``$GRIDEXPAND_OPTIMIZER``, else ``urbs``."""
+    name = (requested or os.environ.get(OPTIMIZER_ENV, "") or DEFAULT_OPTIMIZER).strip()
+    if name not in SUPPORTED_OPTIMIZERS:
+        raise ValueError(
+            f"Unsupported Step 3 optimizer {name!r}; choose one of {SUPPORTED_OPTIMIZERS}."
+        )
+    return name
+
+
+def step3_concurrency(configured: int | None, optimizer: str | None = None) -> int | None:
+    """``--cluster-concurrency`` of a Step 3 command started by a runner.
+
+    The configured number, else the optimizer's default: 1 for urbs (a cluster
+    model needs several GB) and None for pypsa (``gridexpand optimize`` then
+    chooses the workers from the CPUs and the available memory).
+    """
+    if configured is not None:
+        return int(configured)
+    return 1 if resolve_optimizer_name(optimizer) == "urbs" else None
 
 
 def resolve_solver_name(requested: str | None = None) -> str:
@@ -117,6 +147,7 @@ def summarize_audit(audit) -> dict[str, Any]:
     first = audit.iloc[0]
     gaps = [value for value in audit["mip_gap"] if value is not None and math.isfinite(value)]
     return {
+        "optimization_optimizer": str(first.get("optimizer", DEFAULT_OPTIMIZER)),
         "optimization_solver": str(first["solver"]),
         "optimization_solver_version": str(first["solver_version"]),
         "optimization_solver_options": json.loads(first["solver_options"]),

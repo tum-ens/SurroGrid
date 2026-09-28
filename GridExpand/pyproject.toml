@@ -35,8 +35,10 @@ dependencies = [
   "pyomo>=6.9,<7",
   "tsam>=2.3,<3",
   "scikit-learn>=1.6,<2",
-  "highspy>=1.10,<2",
+  "highspy>=1.15,<2",
   "gurobipy>=13.0.2",
+  "pypsa>=1.2.4,<1.3",
+  "linopy>=0.9.1,<0.10",
   # Step 4 (power flow) and Step 5 (analysis, plotting)
   "pandapower>=3.1,<3.2",
   "matplotlib>=3.10,<3.11",

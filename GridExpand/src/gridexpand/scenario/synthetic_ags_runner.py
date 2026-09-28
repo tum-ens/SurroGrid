@@ -57,7 +57,13 @@ from gridexpand.common.timeframe import (
     scenario_output_directory,
 )
 from gridexpand.db import SurroGridDatabase
-from gridexpand.optimization.solver import SOLVER_ENV, SUPPORTED_SOLVERS
+from gridexpand.optimization.solver import (
+    OPTIMIZER_ENV,
+    SOLVER_ENV,
+    SUPPORTED_OPTIMIZERS,
+    SUPPORTED_SOLVERS,
+    step3_concurrency,
+)
 from gridexpand.paths import (
     ALLOCATION_RESULTS_DIR,
     OPTIMIZATION_INPUT_DIR,
@@ -137,10 +143,11 @@ class BatchSettings:
     step3_cpus: int = 16
     step3_max_cpus: int = 32
     step3_target_columns: int = 35
-    step3_cluster_concurrency: int = 1
+    step3_cluster_concurrency: int | None = None  # None: 1 for urbs, automatic for pypsa
     dynamic_step3: bool = True
     step4_cpus: int = 4
     solver: str | None = None
+    optimizer: str | None = None
     powerflow_output: str = "raw"
     powerflow_grid_scope: str = "full"
     case_qualified_output: bool = False
@@ -197,7 +204,8 @@ def check_settings(settings: BatchSettings) -> None:
         raise ValueError("--plz is required with --kcid/--bcid.")
     for name in ("workers", "step2_cpus", "step3_cpus", "step3_max_cpus", "step3_target_columns",
                  "step3_cluster_concurrency", "step4_cpus"):
-        if int(getattr(settings, name)) < 1:
+        value = getattr(settings, name)
+        if value is not None and int(value) < 1:  # step3_cluster_concurrency None: optimizer default
             raise ValueError(f"--{name.replace('_', '-')} must be at least 1.")
 
 
@@ -220,11 +228,13 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Minimum number of Step 3 building clusters (partitions).")
     parser.add_argument("--step3-max-cpus", type=int, default=32)
     parser.add_argument("--step3-target-columns", type=int, default=35)
-    parser.add_argument("--step3-cluster-concurrency", type=int, default=1,
-                        help="Step 3 clusters solved at the same time.")
+    parser.add_argument("--step3-cluster-concurrency", type=int, default=None,
+                        help="Step 3 models solved at the same time (default: 1 for urbs, automatic for pypsa).")
     parser.add_argument("--step4-cpus", type=int, default=4)
     parser.add_argument("--solver", choices=SUPPORTED_SOLVERS, default=None,
                         help="Step 3 solver (default: $GRIDEXPAND_SOLVER, else gurobi).")
+    parser.add_argument("--optimizer", choices=SUPPORTED_OPTIMIZERS, default=None,
+                        help="Step 3 optimizer (default: $GRIDEXPAND_OPTIMIZER, else urbs).")
     parser.add_argument("--scenario-config", type=Path, required=True, help="Scenario YAML (config/scenarios).")
     parser.add_argument(
         "--electrification-assignment",
@@ -374,6 +384,7 @@ def settings_from_args(args: argparse.Namespace) -> BatchSettings:
         dynamic_step3=not args.no_dynamic_step3,
         step4_cpus=args.step4_cpus,
         solver=args.solver,
+        optimizer=args.optimizer,
         powerflow_output=args.powerflow_output,
         powerflow_grid_scope=args.powerflow_grid_scope,
         case_qualified_output=args.case_qualified_output,
@@ -692,7 +703,7 @@ def choose_step3_settings(step2_output: Path, settings: BatchSettings) -> tuple[
     demand columns.
     """
     if not settings.dynamic_step3:
-        return int(settings.step3_cpus), int(settings.step3_cluster_concurrency), {}
+        return int(settings.step3_cpus), step3_concurrency(settings.step3_cluster_concurrency, settings.optimizer), {}
 
     stats: dict[str, int] = {}
     for key, name in (("urbs_in/demand", "demand_columns"), ("urbs_in/eff_factor", "eff_factor_columns")):
@@ -712,7 +723,7 @@ def choose_step3_settings(step2_output: Path, settings: BatchSettings) -> tuple[
     selected = next((value for value in choices if value >= required), choices[-1])
     selected = max(selected, int(settings.step3_cpus))
     selected = min(selected, max_cpus)
-    return selected, int(settings.step3_cluster_concurrency), stats
+    return selected, step3_concurrency(settings.step3_cluster_concurrency, settings.optimizer), stats
 
 
 # One candidate ----------------------------------------------------------------------------
@@ -796,7 +807,7 @@ def run_step3(ctx: CandidateContext, step2_output: Path, scenario_filename: str)
     ctx.status.update(
         ctx.index,
         step3_cpus=step3_cpus,
-        urbs_cluster_concurrency=cluster_concurrency,
+        urbs_cluster_concurrency="auto" if cluster_concurrency is None else cluster_concurrency,
         message=json.dumps(step3_stats, sort_keys=True),
     )
     ctx.command(
@@ -806,6 +817,7 @@ def run_step3(ctx: CandidateContext, step2_output: Path, scenario_filename: str)
             scenario_config=settings.scenario_config,
             cluster_concurrency=cluster_concurrency,
             solver=settings.solver,
+            optimizer=settings.optimizer,
         ),
         "step3_urbs_for_inflex" if settings.inflex_only else "step3_urbs",
     )
@@ -1392,6 +1404,7 @@ def run_batch(
         step3_cluster_concurrency=settings.step3_cluster_concurrency,
         step4_cpus=settings.step4_cpus,
         solver=settings.solver or os.environ.get(SOLVER_ENV) or "gurobi",
+        optimizer=settings.optimizer or os.environ.get(OPTIMIZER_ENV) or "urbs",
         powerflow_output=settings.powerflow_output,
         powerflow_grid_scope=settings.powerflow_grid_scope,
         materialize_expansion=settings.materialize_expansion and settings.summary_output,

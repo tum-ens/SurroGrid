@@ -142,9 +142,10 @@ batch per execution group (see [method.md](method.md#model-cases)). Outputs are 
 | `step3_max_cpus` | 32 | maximum number of clusters |
 | `step3_target_columns` | 35 | demand/efficiency columns per cluster that the dynamic choice aims at |
 | `dynamic_step3` | true | choose the cluster count per grid from 4/8/12/16/24/32 (at least `step3_cpus`, at most `step3_max_cpus`); false: always `step3_cpus` |
-| `step3_cluster_concurrency` | 1 | clusters solved at the same time |
+| `step3_cluster_concurrency` | null | Step 3 models solved at the same time; null: 1 for urbs, automatic for pypsa (CPUs / 4, at most one per 2 GB of available memory: 8 on the development VM) |
 | `step4_cpus` | 4 | Step 4 time chunks in parallel |
 | `solver` | null | `gurobi` or `appsi_highs` (null: `$GRIDEXPAND_SOLVER`, else `gurobi`) |
+| `optimizer` | null | Step 3 optimizer `urbs` or `pypsa` (null: `$GRIDEXPAND_OPTIMIZER`, else `urbs`); `pypsa` ignores the cluster keys above (one model per building), see [Step 3](steps/3_urbs.md#pypsa-optimizer) |
 | `powerflow_output` | `summary` | `summary`, `raw` or `both` |
 | `cleanup_intermediates` | `never` | `success`: delete a grid's hand-off HDF5 files after its Step 4 validation |
 | `materialize_expansion` | true | expansion analyses at the end of each batch |
@@ -167,9 +168,11 @@ SWF real grids versus the synthetic grids of one prepared paired dataset ([paire
 | `resources.target_network` | `both` | `both`, `real_swf` or `synthetic` |
 | `resources.target_grid_id` | null | diagnostic single-grid filter |
 | `execution.model_cases` | required | post cases only (`pre` is added to the first group) |
-| `execution.workers`, `step3_cpus`, `step3_cluster_concurrency`, `step4_cpus` | 1 each | resources |
+| `execution.workers`, `step3_cpus`, `step4_cpus` | 1 each | resources |
+| `execution.step3_cluster_concurrency` | null | Step 3 models solved at the same time; null: 1 for urbs, automatic for pypsa |
 | `execution.cleanup_intermediates`, `resume` | false | lifecycle |
 | `execution.materialize_expansion` | true | expansion analyses `<run.id>[_real]_<case suffix>` after success |
+| `execution.optimizer` | null | Step 3 optimizer `urbs` or `pypsa` for all jobs of the run (null: `$GRIDEXPAND_OPTIMIZER`, else `urbs`) |
 
 The SWF export root is the `.env` variable `GRID_DATA_PATH` (a deployment setting, not a run choice); a station
 dataset must contain `station_split_manifest.csv` and `station_radialization_manifest.csv`.
@@ -189,12 +192,14 @@ Every provider (SWF, ÜZW) of a pylovo alignment bundle, each against its synthe
 | `resources.providers.<…>.workers` | `execution.workers` | grids in parallel for this provider |
 | `resources.target_network` | `both` | `both`, `real` or `synthetic` |
 | `execution.model_cases` | required | post cases only |
-| `execution.workers`, `step3_cpus`, `step3_cluster_concurrency`, `step4_cpus` | 1 each | resources |
+| `execution.workers`, `step3_cpus`, `step4_cpus` | 1 each | resources |
+| `execution.step3_cluster_concurrency` | null | Step 3 models solved at the same time; null: 1 for urbs, automatic for pypsa |
 | `execution.heat_workers` | 4 | parallel TEASER heat regeneration jobs |
 | `execution.powerflow_max_timesteps` | null | smoke-test cap (not for publication) |
 | `execution.cleanup_intermediates`, `resume`, `parallel_providers` | false | lifecycle; providers in parallel |
 | `execution.materialize_expansion` | false | expansion analyses of all provider groups after success |
 | `execution.grid_subset` | null | `{method: components\|islands, seed, real_grids_per_provider}` |
+| `execution.optimizer` | null | Step 3 optimizer `urbs` or `pypsa` for all jobs of the run (null: `$GRIDEXPAND_OPTIMIZER`, else `urbs`) |
 
 The heat library of a provider is derived: `<paired_dataset_id>_teaser_heat_<scenario_hash[:12]>`.
 `grid_subset` picks whole pylovo overlap components (`components`, in seeded random order up to
@@ -253,6 +258,7 @@ is loaded with override: its values win over variables of the same name in the p
 | `GRIDEXPAND_WORK_DIR` | relocate `work/` (runtime artifacts) |
 | `GRIDEXPAND_DATA_DIR` | relocate `data/` (static inputs) |
 | `GRIDEXPAND_SOLVER` | default Step 3 solver (`gurobi` or `appsi_highs`) |
+| `GRIDEXPAND_OPTIMIZER` | default Step 3 optimizer (`urbs` or `pypsa`); `gridexpand run` sets it from `execution.optimizer` |
 | `URBS_CLUSTER_CONCURRENCY` | default of `gridexpand optimize --cluster-concurrency` |
 | `GRIDEXPAND_API_SCENARIO_DIRS`, `GRIDEXPAND_API_USER_SCENARIO_DIR`, `GRIDEXPAND_API_CORS_ORIGINS` | API, see [api.md](api.md) |
 

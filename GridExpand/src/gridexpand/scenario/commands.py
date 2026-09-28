@@ -124,14 +124,16 @@ def optimization_command(
     scenario_config: Path,
     cluster_concurrency: int | None = None,
     solver: str | None = None,
+    optimizer: str | None = None,
     reduce_only: bool = False,
     python: str | None = None,
 ) -> list[str]:
-    """Step 3 (``gridexpand optimize``) of one Step 2 input; ``n_cpu`` = building clusters."""
+    """Step 3 (``gridexpand optimize``) of one Step 2 input; ``n_cpu`` = urbs building clusters."""
     argv = module_command(OPTIMIZATION, input_name, "--n_cpu", n_cpu, "--scenario-config", scenario_config,
                           python=python)
     _flag(argv, "--cluster-concurrency", cluster_concurrency)
     _flag(argv, "--solver", solver)
+    _flag(argv, "--optimizer", optimizer)
     if reduce_only:
         argv.append("--reduce-only")
     return argv
@@ -296,7 +298,7 @@ def paired_runner_command(
     target: str,
     workers: int,
     step3_cpus: int,
-    step3_cluster_concurrency: int,
+    step3_cluster_concurrency: int | None,
     step4_cpus: int,
     powerflow_grid_scope: str,
     profile_seed: int,
@@ -328,7 +330,9 @@ def paired_runner_command(
         "--target", target,
         "--workers", str(workers),
         "--step3-cpus", str(step3_cpus),
-        "--step3-cluster-concurrency", str(step3_cluster_concurrency),
+    ]
+    _flag(argv, "--step3-cluster-concurrency", step3_cluster_concurrency)
+    argv += [
         "--step4-cpus", str(step4_cpus),
         "--powerflow-grid-scope", powerflow_grid_scope,
         "--profile-seed", str(profile_seed),

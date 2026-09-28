@@ -36,6 +36,8 @@ def test_optimization_command():
     argv = commands.optimization_command("x.h5", n_cpu=1, scenario_config=SC, cluster_concurrency=2,
                                          solver="appsi_highs", reduce_only=True, python=PY)
     assert argv[-5:] == ["--cluster-concurrency", "2", "--solver", "appsi_highs", "--reduce-only"]
+    argv = commands.optimization_command("x.h5", n_cpu=1, scenario_config=SC, optimizer="pypsa", python=PY)
+    assert argv[-2:] == ["--optimizer", "pypsa"]
 
 
 def test_powerflow_command_one_pass_and_paired_summary():
@@ -101,6 +103,9 @@ def test_paired_runner_command():
     assert "--pre-only" in pre_only and "--model-case" not in pre_only and "--provider" in pre_only
     with pytest.raises(ValueError):
         commands.paired_runner_command(**common)
+    assert argv[argv.index("--step3-cluster-concurrency") + 1] == "1"
+    auto = commands.paired_runner_command(**{**common, "step3_cluster_concurrency": None}, pre_only=True)
+    assert "--step3-cluster-concurrency" not in auto  # the runner then uses the optimizer's default
 
 
 def test_preparation_commands():

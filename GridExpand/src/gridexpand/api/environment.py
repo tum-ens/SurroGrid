@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -113,8 +114,12 @@ def solver_status(configured: str) -> dict[str, Any]:
         usable, reason = highs["usable"], None if highs["usable"] else "highspy is not installed"
     else:
         usable, reason = False, f"unknown solver '{configured}'"
-    return {"configured": configured, "step3_reads_setting": honoured, "gurobi": gurobi, "highs": highs,
-            "post_cases_supported": usable, "post_cases_reason": reason}
+    from gridexpand.optimization.solver import DEFAULT_OPTIMIZER, OPTIMIZER_ENV
+
+    # The jobs inherit the environment of the service, so this is the Step 3 optimizer.
+    optimizer = os.environ.get(OPTIMIZER_ENV, "").strip() or DEFAULT_OPTIMIZER
+    return {"configured": configured, "optimizer": optimizer, "step3_reads_setting": honoured, "gurobi": gurobi,
+            "highs": highs, "post_cases_supported": usable, "post_cases_reason": reason}
 
 
 def data_assets() -> list[dict[str, Any]]:

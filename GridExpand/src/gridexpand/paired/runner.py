@@ -33,6 +33,7 @@ from gridexpand.common.orchestration import (
 )
 from gridexpand.common.reproducibility import DEFAULT_PROFILE_SEED
 from gridexpand.common.timeframe import FULL_YEAR_HOURS, read_hdf_metadata
+from gridexpand.optimization.solver import step3_concurrency
 from gridexpand.paired.comparison import (
     read_tsam_signature,
     validate_full_year_result,
@@ -390,7 +391,7 @@ def _run_one(
                     input_hdf.name,
                     n_cpu=args.step3_cpus,
                     scenario_config=args.scenario_config,
-                    cluster_concurrency=args.step3_cluster_concurrency,
+                    cluster_concurrency=step3_concurrency(args.step3_cluster_concurrency),
                 ),
                 log_path=log_path,
                 status=status,
@@ -541,7 +542,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--step3-cpus", type=int, default=8)
-    parser.add_argument("--step3-cluster-concurrency", type=int, default=1)
+    parser.add_argument("--step3-cluster-concurrency", type=int, default=None,
+                        help="Step 3 models solved at the same time (default: 1 for urbs, automatic for pypsa).")
     parser.add_argument("--step4-cpus", type=int, default=1)
     parser.add_argument(
         "--powerflow-grid-scope",

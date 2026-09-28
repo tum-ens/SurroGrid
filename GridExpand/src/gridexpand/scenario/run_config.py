@@ -118,6 +118,22 @@ def _grid_scope(execution: dict[str, Any]) -> str:
     return choice(execution.get("powerflow_grid_scope", "full"), "execution.powerflow_grid_scope", ("full", "backbone"))
 
 
+def _optimizer(execution: dict[str, Any]) -> str | None:
+    """``execution.optimizer`` (Step 3 optimizer) or None for ``$GRIDEXPAND_OPTIMIZER``/urbs."""
+    optimizer = execution.get("optimizer")
+    if optimizer is None:
+        return None
+    from gridexpand.optimization.solver import SUPPORTED_OPTIMIZERS
+
+    return choice(optimizer, "execution.optimizer", SUPPORTED_OPTIMIZERS)
+
+
+def _concurrency(execution: dict[str, Any]) -> int | None:
+    """``execution.step3_cluster_concurrency``; None (unset): the optimizer's default."""
+    value = execution.get("step3_cluster_concurrency")
+    return None if value is None else positive_int(value, "execution.step3_cluster_concurrency")
+
+
 def _seed(execution: dict[str, Any]) -> int:
     return positive_int(execution.get("profile_seed", DEFAULT_PROFILE_SEED), "execution.profile_seed", allow_zero=True)
 
@@ -156,10 +172,11 @@ class SyntheticRun:
     step3_cpus: int = 16
     step3_max_cpus: int = 32
     step3_target_columns: int = 35
-    step3_cluster_concurrency: int = 1
+    step3_cluster_concurrency: int | None = None  # None: 1 for urbs, automatic for pypsa
     dynamic_step3: bool = True
     step4_cpus: int = 4
     solver: str | None = None
+    optimizer: str | None = None
     powerflow_output: str = "summary"
     powerflow_grid_scope: str = "full"
     cleanup_intermediates: str = "never"
@@ -178,7 +195,7 @@ class SyntheticRun:
         "model_cases", "profile_seed", "timeframe_mode", "demand_scope", "mobility_source", "n_cpu",
         "workers", "step2_cpus", "step2_timeseries_storage", "step3_cpus", "step3_max_cpus",
         "step3_target_columns", "step3_cluster_concurrency", "dynamic_step3", "step4_cpus", "solver",
-        "powerflow_output", "powerflow_grid_scope", "cleanup_intermediates", "materialize_expansion",
+        "optimizer", "powerflow_output", "powerflow_grid_scope", "cleanup_intermediates", "materialize_expansion",
         "pilot_gate", "pilot_index", "resume", "rerun_failed",
     })
 
@@ -257,10 +274,11 @@ class SyntheticRun:
             step3_cpus=number("step3_cpus", cls.step3_cpus),
             step3_max_cpus=number("step3_max_cpus", cls.step3_max_cpus),
             step3_target_columns=number("step3_target_columns", cls.step3_target_columns),
-            step3_cluster_concurrency=number("step3_cluster_concurrency", cls.step3_cluster_concurrency),
+            step3_cluster_concurrency=_concurrency(execution),
             dynamic_step3=boolean("dynamic_step3", cls.dynamic_step3),
             step4_cpus=number("step4_cpus", cls.step4_cpus),
             solver=solver,
+            optimizer=_optimizer(execution),
             powerflow_output=choice(execution.get("powerflow_output", cls.powerflow_output),
                                     "execution.powerflow_output", ("raw", "summary", "both")),
             powerflow_grid_scope=_grid_scope(execution),
@@ -311,13 +329,14 @@ class PairedRun:
     model_cases: tuple[str, ...]
     workers: int
     step3_cpus: int
-    step3_cluster_concurrency: int
+    step3_cluster_concurrency: int | None
     step4_cpus: int
     powerflow_grid_scope: str
     profile_seed: int
     cleanup_intermediates: bool
     resume: bool
     materialize_expansion: bool
+    optimizer: str | None = None
     pipeline: str = "paired_validation"
 
     @classmethod
@@ -331,6 +350,7 @@ class PairedRun:
         only(execution, {
             "model_cases", "workers", "step3_cpus", "step3_cluster_concurrency", "step4_cpus",
             "powerflow_grid_scope", "profile_seed", "cleanup_intermediates", "resume", "materialize_expansion",
+            "optimizer",
         }, "paired-validation execution")
         missing = [name for name in ("ags", "plz", "heat_profile_set_id", "weather_source_hdf")
                    if resources.get(name) in (None, "")]
@@ -353,15 +373,14 @@ class PairedRun:
             model_cases=validate_cases(execution.get("model_cases") or (), allowed=POST_MODEL_CASES),
             workers=positive_int(execution.get("workers", 1), "execution.workers"),
             step3_cpus=positive_int(execution.get("step3_cpus", 1), "execution.step3_cpus"),
-            step3_cluster_concurrency=positive_int(
-                execution.get("step3_cluster_concurrency", 1), "execution.step3_cluster_concurrency"
-            ),
+            step3_cluster_concurrency=_concurrency(execution),
             step4_cpus=positive_int(execution.get("step4_cpus", 1), "execution.step4_cpus"),
             powerflow_grid_scope=_grid_scope(execution),
             profile_seed=_seed(execution),
             cleanup_intermediates=flag(execution.get("cleanup_intermediates", False), "execution.cleanup_intermediates"),
             resume=flag(execution.get("resume", False), "execution.resume"),
             materialize_expansion=flag(execution.get("materialize_expansion", True), "execution.materialize_expansion"),
+            optimizer=_optimizer(execution),
         )
 
     @property
@@ -441,7 +460,7 @@ class AlignedRun:
     model_cases: tuple[str, ...]
     workers: int
     step3_cpus: int
-    step3_cluster_concurrency: int
+    step3_cluster_concurrency: int | None
     step4_cpus: int
     heat_workers: int
     powerflow_grid_scope: str
@@ -452,6 +471,7 @@ class AlignedRun:
     parallel_providers: bool
     materialize_expansion: bool
     grid_subset: dict[str, Any] | None
+    optimizer: str | None = None
     pipeline: str = "paired_aligned"
 
     @classmethod
@@ -469,7 +489,7 @@ class AlignedRun:
         only(execution, {"model_cases", "workers", "step3_cpus", "step3_cluster_concurrency", "step4_cpus",
                          "heat_workers", "powerflow_grid_scope", "powerflow_max_timesteps", "profile_seed",
                          "cleanup_intermediates", "resume", "parallel_providers", "materialize_expansion",
-                         "grid_subset"}, "paired_aligned execution")
+                         "grid_subset", "optimizer"}, "paired_aligned execution")
         scenario_tag = load_scenario_config(scenario_path)[1][:12]
         providers = []
         for name, block in mapping(resources.get("providers"), "resources.providers").items():
@@ -504,9 +524,7 @@ class AlignedRun:
             model_cases=validate_cases(execution.get("model_cases") or (), allowed=POST_MODEL_CASES),
             workers=positive_int(execution.get("workers", 1), "execution.workers"),
             step3_cpus=positive_int(execution.get("step3_cpus", 1), "execution.step3_cpus"),
-            step3_cluster_concurrency=positive_int(
-                execution.get("step3_cluster_concurrency", 1), "execution.step3_cluster_concurrency"
-            ),
+            step3_cluster_concurrency=_concurrency(execution),
             step4_cpus=positive_int(execution.get("step4_cpus", 1), "execution.step4_cpus"),
             heat_workers=positive_int(execution.get("heat_workers", 4), "execution.heat_workers"),
             powerflow_grid_scope=_grid_scope(execution),
@@ -519,6 +537,7 @@ class AlignedRun:
             parallel_providers=flag(execution.get("parallel_providers", False), "execution.parallel_providers"),
             materialize_expansion=flag(execution.get("materialize_expansion", False), "execution.materialize_expansion"),
             grid_subset=_grid_subset(execution.get("grid_subset")),
+            optimizer=_optimizer(execution),
         )
 
     def provider(self, name: str) -> ProviderResources:
