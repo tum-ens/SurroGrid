@@ -11,16 +11,21 @@ def _args(*argv: str):
     return ge._build_parser().parse_args(list(argv))
 
 
-def test_sql_fragments_are_inlined():
+def test_sql_files_join_the_python_decisions():
     line_sql = ge.sql_text("line_insert.sql")
-    assert "/*CABLE_SELECTION*/" not in line_sql and "generate_series" in line_sql
+    assert "JOIN expansion_component_selection sel" in line_sql
     transformer_sql = ge.sql_text("transformer_insert.sql")
-    assert "/*TRANSFORMER_COST*/" not in transformer_sql and "all_in_replacement_to_100kva" in transformer_sql
+    assert "JOIN expansion_station_selection sel USING (powerflow_run_id)" in transformer_sql
+    peak_sql = ge.sql_text("transformer_peak.sql")
     # Station rating, not the unit rating s_max_kva of transformer_positions_with_grid.
-    assert "gr.transformer_rated_power::DOUBLE PRECISION AS rated_kva" in transformer_sql
-    assert "s_max_kva" not in transformer_sql
+    assert "gr.transformer_rated_power::DOUBLE PRECISION AS rated_kva" in peak_sql
+    assert "s_max_kva" not in peak_sql
     # Deterministic tie-break of the critical component (B8).
     assert "loading_percent DESC NULLS LAST, component_line" in line_sql
+
+
+def test_default_assumption_is_the_staged_row():
+    assert _args().assumption_key == "de_lv_staged_2026"
 
 
 def test_identity_and_replacement_guard():

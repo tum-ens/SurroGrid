@@ -205,6 +205,14 @@ def load_expansion_stage_context(
     }
 
 
+STAGED_STATION_COMPONENTS = (
+    ("Transformer exchange", "transformer_exchange_cost_eur"),
+    ("Load transfer", "load_transfer_cost_eur"),
+    ("New substations", "new_station_cost_eur"),
+    ("Voltage measures", "voltage_cost_eur"),
+)
+
+
 def expansion_cost_comparison_from_tables(
     expansion_tables_by_stage: Mapping[str, dict[str, pd.DataFrame]],
     analysis_meta_by_stage: Mapping[str, pd.Series],
@@ -224,21 +232,19 @@ def expansion_cost_comparison_from_tables(
         ):
             continue
         cost_summary_row = tables["cost_summary"].iloc[0]
-        cost_rows.extend(
-            [
-                {
-                    "stage": label,
-                    "data_source": data_source,
-                    "component": "Cables",
-                    "cost_eur": float(cost_summary_row["cable_cost_eur"]),
-                },
-                {
-                    "stage": label,
-                    "data_source": data_source,
-                    "component": "Transformers",
-                    "cost_eur": float(cost_summary_row["transformer_cost_eur"]),
-                },
+        components = [("Cables", float(cost_summary_row["cable_cost_eur"]))]
+        if cost_summary_row.get("rule_set") == "staged_2026":
+            # The transformer rows carry every station-level measure; show them one by one. Analyses
+            # written before migration 0007 have no breakdown and show one Transformers bar.
+            components += [
+                (name, float(cost_summary_row[column] or 0.0))
+                for name, column in STAGED_STATION_COMPONENTS
             ]
+        else:
+            components.append(("Transformers", float(cost_summary_row["transformer_cost_eur"])))
+        cost_rows.extend(
+            {"stage": label, "data_source": data_source, "component": name, "cost_eur": cost}
+            for name, cost in components
         )
     return pd.DataFrame(cost_rows)
 

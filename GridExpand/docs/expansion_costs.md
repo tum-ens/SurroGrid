@@ -1,180 +1,281 @@
 # Expansion Cost Assumptions
 
-This note documents the LV expansion cost assumptions and rules of `gridexpand expansion` ([Step 5](steps/5_postprocessing.md)). The rules are implemented once in `src/gridexpand/analysis/expansion/heuristics.py` (real grids, via `real_materialization.py`) and once in SQL (`analysis/expansion/sql/*.sql`, synthetic grids); a parity test keeps both identical. The numbers are one row of `surrogrid.expansion_cost_assumption`, seeded by `src/gridexpand/db/sql/0001_baseline.sql` (`ON CONFLICT DO NOTHING`, so manual edits of the row survive migrations).
+This note documents the rules and cost assumptions of `gridexpand expansion` ([Step 5](steps/5_postprocessing.md)).
 
-Default assumption key: `de_lv_heuristic_2026` (`gridexpand expansion --assumption-key`)
+**Rules.** `gridexpand expansion` applies the staged rules of `src/gridexpand/analysis/expansion/staged.py`
+(rule set `staged_2026`) with the assumption row `de_lv_staged_2026` (default) or one of its sensitivity rows. The
+former overload heuristic was retired on 2026-09-29 (see [History](#history)).
 
-The result is a transparent screening estimate for spatial postprocessing. It is not a construction offer, a DSO work-order cost, or a substitute for site-specific grid planning. The current heuristic prices overload-driven cable and transformer reinforcement in existing settlement structures. Flexibility costs are intentionally excluded because flexibility is represented by the separate model cases (`post-hems-*` with optimized dispatch, `post-inflex-heuristic` with rule-based dispatch).
+**One implementation for both sources.** The rules run in Python for synthetic and real grids alike:
+- `synthetic_materialization.py`: the SQL keeps only the scope and the mapping to the visible pylovo lines.
+- `real_materialization.py`: the real SWF and ÜZW grids.
 
-Important topology note: cable capacity must be derived from raw electrical pandapower/pylovo line components, not from `pylovo.lines_result_view`. The `lines_result_view` object is a QGIS-friendly display layer. It can contain artificial helper geometries, offset geometries, merged feeder chains, and visual lines that share geometry without being electrically parallel. It is suitable for displaying and joining final results in QGIS, but it must not be used as the source of installed electrical capacity.
+**Where the numbers come from.** The rows are seeded by migration `0007_staged_expansion.sql` (`ON CONFLICT DO
+NOTHING`, so manual edits survive). Every row documents each parameter in the JSON column `parameter_provenance`:
+value, unit, method and sources. The tables below are the readable form of that
+column, and a test (`tests/analysis/test_staged_assumption.py`) keeps both in step.
 
-## Benchmark, Defaults, and Sources
+**Methods used for the values:**
+- **Central value:** the median of the listed sources, rounded.
+- **Upper value (conservative):** the upper end of recent sources, used where prices have risen since the sources'
+  price base or where a low value would understate costs.
+- **Norm value:** a cable rating of DIN VDE 0276-603, read from the named secondary source because the norms are
+  paywalled.
+- **Decision:** a choice of the project owner (decisions D1–D10 of 2026-09-29), with the literature that supports
+  it.
+- **Assumption:** no source found; the derivation is stated and a sensitivity row covers it.
 
-This table is the single source of truth for the numerical assumptions used by the current LV expansion heuristic. Rows marked as "used directly" are columns of the `expansion_cost_assumption` row; rows marked as "not included" are retained only for interpretation or possible later sensitivity layers.
+All prices keep the price base of their sources (2007–2025); nothing is inflation-adjusted.
 
-| Model component | Parameter / category | Default used | Unit | Literature benchmark or status | Source / rationale | Used directly in code? |
-| --- | --- | ---: | --- | --- | --- | --- |
-| Loading trigger | Expansion threshold | 100 | % nominal loading | Technical screening criterion, not a unit-cost literature value | Reinforcement is triggered only when simulated peak loading exceeds the installed nominal rating. This keeps the heuristic tied to pandapower/pylovo asset ratings and avoids adding an implicit planning margin. | yes |
-| Duct availability | Existing duct share (`--line-existing-duct-share` overrides) | 0.20 | share of reinforced LV routes | No robust published national share found | WEI/GridSim and Wintzek/PuBStadt recommend laying empty ducts during first reinforcement, but the review found no national statistic for existing spare ducts. Therefore this is an explicit scenario parameter, not an empirical statistic. | yes |
-| Duct availability | Trenching share | 0.80 | share of reinforced LV routes | Complement of existing duct share | Derived as `1 - existing_duct_share`. With the default assumption, 80% of reinforced routes require trenching / street reopening. | yes, derived |
-| LV cable reinforcement with trenching | Rural settlement (`settlement_type = 1`) | 90,000 | EUR/km | about 80k-120k EUR/km | Verteilnetzstudie Baden-Wuerttemberg reports rural NS cable costs around 80k EUR/km; Agora/FfE and WEI/GridSim support a broader 67k-120k EUR/km corridor. | yes |
-| LV cable reinforcement with trenching | Semi-urban settlement (`settlement_type = 2`) | 100,000 | EUR/km | about 100k EUR/km | Verteilnetzstudie Baden-Wuerttemberg semi-urban NS cable benchmark. Also used as fallback if settlement type is missing. | yes |
-| LV cable reinforcement with trenching | Urban settlement (`settlement_type = 3`) | 165,000 | EUR/km | about 125k-200k EUR/km; difficult cases up to about 380k EUR/km | Verteilnetzstudie Baden-Wuerttemberg, Wintzek/PuBStadt, and dena Verteilnetzstudie II. The 380k EUR/km value is treated as difficult-case boundary, not the default. | yes |
-| Standard LV reinforcement cable | NAYY_4_150, 270 A | 25,000 | EUR/km | about 20k EUR/km | Wintzek/PuBStadt first-vs-parallel cable distinction; value includes a modest current-cost uplift and is also used for smaller LV service/backbone classes. | yes |
-| Standard LV reinforcement cable | NAYY_4_185, 313 A | 45,000 | EUR/km | about 40k-55k EUR/km | Wintzek/PuBStadt plus current-cost uplift. | yes |
-| Standard LV reinforcement cable | NAYY_4_240, 357 A | 70,000 | EUR/km | about 60k EUR/km; material checks around 25k-28k EUR/km | Wintzek/PuBStadt, Agora/FfE, and WEI/GridSim. Also used as default for unknown larger LV cable type. | yes |
-| Transformer capacity upgrade in existing station context | Replacement / upgrade to 100 kVA | 28,000 | EUR/unit | derived, not a direct benchmark | pylovo equipment cost (3,000 EUR, `pylovo/config/config_generation.yaml`) plus the ~25k EUR installation share implied by the 400/630 kVA all-in bins (33k−8k, 38k−12k). Added 24 Sep 2026 for rural ÜZW stations; replace with sourced all-in values when available. | derived |
-| Transformer capacity upgrade in existing station context | Replacement / upgrade to 160 kVA | 28,800 | EUR/unit | derived, not a direct benchmark | pylovo equipment cost (3,800 EUR, `pylovo/config/config_generation.yaml`) plus the ~25k EUR installation share implied by the 400/630 kVA all-in bins (33k−8k, 38k−12k). Added 24 Sep 2026 for rural ÜZW stations; replace with sourced all-in values when available. | derived |
-| Transformer capacity upgrade in existing station context | Replacement / upgrade to 250 kVA | 30,000 | EUR/unit | derived, not a direct benchmark | pylovo equipment cost (5,000 EUR, `pylovo/config/config_generation.yaml`) plus the ~25k EUR installation share implied by the 400/630 kVA all-in bins (33k−8k, 38k−12k). Added 24 Sep 2026 for rural ÜZW stations; replace with sourced all-in values when available. | derived |
-| Transformer capacity upgrade in existing station context | Replacement / upgrade to 400 kVA | 33,000 | EUR/unit | all-in replacement/model bins about 30k EUR; equipment-only lower bounds about 10k-15k EUR | WEI/GridSim all-in transformer replacement bins, checked against Wintzek and BW-study equipment lower bounds. | yes |
-| Transformer capacity upgrade in existing station context | Replacement / upgrade to 630 kVA | 38,000 | EUR/unit | all-in replacement/model bins about 35k EUR; equipment-only lower bounds about 10k-15k EUR | WEI/GridSim all-in transformer replacement bins, checked against Wintzek and BW-study equipment lower bounds. | yes |
-| Transformer capacity upgrade in existing station context | Replacement / upgrade to 800 kVA | 42,000 | EUR/unit | interpolated between 630 kVA and 1,000 kVA all-in bins | Interpolation between WEI/GridSim 630 kVA and 1 MVA bins, checked against Wintzek 800 kVA equipment anchor. | yes |
-| Transformer capacity upgrade in existing station context | Replacement / upgrade to 1,000 kVA | 48,000 | EUR/unit | all-in replacement/model bins about 45k EUR; equipment-only lower bounds about 10k-15k EUR | WEI/GridSim all-in transformer replacement bin with uplift, checked against Wintzek equipment lower bounds. | yes |
-| Transformer capacity rounding | Capacity step | 50 | kVA | Screening discretization, not a direct cost benchmark | Required transformer capacity is rounded up in 50 kVA increments before mapping to the 100/160/250/400/630/800/1,000 kVA cost bins. This avoids over-interpreting continuous simulated peak values while preserving the standard-size bin logic. | yes |
-| Full ONS / station rebuild boundary | Station-level boundary case above 1 MVA | 100,000 | EUR/station | dena low / central / high values around 80k / 101k / 140k EUR; other LV station references about 45k-60k EUR | dena Verteilnetzstudie II and WEI/GridSim station rebuild checks. Used only when required transformer capacity exceeds the <=1 MVA replacement bins. | yes |
-| rONT for remaining voltage issues | Voltage-control option | not included | EUR/unit | about +30k-45k EUR premium or about 45k EUR/unit depending on source boundary | BW-study, Wintzek/PuBStadt, and Agora/FfE. Kept as a possible later voltage-mitigation layer, not part of the current loading-cost estimate. | no |
-| LV cable Opex | Annual operating cost | not included | % CapEx/a | about 2.5% of CapEx per year | Wintzek/PuBStadt. Excluded because the current output is CapEx screening only. | no |
-| MS cable / MS station reinforcement | Medium-voltage level | not included | EUR/km or EUR/station | MS cables about 130k-160k EUR/km; MS/LV station upgrades can reach 1.3M-3.2M EUR | Verteilnetzstudie Baden-Wuerttemberg. Excluded because this analysis is LV-focused. | no |
+**What the result is.** A transparent screening estimate for spatial postprocessing, not a construction offer or a
+DSO work order. Flexibility costs are excluded: flexibility is represented by the model cases (`post-hems-*`,
+`post-inflex-heuristic`).
 
-## Cable Reinforcement Heuristic
+**Topology note.** Cable capacity must come from the raw electrical pandapower/pylovo line components, not from
+`pylovo.lines_result_view`. That view is a QGIS display layer with helper and merged geometries.
 
-Cable capacity is evaluated on P100 loading: the maximum current represented by the complete power-flow horizon. No grid or asset percentile cutoff is applied to the expansion decision.
+## Rules (`staged_2026`)
 
-```text
-installed_capacity_ka = existing_max_i_ka * existing_parallel
-required_added_capacity_ka = max(peak_current_ka - installed_capacity_ka, 0)
-```
+The rules follow the order of measures of Niederle et al. (EnInnov 2026, TUM/SWM) and German planning practice:
+dena 2012, Verteilnetzstudie BW 2017, FfE/Agora 2023, Kerber 2011, PuBStadt 2021. They keep the load-based core:
+the P100 values of the Step 4 time series.
 
-The existing cable is retained regardless of its SWF or pylovo type. Every added circuit must be selected from the same catalogue on both network sources:
+### Stages
 
-| Added cable | Ampacity | Cable-in-duct cost |
-| --- | ---: | ---: |
-| `NAYY_4_150` | 0.270 kA | 25,000 EUR/km |
-| `NAYY_4_185` | 0.313 kA | 45,000 EUR/km |
-| `NAYY_4_240` | 0.357 kA | 70,000 EUR/km |
+The inputs per grid are:
+- the P100 current and installed capacity of each route;
+- the P100 station import and the station rating;
+- the minimum voltage of each evaluated bus (Step 4 summaries);
+- the grid topology (`topology.py`).
 
-All nonnegative integer combinations are considered. The selected combination is the least-cost option whose added nominal ampacity covers `required_added_capacity_ka` (a gap below 1e-12 kA counts as covered). Ties are resolved by fewer circuits, then lower excess capacity, then more 240 mm² circuits, then more 185 mm² circuits. This is a thermal screening approximation: actual current sharing between unlike parallel cables is not recalculated.
+A route is a synthetic line component, or a real cable corridor (parallel rows between the same buses, lengths
+within 5 %).
 
-For real grids (SWF and ÜZW), parallel physical line rows are normalized to construction corridors before this selection is applied. Rows are grouped only when they connect the same unordered bus pair and their recorded lengths differ by no more than 5%. The real grid files do not contain route geometries, so agreement in endpoints and length is the conservative available proxy for a common physical route; same-bus rows with materially different lengths remain separate. Installed ampacity and row-level P100 currents are summed, the longest member length represents the corridor, and trenching is charged once. The result retains the member cable IDs and grouping method for auditability. Synthetic parallel circuits already use pandapower's `parallel` attribute and therefore enter the same calculation as one electrical corridor.
+**1. Station.**
+- S_P100 ≤ τ·S_r: no measure.
+- S_P100 ≤ τ·S_max: exchange for the smallest standard size (100, 160, 250, 400, 630, 800, 1000 kVA) that carries
+  the load. S_max is 1000 kVA in every settlement type (the columns per settlement type allow other limits in
+  sensitivity rows).
+- Otherwise the grid is **over the limit** by S_P100 − τ·S_max:
+  - its transformer is exchanged up to S_max;
+  - the rest goes to stage 4.
+- A station whose unit is already above S_max keeps it as its ceiling.
 
-The settlement class controls the reopened-route cost:
+**2. Routes.** Each overloaded route gets the least-cost combination of parallel NAYY 4×150/185/240 cables, with at
+most `line_max_added_cables`.
+- **Ratings.** All cables of a route, existing and added, count at their nominal ratings (no grouping derating,
+  see below).
+- **Route cost.** On a trenched route the most expensive added cable pays the settlement's trench cost
+  `line_reopen_*` (trench incl. that cable); further cables pay their increment `line_parallel_*`. The share
+  `line_existing_duct_share` of a route lies in existing ducts and needs no trench.
+- **Escalation.** A route that the cap cannot resolve escalates the grid. Its excess is √3·0.4 kV times the
+  current that is still missing with the maximum number of cables.
+- **Service lines.** A service line is the edge into a load bus with at most one line neighbour, the terminal
+  service connection of `comparison_backbone_scope`. It is costed as `service_cost_eur` and stays out of the total
+  (decision D9).
 
-```text
-settlement_type = 1 -> rural
-settlement_type = 2 -> semi-urban
-settlement_type = 3 -> urban
-missing settlement_type -> semi-urban
-```
+**3. Panels.**
+- Panels = existing station outlets (cables) + cables added on outlet routes, one NH way each.
+- Reported per grid. An escalation only if `panel_trigger` (default off, decision D5).
 
-For a selected combination:
+**4. Grids over the limit or escalated** (per analysis, all grids of the run and region together).
+- **(a) Load transfer.**
+  - *Neighbours:* grids whose buses come within `load_transfer_adjacency_m`. Bus coordinates are in EPSG:25832;
+    pylovo's WGS84 coordinates are projected.
+  - *Spare capacity* of a neighbour: τ·rating after its own stage 1, minus its P100.
+  - *Order:* grids by descending excess; the largest spare is used first, and each kVA only once.
+  - *If the spare covers the excess:* `load_transfer_eur` plus the own exchange to S_max.
+- **(b) Whole new substations.**
+  - The remaining neighbouring grids form a cluster that shares ⌈Σ excess / (τ·S_new)⌉ new substations.
+  - Each substation costs `new_station_eur` + `new_station_mv_loop_in_km`·`mv_cable_eur_per_km` +
+    `new_station_lv_connection_km`·trench cost of the settlement.
+  - The cluster cost is allocated to the grids by excess.
+- **In both cases:**
+  - routes that need two or more added cables, and unresolved routes, count as relieved (measure
+    `relieved_by_transfer` / `relieved_by_new_station`, no cable cost);
+  - routes with one added cable keep their cost.
 
-```text
-duct_total = sum(selected cable-in-duct costs)
-primary_duct_cost = highest cable-in-duct cost among selected cables
-trenching_share = 1 - existing_duct_share
+**5. Residual voltage.** Step 4 already sets the busbar to 0.96 pu and uses up to two off-load tap steps
+(`powerflow/station_voltage.py`, the convention of pylovo). A bus still below 0.90 pu:
+- counts as resolved if a measure touches a route on its path to the station, or if the grid gets a new
+  substation;
+- otherwise gets an rONT, if the rONT headroom 0.96·(1 + range) − busbar voltage lifts it to 0.90 pu. The rONT
+  costs `ront_premium_eur` where stage 1 buys a new transformer anyway. Where it replaces the kept transformer, it
+  costs a full unit: the conventional price of the station's size plus the premium (PuBStadt, BW 2017 and dena 2012
+  price rONTs as full units). The 100, 160 and 250 kVA units share one price, so a small station pays for the
+  smallest rONT of the product data (160 kVA);
+- otherwise gets a feeder split: a new NAYY 4×240 route from the station to 2/3 of the distance to the farthest
+  critical bus, priced like a one-cable reinforcement.
 
-route_cost_eur_per_km =
-    duct_total
-    + trenching_share * (reopened_route_cost - primary_duct_cost)
+Runs solved before the station voltage existed (no `lv_busbar_vm_pu`) get `not_assessed`.
 
-component_cost_eur = component_length_km * route_cost_eur_per_km
-```
+### Parameters of `de_lv_staged_2026`
 
-The reopened-route cost represents the first cable plus civil works. Further selected circuits add their cable-in-duct cost, so trenching is charged once per reinforced route.
+PuBStadt 2021 and dena 2012 are cited by printed page (their PDF pages are 21 and 22 higher). Prices keep the price
+base of their source; nothing is inflation-adjusted.
 
-The result tables store:
+| Parameter (column) | Value | Method | Sources |
+|---|---:|---|---|
+| `transformer_planning_limit` | 1.0 × Sr | decision D4, DSO practice (all studies agree) | Niederle et al. 2026, p. 7–8; PuBStadt 2021 §7.5.2, p. 50 (100 % of Sr); dena 2012, p. 89–90; BW 2017, p. 37; FfE/Agora 2023, p. 53, 111 (reinforced even after short overloads); Nobis 2016 (no (n-1) in LV). IEC 60076-7 allows up to 1.5 p.u. normal cyclic loading, so 1.1/1.2 are sensitivities |
+| `station_max_kva_rural` / `_suburban` / `_urban` | 1000 kVA | decision D2, revised 2026-09-29: as FfE/Agora 2023 | FfE/Agora 2023, p. 85, 111 (1000 kVA in every settlement type, after PuBStadt and DSO feedback; above that an additional station); PuBStadt 2021, p. 157 (1000 kVA or 2 × 630 kVA in urban grids); dena 2012, BW 2017, Agora 2019 / NRW 2021 (a second or more parallel units); Schneider Planungskompendium (MV fuse-switch protection up to about 1000 kVA, VDE 0670-402); Schneider EIG (urban substations with one or two 1000 kVA units). Stricter: PuBLIK 2016 / Harnisch 2019 (rural: new station from 800 kVA), Kerber 2011 (630 kVA), Munich (630/800 kVA). The exchange cost has no larger station housing, which small rural stations may need |
+| `transformer_replace_100_eur` / `_160_eur` | 8,000 € | conservative: no 100 kVA source; the 250 kVA value, above Kerber's 160 kVA value | Kerber 2011, p. 142: 160 kVA 6.5 k€ (2007) |
+| `transformer_replace_250_eur` | 8,000 € | upper value of the size-specific sources | Kerber 2011: 8.0 k€ (2007); FfE MONA 2030: 7.0 k€ (2015); Verteilnetzstudie Hessen 2018: 7 k€ (2015). FfE/Agora 2023 charges 15 k€ per exchange whatever the size (upper bound) |
+| `transformer_replace_400_eur` | 10,000 € | upper range, rounded | Kerber 2011: 10.5 k€; MONA: 8.5 k€; Hessen 2018: 9 k€; BMWi 2014: 8 (6–10) k€; FfE/Agora 2023: 15 k€ per exchange (upper bound) |
+| `transformer_replace_630_eur` | 12,000 € | central value (median of ten sources) | BMWi 2014, MONA, Hessen 2018: 12 k€; PuBStadt 2021, p. 213: 10 k€; dena 2012, p. 147: 10 k€ (2011); Kerber 2011: 14 k€; Schlömer 2017: 11.25 k€; Arnold 2019: 8.6 k€; FfE/Agora 2023 (any size) and BW 2017: 15 k€ |
+| `transformer_replace_800_eur` | 12,500 € | central value (median of three sources) | PuBStadt 2021, p. 213: 12.5 k€; Arnold 2019: 9.8 k€ (2014); FfE/Agora 2023: 15 k€ (any size) |
+| `transformer_replace_1000_eur` | 15,000 € | upper value of four sources | PuBStadt 2021, p. 213 and FfE/Agora 2023: 15 k€; Schlömer 2017: 13.25 k€; Arnold 2019: 10.9 k€ |
+| `line_parallel_150/185/240_eur_per_km` | 25/45/70 k€/km | PuBStadt value rounded up by 5/5/10 k€/km (kept from `heuristic_2026`) | PuBStadt 2021, p. 212: +20/40/60 k€/km for a parallel cable in the same trench, cable and installation (2021). Lower bound: FfE/Agora 2023, p. 112–113: 28 k€/km material for NAYY 4×240. Upper bound: dena 2012 and BW 2017 price every added cable at the full trench rate |
+| `line_reinforcement_150/185/240_max_i_ka` | 0.270/0.313/0.357 kA | kept for consistency with the grid data | SimBench/pandapower (270/357 A); DIN VDE 0276-603 via Siemens TIP 12 (2023): 275/313/364 A at m = 0.7 |
+| `line_reopen_rural_eur_per_km` | 80 k€/km | BW 2017, the only source with rural, semi-urban and urban values (80/100/120) | BW 2017, p. 91: 80; dena 2012, p. 147: 60 (≤ 500 inhabitants/km², 2011); FfE/Agora 2023, p. 113: 67 (39 laying + 28 material). Median of the three rural sources: 67 |
+| `line_reopen_suburban_eur_per_km` | 100 k€/km | central value: the two sources with a semi-urban class | BW 2017, p. 91: 100; Gutachten NRW 2021, Tab. 7-3: 100; dena 2012: 60/100 (≤/> 500 inhabitants/km², 2011); FfE/Agora 2023: 67 (rural and suburban) |
+| `line_reopen_urban_eur_per_km` | 165 k€/km | central value: median of the six sources with 2021–2025 prices (115, 139, 150, 182, 250, 312) = 166, rounded | FfE/Agora 2023: 115; ef.Ruhr/EWI 2024: 139; PuBStadt 2021, p. 212: 150/175/200 (NAYY 150/185/240); dena VNS II 2025, p. 276: 182 (80–380); NAP 2024 (derived): SWM about 250, enercity about 312. Older: BW 2017: 120; dena 2012: 100 |
+| `line_existing_duct_share` | 0.20 | assumption (no source) | PuBStadt recommends empty ducts but gives no share; `--line-existing-duct-share` for 0 / 0.5 |
+| `line_max_added_cables` | 3 | decision D6 (revised 2026-09-29: nominal ratings, no derating) | Kerber 2011 (at most 3 parallel cables per street side); Agora 2019 / NRW 2021 (at most 4 parallel LV cables). No other German study caps the number: PuBStadt usually needs one more cable; BW 2017 and FfE/Agora 2023 allow any number (FfE: 1.0–1.3 cables per reinforced trench-km on average, derived) |
+| `panel_max`, `panel_trigger` | 12, off | catalogue practice; decision D5 | Niederle 2026, p. 17 (8 or 12 panels); Jean Müller 2012 (8/10/12 NH2 ways); Kenter (12 NH2); no standard limits panels |
+| `new_station_eur` | 85,000 € | central value: median of the eight German sources with 2020–2025 prices (51, 57.5, 83.5, 84, 86.5, 101, 150.5, 225 k€) | dena VNS II 2025, Gutachten p. 276: 101 k€ (80–140); ef.Ruhr/EWI 2024: 86.5 k€; NAP 2024 (derived): Netze BW 77–91, e-netz Südhessen 74–93, enercity about 150 k€, Munich 200–250 k€ per site; PuBStadt 2021, p. 213: 45 k€ building + 10–15 k€ transformer; FfE/Agora 2023: 51 k€ (probably incl. connection cables); BW 2017: 60 k€ incl. transformer; Langfristszenarien 3: 50 k€ (2018 prices); dena 2012: 30/40 k€ (2011). Sources with 2006–2018 prices give 18–60 k€ |
+| `new_station_mv_loop_in_km` | 0.2 km | assumption (no source) | Two MV cables of 100 m to the nearest ring cable. No study gives a length; FfE counts connection cables in its station price, dena 2012 names their cost only qualitatively |
+| `mv_cable_eur_per_km` | 250,000 €/km | central value: median of the three study values with 2021–2025 prices | ef.Ruhr/EWI 2024: 230 k€/km; PuBStadt 2021, p. 214: 250 k€/km (NA2XS2Y 3×1×240, incl. civil works); dena VNS II 2025: 278 k€/km (161–520); NAP 2024 (derived): 137–440 k€/km. Older: BW 2017: 130/145/160; dena 2012: 80/140 |
+| `new_station_lv_connection_km` | 0.1 km at the settlement's trench cost | assumption | Two LV links of 50 m (dena 2012, p. 93–94: critical feeders are cut at half length and connected to the new station) |
+| `new_station_kva` | 630 kVA | standard size of a new compact station | dena 2012, p. 97; BW 2017, p. 44; eDisGo `config_grid_expansion_default.cfg`. PuBStadt 2021 recommends 800 kVA as the new urban standard |
+| `load_transfer_eur` | 20,000 € | assumption from unit costs, rounded up | LV link of about 50 m at 165 k€/km = 8.3 k€, plus a cable distribution cabinet of 5 k€ (PuBStadt 2021, p. 212) = 13.3 k€, rounded up for planning and switching. No study prices a load transfer; dena 2012 treats switching changes as operating reserve |
+| `load_transfer_adjacency_m` | 50 m | assumption | Niederle 2026, p. 17: feeders or feeder sections move to less loaded stations. 0 disables the transfer |
+| `ront_premium_eur` | 12,000 € | central value (median of twelve derived premiums, 5.5–30 k€) | MR/BUW 2023: 5.5; IEE/BWP 2022: 8; PuBLIK 2016: 8.5; Arnold 2019: 10–11; MONA: 10–11.5; PuBStadt 2021, p. 213: 11–12.5; Schlömer 2017: 12; FfE/Agora 2023: 13; BMWi 2014: 15; Hessen 2018: 16–17; dena 2012, p. 169: about 20 (30 k€ conversion incl. measurement, derived); BW 2017: 30 k€. Where the rONT replaces a kept transformer, stage 5 adds the conventional price of its size |
+| `ront_control_range_percent` | ±10 % | product value | Schneider Minera SGrid (2015): 5 positions ±5 % or 9 positions ±10 % |
+| `service_lines_in_total` | no | decision D9 | NAV § 9: the connectee usually reimburses changes of the house connection |
 
-- `reinforcement_150_count`
-- `reinforcement_185_count`
-- `reinforcement_240_count`
-- `reinforcement_added_capacity_ka`
-- `reinforcement_catalog`
-- route cost basis, duct/trenching shares, and estimated cost
+The baseline columns `transformer_station_rebuild_boundary_eur` and `transformer_capacity_step_kva` belong to the
+retired rule set; the staged rows keep their defaults and do not use them.
 
-For synthetic display geometries that combine several raw electrical components, cable counts, added capacity, and cost are summed over those components. Critical-component fields still identify the electrically most loaded mapped component.
+**No grouping derating.** DIN VDE 0276-1000 reduces the rating of cables that lie side by side in one trench
+(multicore cables 7 cm apart at load factor 0.7: two cables 0.85, three 0.75, four 0.70 of their rating; lower at
+higher load factors). The German planning studies do not apply it to LV cables: PuBStadt 2021 (p. 87) argues
+sufficient spacing and peaks that are not sustained; BW 2017, FfE/Agora 2023 and dena 2012 do not derate either.
+pylovo's cable sizing and the Step 4 overload check use the nominal ratings as well, so derating in Step 5 alone
+would count existing double cables as overloaded from 85 % loading and would weigh most on the real rural grids,
+which have the most parallel cables.
 
-## Transformer Heuristic
+### Sensitivity rows
 
-Transformer capacity is evaluated on the peak (P100) apparent power imported through the transformer position over the simulated horizon (the full year, the representative TSAM hours or one week).
+| Assumption key | Change against `de_lv_staged_2026` |
+|---|---|
+| `de_lv_staged_2026_low` | new substation 60 k€ (BW 2017 incl. transformer; the upper end of the sources with 2006–2018 prices), MV cable 200 k€/km, load transfer 10 k€ |
+| `de_lv_staged_2026_high` | new substation 150 k€ (NAP 2024 up to 151 k€; dena VNS II high 140 k€), MV cable 400 k€/km (NAP enercity/SWM), load transfer 30 k€ |
+| `de_lv_staged_2026_trafo_allin` | transformer exchange at the all-in bins of `heuristic_2026` (28–48 k€; source not verifiable) |
+| `de_lv_staged_2026_station_800` | station limit 800 kVA in every settlement type (PuBLIK/Harnisch rural 800 kVA, Kerber 630 kVA, Munich 630/800 kVA); also covers small rural stations that need a new housing for 1000 kVA |
+| `de_lv_staged_2026_no_transfer` | no load transfer (`load_transfer_adjacency_m` = 0): whole new substations only |
 
-```text
-peak_s_kva = sqrt(P_mW^2 + Q_mvar^2) * 1000
-loading_percent = peak_s_kva / rated_kva * 100
-required_transformer_kva = ceil(peak_s_kva / transformer_capacity_step_kva - 1e-12) * transformer_capacity_step_kva
-additional_transformer_kva = max(required_transformer_kva - rated_kva, 0)
-requires_expansion = additional_transformer_kva > 0
-```
+Further sensitivities: `--line-existing-duct-share`, or new rows with another planning limit, station limit or
+cable cap.
 
-Transformer cost:
+### What the result tables store
 
-```text
-if required_transformer_kva <= existing_rated_kva: 0 EUR
-elif required_transformer_kva <= 100: 28,000 EUR
-elif required_transformer_kva <= 160: 28,800 EUR
-elif required_transformer_kva <= 250: 30,000 EUR
-elif required_transformer_kva <= 400: 33,000 EUR
-elif required_transformer_kva <= 630: 38,000 EUR
-elif required_transformer_kva <= 800: 42,000 EUR
-elif required_transformer_kva <= 1000: 48,000 EUR
-else: 100,000 EUR boundary case
-```
+- **Line rows** (`expansion_line_result`, `expansion_real_line_result`):
+  - `measure`: `none`, `local`, `outlet`, `service`, `relieved_by_transfer`, `relieved_by_new_station`,
+    `unresolved_service`;
+  - `is_station_outlet`, `is_service_line`, `route_cable_count`;
+  - `service_cost_eur`: a service line's cost, which is not in `estimated_cost_eur`.
+- **Transformer rows** (`expansion_transformer_result`, `expansion_real_transformer_result`):
+  - `station_measure`: `none`, `exchange`, `over_limit`, `transfer`, `new_station`;
+  - `station_limit_kva`, `excess_kva`;
+  - the cost breakdown `transformer_exchange_cost_eur`, `load_transfer_cost_eur`, `new_station_cost_eur`,
+    `voltage_cost_eur`;
+  - `voltage_measure`.
 
-The transformer bins are interpreted as all-in screening values for capacity replacement or upgrade in an existing station context. The equipment-only literature values are lower, but they do not include the planning and brownfield integration scope represented here. The full station rebuild value is a boundary case, not a detailed station design.
+  `estimated_cost_eur` is the sum of the breakdown, so line plus transformer rows still add up to the grid total.
+- **`expansion_grid_result`:** one row per grid and analysis with the decision trail. It holds the
+  escalation reason, transfer partners, new-station cluster and share of stations, panels, route counts, voltage
+  measure and every cost component.
+  - A grid without a transformer rating (one ÜZW area) has no transformer row; its station-level costs are only in
+    this table.
 
-## Voltage and rONT Consideration
+## History
 
-The current expansion estimate is still primarily a thermal-capacity heuristic. It adds cable capacity when simulated current exceeds nominal installed capacity and replaces transformers when apparent-power loading exceeds the rated transformer capacity.
+Until 2026-09-29 the default was `de_lv_heuristic_2026` (rule set `heuristic_2026`, seeded by migration 0001): the
+least-cost parallel NAYY cables on every overloaded route, without a cap or derating; the P100 transformer load
+rounded up to 50 kVA and priced with all-in bins of 28–48 k€ whose source could not be verified; a flat 100 k€
+station rebuild above 1000 kVA. `staged_2026` replaced it. The row stays in the database for the analyses written
+with it; `gridexpand expansion` refuses it. The code is in the git history (SurroGrid `dev` 8005175).
 
-Voltage violations are intentionally not converted into cable costs by default. The cheapest technically plausible voltage remedy may be transformer tap adjustment, rONT installation, feeder reconfiguration, local cable reinforcement, transformer relocation, or a new feeder route. Treating every low-voltage case as an additional parallel cable on the most loaded segment would be too confident.
+## Application to synthetic and real grids
 
-A useful next layer would be separate from the thermal result:
+The same assumption row and the same rules apply to both network sources; only the reading of identifiers and
+geometry differs:
 
-```text
-thermal_cost_eur = cable_loading_cost_eur + transformer_loading_cost_eur
-optional_voltage_mitigation_cost_eur = rONT_or_voltage_measure_proxy for grids with remaining voltage violations
-```
+- **Synthetic grids.**
+  - The components are joined through pylovo grid, line and transformer identifiers.
+  - The staged rules read the pylovo network (`pylovo.grid_result.grid`) for the topology and coordinates.
+  - Unmapped root connectors of at most 5 m count as station busbar.
+- **Real grids.**
+  - The rows are joined through `real_grid_case_id`, pandapower line indices, transformer ratings and the grid file
+    of the power-flow run (SWF: Excel workbook, ÜZW: pandapower JSON).
+  - The grid file also gives the topology and the coordinates.
 
-For the paper comparison, this keeps the current result interpretable as loading-driven reinforcement cost. Remaining voltage issues can be reported as a separate voltage-mitigation need or sensitivity class. rONT costs are therefore noted in the table above, but not included in the default expansion-cost materialization.
+**Coverage.**
+- A real grid-stage is priced only when every simulated timestep converged. A grid with failed timesteps is
+  `incomplete`, gets no cost rows and takes no part in the staged stage 4 (it offers no spare capacity).
+- Methodological exclusions are `excluded`.
+- Cost comparisons must report both total cost and coverage.
 
-## Source Notes
+**Structural differences between the sources.** Real stations have a median of 6–7 outlets, synthetic a1 stations
+3. The panel count is therefore reported, not a trigger. Real grids have more parallel cables than synthetic ones
+(route length with two or more cables: real SWF 1.9 %, real ÜZW 7.5 %, synthetic a1 0.7 %); they count at their
+nominal capacity.
 
-The cost review behind the current defaults emphasizes that civil works dominate LV cable costs. Cable material-only values around 25k-28k EUR/km are much lower than full underground-cable costs. The decisive modelling choice is therefore whether an added parallel cable can use an existing duct/empty pipe or whether a paved route must be reopened.
+## Interpretation guidance
 
-No robust official or academic percentage was found for how many existing German LV routes already have spare ducts. The `existing_duct_share = 0.20` default is therefore a transparent scenario assumption, not an observed national statistic. It should be varied in sensitivity runs.
+Use the result as an order-of-magnitude screening layer:
 
-Primary/context sources and how they are used:
+- **Good for:**
+  - mapping which routes and stations become critical;
+  - comparing scenarios and flexibility cases;
+  - sensitivity analysis. The most uncertain inputs are the new-substation cost, the load transfer (cost and
+    neighbour distance) and the existing-duct share.
+- **Not suitable for:**
+  - budgeting without route, site and protection checks. New substations are not sited, and MV feasibility (ring
+    capacity, n-1) is not checked;
+  - inferring electrical parallel cables from QGIS helper geometries.
+- **Lumpy measures.** Whole substations make the cost a step function of the peak load. Report measure counts
+  (transfers, new substations, `expansion_grid_result`) next to the euros. The load transfer softens the steps
+  where neighbours have spare capacity.
 
-- WEI202 / GridSim / Candas-related LV expansion modelling: supports recursive line reinforcement, transformer replacement steps, and the distinction between first reinforcement with trenching and later parallel cables in empty pipes.
-- Wintzek 2021 / PuBStadt: provides urban LV planning guidance, first-line vs parallel-line cable cost benchmarks, empty-pipe strategy, rONT context, and Opex assumptions.
-- Verteilnetzstudie Baden-Wuerttemberg 2017: provides rural, semi-urban, and urban NS cable benchmarks, transformer/station/rONT references, and MS-level boundary values.
-- Bundesnetzagentur, Zustand und Ausbau der Verteilernetze 2022: macro-level context for distribution-grid expansion needs and the use of aggregated lower-voltage planning estimates. https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/VerteilerNetz/start.html
-- Deutsche Energie-Agentur, dena-Verteilnetzstudie II Gutachten, 2025: recent DSO-informed boundary values for NS-line and station-cost assumptions. https://www.dena.de/fileadmin/dena/Publikationen/PDFs/2025/Gutachten_VNSII.pdf
-- Consentec, Fraunhofer ISI, Fraunhofer IEG, Planung von Verteilnetzen der Zukunft, 2025: context for future planning practice and flexibility as a lever to reduce dimensioning-relevant peaks. https://consentec.de/app/uploads/2025/08/Consentec_ISI_IEG_BMWK_VN-Zukunft_AbschlussBer_20250627-1.pdf
-- Agora/FfE and related FfE distribution-grid modelling: cable material and laying decomposition, transformer and rONT equipment anchors, and method context.
-- WEI/GridSim 2025 modelling assumptions: cable material, installation, transformer replacement, and station rebuild consistency checks.
-- dena 2012: historical DSO-validated lower-bound plausibility check; not used as the primary default because the cost base is old.
+Cost-basis labels such as `catalog_rural_duct20_trench80_150x1_185x0_240x0` round the shares to whole percent. The
+result tables keep the cost basis, per-km costs, measures and breakdown columns, so QGIS users can see why a feature
+received its cost.
 
-## Application to Synthetic and Real Networks
+## Sources
 
-The same `de_lv_heuristic_2026` assumption row and the same asset-level formulas are applied to both network sources. The implementation differs only where source-specific identifiers and geometry must be read:
+- Niederle, S. et al. (2026): Ermittlung des Netzausbaubedarfes im urbanen Verteilnetz durch Sektorenkopplung
+  mittels vereinfachter Netzberechnung. 19. Symposium Energieinnovation, Graz.
+  https://www.tugraz.at/fileadmin/user_upload/Events/Eninnov/EnInnov2026/files/lf/262_LF_Niederle.pdf
+- Wintzek, P. et al. (2021): Planungs- und Betriebsgrundsätze für städtische Verteilnetze (PuBStadt). Neue Energie
+  aus Wuppertal 35. https://d-nb.info/1252809050/34
+- Harnisch, S. et al. (2016): Planungs- und Betriebsgrundsätze für ländliche Verteilungsnetze (PuBLIK). Neue Energie
+  aus Wuppertal 8; Harnisch, S. (2019): dissertation, BU Wuppertal.
+- Kerber, G. (2011): Aufnahmefähigkeit von Niederspannungsverteilnetzen für die Einspeisung aus
+  Photovoltaikkleinanlagen. Dissertation, TU München. https://mediatum.ub.tum.de/doc/998003/998003.pdf
+- dena (2012): dena-Verteilnetzstudie. Ausbau- und Innovationsbedarf der Stromverteilnetze in Deutschland bis 2030
+  (TU Dortmund/ef.Ruhr, Brunekreeft). dena (2025): dena-Verteilnetzstudie II, Gutachten (BET, BMU Energy Consulting,
+  BU Wuppertal); the cost values are in the Gutachten, not in the project report.
+  https://www.dena.de/fileadmin/dena/Publikationen/PDFs/2025/Gutachten_VNSII.pdf
+- ef.Ruhr et al. (2017): Verteilnetzstudie Baden-Württemberg; E-Bridge/IAEW/OFFIS (2014): Moderne Verteilernetze
+  für Deutschland (BMWi).
+- FfE for Agora Energiewende (2023): Haushaltsnahe Flexibilitäten nutzen; FfE (2017): MONA 2030.
+- ef.Ruhr/EWI (2024): Verteilnetzausbau BW/DE 2045 (slides); Consentec (2024): Langfristszenarien 3, Stromnetze.
+- Consentec/Fraunhofer ISI/IEG (2025): Planung von Verteilnetzen der Zukunft (planning practice and simultaneity,
+  no unit costs); Bundesnetzagentur (2023): Bericht zum Zustand und Ausbau der Verteilernetze 2022 (DSO survey:
+  planning simultaneity, expected thermal and voltage problems, rONT use, LV budgets).
+- Verteilnetzstudie Hessen (2018); Gutachten Verteilnetze NRW (2021); Agora Verkehrswende/Energiewende (2019):
+  Verteilnetzausbau für die Energiewende – Elektromobilität im Fokus.
+- Arnold (2019), Schlömer (2017), Samweber (2018): dissertations with LV unit costs; MR/BUW (2023): rONT
+  meta-study.
+- DSO network expansion plans under § 14d EnWG (2024): enercity, SWM, Netze BW, e-netz Südhessen (derived unit
+  costs).
+- DIN VDE 0276-603 / -1000 (via Siemens TIP Technische Schriftenreihe 12, 2023; Nexans Starkstromkabel 2012);
+  IEC 60076-7 (via VDE ETG 2024); DIN EN 50160.
+- Schneider Electric: Electrical Installation Guide (wiki), Planungskompendium Energieverteilung, Medium Voltage
+  Technical Guide AMTED300014EN (2022), Minera SGrid brochure (2015).
+- eDisGo (open_eGo), `config_grid_expansion_default.cfg`.
+- NAV § 9 (Niederspannungsanschlussverordnung).
 
-- Synthetic assets are joined through pylovo grid, line, and transformer identifiers.
-- Real assets are joined through `real_grid_case_id`, pandapower line indices, transformer ratings, and geometries read from the grid file of the power-flow run (SWF: pandapower Excel workbook, ÜZW: pandapower JSON).
-- Cable reinforcement uses the P100 current, existing installed capacity, common three-cable reinforcement catalogue, line length, settlement class, and duct/trenching blend on both sides.
-- Transformer reinforcement uses the P100 apparent-power loading, installed rating, 50 kVA rounding step, and the same replacement/rebuild cost bins on both sides.
-
-A real grid-stage is priced only when every simulated timestep converged. A grid with failed timesteps is stored as `incomplete`, receives no cable or transformer cost rows, and is excluded from aggregate costs rather than being interpreted as a zero-cost grid. Methodological exclusions are stored separately as `excluded`. Cost comparisons must therefore report both total cost and coverage; per-complete-grid values are useful when source coverage differs.
-
-The real-grid implementation deliberately follows the same thermal-only boundary as the synthetic calculation. It does not add a separate cost for voltage violations, meshing, switchgear changes, or rONT installation.
-
-## Interpretation Guidance
-
-Use the default result as an order-of-magnitude spatial screening layer:
-
-- Good for mapping which cable routes and transformer positions become thermally critical.
-- Good for comparing regional cost pressure across scenarios.
-- Good for sensitivity analysis around the existing-duct share, because this is the least observable but most cost-relevant cable parameter.
-- Not suitable for final construction budgeting without checking route feasibility, trench reopening constraints, switchgear, protection, voltage constraints, station constraints, and DSO-specific planning rules.
-- Not suitable for inferring electrical parallel cables from QGIS helper geometries. Raw electrical line components must remain the source for installed capacity and additional cable counts.
-
-Cost-basis labels such as `catalog_rural_duct20_trench80_150x1_185x0_240x0` round the shares to whole percent like PostgreSQL `ROUND`. The output deliberately keeps `critical_component_cost_basis`, `critical_component_cost_eur_per_km`, `critical_component_duct_cost_eur_per_km`, `critical_component_reopen_cost_eur_per_km`, and `transformer_cost_basis` in the result tables so QGIS users can see why a feature received its cost.
+The research notes with pages, price bases and the full URL list are kept outside the repository
+(`AI/SurroGrid/GridExpand/expansion-heuristic-refinement-2026-09-28/`).

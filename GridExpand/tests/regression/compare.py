@@ -27,6 +27,7 @@ KEYS = {
     "electrification_assignment": ["demand_allocation_run_id", "building_objectid", "technology"],
     "expansion_analysis_run": ["analysis_key"],
     "expansion_cost_assumption": ["assumption_key"],
+    "expansion_grid_result": ["expansion_analysis_run_id", "powerflow_run_id", "real_powerflow_run_id"],
     "expansion_line_qgis_mv": ["analysis_key", "powerflow_run_id", "visible_line_id"],
     "expansion_line_result": ["expansion_analysis_run_id", "powerflow_run_id", "visible_line_id"],
     "expansion_transformer_qgis_mv": ["analysis_key", "powerflow_run_id"],

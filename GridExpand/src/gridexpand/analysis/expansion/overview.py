@@ -114,6 +114,18 @@ def load_expansion_overview(
                        COUNT(*) FILTER (WHERE cost_status = 'excluded') AS grids_excluded
                 FROM surrogrid.expansion_real_grid_status
                 WHERE expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar)
+            ), grid_parts AS (
+                SELECT MAX(rule_set) AS rule_set,
+                       COALESCE(SUM(service_cost_eur), 0.0) AS service_cost_eur,
+                       COALESCE(SUM(transformer_exchange_cost_eur), 0.0) AS transformer_exchange_cost_eur,
+                       COALESCE(SUM(load_transfer_cost_eur), 0.0) AS load_transfer_cost_eur,
+                       COALESCE(SUM(new_station_cost_eur), 0.0) AS new_station_cost_eur,
+                       COALESCE(SUM(voltage_cost_eur), 0.0) AS voltage_cost_eur,
+                       COUNT(*) FILTER (WHERE station_measure = 'transfer') AS load_transfers,
+                       COALESCE(SUM(new_stations), 0.0) AS new_stations,
+                       COUNT(*) FILTER (WHERE voltage_measure IN ('ront', 'split')) AS voltage_measures
+                FROM surrogrid.expansion_grid_result
+                WHERE expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar)
             )
             SELECT ar.data_source,
                    CASE WHEN ar.data_source <> 'Synthetic' THEN rl.grids_with_line_rows ELSE sl.grids_with_line_rows END AS grids_with_line_rows,
@@ -134,10 +146,14 @@ def load_expansion_overview(
                    CASE WHEN ar.data_source <> 'Synthetic' THEN rs.grids_incomplete ELSE 0 END AS grids_incomplete,
                    CASE WHEN ar.data_source <> 'Synthetic' THEN rs.grids_excluded ELSE 0 END AS grids_excluded,
                    (CASE WHEN ar.data_source <> 'Synthetic' THEN rl.cable_cost_eur ELSE sl.cable_cost_eur END)
-                   + (CASE WHEN ar.data_source <> 'Synthetic' THEN rt.transformer_cost_eur ELSE st.transformer_cost_eur END) AS total_cost_eur
+                   + (CASE WHEN ar.data_source <> 'Synthetic' THEN rt.transformer_cost_eur ELSE st.transformer_cost_eur END) AS total_cost_eur,
+                   gp.rule_set, gp.service_cost_eur, gp.transformer_exchange_cost_eur,
+                   gp.load_transfer_cost_eur, gp.new_station_cost_eur, gp.voltage_cost_eur,
+                   gp.load_transfers, gp.new_stations, gp.voltage_measures
             FROM ar
             CROSS JOIN synthetic_lines sl CROSS JOIN synthetic_trafos st
             CROSS JOIN real_lines rl CROSS JOIN real_trafos rt CROSS JOIN real_status rs
+            CROSS JOIN grid_parts gp
             """
         ),
         "grid_cost_summary": text(
@@ -170,6 +186,12 @@ def load_expansion_overview(
                 FROM surrogrid.expansion_transformer_result
                 WHERE expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar)
                 GROUP BY grid_case_id
+            ), grid_parts AS (
+                SELECT grid_case_id, real_grid_case_id, station_measure, escalation_reason,
+                       new_stations, voltage_measure, service_cost_eur, transformer_exchange_cost_eur,
+                       load_transfer_cost_eur, new_station_cost_eur, voltage_cost_eur
+                FROM surrogrid.expansion_grid_result
+                WHERE expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar)
             ), synthetic_rows AS (
                 SELECT 'Synthetic'::TEXT AS data_source,
                        COALESCE(l.grid_case_id, t.grid_case_id)::TEXT AS source_grid_id,
@@ -187,8 +209,12 @@ def load_expansion_overview(
                        t.transformer_loading_percent, 'complete'::TEXT AS cost_status,
                        0 AS n_failed_timesteps, NULL::TEXT AS status_reason,
                        COALESCE(l.cable_cost_eur, 0.0) + COALESCE(t.transformer_cost_eur, 0.0) AS total_cost_eur,
-                       NULL::TEXT AS real_source, NULL::TEXT AS lv_id
+                       NULL::TEXT AS real_source, NULL::TEXT AS lv_id,
+                       gp.station_measure, gp.escalation_reason, gp.new_stations, gp.voltage_measure,
+                       gp.service_cost_eur, gp.transformer_exchange_cost_eur, gp.load_transfer_cost_eur,
+                       gp.new_station_cost_eur, gp.voltage_cost_eur
                 FROM synthetic_lines l FULL OUTER JOIN synthetic_trafos t USING (grid_case_id)
+                LEFT JOIN grid_parts gp ON gp.grid_case_id = COALESCE(l.grid_case_id, t.grid_case_id)
             ), real_lines AS (
                 SELECT real_grid_case_id, MAX(plz) AS plz, MAX(lv_id) AS lv_id,
                        COUNT(*) AS cable_segments,
@@ -231,11 +257,15 @@ def load_expansion_overview(
                        t.transformer_loading_percent, s.cost_status, s.n_failed_timesteps,
                        s.status_reason,
                        CASE WHEN s.cost_status = 'complete' THEN COALESCE(l.cable_cost_eur, 0.0) + COALESCE(t.transformer_cost_eur, 0.0) END AS total_cost_eur,
-                       rgc.source AS real_source, s.lv_id
+                       rgc.source AS real_source, s.lv_id,
+                       gp.station_measure, gp.escalation_reason, gp.new_stations, gp.voltage_measure,
+                       gp.service_cost_eur, gp.transformer_exchange_cost_eur, gp.load_transfer_cost_eur,
+                       gp.new_station_cost_eur, gp.voltage_cost_eur
                 FROM surrogrid.expansion_real_grid_status s
                 JOIN surrogrid.real_grid_case rgc USING (real_grid_case_id)
                 LEFT JOIN real_lines l USING (real_grid_case_id)
                 LEFT JOIN real_trafos t USING (real_grid_case_id)
+                LEFT JOIN grid_parts gp USING (real_grid_case_id)
                 WHERE s.expansion_analysis_run_id = (SELECT expansion_analysis_run_id FROM ar)
             )
             SELECT * FROM synthetic_rows WHERE (SELECT data_source FROM ar) = 'Synthetic'

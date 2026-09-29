@@ -1,16 +1,23 @@
 # Step 5: expansion analysis and postprocessing
 
-Step 5 reads power-flow results from the `surrogrid` schema, turns peak loadings into cable and transformer
-reinforcement needs and costs, and provides the loaders, plots and notebooks of the result analysis. It writes only
-derived analysis tables, QGIS views, figures and audit exports.
+Step 5 reads power-flow results from the `surrogrid` schema and turns them into expansion measures and costs. It
+also provides the loaders, plots and notebooks of the result analysis. It writes only derived analysis tables, QGIS
+views, figures and audit exports.
+
+The rules are the staged rules (`staged_2026`): station limit, capped cables, load transfer to neighbouring
+stations, new substations, and residual voltage. The former heuristic (`heuristic_2026`) was retired on
+2026-09-29. See [expansion_costs.md](../expansion_costs.md).
 
 Code: `src/gridexpand/analysis/`
 
 | module | content |
 |---|---|
 | `expansion/grid_expansion.py` | `gridexpand expansion`: one analysis per run name and stage, one transaction |
-| `expansion/sql/*.sql` | synthetic path: selected runs, component loading, cable selection, line and transformer rows |
-| `expansion/heuristics.py` | the shared reinforcement rules (Python twin of the SQL, parity-tested) |
+| `expansion/staged.py` | the rules, rule set `staged_2026` (stages 1–5, cable search, route cost; pure functions) |
+| `expansion/topology.py` | station busbar, radial tree, outlets, service lines, bus coordinates (both sources) |
+| `expansion/results.py` | row fields: route decisions, station-level cost breakdown, `expansion_grid_result` rows |
+| `expansion/synthetic_materialization.py` | synthetic grids: rules in Python; decisions in temp tables for the SQL inserts |
+| `expansion/sql/*.sql` | synthetic scope and mapping: selected runs, component loading, transformer peaks, line and transformer inserts |
 | `expansion/real_materialization.py` | real SWF / ÜZW grids: cable corridors, grid status |
 | `expansion/aligned_expansion.py` | all provider groups of an aligned run in one command |
 | `expansion/cases.py` | model case → stage and analysis-key suffix |
@@ -41,7 +48,7 @@ uv run gridexpand expansion --refresh-only        # refresh the QGIS materialize
 | `--scenario-id` | the single scenario of the selected runs | scenario recorded with the analysis |
 | `--pylovo-version-id` | run assumptions | synthetic grid-case filter; real-grid settlement type |
 | `--exclude-real-lv-id` | none | real grid kept in coverage but not costed (repeatable) |
-| `--assumption-key` | `de_lv_heuristic_2026` | cost row of `expansion_cost_assumption` ([expansion_costs.md](../expansion_costs.md)) |
+| `--assumption-key` | `de_lv_staged_2026` | cost row of `expansion_cost_assumption`; its `rule_set` picks the rules. Sensitivity rows: `_low`, `_high`, `_trafo_allin`, `_load_factor_1_0`, `_no_transfer` ([expansion_costs.md](../expansion_costs.md)) |
 | `--line-existing-duct-share` | from the assumption | existing-duct share override |
 | `--analysis-key` | `<ags or all>_<run>_<stage>_<UTC stamp>` | readable key |
 | `--note` | empty | free text |
@@ -67,22 +74,32 @@ uv run python -m gridexpand.analysis.expansion.aligned_expansion --run-id joint_
 (`--pylovo-version-id`, `--exclude-real-grid PROVIDER:ID` repeatable; power-flow run names
 `<run.id>_<provider>_<real_<provider>|synthetic>_<case>`.)
 
-**Method in short** ([expansion_costs.md](../expansion_costs.md)): cable reinforcement from the P100 current of
-each visible pylovo line (synthetic: summed over its electrical components) or real cable corridor, with the
-least-cost combination of added NAYY 4×150/185/240 circuits and one trench per route; transformer upgrade from the
-P100 apparent power rounded up to 50 kVA with all-in replacement bins. Real grid-stages with failed power-flow
-timesteps are `incomplete` (no cost rows, not zero cost); explicit exclusions are `excluded`. Synthetic and real
-analyses use the same assumption row.
+**Method in short** ([expansion_costs.md](../expansion_costs.md)), rule set `staged_2026`:
+1. **Station.** Transformer exchange up to 1000 kVA in every settlement type, at literature unit costs.
+2. **Routes.** At most 3 added NAYY cables per route, at their nominal ratings.
+   Service lines are costed separately and stay out of the total.
+3. **Panels.** Reported per grid.
+4. **Grids above the station limit or with an unresolvable route** (per analysis). The excess goes to neighbouring
+   stations with spare capacity (load transfer), else neighbouring grids share whole new substations. Both relieve
+   the routes that need two or more cables.
+5. **Residual voltage** after the Step 4 tap: an rONT, or a feeder split at 2/3.
+
+The rules run in Python for both sources and use the same assumption row. Real grid-stages with failed
+power-flow timesteps are `incomplete` (no cost rows, not zero cost); explicit exclusions are `excluded`.
 
 ## Outputs
 
 Tables ([database.md](../database.md#step-5-expansion)): `expansion_analysis_run`, `expansion_line_result`,
 `expansion_transformer_result`, `expansion_real_grid_status`, `expansion_real_line_result`,
-`expansion_real_transformer_result`. QGIS views (synthetic grids, pylovo geometry): `expansion_line_qgis_mv`,
+`expansion_real_transformer_result`, `expansion_grid_result` (one row per grid with the decision trail and every
+cost component). QGIS views (synthetic grids, pylovo geometry): `expansion_line_qgis_mv`,
 `expansion_transformer_qgis_mv`. Useful fields: `analysis_key`, `requires_expansion`, `loading_percent`,
 `estimated_cost_eur`, `additional_parallel`, `reinforcement_150_count` / `_185_count` / `_240_count`,
-`additional_transformer_kva`, `critical_ts`, and the cost-basis columns (`critical_component_cost_basis`,
-`transformer_cost_basis`, ...).
+`additional_transformer_kva`, `critical_ts`, the cost-basis columns (`critical_component_cost_basis`,
+`transformer_cost_basis`, ...), and the staged columns: `measure`, `service_cost_eur`, `station_measure`, and the
+breakdown `transformer_exchange_cost_eur`, `load_transfer_cost_eur`, `new_station_cost_eur`, `voltage_cost_eur`.
+The transformer row's `estimated_cost_eur` carries every station-level cost, so line plus transformer rows add up to
+the grid total.
 
 Files go below `work/analysis/output/` (plots under `plots/`, audits under `audits/<workflow>/`); callers choose the
 destination of plots.

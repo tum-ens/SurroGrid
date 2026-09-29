@@ -1,11 +1,8 @@
 -- Cable expansion rows of one synthetic analysis: component costs summed per visible pylovo
 -- line; the most loaded component describes the line (ties: lowest pandapower line index).
-WITH assumption AS (
-    SELECT *
-    FROM surrogrid.expansion_cost_assumption
-    WHERE assumption_key = :assumption_key
-),
-component_loading AS (
+-- The decision per component comes from the rules in Python (temp table
+-- expansion_component_selection, written by synthetic_materialization).
+WITH component_loading AS (
     SELECT
         ecl.powerflow_run_id,
         ecl.grid_case_id,
@@ -44,7 +41,31 @@ component_loading AS (
     WHERE ecl.visible_line_id IS NOT NULL
 ),
 component_cost AS (
-/*CABLE_SELECTION*/
+    SELECT
+        cl.*,
+        sel.required_parallel,
+        sel.additional_parallel,
+        sel.reinforcement_150_count,
+        sel.reinforcement_185_count,
+        sel.reinforcement_240_count,
+        sel.reinforcement_added_capacity_ka,
+        sel.reinforcement_catalog,
+        sel.line_cost_eur_per_km,
+        sel.line_cost_basis,
+        sel.duct_cost_eur_per_km,
+        sel.reopen_cost_eur_per_km,
+        sel.existing_duct_share,
+        sel.trenching_share,
+        sel.estimated_component_cost_eur,
+        sel.measure,
+        sel.is_station_outlet,
+        sel.is_service_line,
+        sel.route_cable_count,
+        sel.service_cost_eur
+    FROM component_loading cl
+    JOIN expansion_component_selection sel
+      ON sel.powerflow_run_id = cl.powerflow_run_id
+     AND sel.component_line = cl.component_line
 ),
 visible_counts AS (
     SELECT powerflow_run_id, visible_line_id, COUNT(*) AS mapped_component_lines
@@ -64,6 +85,8 @@ visible_aggregate AS (
         BOOL_OR(additional_parallel > 0) AS requires_expansion,
         BOOL_OR(COALESCE(loading_percent, 0.0) > 100.0) AS overloaded_at_100_percent,
         COALESCE(SUM(estimated_component_cost_eur), 0.0) AS estimated_cost_eur,
+        COALESCE(SUM(service_cost_eur), 0.0) AS service_cost_eur,
+        BOOL_OR(is_station_outlet) AS is_station_outlet,
         COUNT(DISTINCT line_cost_basis) AS component_cost_basis_count,
         COUNT(DISTINCT component_std_type) AS component_std_type_count
     FROM component_cost
@@ -121,7 +144,12 @@ INSERT INTO surrogrid.expansion_line_result (
     critical_ts,
     mapped_component_lines,
     component_cost_basis_count,
-    component_std_type_count
+    component_std_type_count,
+    measure,
+    is_station_outlet,
+    is_service_line,
+    route_cable_count,
+    service_cost_eur
 )
 SELECT
     :expansion_analysis_run_id,
@@ -169,7 +197,12 @@ SELECT
     cc.critical_ts,
     vc.mapped_component_lines,
     va.component_cost_basis_count,
-    va.component_std_type_count
+    va.component_std_type_count,
+    cc.measure,
+    va.is_station_outlet,
+    cc.is_service_line,
+    cc.route_cable_count,
+    va.service_cost_eur
 FROM critical_component cc
 JOIN visible_aggregate va
   ON va.powerflow_run_id = cc.powerflow_run_id

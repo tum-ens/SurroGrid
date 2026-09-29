@@ -30,6 +30,7 @@ in order and recorded in `surrogrid.schema_migration`, plus the re-runnable
 | `0004_validate_constraints.sql` | validates the 0003 constraints (no write lock), then drops the single-column keys they replace |
 | `0005_powerflow_asset.sql` | adds `powerflow_asset` (building assets simulated by a power-flow run) |
 | `0006_station_voltage.sql` | adds `lv_busbar_vm_pu` and `tap_steps` (station voltage of Step 4) to `powerflow_summary` and `real_powerflow_summary`; older rows stay NULL |
+| `0007_staged_expansion.sql` | staged expansion rules: `rule_set`, the `staged_2026` parameters and `parameter_provenance` in `expansion_cost_assumption` (rows `de_lv_staged_2026` and five sensitivities); measure and cost-breakdown columns of the line and transformer results; table `expansion_grid_result` |
 | `views.sql` | `grid_building_bus`, `grid_building_component`, the two QGIS materialized views |
 
 0002–0004 only change databases created by the pre-migration code; on a
@@ -209,8 +210,10 @@ and the expansion `critical_ts` columns.
 
 ### Step 5 expansion
 
-- `expansion_cost_assumption`: cost and catalogue assumptions
-  (`de_lv_heuristic_2026`, see [expansion_costs.md](expansion_costs.md)).
+- `expansion_cost_assumption`: rule set, cost and catalogue assumptions, and per-parameter
+  `parameter_provenance` (value, unit, method, sources). Rows: `de_lv_staged_2026` (default) and its sensitivities,
+  and `de_lv_heuristic_2026` of the retired rule set, kept for the analyses written with it. See
+  [expansion_costs.md](expansion_costs.md).
 - `expansion_analysis_run`: one materialization (`analysis_key` unique,
   `run_name`, `stage`, `data_source` Synthetic / Real SWF / Real ÜZW).
 - `expansion_line_result`, `expansion_transformer_result`: per visible pylovo
@@ -218,6 +221,15 @@ and the expansion `critical_ts` columns.
   parallel cables or transformer size, estimated cost, critical time step.
 - `expansion_real_grid_status`, `expansion_real_line_result`,
   `expansion_real_transformer_result`: the same for real grids (with geometry).
+- Since 0007 the line rows carry `measure`, `is_station_outlet`, `is_service_line`,
+  `route_cable_count` and `service_cost_eur`. The transformer rows carry
+  `station_measure`, `station_limit_kva`, `excess_kva`, `voltage_measure` and the breakdown
+  `transformer_exchange_cost_eur` / `load_transfer_cost_eur` / `new_station_cost_eur` /
+  `voltage_cost_eur`, whose sum is `estimated_cost_eur`.
+- `expansion_grid_result`: one row per analysis and grid (`grid_key` = `synthetic:<powerflow_run_id>`
+  or `real:<real_powerflow_run_id>`). It holds the rule set, station decision,
+  escalation reason, load-transfer partners, new-station cluster and share, panels, route counts, voltage
+  measure and every cost component (`total_cost_eur` excludes `service_cost_eur`).
 
 ## Views
 

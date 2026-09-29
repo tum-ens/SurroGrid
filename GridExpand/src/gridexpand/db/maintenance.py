@@ -55,6 +55,7 @@ EXPANSION_RESULT_TABLES = (
     "expansion_real_grid_status",
     "expansion_real_line_result",
     "expansion_real_transformer_result",
+    "expansion_grid_result",
 )
 QGIS_VIEW_TABLES = ("expansion_line_qgis_mv", "expansion_transformer_qgis_mv")
 DEMAND_TABLES = ("scenario", "pipeline_run", "demand_allocation_run", *DEMAND_ALLOCATION_CHILDREN)

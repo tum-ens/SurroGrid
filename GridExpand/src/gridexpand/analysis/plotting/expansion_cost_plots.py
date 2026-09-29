@@ -9,6 +9,13 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
+# Analyses written before migration 0007 have Cables and Transformers only; later ones split the
+# station-level cost.
+COMPONENT_ORDER = (
+    "Cables", "Transformers", "Transformer exchange", "Load transfer", "New substations", "Voltage measures",
+)
+
+
 def plot_expansion_cost_comparison_bar(
     expansion_cost_comparison: pd.DataFrame,
     *,
@@ -18,7 +25,7 @@ def plot_expansion_cost_comparison_bar(
     title: str = "Heuristic Expansion Cost by Asset Type",
     show: bool = True,
 ):
-    """Plot total cable and transformer expansion cost by stage."""
+    """Plot the expansion cost per component (cables and station-level measures) by stage."""
     if expansion_cost_comparison.empty:
         print("No post-electrification expansion cost summaries available yet.")
         return None
@@ -28,7 +35,8 @@ def plot_expansion_cost_comparison_bar(
         cost_data["data_source"] = "Synthetic"
     plotted_stages = [stage for stage in stage_order if stage in set(cost_data["stage"])]
     sources = [str(source) for source in cost_data["data_source"].dropna().drop_duplicates()]
-    components = ["Cables", "Transformers"]
+    present = set(cost_data["component"])
+    components = [component for component in COMPONENT_ORDER if component in present]
     fig, ax = plt.subplots(figsize=(max(7.2, 2.7 * len(plotted_stages) * max(len(sources), 1)), 4.4))
     x_positions = range(len(components))
     series = [(stage, source) for stage in plotted_stages for source in sources]

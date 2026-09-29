@@ -2,10 +2,12 @@
 
 One analysis (``surrogrid.expansion_analysis_run``) reduces the peak loading of
 one power-flow run name and stage to reinforcement needs and costs per visible
-pylovo cable and per transformer (synthetic grids, SQL in ``sql/``) or per
-cable corridor and transformer of the real SWF/ÜZW grids (``real_materialization``).
-The rules are documented in ``heuristics``. Each analysis is written in one
-transaction: a failure leaves no partial analysis behind.
+pylovo cable and per transformer (synthetic grids, ``synthetic_materialization`` with
+the SQL in ``sql/``) or per cable corridor and transformer of the real SWF/ÜZW grids
+(``real_materialization``), plus one ``expansion_grid_result`` row per grid. The rules
+are those of ``staged`` (rule set ``staged_2026``, default key ``de_lv_staged_2026`` or one
+of its sensitivity rows). Each analysis is written in one transaction: a failure leaves no
+partial analysis behind.
 
 ``gridexpand expansion --help`` lists the options. Batch callers pass
 ``--no-refresh`` and refresh the QGIS views once at the end with
@@ -27,8 +29,10 @@ from gridexpand.db import refresh_qgis_views
 from gridexpand.db.database import SurroGridDatabase, normalize_ags
 
 from .real_materialization import insert_real_results, prepare_real_results
+from .synthetic_materialization import materialize_synthetic
 
 SQL_DIR = Path(__file__).with_name("sql")
+DEFAULT_ASSUMPTION_KEY = "de_lv_staged_2026"
 DATA_SOURCE_LABELS = {
     "synthetic": "Synthetic",
     "real_swf": "Real SWF",
@@ -38,15 +42,23 @@ DATA_SOURCE_LABELS = {
 
 @cache
 def sql_text(name: str) -> str:
-    """SQL of ``sql/<name>`` with its fragments (``/*CABLE_SELECTION*/``, ``/*TRANSFORMER_COST*/``) inlined."""
-    sql = (SQL_DIR / name).read_text(encoding="utf-8")
-    for marker, fragment in (
-        ("/*CABLE_SELECTION*/", "cable_selection.sql"),
-        ("/*TRANSFORMER_COST*/", "transformer_cost.sql"),
-    ):
-        if marker in sql:
-            sql = sql.replace(marker, sql_text(fragment))
-    return sql
+    """SQL of ``sql/<name>``."""
+    return (SQL_DIR / name).read_text(encoding="utf-8")
+
+
+def assumption_row(conn: Connection, assumption_key: str) -> dict[str, Any]:
+    """The ``expansion_cost_assumption`` row of ``assumption_key``.
+
+    Raises:
+        RuntimeError: no such row.
+    """
+    row = conn.execute(
+        text("SELECT * FROM surrogrid.expansion_cost_assumption WHERE assumption_key = :key"),
+        {"key": assumption_key},
+    ).mappings().first()
+    if row is None:
+        raise RuntimeError(f"No expansion_cost_assumption row {assumption_key!r} (run `gridexpand db migrate`).")
+    return dict(row)
 
 
 def _ags_values(args: argparse.Namespace) -> list[int] | None:
@@ -247,11 +259,18 @@ def _prepare_synthetic_scope(conn: Connection, args: argparse.Namespace) -> set[
     }
 
 
-def _materialize_synthetic(conn: Connection, run_id: int, args: argparse.Namespace) -> dict[str, int]:
-    params = {**_synthetic_params(args), "expansion_analysis_run_id": run_id}
-    lines = conn.execute(text(sql_text("line_insert.sql")), params).rowcount
-    transformers = conn.execute(text(sql_text("transformer_insert.sql")), params).rowcount
-    return {"line_rows": int(lines or 0), "transformer_rows": int(transformers or 0)}
+def _materialize_synthetic(
+    conn: Connection, db: SurroGridDatabase, run_id: int, args: argparse.Namespace
+) -> dict[str, int]:
+    return materialize_synthetic(
+        conn,
+        db.engine,
+        run_id,
+        stage=args.stage,
+        assumption=assumption_row(conn, args.assumption_key),
+        duct_share_override=args.line_existing_duct_share,
+        sql_text=sql_text,
+    )
 
 
 def _print_summary(db: SurroGridDatabase, analysis_key: str) -> None:
@@ -316,8 +335,33 @@ def _print_summary(db: SurroGridDatabase, analysis_key: str) -> None:
     print(f"cable_expansion_segments: {row['cable_expansion_segments']}")
     print(f"transformer_expansion_count: {row['transformer_expansion_count']}")
     print(f"cable_cost_eur: {float(row['cable_cost_eur']):.2f}")
-    print(f"transformer_cost_eur: {float(row['transformer_cost_eur']):.2f}")
+    print(f"transformer_cost_eur (all station-level measures): {float(row['transformer_cost_eur']):.2f}")
     print(f"total_cost_eur: {total:.2f}")
+    breakdown = text(
+        """
+        SELECT MAX(g.rule_set) AS rule_set,
+               COALESCE(SUM(g.service_cost_eur), 0.0) AS service_cost_eur,
+               COALESCE(SUM(g.transformer_exchange_cost_eur), 0.0) AS transformer_exchange_cost_eur,
+               COALESCE(SUM(g.load_transfer_cost_eur), 0.0) AS load_transfer_cost_eur,
+               COALESCE(SUM(g.new_station_cost_eur), 0.0) AS new_station_cost_eur,
+               COALESCE(SUM(g.voltage_cost_eur), 0.0) AS voltage_cost_eur,
+               COUNT(*) FILTER (WHERE g.station_measure = 'transfer') AS load_transfers,
+               COALESCE(SUM(g.new_stations), 0.0) AS new_stations,
+               COUNT(*) FILTER (WHERE g.voltage_measure IN ('ront', 'split')) AS voltage_measures
+        FROM surrogrid.expansion_grid_result g
+        JOIN surrogrid.expansion_analysis_run ar USING (expansion_analysis_run_id)
+        WHERE ar.analysis_key = :analysis_key
+        """
+    )
+    with db.engine.connect() as conn:
+        parts = conn.execute(breakdown, {"analysis_key": analysis_key}).mappings().one()
+    if parts["rule_set"] is not None:
+        print(f"rule_set: {parts['rule_set']}")
+        print(f"  transformer_exchange_cost_eur: {float(parts['transformer_exchange_cost_eur']):.2f}")
+        print(f"  load_transfer_cost_eur: {float(parts['load_transfer_cost_eur']):.2f} ({parts['load_transfers']} grids)")
+        print(f"  new_station_cost_eur: {float(parts['new_station_cost_eur']):.2f} ({float(parts['new_stations']):.1f} stations)")
+        print(f"  voltage_cost_eur: {float(parts['voltage_cost_eur']):.2f} ({parts['voltage_measures']} grids)")
+        print(f"  service_cost_eur (not in the total): {float(parts['service_cost_eur']):.2f}")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -377,8 +421,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--assumption-key",
-        default="de_lv_heuristic_2026",
-        help="Cost/planning assumption row to use.",
+        default=DEFAULT_ASSUMPTION_KEY,
+        help=(
+            f"Cost/planning assumption row of rule set staged_2026 (default {DEFAULT_ASSUMPTION_KEY}; "
+            "the sensitivity rows are listed in docs/expansion_costs.md)."
+        ),
     )
     parser.add_argument(
         "--line-existing-duct-share",
@@ -439,7 +486,7 @@ def materialize(
                 args=args,
                 scenario_id=resolve_scenario_id(args.scenario_id, scenario_ids),
             )
-            counts = _materialize_synthetic(conn, run_id, args)
+            counts = _materialize_synthetic(conn, db, run_id, args)
     else:
         # Reads and grid files first; the transaction only writes.
         results = prepare_real_results(db, args)
@@ -454,6 +501,7 @@ def materialize(
         print(f"grid status rows inserted: {counts['grid_status_rows']}")
     print(f"line rows inserted: {counts['line_rows']}")
     print(f"transformer rows inserted: {counts['transformer_rows']}")
+    print(f"grid rows inserted: {counts['grid_rows']}")
     if refresh_views:
         refresh_qgis_views(db.engine)
         print("QGIS materialized views refreshed.")
