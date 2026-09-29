@@ -1,9 +1,10 @@
 """Station voltage of the Step 4 power flow: LV busbar reference and off-load tap.
 
 Step 4 solves every grid with the external grid on the station's LV busbar; the MV/LV transformer
-is represented by its rating only. The busbar voltage follows the convention of pylovo's validation
-power flow (``pylovo/src/pylovo/station_voltage.py``), which splits the DIN EN 50160 band between MV
-and LV as in Niederle et al. (2026):
+is represented by its rating only. The busbar reference follows pylovo's validation power flow
+(``pylovo/src/pylovo/station_voltage.py``), which splits the DIN EN 50160 band between MV and LV as in
+Niederle et al. (2026). pylovo keeps the tap neutral for the grid as built; Step 4 adds it as the first,
+free voltage measure, as Niederle et al. do in their expansion:
 
 1. the LV busbar sits at ``LV_REFERENCE_VOLTAGE_PU`` (0.96 p.u.);
 2. while a bus is below ``MIN_VM_PU`` in any timestep, the off-load tap lifts the LV side by one more

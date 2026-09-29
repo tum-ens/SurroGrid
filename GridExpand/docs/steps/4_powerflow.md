@@ -99,8 +99,16 @@ of the evaluation scope is below `MIN_VM_PU` = 0.90 p.u. in any timestep, the of
 more step of 2.5 %, at most `MAX_TAP_STEPS` = 2 steps. The tap is on the HV side, so the busbar goes to
 0.96 / (1 − k · 0.025) = 0.985 or 1.011 p.u. A step is not used if it pushes a bus above `MAX_VM_PU` = 1.10 p.u.
 in any timestep or adds non-converged timesteps.
-- This is the convention of pylovo's validation power flow: the DIN EN 50160 band is split between MV and LV as in
-  Niederle et al. (2026).
+- The reference is the convention of pylovo's validation power flow: the DIN EN 50160 band is split between MV and
+  LV as in Niederle et al. (2026). pylovo keeps the tap neutral for the grid as built; here re-tapping is the first,
+  free voltage measure.
+- Niederle et al. let the MV grid drop to 0.96 p.u. and start the LV grid at 0.96 p.u., with nothing reserved for the
+  transformer. The reference therefore describes a station at the weakest MV point whose tap already compensates the
+  transformer drop; the dena-Verteilnetzstudie (2012) likewise folds the static tapping of the MV/LV transformers into
+  its reference voltages. The up to 2 steps come on top, as in Niederle et al. At such stations this is optimistic by
+  up to the transformer drop (about one step); stations nearer the substation sit above 0.96 p.u. anyway.
+  Wintzek/PuBStadt (2021) put the busbar at 0.95 p.u. (the 0.96 p.u. MV minimum minus 1 % transformer drop) and use
+  the full ±2 × 2.5 % as the first measure. GridExpand keeps Niederle's pairing for comparability.
 - The tap is chosen per stage over the whole horizon, and each step solves the horizon again. A post stage may
   therefore use another tap than the status quo.
 - The summaries record `lv_busbar_vm_pu` and `tap_steps`, and the run assumptions record the convention
