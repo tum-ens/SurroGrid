@@ -385,6 +385,7 @@ SYNTHETIC_GRID_SUMMARY_COLUMNS = (
     "cable_loading_p95_asset_percent", "cable_hours_above_100_p95_asset",
     "voltage_p05_load_bus_hour_pu", "voltage_hours_below_0_90_p95_asset",
     "voltage_hours_above_1_03_p95_asset", "voltage_hours_above_1_10_p95_asset",
+    "lv_busbar_vm_pu", "tap_steps",
 )
 REAL_GRID_SUMMARY_COLUMNS = (
     "transformer_s_rated_mva",
@@ -393,6 +394,7 @@ REAL_GRID_SUMMARY_COLUMNS = (
     "trafo_loading_max_time_percent", "trafo_loading_hours_above_100",
     "cable_loading_p95_asset_percent", "cable_hours_above_100_p95_asset",
     "voltage_p05_load_bus_hour_pu", "voltage_hours_below_0_90_p95_asset",
+    "lv_busbar_vm_pu", "tap_steps",
 )
 REAL_CABLE_SUMMARY_COLUMNS = (
     "cable", "cable_loading_p50_time_percent", "cable_loading_p90_time_percent",

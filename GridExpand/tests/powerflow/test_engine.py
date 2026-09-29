@@ -10,7 +10,7 @@ import pandapower.networks as pn
 import pandas as pd
 import pytest
 
-from gridexpand.powerflow import engine, network
+from gridexpand.powerflow import engine, network, station_voltage
 from gridexpand.powerflow.powerflow import pf, pf_summary
 
 
@@ -74,8 +74,11 @@ def test_summary_is_independent_of_chunking_and_grid_copies():
                   voltage_buses=voltage_buses, cable_ids=cables, on_nonconvergence="nan")
     serial = pf_summary(grid, demand, protect_grid_state=True, **kwargs)
     parallel = pf_summary(grid, demand, n_workers=4, **kwargs)
-    matrices = engine.run_timeseries(grid, demand, n_workers=3)
+    matrices, station = station_voltage.solve(
+        grid, voltage_buses, lambda net: engine.run_timeseries(net, demand, n_workers=3)
+    )
     one_pass = engine.summarize(grid, matrices, **{k: v for k, v in kwargs.items() if k != "on_nonconvergence"})
+    one_pass["grid_summary"].update(station.as_summary())
     for other in (parallel, one_pass):
         for key in ("cable_summary", "bus_voltage_summary", "tail_summary", "transformer_diagnostic"):
             pd.testing.assert_frame_equal(serial[key], other[key], check_exact=True)

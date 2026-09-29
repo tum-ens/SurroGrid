@@ -179,7 +179,8 @@ def test_timestamps_follow_timeframe_start() -> None:
 def test_summary_frames_synthetic_and_real() -> None:
     stamps = FixedTimestamps()
     summary = {
-        "grid_summary": {"n_timesteps": 168, "n_voltage_buses": 3, "n_cables": 2, "trafo_critical_t_index": 5},
+        "grid_summary": {"n_timesteps": 168, "n_voltage_buses": 3, "n_cables": 2, "trafo_critical_t_index": 5,
+                         "lv_busbar_vm_pu": 0.96 / 0.975, "tap_steps": 1},
         "cable_summary": pd.DataFrame({"cable": [1.0, 2.0], "cable_max_i_ka": [0.1, 0.2], "extra": [1, 2]}),
         "transformer_diagnostic": pd.DataFrame(
             {"diagnostic": ["x", "x"], "point_index": [0, 1], "x_value": [1, 2], "t_index": [3, None]}
@@ -195,6 +196,8 @@ def test_summary_frames_synthetic_and_real() -> None:
     assert "extra" not in real["real_powerflow_cable_summary"]
     assert "trafo_critical_ts" not in real["real_powerflow_summary"]
     assert real["real_powerflow_summary"].loc[0, "real_powerflow_run_id"] == 8
+    for row in (synthetic["powerflow_summary"], real["real_powerflow_summary"]):
+        assert row.loc[0, "tap_steps"] == 1 and row.loc[0, "lv_busbar_vm_pu"] == pytest.approx(0.96 / 0.975)
 
 
 def test_allocated_timeseries_frame_drops_missing_values() -> None:

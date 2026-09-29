@@ -23,7 +23,7 @@ from gridexpand.common.timeframe import scenario_key_for_timeframe
 from gridexpand.optimization.identity import resolve_input_file
 from gridexpand.optimization.solver import summarize_audit
 from gridexpand.paths import POWERFLOW_INPUT_DIR, POWERFLOW_OUTPUT_DIR
-from gridexpand.powerflow import engine, network
+from gridexpand.powerflow import engine, network, station_voltage
 from gridexpand.powerflow.io import (
     DbRunSink,
     HdfSink,
@@ -234,6 +234,7 @@ def build_assumptions(args, reader: ScenarioResultReader) -> dict:
         "post_demand_mode": args.post_demand_mode,
         "summary_grid_scope": args.summary_grid_scope,
         "summary_nonconvergence": args.summary_nonconvergence,
+        "station_voltage": station_voltage.assumptions(),
     }
     if args.post_demand_mode == "inflex":
         assumptions.update({
@@ -416,15 +417,20 @@ def prepare_grid_context(grid, load_buses, scope) -> GridContext:
 
 
 def run_stage(context: GridContext, demand, stage, *, outputs, raw_sink, summary_sink, n_workers, on_nonconvergence):
-    """Solve one stage once and write its raw tables and/or summary."""
+    """Solve one stage (station voltage: ``station_voltage``) and write its raw tables and/or summary."""
     with resource_report(name=f"{stage.capitalize()}-Expansion Powerflow Run", include_children=True):
-        matrices = engine.run_timeseries(
+        matrices, station = station_voltage.solve(
             context.grid,
-            demand,
-            algorithm="bfsw",
-            on_nonconvergence="raise" if "raw" in outputs else on_nonconvergence,
-            n_workers=n_workers,
+            context.voltage_buses,
+            lambda grid: engine.run_timeseries(
+                grid,
+                demand,
+                algorithm="bfsw",
+                on_nonconvergence="raise" if "raw" in outputs else on_nonconvergence,
+                n_workers=n_workers,
+            ),
         )
+        print(f"Station voltage ({stage}): {station.describe()}", flush=True)
         if "raw" in outputs:
             ext_import, vm, line_loads = engine.raw_tables(matrices)
             raw_sink.save_df(ext_import, f"/pwrflw/output/{stage}/demand_import")
@@ -439,6 +445,7 @@ def run_stage(context: GridContext, demand, stage, *, outputs, raw_sink, summary
                 voltage_buses=context.voltage_buses,
                 cable_ids=context.cable_ids,
             )
+            summary["grid_summary"].update(station.as_summary())
             summary_sink.save_summary(summary, stage)
 
 

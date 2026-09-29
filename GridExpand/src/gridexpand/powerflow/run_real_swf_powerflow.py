@@ -37,7 +37,7 @@ from gridexpand.allocation.scenario_calibration.profiles.real_swf_electricity_pr
 from gridexpand.db.database import DEFAULT_SCENARIO_KEY, SurroGridDatabase
 from gridexpand.paths import ENV_FILE
 import gridexpand.powerflow.powerflow as pwrflw
-from gridexpand.powerflow import network
+from gridexpand.powerflow import network, station_voltage
 from gridexpand.powerflow.config import config as pf_config
 
 ENV_PATH = ENV_FILE
@@ -542,6 +542,7 @@ def run_one(
             "timeframe_mode": "full_year",
             "demand_allocation": ASSUMPTION_TEXT,
             "profile_seed": int(seed),
+            "station_voltage": station_voltage.assumptions(),
             **demand_audit_totals,
             **load_scope,
             "selected_household_load_rows": int(len(selected_household_loads)),

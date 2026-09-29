@@ -7,6 +7,7 @@ frame. The implementation lives in ``engine`` (solves, matrices, summary) and
 
 from __future__ import annotations
 
+from gridexpand.powerflow import station_voltage
 from gridexpand.powerflow.engine import raw_tables, run_timeseries, summarize
 from gridexpand.powerflow.network import (  # noqa: F401  (used as pwrflw.* by the real-grid runners)
     comparison_backbone_scope,
@@ -37,18 +38,24 @@ def pf_summary(
 ):
     """Run power flow and return compact violation-hour and percentile metrics.
 
+    The LV busbar voltage and the off-load tap follow ``station_voltage``; the
+    grid summary records both (``lv_busbar_vm_pu``, ``tap_steps``).
     ``on_nonconvergence="nan"`` keeps the annual summary running and records
     failed timesteps as missing values. The default stays strict and raises.
     """
-    matrices = run_timeseries(
+    matrices, station = station_voltage.solve(
         grid,
-        df,
-        algorithm=algorithm,
-        on_nonconvergence=on_nonconvergence,
-        n_workers=n_workers,
-        protect_grid_state=protect_grid_state,
+        voltage_buses,
+        lambda net: run_timeseries(
+            net,
+            df,
+            algorithm=algorithm,
+            on_nonconvergence=on_nonconvergence,
+            n_workers=n_workers,
+            protect_grid_state=protect_grid_state,
+        ),
     )
-    return summarize(
+    summary = summarize(
         grid,
         matrices,
         transformer_s_rated_mva=transformer_s_rated_mva,
@@ -56,3 +63,5 @@ def pf_summary(
         voltage_buses=voltage_buses,
         cable_ids=cable_ids,
     )
+    summary["grid_summary"].update(station.as_summary())
+    return summary

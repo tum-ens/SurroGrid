@@ -93,6 +93,19 @@ rejected); static generators, generators and storages are switched off; line, lo
 MV/LV transformer is replaced by a closed bus-bus switch and the external grid bus gets the LV nominal voltage;
 transformer loading is evaluated from the external-grid import against the station rating (`sn_mva` × parallel units).
 
+**Station voltage** (`station_voltage.py`, values in `config.py`). The external grid sits on the station's LV busbar
+in both sources. Step 4 sets it to `LV_REFERENCE_VOLTAGE_PU` = 0.96 p.u., whatever the stored grid holds. While a bus
+of the evaluation scope is below `MIN_VM_PU` = 0.90 p.u. in any timestep, the off-load tap lifts the busbar by one
+more step of 2.5 %, at most `MAX_TAP_STEPS` = 2 steps. The tap is on the HV side, so the busbar goes to
+0.96 / (1 − k · 0.025) = 0.985 or 1.011 p.u. A step is not used if it pushes a bus above `MAX_VM_PU` = 1.10 p.u.
+in any timestep or adds non-converged timesteps.
+- This is the convention of pylovo's validation power flow: the DIN EN 50160 band is split between MV and LV as in
+  Niederle et al. (2026).
+- The tap is chosen per stage over the whole horizon, and each step solves the horizon again. A post stage may
+  therefore use another tap than the status quo.
+- The summaries record `lv_busbar_vm_pu` and `tap_steps`, and the run assumptions record the convention
+  (`station_voltage`). In the raw outputs the busbar voltage is the `vm_pu` of the external-grid bus.
+
 **Solve.** Synthetic grids use `pandapower.runpp(algorithm="bfsw")` per timestep (real grids `nr`, then
 `iwamoto_nr`), `tolerance_mva = 1e-6`; timesteps are split into `--n_cpu` chunks solved in parallel processes, and
 results do not depend on the chunking.

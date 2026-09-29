@@ -29,6 +29,7 @@ in order and recorded in `surrogrid.schema_migration`, plus the re-runnable
 | `0003_constraints.sql` | composite run keys, CHECKs and the RESTRICT key to pylovo, all `NOT VALID`; removes the unused `baseline_static` seed row; fills `expansion_analysis_run.scenario_id` |
 | `0004_validate_constraints.sql` | validates the 0003 constraints (no write lock), then drops the single-column keys they replace |
 | `0005_powerflow_asset.sql` | adds `powerflow_asset` (building assets simulated by a power-flow run) |
+| `0006_station_voltage.sql` | adds `lv_busbar_vm_pu` and `tap_steps` (station voltage of Step 4) to `powerflow_summary` and `real_powerflow_summary`; older rows stay NULL |
 | `views.sql` | `grid_building_bus`, `grid_building_component`, the two QGIS materialized views |
 
 0002–0004 only change databases created by the pre-migration code; on a
@@ -199,7 +200,8 @@ and the expansion `critical_ts` columns.
   `powerflow_reactive_component` (q_kvar per bus, component, source).
 - Summaries (plain tables, one unique key each, `stage` is `pre` or `post`):
   `powerflow_summary` (one row per run and stage: transformer loading
-  percentiles, cable/voltage tails, annual-boundary diagnostics),
+  percentiles, cable/voltage tails, annual-boundary diagnostics, the LV
+  busbar voltage and off-load tap of the stage),
   `powerflow_cable_summary`, `powerflow_bus_voltage_summary`,
   `powerflow_tail_value`, `powerflow_transformer_diagnostic`; the `real_*`
   summary tables hold the same for real grids (their stages include

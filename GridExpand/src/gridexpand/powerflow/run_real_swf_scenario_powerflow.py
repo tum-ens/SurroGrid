@@ -37,7 +37,7 @@ from gridexpand.common.timeframe import (
 )
 import gridexpand.powerflow.powerflow as pwrflw
 import gridexpand.powerflow.demands as dmnds
-from gridexpand.powerflow import network
+from gridexpand.powerflow import network, station_voltage
 from gridexpand.powerflow.io import (
     ScenarioResultReader,
     read_temporal_method,
@@ -318,6 +318,7 @@ def run_one(
         **build_full_year_metadata(),
         "demand_allocation": ASSUMPTION_TEXT,
         "allocation_plan_path": str(allocation_plan_path),
+        "station_voltage": station_voltage.assumptions(),
         "profile_seed": int(seed),
         "sector_assets_simulated": False,
         "stage_label": "base_electricity",
@@ -476,6 +477,7 @@ def run_one_urbs_result(
         **metadata,
         "demand_allocation": URBS_ASSUMPTION_TEXT,
         "urbs_result_hdf": str(hdf_path),
+        "station_voltage": station_voltage.assumptions(),
         "post_demand_mode": post_demand_mode,
         "stage_label": "sector_coupling",
         "max_timesteps": None if max_timesteps is None else int(max_timesteps),
