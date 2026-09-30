@@ -111,10 +111,19 @@ uv sync --extra notebooks
 uv run jupyter lab notebooks/analysis
 ```
 
-- `analysis_powerflow.ipynb`: paired real/synthetic status-quo power-flow analysis;
-- `analysis_expansion.ipynb`: paired pre/post expansion analysis. `prepare_expansion_analysis(scenario_prefix=<run.id>,
-  providers=("swf", "uzw"))` (in `expansion.notebook_workflow`) prepares the four groups of an aligned run and
-  enforces consistent provenance (temporal method, run readiness);
+- `analysis_powerflow.ipynb`: status-quo validation of the joint aligned run, synthetic vs real (distribution
+  similarity, paper figure `asset-percentiles`);
+- `analysis_expansion.ipynb`: status quo, INFLEX and HEMS of the joint run (paper figure
+  `pre_post_flex_no_flex_asset_cutoff_overview`, expansion costs on one grid set for all cases, cable and voltage
+  diagnostics);
+- `joint_setup.py`: the setup both notebooks import (run id, providers, case colors and labels, exclusion
+  threshold, `CURVE_Y_LIMITS`: the fixed top-row scale shared by both paper figures). `prepare_joint_analysis()` calls `prepare_expansion_analysis(providers=("swf", "uzw"))` (in
+  `expansion.notebook_workflow`), which prepares the four groups and enforces consistent provenance, and adds
+  `nonconverged_grids` and their `excluded_grids`: a grid with non-converged power-flow hours in at least 1 % of
+  the hours of any case is left out of every case of its own group. The loaders take `excluded_grids`
+  (group → LV/area ids or `PLZ_kcid_bcid`); `expansion_cost_comparison` also leaves out real grids whose cost is
+  incomplete in one of the cases. The paper figures pool the providers as `Real`/`Synthetic` (column `network`),
+  so no DSO is named;
 - `grid_area_envelope_comparison.ipynb`: supplied-area envelope diagnostic (OSM tiles need `contextily` and
   network access).
 
