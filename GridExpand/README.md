@@ -118,6 +118,7 @@ repository, which runs both images behind one proxy.
 | `gridexpand optimize <id> --scenario-config ...` | Step 3 for one Step 2 file ([docs](docs/steps/3_urbs.md)) |
 | `gridexpand powerflow <id>` | Step 4 for one scenario file ([docs](docs/steps/4_powerflow.md)) |
 | `gridexpand expansion --run-name ... --stage ...` | Step 5 expansion materialization ([docs](docs/steps/5_postprocessing.md)) |
+| `gridexpand status-quo-test --provider ... (--alignment-dir ... \| --dataset ...) --output-dir ...` | status-quo power flow of the real grids at alignment; exclusion list per provider ([docs](docs/configuration.md#status-quo-test)) |
 | `gridexpand db <init-schema\|migrate\|compress\|relink-pylovo\|delete-scenario>` | database maintenance |
 | `gridexpand api` | HTTP API for the GridPlanner UI (`api` extra) |
 

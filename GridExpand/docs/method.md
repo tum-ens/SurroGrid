@@ -540,6 +540,37 @@ still dimensioned with the open-data GHD assumptions; an open-data rule for load
 is a separate topology sensitivity and must not use DSO matching (that would leak the reference network into the
 synthetic generation).
 
+### Status-quo test
+
+Before pylovo generation, `gridexpand status-quo-test` checks every real grid of a provider under its status-quo
+base electricity (households and GHD of the model above, with the scenario's `ghd:` rules) and writes the exclusion
+list: the alignment removes the flagged real grids and their buildings from both sides, so that the comparison is
+not dominated by grids that already fail today.
+
+*Demand.* The alignment bundle gives the real grid, bus and grid file per building; the building attributes come
+read-only from InfDB `basedata.buildings`. The pylovo derivations the model needs before pylovo has run mirror pylovo
+8afedcc: the non-residential use (Mixed buildings take the class of their function, Residential ones Commercial),
+missing households by type (1 for SFH/TH, area/181 m² for MFH and untyped residential with at least 2 and 1, area/146
+m² for AB with at least 5), component peaks (16.825 kW per household; 79, 29 and 29 W/m² for Commercial, Public and
+Unknown) and MV-direct above 100 kW; missing occupants are households × 2.03. Components, sampling, annual energies,
+seeds and the paired profile builder are those of the aligned allocation. `--dataset` takes the demand of a prepared
+paired dataset instead.
+
+*Power flow and flags.* Step 4's grid preparation and summary: LV busbar at 0.96 p.u. with up to two off-load tap
+steps, Newton-Raphson with the Iwamoto fallback, non-converged hours recorded. A grid is flagged for
+`transformer_overload` (> 100 % of the rating; skipped for grids without a rating), `cable_overload` (a cable above
+100 % of its rated current), `undervoltage` (a load bus below 0.90 p.u. after the taps) or `nonconvergence`. The
+evaluated hours are the 60 largest hours of the grid total plus the 24 largest household and GHD hours (`--all-hours`
+evaluates the year). On the prepared joint datasets this reproduces the full-year `pre` stage of
+`joint_2045_v1_full_year`: the transformer loading of all 48 converging SWF grids to 0.0 percentage points and the same
+eight flagged grids (LV 32, 35, 38, 59, 80, 99, 113, 137); ÜZW has none (one grid has no transformer rating and is
+checked for cables, voltage and convergence only).
+
+*Output* (per provider): `status_quo_<provider>_exclusions.csv` with the columns `provider, real_grid_id, reason`
+(`real_grid_id` is the bundle's own id, SWF `station_id` such as `LV_059` and ÜZW `area_id`; `reason` joins the
+flags with `;`), `status_quo_<provider>_grids.csv` (demand and power-flow metrics of every grid),
+`status_quo_<provider>_ghd_audit.csv` and `status_quo_<provider>_metadata.json`.
+
 ### Shared profile libraries
 
 Physical heat and COP series are generated once per profile assumption set and stored in a network-independent

@@ -246,6 +246,38 @@ The heat library of a provider is derived: `<paired_dataset_id>_teaser_heat_<sce
 `grid_subset` picks whole pylovo overlap components (`components`, in seeded random order up to
 `real_grids_per_provider` real grids) or only one-real-one-synthetic components (`islands`).
 
+## Status-quo test
+
+`gridexpand status-quo-test` checks the real grids of one provider under status-quo base electricity before pylovo
+generation (method in [method.md](method.md#status-quo-test)); read-only on the database.
+
+```bash
+uv run gridexpand status-quo-test --provider swf --alignment-dir <bundle root> \
+    --scenario-config config/scenarios/joint_2045_full_year.yaml --output-dir <dir> --jobs 4
+uv run gridexpand status-quo-test --provider uzw --alignment-dir <bundle root> --uzw-grids-dir <delivery> \
+    --scenario-config <scenario.yaml> --db-env-prefix INFDB_ --output-dir <dir>
+uv run gridexpand status-quo-test --provider swf --dataset work/allocation/outputs/scenario_calibration/<dataset> \
+    --output-dir <dir>                                        # regression: demand of a prepared paired dataset
+```
+
+| option | default | meaning |
+|---|---|---|
+| `--provider` | required | `swf` or `uzw` |
+| `--alignment-dir` / `--dataset` | one required | bundle root (`<dir>/<provider>/building-mapping.json`) or a prepared paired dataset |
+| `--uzw-grids-dir` | – | frozen ÜZW delivery (bundle input) |
+| `--scenario-config` | required with `--alignment-dir` | its `ghd:` block applies |
+| `--db-env-prefix` | `DB_` | InfDB connection from `<prefix>HOST`, `PORT`, `NAME`, `USER`, `PASSWORD` (read-only session) |
+| `--basedata-schema` | `basedata` | schema of `buildings` and `classify_building_use` |
+| `--profile-seed` | 481527 | realization seed (a dataset must match its own) |
+| `--peak-hours`, `--all-hours` | 60, off | evaluated hours per grid |
+| `--grids` | all | comma-separated real grid numbers |
+| `--jobs` | 1 | grids in parallel |
+
+The exclusion list `status_quo_<provider>_exclusions.csv` has exactly the columns `provider` (`swf`, `uzw`),
+`real_grid_id` (the bundle's id: SWF `station_id`, e.g. `LV_059`; ÜZW `area_id`, e.g. `113`) and `reason`
+(`transformer_overload`, `cable_overload`, `undervoltage`, `nonconvergence`, joined by `;`), one row per excluded
+grid; a pylovo alignment option consumes it to drop these grids and their buildings.
+
 ## Grid selection
 
 Synthetic runs take one region selector and optional filters; the user never enters a file name or a
