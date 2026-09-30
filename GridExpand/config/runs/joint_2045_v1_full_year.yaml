@@ -1,4 +1,4 @@
-# Joint paired SWF + ÜZW full-year comparison on pylovo v1 aligned grids.
+# Joint paired SWF + ÜZW full-year comparison on pylovo a1 aligned grids.
 # One scenario YAML and one pylovo version for both providers; each provider
 # gets its own paired dataset (weather, PV and TEASER heat libraries, adoption
 # selection) built from its alignment bundle. Launch with
@@ -9,34 +9,36 @@ run:
   pipeline: paired_aligned
 
 resources:
-  pylovo_version_id: 1
+  pylovo_version_id: a1
   alignment_dir: ~/data/alignment
-  # Frozen copy of pylovo validations_new/metrics/v1/comparison.json; its
-  # metric cohort is the compared building population.
-  population: ~/data/joint_paired_v1/pylovo-v1-comparison.json
+  # Frozen copy of pylovo validations_new/metrics/va1/comparison.json
+  # (sha256 c9ce248f…); its metric cohort is the compared building population.
+  population: ~/data/joint_paired_a1/pylovo-a1-comparison.json
   # Frozen, fingerprint-checked copy of the ÜZW delivery (87c5e86c…).
   uzw_grids_dir: ~/data/uzw-grids-87c5e86c
   providers:
     swf:
       paired_dataset_id: joint_2045_v1_swf
       weather_source_hdf: weather_joint_swf_v1.h5
-      workers: 2 # fewer, larger grids
+      workers: 3 # fewer, larger grids; Step 4 costs ~11 s per building (ÜZW ~5 s): 3 + 5 balances the providers
     uzw:
       paired_dataset_id: joint_2045_v1_uzw
       weather_source_hdf: weather_joint_uzw_v1.h5
-      workers: 3 # T3: ~1.8 GB per job; 5 jobs fit the 23 GB with the host's other load
+      workers: 5 # 8 jobs in total; <= ~1.7 GB per job in Step 3 (1 PyPSA worker), ~0.7 GB in Step 4
   target_network: both # both, real, or synthetic
 
 execution:
+  optimizer: pypsa
   powerflow_grid_scope: full
   model_cases:
     - post-inflex-heuristic
     - post-hems-heuristic
   workers: 2
   step3_cpus: 40
+  # 1 PyPSA worker per job: 2 workers x 8 jobs filled RAM + swap when all jobs were in Step 3 (2026-09-29).
   step3_cluster_concurrency: 1
   step4_cpus: 2
-  heat_workers: 6
+  heat_workers: 8
   # null = the full 8760 h year; a number caps Step-4 power flow (smoke tests).
   powerflow_max_timesteps: null
   profile_seed: 481527
