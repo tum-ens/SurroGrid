@@ -68,6 +68,8 @@ def test_real_adapter_commands(tmp_path, monkeypatch):
     modes = [cmd[cmd.index("--post-demand-mode") + 1] for _, _, cmd in calls]
     labels = [cmd[cmd.index("--scenario-label") + 1] for _, _, cmd in calls]
     assert modes == ["pre-only", "inflex", "flexible"]
+    # The pre stage is solved once, by the pre case; result cases solve the post stage only.
+    assert ["--post-only" in cmd for _, _, cmd in calls] == [False, True, True]
     assert labels == ["Paired 2045 real_swf pre electricity-only", "Paired 2045 real_swf heuristic-assets INFLEX",
                       "Paired 2045 real_swf heuristic-assets HEMS"]
     assert all("--expect-temporal-method" in cmd and "--grid-data-path" in cmd for _, _, cmd in calls)
@@ -89,8 +91,9 @@ def test_synthetic_adapter_commands(tmp_path, monkeypatch):
     joined = " ".join(cmd)
     for part in ("--grid-case-id 7", "--outputs summary", "--summary-nonconvergence nan",
                  "--summary-grid-scope backbone", "--max-timesteps 24", "--post-demand-mode flexible",
-                 "--run-name run_synthetic_post-hems-optimized"):
+                 "--run-name run_synthetic_post-hems-optimized", "--post-only"):
         assert part in joined
+    assert "--pre-only" not in cmd
     assert "--expect-temporal-method" not in cmd and not (tmp_path / "pf" / "r.h5").exists()
 
 

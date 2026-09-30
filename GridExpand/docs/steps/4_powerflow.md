@@ -47,6 +47,7 @@ uv run gridexpand powerflow <inputfile_id> --storage db --pre-only --outputs sum
 | `--summary-only` | | same as `--outputs summary` |
 | `--run-name`, `--summary-run-name` | DB default | run name of the raw tables (or of the summary with `--summary-only`); separate summary run with `--outputs raw,summary` |
 | `--pre-only` | off | only the pre stage from `urbs_in/demand` (no Step 3 result needed) |
+| `--post-only` | off | only the post stage, summary output only; the pre stage comes from a separate `--pre-only` run (paired runs; the real-grid runner has the same flag) |
 | `--post-demand-mode` | `flexible` | `flexible` (optimized urbs import) or `inflex` (fixed heat, PV and EV charging; needs EV sessions, i.e. paired inputs) |
 | `--inflex-ev-charger-kw` | none | INFLEX only: cross-check of the charger rating of every vehicle |
 | `--expect-temporal-method` | none | reject a Step 3 result that does not record `full_year_no_tsam` / `shared_weather_tsam` |

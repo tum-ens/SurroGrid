@@ -150,6 +150,7 @@ def powerflow_command(
     outputs: Sequence[str] = ("raw",),
     summary_run_name: str | None = None,
     pre_only: bool = False,
+    post_only: bool = False,
     post_demand_mode: str | None = None,
     inflex_ev_charger_kw: float | None = None,
     pylovo_version_id: str | None = None,
@@ -164,13 +165,16 @@ def powerflow_command(
     """Step 4 (``gridexpand powerflow``) of one synthetic-grid scenario file (DB storage).
 
     ``outputs`` is ``raw``, ``summary`` or both (one power-flow pass); with both,
-    ``summary_run_name`` names the summary run.
+    ``summary_run_name`` names the summary run. ``post_only`` skips the pre stage
+    (summary output; the pre stage comes from a separate ``pre_only`` run).
     """
     argv = module_command(POWERFLOW, input_name, python=python)
     _flag(argv, "--grid-case-id", grid_case_id)
     argv += ["--storage", "db"]
     if pre_only:
         argv.append("--pre-only")
+    if post_only:
+        argv.append("--post-only")
     argv += ["--outputs", ",".join(outputs)]
     _flag(argv, "--summary-nonconvergence", summary_nonconvergence)
     _flag(argv, "--summary-grid-scope", summary_grid_scope)
@@ -202,9 +206,13 @@ def real_powerflow_command(
     grid_file: str | None = None,
     grid_data_path: Path | None = None,
     max_timesteps: int | None = None,
+    post_only: bool = False,
     python: str | None = None,
 ) -> list[str]:
-    """Step 4 of one real DSO grid; the run name doubles as scenario key."""
+    """Step 4 of one real DSO grid; the run name doubles as scenario key.
+
+    ``post_only`` skips the pre stage (it comes from the separate pre-only run).
+    """
     argv = module_command(
         REAL_POWERFLOW,
         "--plz", plz,
@@ -227,6 +235,8 @@ def real_powerflow_command(
         "--scenario-key", run_name,
         "--scenario-label", scenario_label,
     ]
+    if post_only:
+        argv.append("--post-only")
     return argv
 
 

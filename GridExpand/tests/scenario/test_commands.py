@@ -83,6 +83,13 @@ def test_real_powerflow_command():
     )
     assert "--grid-file" in argv and "--grid-data-path" not in argv  # an explicit grid file wins
     assert argv[argv.index("--scenario-key") + 1] == "p_real_swf_pre"
+    assert "--post-only" not in argv
+    post = commands.real_powerflow_command(
+        plz=91301, lv_id=80, provider="swf", profile_seed=1, urbs_result_hdf=Path("/r.h5"), summary_grid_scope="full",
+        post_demand_mode="flexible", run_name="p_real_swf_post", scenario_label="Paired 2045 real_swf HEMS",
+        post_only=True, python=PY,
+    )
+    assert post[-1] == "--post-only"
 
 
 def test_paired_runner_command():

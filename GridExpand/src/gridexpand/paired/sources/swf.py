@@ -74,7 +74,11 @@ def run_real_powerflows(
     target_network: str,
     provider: str,
 ) -> None:
-    """Step 4 of one real grid: the pre case (unless ``--skip-pre``), then each result case."""
+    """Step 4 of one real grid: the pre case (unless ``--skip-pre``), then each result case.
+
+    Result cases solve the post stage only: the pre stage is the same for every case
+    and is written once, by the pre case of the job that emits it.
+    """
     cases = args.result_cases if args.skip_pre else ("pre", *args.result_cases)
     for case_name in cases:
         case = MODEL_CASES[case_name]
@@ -94,6 +98,7 @@ def run_real_powerflows(
             grid_data_path=args.grid_data_path,
             max_timesteps=getattr(args, "max_timesteps", None),
             post_demand_mode=case.real_powerflow_mode,
+            post_only=case.powerflow_mode is not None,
             run_name=run_name,
             scenario_label=f"Paired 2045 {target_network} {case.label}",
         )

@@ -53,7 +53,11 @@ def run_powerflows(
     log_path: Path,
     status: StatusLog,
 ) -> None:
-    """Step 4 summaries of one synthetic grid: pre (unless ``--skip-pre``), then each result case."""
+    """Step 4 summaries of one synthetic grid: pre (unless ``--skip-pre``), then each result case.
+
+    Result cases solve the post stage only: the pre stage is the same for every case
+    and is written once, by the pre case of the job that emits it.
+    """
     grid_id = int(job["target_grid_id"])
     step4_input = ensure_dir(POWERFLOW_INPUT_DIR) / result_hdf.name
     shutil.copy2(result_hdf, step4_input)
@@ -73,6 +77,7 @@ def run_powerflows(
             # Step-3 temporal record.
             expect_temporal_method=None if args.tsam or args.pre_only else "full_year_no_tsam",
             pre_only=case.powerflow_mode is None,
+            post_only=case.powerflow_mode is not None,
             post_demand_mode=case.powerflow_mode,
             run_name=f"{args.run_name_prefix}_{TARGET_NETWORK}_{case_name}",
         )

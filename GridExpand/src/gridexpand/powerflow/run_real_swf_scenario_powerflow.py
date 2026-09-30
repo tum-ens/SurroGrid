@@ -378,6 +378,7 @@ def run_one_urbs_result(
     inflex_ev_charger_kw: float | None = None,
     summary_grid_scope: str = "full",
     expect_temporal_method: str | None = None,
+    post_only: bool = False,
 ) -> dict[str, Any]:
     start = time.perf_counter()
     hdf_path = Path(urbs_result_hdf).resolve()
@@ -448,16 +449,17 @@ def run_one_urbs_result(
             df_post_demand = df_post_demand.iloc[: int(max_timesteps)].copy()
 
     summaries: dict[str, dict[str, Any]] = {}
-    summaries["pre"] = pwrflw.pf_summary(
-        grid,
-        df_pre_demand,
-        transformer_s_rated_mva=transformer_s_rated_mva,
-        cable_max_i_ka=cable_max_i_ka,
-        voltage_buses=voltage_buses,
-        algorithm=["nr", "iwamoto_nr"],
-        cable_ids=summary_cable_ids,
-        on_nonconvergence="nan",
-    )
+    if not post_only:
+        summaries["pre"] = pwrflw.pf_summary(
+            grid,
+            df_pre_demand,
+            transformer_s_rated_mva=transformer_s_rated_mva,
+            cable_max_i_ka=cable_max_i_ka,
+            voltage_buses=voltage_buses,
+            algorithm=["nr", "iwamoto_nr"],
+            cable_ids=summary_cable_ids,
+            on_nonconvergence="nan",
+        )
     if df_post_demand is not None:
         summaries["post"] = pwrflw.pf_summary(
             grid,
@@ -476,6 +478,7 @@ def run_one_urbs_result(
         "urbs_result_hdf": str(hdf_path),
         "station_voltage": station_voltage.assumptions(),
         "post_demand_mode": post_demand_mode,
+        **({"post_only": True} if post_only else {}),
         "stage_label": "sector_coupling",
         "max_timesteps": None if max_timesteps is None else int(max_timesteps),
         "allocation_plan_rows": int(len(allocation)),
@@ -516,14 +519,14 @@ def run_one_urbs_result(
         "elapsed_s": elapsed,
         "post_demand_mode": post_demand_mode,
         "stages": ",".join(summaries),
-        "pre_failed_timesteps": summaries["pre"]["grid_summary"].get(
-            "n_failed_timesteps"
-        ),
+        "pre_failed_timesteps": summaries.get("pre", {})
+        .get("grid_summary", {})
+        .get("n_failed_timesteps"),
         "post_failed_timesteps": summaries.get("post", {})
         .get("grid_summary", {})
         .get("n_failed_timesteps"),
-        "n_voltage_buses": summaries["pre"]["grid_summary"]["n_voltage_buses"],
-        "n_cables": summaries["pre"]["grid_summary"]["n_cables"],
+        "n_voltage_buses": next(iter(summaries.values()))["grid_summary"]["n_voltage_buses"],
+        "n_cables": next(iter(summaries.values()))["grid_summary"]["n_cables"],
         **load_scope,
     }
 
@@ -627,7 +630,14 @@ def main(argv: list[str] | None = None) -> None:
         default="full",
         help="Include service lines/terminal buses (full) or evaluate the upstream backbone only.",
     )
+    parser.add_argument(
+        "--post-only",
+        action="store_true",
+        help="With --urbs-result-hdf: run only the post stage; the pre stage comes from a separate pre-only run.",
+    )
     args = parser.parse_args(argv)
+    if args.post_only and (args.urbs_result_hdf is None or args.post_demand_mode == "pre-only"):
+        parser.error("--post-only requires --urbs-result-hdf and a post --post-demand-mode (flexible or inflex).")
 
     load_dotenv(ENV_PATH, override=True)
     root = args.grid_data_path or Path(os.environ["GRID_DATA_PATH"])
@@ -673,6 +683,7 @@ def main(argv: list[str] | None = None) -> None:
             args.inflex_ev_charger_kw,
             args.summary_grid_scope,
             args.expect_temporal_method,
+            args.post_only,
         )
         result["status"] = "ok"
         result["error"] = ""

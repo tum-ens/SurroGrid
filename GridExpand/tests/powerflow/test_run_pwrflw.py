@@ -26,6 +26,8 @@ def test_outputs_default_and_summary_only_alias():
         ["x.h5", "--summary-nonconvergence", "raise"],
         ["x.h5", "--outputs", "raw,other"],
         ["x.h5", "--pre-only", "--post-demand-mode", "inflex"],
+        ["x.h5", "--storage", "db", "--outputs", "summary", "--post-only", "--pre-only"],
+        ["x.h5", "--storage", "db", "--outputs", "raw,summary", "--post-only"],  # post-only writes summaries only
     ],
 )
 def test_invalid_option_combinations(argv):
@@ -62,6 +64,9 @@ def test_assumptions_carry_temporal_and_solver_provenance():
     assert "optimization_solver" not in pre_only and "temporal_method" not in pre_only
     inflex = build_assumptions(parse_args(["x.h5", "--post-demand-mode", "inflex"]), _Reader())
     assert "inst-cap" in inflex["inflex_capacity_source"]
+    assert "post_only" not in assumptions
+    post_only = parse_args(["x.h5", "--storage", "db", "--outputs", "summary", "--post-only"])
+    assert post_only.post_only and build_assumptions(post_only, _Reader(temporal, audit))["post_only"] is True
 
 
 def test_demand_buses():

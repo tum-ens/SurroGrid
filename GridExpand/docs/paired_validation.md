@@ -68,7 +68,8 @@ source adapter in `paired/sources/` registered in `paired/sources/__init__.py`, 
 | `work/runs/<run.id>/[<provider>/]<group>[-grid<id>]/` | paired runner directories (`status.tsv`, logs, canonical temporal mapping) |
 
 Power-flow run names: `<run.id>_<target>_<case>` (paired, target `synthetic` or `real_swf`) and
-`<run.id>_<provider>_<real_<provider>|synthetic>_<case>` (aligned). Analysis keys: see
+`<run.id>_<provider>_<real_<provider>|synthetic>_<case>` (aligned). The `_pre` run holds the pre stage of a grid;
+the result-case runs hold only their post stage (Step 4 `--post-only`), since the pre stage is the same for every case. Analysis keys: see
 [Step 5](steps/5_postprocessing.md#expansion-materialization).
 
 ## Runner options

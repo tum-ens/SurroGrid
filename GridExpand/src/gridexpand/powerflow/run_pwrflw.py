@@ -81,6 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run only pre-expansion powerflow from urbs_in/demand; does not require urbs_out/MILP/tau_pro.",
     )
     parser.add_argument(
+        "--post-only",
+        action="store_true",
+        help="Run only the post stage (summary output); the pre stage comes from a separate --pre-only run.",
+    )
+    parser.add_argument(
         "--outputs",
         type=_outputs,
         default=None,
@@ -216,6 +221,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--hh-annual-demand-scale requires --hh-only.")
     if args.hh_annual_demand_scale != 1.0 and not args.pre_only:
         parser.error("--hh-annual-demand-scale is only supported for --pre-only HH demand runs.")
+    if args.post_only and args.pre_only:
+        parser.error("--post-only conflicts with --pre-only.")
+    if args.post_only and "raw" in args.outputs:
+        parser.error("--post-only writes summaries only; use --outputs summary.")
     if args.post_demand_mode == "inflex" and args.pre_only:
         parser.error("--post-demand-mode inflex requires a post-electrification run, not --pre-only.")
     if args.inflex_ev_charger_kw is not None and args.post_demand_mode != "inflex":
@@ -236,6 +245,8 @@ def build_assumptions(args, reader: ScenarioResultReader) -> dict:
         "summary_nonconvergence": args.summary_nonconvergence,
         "station_voltage": station_voltage.assumptions(),
     }
+    if args.post_only:
+        assumptions["post_only"] = True
     if args.post_demand_mode == "inflex":
         assumptions.update({
             "inflex_assumption": INFLEX_ASSUMPTION,
@@ -535,7 +546,7 @@ def main(argv: list[str] | None = None) -> None:
             if post is not None:
                 raw_sink.save_df(post, "/pwrflw/input/demand_post")
 
-        stages = [("pre", pre)] + ([] if args.pre_only else [("post", post)])
+        stages = ([] if args.post_only else [("pre", pre)]) + ([] if args.pre_only else [("post", post)])
         for stage, demand in stages:
             run_stage(
                 context, demand, stage,
