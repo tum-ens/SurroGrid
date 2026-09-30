@@ -149,7 +149,7 @@ def build_building_model(data: dict, mode: dict):
         (cin,) = inputs
         row = {"name": name, "site": site, "process": process,
                "inst": float(r["inst-cap"]), "up": float(r["cap-up"]),
-               "inv": float(r["inv-cost"]), "inv_fix": float(np.nan_to_num(r["inv-cost-fix"])),
+               "inv": float(r["inv-cost"]), "inv_fix": 0.0 if pd.isna(r["inv-cost-fix"]) else float(r["inv-cost-fix"]),
                "annuity": float(invcost_factor(r["depreciation"], r["wacc"]))}
         row["ext"] = row["up"] > row["inst"] + EPS
         if row["ext"] and row["inst"] > EPS:

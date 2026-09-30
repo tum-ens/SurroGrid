@@ -174,3 +174,14 @@ def test_no_optimum_charges_while_the_car_is_away(tmp_path):
     m.objective = -1 * (m["Link-p"].sel(name=names) * share).sum()
     m.solve(solver_name="highs", io_api="direct", set_names=False, output_flag=False, **EXACT)
     assert -float(m.objective.value) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_missing_fixed_investment_costs_count_as_zero(tmp_path):
+    """A building with only import and feed-in has no fixed investment cost: the column holds None, not NaN."""
+    from gridexpand.optimization.pypsa_model.building_model import build_building_model
+
+    data, mode, _ = read_prepared(write_input(tmp_path / "input.h5", "heuristic"))
+    process = data["process"]
+    process["inv-cost-fix"] = pd.Series([None] * len(process), index=process.index, dtype=object)
+    _, parts = build_building_model(data, mode)
+    assert (parts.processes["inv_fix"] == 0.0).all()
