@@ -67,6 +67,17 @@ def test_the_fixture_covers_the_variant(solved):
         assert tau["heatpump_booster"] > 0
 
 
+def test_ev_session_rows_are_not_padded(solved):
+    """One term slot per hour of the longest session, not per hour outside the sessions (memory ~ vehicles^2)."""
+    variant, _, _, _, _, network = solved
+    if variant != "ev_sessions":
+        pytest.skip("EV sessions only")
+    rows = network.model.constraints["EV-session-energy"]
+    terms = (rows.vars >= 0).sum("_term")
+    assert int(terms.min()) >= 1
+    assert rows.vars.sizes["_term"] == int(terms.max())
+
+
 def test_the_optimum_is_unique(solved):
     """Minimise and maximise a random direction over the optimal face: one point.
 

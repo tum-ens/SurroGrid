@@ -6,6 +6,8 @@ Called after ``network.optimize.create_model()``; ``results.py`` reads the added
 
 from __future__ import annotations
 
+import linopy
+import numpy as np
 import pandas as pd
 import xarray as xr
 
@@ -46,21 +48,39 @@ def _storage_input_costs(network, parts: ModelParts) -> None:
 
 
 def _ev_sessions(network, parts: ModelParts) -> None:
-    """Dedicated EV sessions: charging summed over a session's hours equals its energy."""
+    """Dedicated EV sessions: charging summed over a session's hours equals its energy.
+
+    The terms are gathered per session (sessions x longest session). A groupby over
+    all (snapshot, charger) cells would pad every session to the number of cells
+    outside any session, which grows with the square of the vehicles of a building
+    (16 GB for 52 vehicles); the constraints are the same.
+    """
     if parts.ev_label is None:
         return
     m = network.model
     label = parts.ev_label
-    groups = xr.DataArray(label.to_numpy(), coords={"snapshot": label.index, "name": label.columns.tolist()},
-                          dims=("snapshot", "name"), name="session")
-    charging = (-1 * m["Generator-p"].sel(name=label.columns.tolist())).where(groups.notnull())
-    per_session = charging.groupby(groups.fillna(-1)).sum()
-    codes = per_session.coords["session"].values
-    per_session = per_session.sel(session=codes[codes >= 0])
-    if per_session.sizes["session"] != len(parts.ev_energy):
+    codes = label.to_numpy()
+    rows, cols = np.nonzero(~np.isnan(codes))
+    session = codes[rows, cols].astype(np.int64)
+    counts = np.bincount(session, minlength=len(parts.ev_energy))
+    if len(counts) != len(parts.ev_energy) or (counts == 0).any():
         raise ValueError("Every EV session needs at least one admissible hour.")
-    energy = xr.DataArray(parts.ev_energy[per_session.coords["session"].values.astype(int)],
-                          coords={"session": per_session.coords["session"].values}, dims="session")
+    order = np.argsort(session, kind="stable")  # hours of a session in snapshot order
+    session, rows, cols = session[order], rows[order], cols[order]
+    term = np.arange(len(session)) - np.repeat(np.cumsum(counts) - counts, counts)
+    labels = (m["Generator-p"].labels.sel(snapshot=label.index, name=label.columns.tolist())
+              .transpose("snapshot", "name").to_numpy())
+    variables = np.full((len(counts), counts.max()), -1, dtype=labels.dtype)
+    coeffs = np.zeros((len(counts), counts.max()))
+    variables[session, term] = labels[rows, cols]
+    coeffs[session, term] = -1.0  # charging = -p of the charger generator
+    coords = {"session": np.arange(len(counts))}
+    per_session = linopy.LinearExpression(
+        xr.Dataset({"vars": (("session", "_term"), variables), "coeffs": (("session", "_term"), coeffs)},
+                   coords=coords),
+        m,
+    )
+    energy = xr.DataArray(parts.ev_energy, coords=coords, dims="session")
     m.add_constraints(per_session == energy, name="EV-session-energy")
 
 
