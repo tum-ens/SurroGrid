@@ -26,6 +26,7 @@ from gridexpand.analysis.powerflow.raw import transformer_import_distribution_db
 
 PROVIDER_LABELS = {"swf": "SWF", "uzw": "ÜZW"}
 REAL_GROUP_SOURCES = {"Real SWF": "swf", "Real ÜZW": "uzw"}
+NETWORK_ORDER = ("Synthetic", "Real")
 
 
 def provider_group_label(provider: str, network: str) -> str:
@@ -38,6 +39,22 @@ def _is_real_group(group: str) -> bool:
     return str(group).startswith("Real")
 
 
+def group_network(group: str) -> str:
+    """Pooled network of a group, ``Real`` or ``Synthetic`` (no provider name)."""
+    return "Real" if _is_real_group(group) else "Synthetic"
+
+
+def group_provider(group: str) -> str | None:
+    """Provider label of a group (``SWF``/``ÜZW``); None for the SWF-only label ``Synthetic``."""
+    parts = str(group).split(" ", 1)
+    return parts[1] if len(parts) == 2 else None
+
+
+def _with_group_columns(frame: pd.DataFrame, group: str) -> pd.DataFrame:
+    """``data_source`` (the group), ``network`` and ``provider`` columns of one group's rows."""
+    return frame.assign(data_source=group, network=group_network(group), provider=group_provider(group))
+
+
 def _default_specs_by_source(
     synthetic_specs: Mapping[str, Mapping[str, object]] | None,
     real_specs: Mapping[str, Mapping[str, object]] | None,
@@ -48,24 +65,30 @@ def _default_specs_by_source(
     return {"Synthetic": synthetic_specs or {}, "Real SWF": real_specs or {}}
 
 
-def _excluded_ids(
-    excluded_real_lv_ids: tuple[int | str, ...] | Mapping[str, tuple[int | str, ...]],
-    group: str | None,
-) -> set[str]:
-    """Return canonical text grid ids excluded for one real group.
-
-    A plain tuple applies to every real group; a mapping is keyed by group label.
-    """
-    values = (
-        excluded_real_lv_ids.get(group, ())
-        if isinstance(excluded_real_lv_ids, Mapping)
-        else excluded_real_lv_ids
-    )
-    return {canonical_real_grid_id(value) for value in values}
+def synthetic_grid_keys(frame: pd.DataFrame) -> pd.Series:
+    """``PLZ_kcid_bcid`` of synthetic rows: from those columns, else from the ``AGS-PLZ_kcid_bcid`` label."""
+    if {"plz", "kcid", "bcid"}.issubset(frame.columns):
+        parts = [frame[col].astype("Int64").astype("string") for col in ("plz", "kcid", "bcid")]
+        return parts[0] + "_" + parts[1] + "_" + parts[2]
+    return frame["grid"].astype("string").str.split("-", n=1).str[-1]
 
 
-def _without_excluded(frame: pd.DataFrame, excluded: set[str]) -> pd.DataFrame:
-    return frame[~frame["lv_id"].map(canonical_real_grid_id).isin(excluded)].copy()
+def _excluded_ids(excluded_grids: Mapping[str, tuple], group: str) -> set[str]:
+    """Excluded grid keys of one group: canonical LV/area ids (real) or ``PLZ_kcid_bcid`` (synthetic)."""
+    values = excluded_grids.get(group, ())
+    if _is_real_group(group):
+        return {canonical_real_grid_id(value) for value in values}
+    return {str(value) for value in values}
+
+
+def _without_excluded(frame: pd.DataFrame, group: str, excluded: set[str]) -> pd.DataFrame:
+    if not excluded or frame.empty:
+        return frame
+    if _is_real_group(group):
+        keys = frame["lv_id"].map(canonical_real_grid_id)
+    else:
+        keys = synthetic_grid_keys(frame)
+    return frame[~keys.isin(excluded)].copy()
 
 
 # Name used by the analysis notebooks.
@@ -213,67 +236,107 @@ STAGED_STATION_COMPONENTS = (
 )
 
 
-def expansion_cost_comparison_from_tables(
-    expansion_tables_by_stage: Mapping[str, dict[str, pd.DataFrame]],
-    analysis_meta_by_stage: Mapping[str, pd.Series],
-    *,
-    post_inflex_label: str,
-    post_flex_label: str,
-    data_source: str = "Synthetic",
-) -> pd.DataFrame:
-    """Build the cable/transformer cost table used by the comparison bar chart."""
-    cost_rows = []
-    for label in (post_inflex_label, post_flex_label):
-        tables = expansion_tables_by_stage.get(label)
-        if (
-            tables is None
-            or label not in analysis_meta_by_stage
-            or tables["cost_summary"].empty
-        ):
-            continue
-        cost_summary_row = tables["cost_summary"].iloc[0]
-        components = [("Cables", float(cost_summary_row["cable_cost_eur"]))]
-        if cost_summary_row.get("rule_set") == "staged_2026":
-            # The transformer rows carry every station-level measure; show them one by one. Analyses
-            # written before migration 0007 have no breakdown and show one Transformers bar.
-            components += [
-                (name, float(cost_summary_row[column] or 0.0))
-                for name, column in STAGED_STATION_COMPONENTS
-            ]
-        else:
-            components.append(("Transformers", float(cost_summary_row["transformer_cost_eur"])))
-        cost_rows.extend(
-            {"stage": label, "data_source": data_source, "component": name, "cost_eur": cost}
-            for name, cost in components
-        )
-    return pd.DataFrame(cost_rows)
+COST_COMPONENTS = (("Cables", "cable_cost_eur"), *STAGED_STATION_COMPONENTS)
+REINFORCEMENT_COLUMNS = (
+    "reinforcement_150_count",
+    "reinforcement_185_count",
+    "reinforcement_240_count",
+    "reinforcement_added_capacity_ka",
+)
 
 
-def reinforcement_catalog_summary(
+def expansion_grid_costs(
     expansion_tables_by_source: Mapping[str, Mapping[str, Mapping[str, pd.DataFrame]]],
+    stage_labels: tuple[str, ...] | list[str],
 ) -> pd.DataFrame:
-    """Return selected standard reinforcement-cable counts by source and stage."""
-    rows: list[dict[str, object]] = []
+    """Per-grid expansion costs (``grid_cost_summary`` rows) of every group and stage, with group columns."""
+    frames = []
     for source, tables_by_stage in expansion_tables_by_source.items():
-        for stage_label, tables in tables_by_stage.items():
-            summary = tables.get("cost_summary", pd.DataFrame())
-            if summary.empty:
+        for label in stage_labels:
+            tables = tables_by_stage.get(label)
+            if tables is None or tables["grid_cost_summary"].empty:
                 continue
-            row = summary.iloc[0]
-            rows.append(
-                {
-                    "data_source": source,
-                    "stage_label": stage_label,
-                    "NAYY_4_150": int(row.get("reinforcement_150_count", 0) or 0),
-                    "NAYY_4_185": int(row.get("reinforcement_185_count", 0) or 0),
-                    "NAYY_4_240": int(row.get("reinforcement_240_count", 0) or 0),
-                    "added_capacity_ka": round(
-                        float(row.get("reinforcement_added_capacity_ka", 0.0) or 0.0),
-                        3,
-                    ),
-                }
-            )
-    return pd.DataFrame(rows)
+            frame = _with_group_columns(tables["grid_cost_summary"], source)
+            frames.append(frame.assign(stage_label=label))
+    return pd.concat(frames, ignore_index=True, sort=False) if frames else pd.DataFrame()
+
+
+def _cost_grid_keys(frame: pd.DataFrame) -> pd.Series:
+    """One key per grid of ``expansion_grid_costs`` rows: group plus LV/area id or ``PLZ_kcid_bcid``."""
+    keys = pd.Series(index=frame.index, dtype="string")
+    real = frame["network"].eq("Real")
+    keys[real] = frame.loc[real, "lv_id"].map(canonical_real_grid_id)
+    keys[~real] = synthetic_grid_keys(frame.loc[~real])
+    return frame["data_source"].astype("string") + "|" + keys
+
+
+def expansion_cost_comparison(
+    grid_costs: pd.DataFrame,
+    *,
+    stage_labels: tuple[str, ...] | list[str],
+    excluded_grids: Mapping[str, tuple] | None = None,
+    by: str = "network",
+) -> dict[str, pd.DataFrame]:
+    """Expansion cost per component, stage and ``by`` on one grid set for all stages.
+
+    Left out of every stage: the ``excluded_grids`` and each real grid whose cost is
+    not ``complete`` in one of the stages (its non-converged hours leave the P100 cost
+    unknown), so the stages compare the same grids. ``by`` is ``network`` (pooled
+    Real/Synthetic) or ``data_source`` (the provider groups).
+
+    Returns:
+        ``costs`` (``stage``, ``data_source`` = the ``by`` value, ``component``, ``cost_eur``,
+        the input of ``plot_expansion_cost_comparison_bar``), ``grids`` (grids and total per
+        stage), ``reinforcements`` (standard cables added) and ``excluded`` (grid, reason).
+    """
+    empty = {"costs": pd.DataFrame(), "grids": pd.DataFrame(), "reinforcements": pd.DataFrame(),
+             "excluded": pd.DataFrame(columns=["data_source", "grid", "reason"])}
+    if grid_costs.empty:
+        return empty
+    frame = grid_costs[grid_costs["stage_label"].isin(stage_labels)].copy()
+    frame["_key"] = _cost_grid_keys(frame)
+    excluded_rows = []
+    configured = pd.Series(False, index=frame.index)
+    for source in frame["data_source"].unique():
+        ids = _excluded_ids(excluded_grids or {}, source)
+        rows = frame["data_source"].eq(source)
+        configured[rows] = ~frame.index[rows].isin(_without_excluded(frame[rows], source, ids).index)
+    incomplete_keys = set(frame.loc[frame["cost_status"].fillna("complete").ne("complete"), "_key"])
+    for key, rows in frame[configured].groupby("_key"):
+        excluded_rows.append({"data_source": rows["data_source"].iloc[0], "grid": rows["grid_label"].iloc[0],
+                              "reason": "excluded: non-converged power flow"})
+    for key, rows in frame[frame["_key"].isin(incomplete_keys) & ~configured].groupby("_key"):
+        stages = rows.loc[rows["cost_status"].fillna("complete").ne("complete"), "stage_label"]
+        excluded_rows.append({"data_source": rows["data_source"].iloc[0], "grid": rows["grid_label"].iloc[0],
+                              "reason": "cost incomplete in " + ", ".join(dict.fromkeys(map(str, stages)))})
+    kept = frame[~configured & ~frame["_key"].isin(incomplete_keys)].copy()
+
+    staged = kept[[column for _, column in STAGED_STATION_COMPONENTS]].notna().any(axis=1)
+    components = [(name, column) for name, column in COST_COMPONENTS]
+    long_rows = []
+    for (group, stage), rows in kept.groupby([by, "stage_label"], sort=False):
+        for name, column in components:
+            if name == "Cables" or staged[rows.index].all():
+                long_rows.append({"stage": stage, "data_source": group, "component": name,
+                                  "cost_eur": float(rows[column].fillna(0.0).sum())})
+        if not staged[rows.index].all():  # analyses written before migration 0007: one station bar
+            long_rows.append({"stage": stage, "data_source": group, "component": "Transformers",
+                              "cost_eur": float(rows["transformer_cost_eur"].fillna(0.0).sum())})
+    grids = (
+        kept.groupby([by, "stage_label"], sort=False)
+        .agg(grids=("_key", "nunique"), total_cost_eur=("total_cost_eur", "sum"))
+        .reset_index()
+        .rename(columns={by: "data_source", "stage_label": "stage"})
+    )
+    reinforcement_columns = [column for column in REINFORCEMENT_COLUMNS if column in kept.columns]
+    reinforcements = (
+        kept.groupby([by, "stage_label"], sort=False)[reinforcement_columns].sum(min_count=1)
+        .reset_index()
+        .rename(columns={by: "data_source", "stage_label": "stage"})
+    )
+    excluded = pd.DataFrame(excluded_rows, columns=["data_source", "grid", "reason"])
+    return {"costs": pd.DataFrame(long_rows), "grids": grids, "reinforcements": reinforcements,
+            "excluded": excluded.sort_values(["data_source", "grid"]).reset_index(drop=True)}
 
 
 def expansion_cost_reduction_summary(
@@ -329,24 +392,90 @@ def expansion_cost_reduction_summary(
     )
 
 
-def expansion_cost_coverage_summary(analysis_status: pd.DataFrame) -> pd.DataFrame:
-    """Report comparable totals and per-complete-grid costs for each source/stage."""
-    if analysis_status.empty:
-        return pd.DataFrame()
-    columns = [
-        "data_source",
-        "stage_label",
-        "grids_total",
-        "grids_complete",
-        "grids_incomplete",
-        "grids_excluded",
-        "total_cost_eur",
-    ]
-    result = analysis_status.loc[analysis_status["available"], columns].copy()
-    result["cost_per_complete_grid_eur"] = result["total_cost_eur"] / result[
-        "grids_complete"
-    ].replace(0, pd.NA)
-    return result.round({"total_cost_eur": 0, "cost_per_complete_grid_eur": 0})
+_SYNTHETIC_FAILED_QUERY = text(
+    """
+    SELECT CONCAT(LPAD(gc.ags::TEXT, 8, '0'), '-', gc.plz, '_', gc.kcid, '_', gc.bcid) AS grid,
+           CONCAT(gc.plz, '_', gc.kcid, '_', gc.bcid) AS grid_key,
+           pfs.n_timesteps, COALESCE(pfs.n_failed_timesteps, 0) AS n_failed_timesteps
+    FROM surrogrid.powerflow_run pr
+    JOIN surrogrid.grid_case gc USING (grid_case_id)
+    JOIN surrogrid.powerflow_summary pfs USING (powerflow_run_id)
+    WHERE pr.run_name = :run_name AND pfs.stage = :stage
+    """
+)
+_REAL_FAILED_QUERY = text(
+    """
+    SELECT CASE WHEN rgc.source = 'uzw' THEN CONCAT('ÜZW area-', LPAD(rgc.lv_id, 4, '0'))
+                ELSE CONCAT(UPPER(rgc.source), ' LV_', LPAD(rgc.lv_id, 3, '0'))
+           END AS grid,
+           rgc.lv_id AS grid_key,
+           rps.n_timesteps, COALESCE(rps.n_failed_timesteps, 0) AS n_failed_timesteps
+    FROM surrogrid.real_powerflow_run rpr
+    JOIN surrogrid.real_grid_case rgc USING (real_grid_case_id)
+    JOIN surrogrid.real_powerflow_summary rps USING (real_powerflow_run_id)
+    WHERE rpr.run_name = :run_name AND rps.stage = :stage
+      AND (CAST(:source AS TEXT) IS NULL OR rgc.source = CAST(:source AS TEXT))
+    """
+)
+
+
+def nonconverged_grids(
+    specs_by_source: Mapping[str, Mapping[str, Mapping[str, object]]],
+    *,
+    min_failed_share: float = 0.01,
+) -> pd.DataFrame:
+    """Grids with non-converged power-flow hours in any case, and whether they are excluded.
+
+    Non-converged hours are missing from the summaries, so a grid's statistics lack
+    exactly its worst hours. A grid is ``excluded`` when its largest share of
+    non-converged hours over the cases reaches ``min_failed_share``; it is then left
+    out of every case of its own group only (real and synthetic are not matched).
+    ``grid_key`` is the id of ``excluded_grids``: LV/area id (real), ``PLZ_kcid_bcid``
+    (synthetic).
+    """
+    frames = []
+    with SurroGridDatabase().engine.connect() as conn:
+        for source, specs in specs_by_source.items():
+            for label, spec in specs.items():
+                params = {"run_name": str(spec["run_name"]), "stage": str(spec["stage"])}
+                if _is_real_group(source):
+                    query = _REAL_FAILED_QUERY
+                    params["source"] = REAL_GROUP_SOURCES.get(source)
+                else:
+                    query = _SYNTHETIC_FAILED_QUERY
+                frame = pd.read_sql_query(query, conn, params=params)
+                if not frame.empty:
+                    frames.append(frame.assign(data_source=source, comparison_stage=label))
+    columns = ["data_source", "network", "provider", "grid", "grid_key", "cases", "max_failed_timesteps",
+               "n_timesteps", "max_failed_share", "excluded"]
+    if not frames:
+        return pd.DataFrame(columns=columns)
+    summaries = pd.concat(frames, ignore_index=True)
+    summaries["grid_key"] = summaries["grid_key"].astype(str)
+    summaries["failed_share"] = summaries["n_failed_timesteps"] / summaries["n_timesteps"]
+    failed = summaries[summaries["n_failed_timesteps"] > 0]
+    result = (
+        failed.groupby(["data_source", "grid", "grid_key"], as_index=False)
+        .agg(
+            cases=("comparison_stage", lambda values: ", ".join(dict.fromkeys(map(str, values)))),
+            max_failed_timesteps=("n_failed_timesteps", "max"),
+            n_timesteps=("n_timesteps", "max"),
+            max_failed_share=("failed_share", "max"),
+        )
+    )
+    result["network"] = result["data_source"].map(group_network)
+    result["provider"] = result["data_source"].map(group_provider)
+    result["excluded"] = result["max_failed_share"] >= float(min_failed_share)
+    return result[columns].sort_values(["excluded", "max_failed_share"], ascending=False).reset_index(drop=True)
+
+
+def excluded_grids_by_group(nonconverged: pd.DataFrame) -> dict[str, tuple[str, ...]]:
+    """``excluded_grids`` of the loaders: the ``grid_key`` of every excluded grid, per group."""
+    excluded = nonconverged[nonconverged["excluded"]]
+    return {
+        str(source): tuple(sorted(rows["grid_key"].astype(str).unique()))
+        for source, rows in excluded.groupby("data_source", sort=False)
+    }
 
 
 def load_powerflow_cutoff_comparison(
@@ -358,70 +487,59 @@ def load_powerflow_cutoff_comparison(
     scenario_id: int | None = None,
     plz: int | None = None,
     real_plz: int | None = None,
-    excluded_real_lv_ids: tuple[int | str, ...] | Mapping[str, tuple] = (),
+    excluded_grids: Mapping[str, tuple] | None = None,
     specs_by_source: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> dict[str, object]:
     """Load compact synthetic and real power-flow summaries for one comparison plot.
 
     ``specs_by_source`` replaces ``synthetic_specs``/``real_specs`` for more than
     two groups, e.g. the four groups of ``prepare_expansion_analysis(providers=...)``.
+    ``excluded_grids`` maps a group to the grids left out of every case (real: LV/area
+    ids, synthetic: ``PLZ_kcid_bcid``), e.g. ``excluded_grids_by_group(nonconverged_grids(...))``.
+    The profile carries ``data_source`` (group), ``network`` (Real/Synthetic) and ``provider``.
     """
     specs_by_source = _default_specs_by_source(synthetic_specs, real_specs, specs_by_source)
+    excluded_grids = excluded_grids or {}
     powerflow_profiles = []
     skipped = {source: {} for source in specs_by_source}
-    excluded_real_grids = []
+    excluded_rows = []
 
     for source, specs in specs_by_source.items():
-        if _is_real_group(source):
-            continue
+        excluded = _excluded_ids(excluded_grids, source)
         for label, spec in specs.items():
             try:
-                profile = load_synthetic_powerflow_cutoff_profile(
-                    run_name=str(spec["run_name"]),
-                    stage=str(spec["stage"]),
-                    scenario_id=scenario_id,
-                    ags=ags,
-                    plz=plz,
-                )
-            except ValueError as exc:
-                skipped[source][label] = str(exc)
-                continue
-            profile["comparison_stage"] = label
-            profile["data_source"] = source
-            powerflow_profiles.append(profile)
-
-    for source, specs in specs_by_source.items():
-        if not _is_real_group(source):
-            continue
-        excluded_lv_ids = _excluded_ids(excluded_real_lv_ids, source)
-        for label, spec in specs.items():
-            try:
-                profile = real_powerflow_percentile_profile_db(
-                    run_name=str(spec["run_name"]),
-                    stage=str(spec["stage"]),
-                    plz=real_plz if real_plz is not None else plz,
-                    source=REAL_GROUP_SOURCES.get(source),
-                )
-            except ValueError as exc:
-                skipped[source][label] = str(exc)
-                continue
-            if excluded_lv_ids and "lv_id" in profile.columns:
-                excluded = profile[profile["lv_id"].map(canonical_real_grid_id).isin(excluded_lv_ids)]
-                if not excluded.empty:
-                    excluded_real_grids.append(
-                        {
-                            "data_source": source,
-                            "comparison_stage": label,
-                            "excluded_lv_ids": ", ".join(
-                                sorted(excluded["grid"].astype(str).unique())
-                            ),
-                            "excluded_grids": excluded["grid"].nunique(),
-                        }
+                if _is_real_group(source):
+                    profile = real_powerflow_percentile_profile_db(
+                        run_name=str(spec["run_name"]),
+                        stage=str(spec["stage"]),
+                        plz=real_plz if real_plz is not None else plz,
+                        source=REAL_GROUP_SOURCES.get(source),
                     )
-                profile = _without_excluded(profile, excluded_lv_ids)
-            profile["comparison_stage"] = label
-            profile["data_source"] = source
-            powerflow_profiles.append(profile)
+                else:
+                    profile = load_synthetic_powerflow_cutoff_profile(
+                        run_name=str(spec["run_name"]),
+                        stage=str(spec["stage"]),
+                        scenario_id=scenario_id,
+                        ags=ags,
+                        plz=plz,
+                    )
+            except ValueError as exc:
+                skipped[source][label] = str(exc)
+                continue
+            kept = _without_excluded(profile, source, excluded)
+            dropped = profile.loc[~profile.index.isin(kept.index), "grid"]
+            if not dropped.empty:
+                excluded_rows.append(
+                    {
+                        "data_source": source,
+                        "comparison_stage": label,
+                        "excluded_grids": dropped.nunique(),
+                        "grids": ", ".join(sorted(dropped.astype(str).unique())),
+                    }
+                )
+            kept = _with_group_columns(kept, source)
+            kept["comparison_stage"] = label
+            powerflow_profiles.append(kept)
 
     if not powerflow_profiles:
         raise ValueError(
@@ -433,6 +551,9 @@ def load_powerflow_cutoff_comparison(
         powerflow_profile["comparison_stage"],
         categories=stage_order,
         ordered=True,
+    )
+    powerflow_profile["network"] = pd.Categorical(
+        powerflow_profile["network"], categories=NETWORK_ORDER, ordered=True
     )
     powerflow_profile = powerflow_profile.sort_values(
         ["comparison_stage", "data_source", "metric", "grid"]
@@ -458,7 +579,7 @@ def load_powerflow_cutoff_comparison(
         "profile": powerflow_profile,
         "asset_summary": asset_summary,
         "coverage_summary": coverage_summary,
-        "excluded_real_grids": pd.DataFrame(excluded_real_grids),
+        "excluded_grids": pd.DataFrame(excluded_rows),
         "skipped": skipped,
     }
 
@@ -471,19 +592,20 @@ def load_voltage_summaries_for_powerflow_comparison(
     scenario_id: int | None = None,
     plz: int | None = None,
     real_plz: int | None = None,
-    excluded_real_lv_ids: tuple[int | str, ...] | Mapping[str, tuple] = (),
+    excluded_grids: Mapping[str, tuple] | None = None,
     specs_by_source: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> dict[str, dict[str, pd.DataFrame]]:
-    """Load source-separated voltage summaries from one scenario's run specs."""
+    """Load source-separated voltage summaries from one scenario's run specs (``excluded_grids`` left out)."""
     specs_by_source = _default_specs_by_source(synthetic_specs, real_specs, specs_by_source)
+    excluded_grids = excluded_grids or {}
     result: dict[str, dict[str, pd.DataFrame]] = {}
     for source, specs in specs_by_source.items():
         summaries: dict[str, pd.DataFrame] = {}
-        excluded_lv_ids = _excluded_ids(excluded_real_lv_ids, source)
+        excluded = _excluded_ids(excluded_grids, source)
         for label, spec in specs.items():
             if not _is_real_group(source):
                 try:
-                    summaries[label] = voltage_deviation_summary_db(
+                    summary = voltage_deviation_summary_db(
                         run_name=str(spec["run_name"]),
                         stages=(str(spec["stage"]),),
                         scenario_id=scenario_id,
@@ -491,7 +613,8 @@ def load_voltage_summaries_for_powerflow_comparison(
                         plz=plz,
                     )
                 except ValueError:
-                    pass
+                    continue
+                summaries[label] = _without_excluded(summary, source, excluded)
                 continue
             try:
                 summary = real_powerflow_headline_summary_db(
@@ -502,8 +625,7 @@ def load_voltage_summaries_for_powerflow_comparison(
                 )
             except ValueError:
                 continue
-            if excluded_lv_ids and "lv_id" in summary.columns:
-                summary = _without_excluded(summary, excluded_lv_ids)
+            summary = _without_excluded(summary, source, excluded)
             if summary.empty or "voltage_min_asset_time_pu" not in summary.columns:
                 continue
             summaries[label] = pd.DataFrame(
@@ -774,10 +896,12 @@ def _publication_gate(
         for value in powerflow_status["scenario_labels"].dropna()
         if str(value).strip()
     }
+    # Aligned runs label every provider and case: ``{run_id}_{provider}_{case}``.
     checks.append(
         {
-            "check": "Single scenario label",
-            "passed": scenario_labels == {scenario_prefix},
+            "check": "Scenario labels of this run",
+            "passed": bool(scenario_labels)
+            and all(label == scenario_prefix or label.startswith(f"{scenario_prefix}_") for label in scenario_labels),
             "detail": ", ".join(sorted(scenario_labels)) or "No scenario labels",
         }
     )
@@ -909,10 +1033,11 @@ def prepare_expansion_analysis(
         )
         for source, keys in analysis_keys_by_source.items()
     }
+    # The group labels the status rows: synthetic analyses store data_source "Synthetic" for every provider.
     expansion_status = pd.concat(
         [
-            context["analysis_status"]
-            for context in expansion_context_by_source.values()
+            context["analysis_status"].assign(data_source=source)
+            for source, context in expansion_context_by_source.items()
         ],
         ignore_index=True,
     )
@@ -983,11 +1108,12 @@ def load_cable_loading_decomposition(
     real_specs: Mapping[str, Mapping[str, object]] | None = None,
     ags: str | int | None = None,
     real_plz: int | None = None,
-    excluded_real_lv_ids: tuple[int | str, ...] | Mapping[str, tuple] = (),
+    excluded_grids: Mapping[str, tuple] | None = None,
     specs_by_source: Mapping[str, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> pd.DataFrame:
-    """Load one annual-maximum row per analyzed cable for every network group."""
+    """Load one annual-maximum row per analyzed cable for every network group (``excluded_grids`` left out)."""
     specs_by_source = _default_specs_by_source(synthetic_specs, real_specs, specs_by_source)
+    excluded_grids = excluded_grids or {}
     db = SurroGridDatabase()
     synthetic_query = text(
         """
@@ -1025,7 +1151,7 @@ def load_cable_loading_decomposition(
     frames = []
     with db.engine.connect() as conn:
         for source, specs in specs_by_source.items():
-            excluded = _excluded_ids(excluded_real_lv_ids, source)
+            excluded = _excluded_ids(excluded_grids, source)
             for stage_label, spec in specs.items():
                 params = {
                     "run_name": str(spec["run_name"]),
@@ -1038,11 +1164,10 @@ def load_cable_loading_decomposition(
                     params["plz"] = real_plz
                     params["source"] = REAL_GROUP_SOURCES.get(source)
                     frame = pd.read_sql_query(real_query, conn, params=params)
-                    if excluded and not frame.empty:
-                        frame = _without_excluded(frame, excluded)
+                frame = _without_excluded(frame, source, excluded)
                 if frame.empty:
                     continue
-                frame["data_source"] = source
+                frame = _with_group_columns(frame, source)
                 frame["comparison_stage"] = stage_label
                 frame["installed_capacity_a"] = (
                     pd.to_numeric(frame["cable_installed_capacity_ka"], errors="coerce")
@@ -1061,6 +1186,8 @@ def load_cable_loading_decomposition(
                 "grid",
                 "asset_id",
                 "data_source",
+                "network",
+                "provider",
                 "comparison_stage",
                 "installed_capacity_a",
                 "max_current_a",
@@ -1077,9 +1204,9 @@ def export_scenario_analysis_manifest(
     context: Mapping[str, object],
     *,
     output_dir: str | Path,
-    excluded_real_lv_ids: tuple[int | str, ...] | Mapping[str, tuple] = (),
+    excluded_grids: Mapping[str, tuple] | None = None,
 ) -> dict[str, Path]:
-    """Export scenario identity and readiness tables alongside notebook figures."""
+    """Export scenario identity, readiness tables and the excluded grids alongside notebook figures."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -1105,14 +1232,9 @@ def export_scenario_analysis_manifest(
         "synthetic_specs": context["synthetic_specs"],
         "real_specs": context["real_specs"],
         "specs_by_source": context.get("specs_by_source"),
-        "excluded_real_lv_ids": (
-            {
-                source: sorted(_excluded_ids(excluded_real_lv_ids, source))
-                for source in excluded_real_lv_ids
-            }
-            if isinstance(excluded_real_lv_ids, Mapping)
-            else list(dict.fromkeys(canonical_real_grid_id(value) for value in excluded_real_lv_ids))
-        ),
+        "excluded_grids": {
+            source: sorted(_excluded_ids(excluded_grids or {}, source)) for source in (excluded_grids or {})
+        },
         "publication_checks": publication_gate.to_dict(orient="records"),
     }
     manifest_path = output_dir / "scenario_analysis_manifest.json"

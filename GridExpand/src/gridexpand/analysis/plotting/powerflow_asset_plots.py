@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 import textwrap
 
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FormatStrFormatter
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -452,6 +455,29 @@ def plot_powerflow_asset_cutoff_overview(
         fig.show()
     return fig
 
+# Line style and violin transparency of each network source, in the order the sources appear.
+_SOURCE_STYLES = (
+    {"linestyle": "-", "alpha": 0.40},
+    {"linestyle": (0, (3.0, 1.6)), "alpha": 0.20},
+    {"linestyle": "-.", "alpha": 0.30},
+    {"linestyle": ":", "alpha": 0.25},
+)
+
+
+def _static_axis_limits(
+    limits: Mapping[str, tuple[float | None, float | None]] | None, name: str
+) -> dict[str, tuple[float | None, float | None]]:
+    """``{metric: (low, high)}`` with canonical metric names; ``None`` bounds stay automatic."""
+    result: dict[str, tuple[float | None, float | None]] = {}
+    for metric, bounds in (limits or {}).items():
+        (key,) = select_metrics((metric,))
+        low, high = bounds
+        if low is not None and high is not None and not float(low) < float(high):
+            raise ValueError(f"{name}[{metric!r}] must be (low, high) with low < high, got {bounds!r}.")
+        result[key] = (low, high)
+    return result
+
+
 def plot_powerflow_asset_cutoff_overview_static(
     profile: pd.DataFrame,
     group_col: str | None = None,
@@ -459,28 +485,39 @@ def plot_powerflow_asset_cutoff_overview_static(
     asset_cutoff_percentile: float = 1.0,
     asset_percentiles: tuple[float, ...] | None = None,
     metrics: tuple[str, ...] = ("Transformer", "Cables", "Voltage"),
-    title: str = "Power-Flow Stress by Retained-Asset Cutoff",
-    y_axis_limits: tuple[float | None, float | None, float | None] | None = None,
+    title: str | None = None,
+    curve_y_axis_limits: Mapping[str, tuple[float | None, float | None]] | None = None,
+    distribution_y_axis_limits: Mapping[str, tuple[float | None, float | None]] | None = None,
     center_stat: str = "mean",
     show_band: bool = False,
     worst_asset_per_grid: bool = True,
     filter_scope: str = "asset",
     source_col: str | None = None,
     source_style_map: dict[str, dict[str, object]] | None = None,
+    group_labels: dict[str, str] | None = None,
+    reference_group: str | None = None,
+    width_mm: float = 180.0,
+    height_mm: float | None = None,
+    font_size: float = 8.0,
     figsize: tuple[float, float] | None = None,
     save_path: str | Path | None = None,
-    save_formats: tuple[str, ...] = ("svg", "pdf"),
+    save_formats: tuple[str, ...] = ("pdf", "svg"),
 ):
-    """Draw a publication-oriented static retained cutoff overview.
+    """Publication figure of the retained cutoff overview (Matplotlib, no slider).
 
-    The figure mirrors :func:`plot_powerflow_asset_cutoff_overview` without a
-    slider. ``asset_cutoff_percentile`` selects the retained cutoff shown in the
-    bottom row and the maximum cutoff shown in the top-row curves.
-    ``filter_scope`` switches between asset-level and grid-level filtering.
-    Static Matplotlib output can be saved as SVG/PDF through ``save_path``.
-    ``source_col`` adds a second comparison dimension, e.g. Synthetic vs Real:
-    colors still follow ``group_col`` while line style and violin/scatter offsets
-    follow ``source_col``.
+    Top row: the ``center_stat`` of the retained critical values over the retained
+    cutoffs up to ``asset_cutoff_percentile``. Bottom row: their distribution at that
+    cutoff (violin, median, points). ``filter_scope`` ranks assets or whole grids.
+    Colors follow ``group_col`` (the cases), line styles and violin offsets follow
+    ``source_col`` (e.g. ``network`` for pooled Real vs Synthetic); the legend shows
+    both. ``group_labels`` renames the groups for display, ``reference_group`` adds a
+    dotted line at that group's median to every distribution panel.
+    ``curve_y_axis_limits`` (top row) and ``distribution_y_axis_limits`` (bottom row)
+    map a metric to ``(low, high)``; ``None`` or a missing metric keeps that bound
+    automatic. Wide, fixed limits keep the scale the same across figures.
+
+    The figure is sized for print (``width_mm``, ``font_size`` in pt, no title unless
+    ``title`` is given; the caption carries it). PDF/SVG keep the text as text.
     """
     required = {"metric", "percentile", "value"}
     missing_required = required.difference(profile.columns)
@@ -490,30 +527,23 @@ def plot_powerflow_asset_cutoff_overview_static(
             "plot_powerflow_asset_cutoff_overview_static expects the asset-level "
             f"percentile profile dataframe; missing column(s): {missing}."
         )
-
     center_stat = str(center_stat).strip().lower()
     if center_stat not in {"median", "mean"}:
         raise ValueError("center_stat must be either 'median' or 'mean'.")
-
     filter_scope = normalize_filter_scope(filter_scope)
     cutoff_unit = "asset" if filter_scope == "asset" else "grid"
-
     cutoff = float(asset_cutoff_percentile)
     if cutoff > 1:
         cutoff = cutoff / 100
     if cutoff <= 0 or cutoff > 1:
         raise ValueError("asset_cutoff_percentile must satisfy 0 < value <= 1, or 0 < value <= 100.")
-
     if asset_percentiles is None:
         asset_percentiles = (0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99, 1.0)
     asset_percentiles = normalize_quantiles(asset_percentiles, "asset_percentiles")
     x_values = tuple(q for q in sorted(set(asset_percentiles).union({cutoff})) if q <= cutoff or np.isclose(q, cutoff))
-    if not x_values:
-        x_values = (cutoff,)
 
     df = profile.copy()
-    if group_col is None:
-        group_col = "comparison_group"
+    group_col = group_col or "comparison_group"
     if group_col not in df.columns:
         df[group_col] = "All retained assets"
     if source_col is not None and source_col not in df.columns:
@@ -522,254 +552,157 @@ def plot_powerflow_asset_cutoff_overview_static(
         source_col = "_plot_source"
         df[source_col] = ""
     df["percentile_norm"] = df["percentile"].map(_normalize_percentile_label)
-
     selected_metrics = select_metrics(metrics)
+    curve_limits = _static_axis_limits(curve_y_axis_limits, "curve_y_axis_limits")
+    distribution_limits = _static_axis_limits(distribution_y_axis_limits, "distribution_y_axis_limits")
 
-    default_colors = color_defaults(color_map)
-    y_axis_ranges = _powerflow_y_axis_ranges(y_axis_limits)
+    def _order(column: str) -> list[str]:
+        values = df[column]
+        if isinstance(values.dtype, pd.CategoricalDtype):
+            present = set(values.dropna().astype(str))
+            return [str(value) for value in values.cat.categories if str(value) in present]
+        return list(values.dropna().astype(str).drop_duplicates())
+
+    groups, sources = _order(group_col), _order(source_col)
+    base_colors = color_defaults(color_map)
+    group_colors = {
+        group: base_colors.get(group, FALLBACK_PALETTE[index % len(FALLBACK_PALETTE)])
+        for index, group in enumerate(groups)
+    }
+    violin_width = 0.8 / max(1, len(sources))
+    source_styles = {}
+    for index, source in enumerate(sources):
+        style = {**_SOURCE_STYLES[index % len(_SOURCE_STYLES)],
+                 "offset": (index - (len(sources) - 1) / 2) * violin_width}
+        style.update((source_style_map or {}).get(source, {}))
+        source_styles[source] = style
+    group_labels = group_labels or {}
+
+    def _group_label(group: str) -> str:
+        text = str(group_labels.get(group, group)).replace("status-quo", "status quo")
+        return "\n".join(textwrap.wrap(text, width=14, break_long_words=False)) or text
 
     def _cutoff_label(value: float) -> str:
         return f"P{int(round(value * 100)):02d}" if value < 1 else "P100"
 
-    def _wrap_axis_label(value: object, width: int = 18) -> str:
-        text = str(value).replace("100-electrification-", "100% electrification ")
-        text = text.replace("status-quo", "status quo")
-        return "\n".join(textwrap.wrap(text, width=width, break_long_words=False, break_on_hyphens=True))
+    positions_by_cutoff = {q: index for index, q in enumerate(x_values)}
 
-    def _short_source_label(source: str) -> str:
-        lowered = str(source).strip().lower()
-        if lowered in {"synthetic", "syn"}:
-            return "Synthetic"
-        if lowered in {"real swf", "real_swf", "real"}:
-            return "Real"
-        if lowered in {"synthetic swf", "synthetic üzw", "real üzw"}:
-            return str(source).replace("Synthetic", "Syn.")
-        return str(source)[:6]
+    def cutoff_position(value: float) -> int:
+        return next(index for q, index in positions_by_cutoff.items() if np.isclose(q, value))
 
-    title_fontsize = 20
-    panel_title_fontsize = 17
-    label_fontsize = 16
-    tick_fontsize = 14
-    legend_fontsize = 15
-
-    plt.style.use("seaborn-v0_8-whitegrid")
-    if figsize is None:
-        figsize = (5.1 * len(selected_metrics), 8.2)
-    fig, axes = plt.subplots(
-        2,
-        len(selected_metrics),
-        figsize=figsize,
-        gridspec_kw={"height_ratios": [1.0, 1.15], "hspace": 0.34, "wspace": 0.28},
-        squeeze=False,
-    )
-    groups = list(df[group_col].astype(str).dropna().drop_duplicates())
-    sources = list(df[source_col].astype(str).dropna().drop_duplicates())
-    source_style_map = source_style_map or {}
-    default_source_styles = {
-        "": {"linestyle": "-", "offset": 0.0, "alpha": 0.30, "marker_alpha": 0.42},
-        "Synthetic": {"linestyle": "-", "offset": -0.18, "alpha": 0.30, "marker_alpha": 0.42},
-        "Real SWF": {"linestyle": "--", "dashes": (3.0, 2.0), "offset": 0.18, "alpha": 0.18, "marker_alpha": 0.46},
-        "synthetic": {"linestyle": "-", "offset": -0.18, "alpha": 0.30, "marker_alpha": 0.42},
-        "real_swf": {"linestyle": "--", "dashes": (3.0, 2.0), "offset": 0.18, "alpha": 0.18, "marker_alpha": 0.46},
-        "Synthetic SWF": {"linestyle": "-", "offset": -0.18, "alpha": 0.30, "marker_alpha": 0.42},
-        "Synthetic ÜZW": {"linestyle": "-.", "offset": -0.06, "alpha": 0.30, "marker_alpha": 0.42},
-        "Real ÜZW": {"linestyle": ":", "offset": 0.06, "alpha": 0.18, "marker_alpha": 0.46},
+    width_in = width_mm / 25.4
+    size = figsize or (width_in, (height_mm / 25.4) if height_mm else width_in * 0.56)
+    rc = {
+        "font.size": font_size, "axes.titlesize": font_size + 1, "axes.labelsize": font_size,
+        "xtick.labelsize": font_size - 1, "ytick.labelsize": font_size - 1, "legend.fontsize": font_size,
+        "axes.spines.top": False, "axes.spines.right": False, "axes.linewidth": 0.6,
+        "xtick.major.width": 0.6, "ytick.major.width": 0.6, "lines.linewidth": 1.2,
+        "pdf.fonttype": 42, "svg.fonttype": "none",
     }
-    for key, value in source_style_map.items():
-        default_source_styles[str(key)] = {**default_source_styles.get(str(key), {}), **value}
-    group_colors = {
-        group: default_colors.get(group, FALLBACK_PALETTE[index % len(FALLBACK_PALETTE)])
-        for index, group in enumerate(groups)
-    }
-
-    def _source_style(source: str) -> dict[str, object]:
-        return default_source_styles.get(str(source), {"linestyle": "--", "dashes": (3.0, 2.0), "offset": 0.18, "alpha": 0.18, "marker_alpha": 0.46})
-
-    def _source_display_label(source: str) -> str:
-        lowered = str(source).strip().lower()
-        if lowered in {"real swf", "real_swf", "real"}:
-            return "Real"
-        return str(source)
-
-    def _legend_label(group: str, source: str) -> str:
-        return group if source == "" else f"{group} - {_source_display_label(source)}"
-
-    for col_idx, metric in enumerate(selected_metrics):
-        metric_df = df[
-            (df["metric"] == metric)
-            & (df["percentile_norm"] == CRITICAL_PERCENTILE[metric])
-        ].dropna(subset=["value"]).copy()
-        if metric_df.empty:
-            continue
-
-        ax_curve = axes[0, col_idx]
-        ax_dist = axes[1, col_idx]
-        for group in groups:
-            for source in sources:
-                group_df = metric_df[
-                    (metric_df[group_col].astype(str) == group)
-                    & (metric_df[source_col].astype(str) == source)
-                ]
-                values = group_df["value"].astype(float).dropna()
-                if values.empty:
-                    continue
-                curve = retained_curve(group_df, metric, x_values, filter_scope=filter_scope, center_stat=center_stat)
-                color = group_colors[group]
-                style = _source_style(source)
-                (line,) = ax_curve.plot(
-                    curve["retained_asset_cutoff"],
-                    curve["center"],
-                    marker="o",
-                    linewidth=2.8,
-                    markersize=6.5,
-                    color=color,
-                    linestyle=str(style.get("linestyle", "-")),
-                    label=_legend_label(group, source),
-                )
-                if style.get("dashes") is not None:
-                    line.set_dashes(style["dashes"])
-                if show_band:
-                    ax_curve.fill_between(
-                        curve["retained_asset_cutoff"].to_numpy(dtype=float),
-                        curve["band_lower"].to_numpy(dtype=float),
-                        curve["band_upper"].to_numpy(dtype=float),
-                        color=color,
-                        alpha=float(style.get("alpha", 0.13)),
-                        linewidth=0,
-                    )
-
-        violin_values = []
-        violin_positions = []
-        violin_colors = []
-        violin_alphas = []
-        violin_sources = []
-        base_positions = np.arange(1, len(groups) + 1)
-        for group_index, group in enumerate(groups):
-            for source in sources:
-                group_df = metric_df[
-                    (metric_df[group_col].astype(str) == group)
-                    & (metric_df[source_col].astype(str) == source)
-                ]
-                retained = retained_frame(group_df, metric, cutoff, filter_scope)
-                if worst_asset_per_grid:
-                    retained = select_worst_asset_per_grid(retained, metric, group_col)
-                values = retained["value"].astype(float).dropna().to_numpy()
-                if values.size == 0:
-                    continue
-                style = _source_style(source)
-                violin_values.append(values)
-                violin_positions.append(float(base_positions[group_index] + float(style.get("offset", 0.0))))
-                violin_colors.append(group_colors[group])
-                violin_alphas.append(float(style.get("alpha", 0.28)))
-                violin_sources.append(str(source))
-
-        if violin_values:
-            violins = ax_dist.violinplot(
-                violin_values,
-                positions=violin_positions,
-                widths=0.30 if len(sources) > 1 else 0.72,
-                showmeans=False,
-                showmedians=True,
-                showextrema=False,
-            )
-            for body, color, alpha in zip(violins["bodies"], violin_colors, violin_alphas):
-                body.set_facecolor(color)
-                body.set_edgecolor(color)
-                body.set_alpha(alpha)
-                body.set_linewidth(1.2)
-            if "cmedians" in violins:
-                violins["cmedians"].set_color("#222222")
-                violins["cmedians"].set_linewidth(2.0)
-            rng = np.random.default_rng(7)
-            for position, values, color, alpha in zip(violin_positions, violin_values, violin_colors, violin_alphas):
-                jitter = rng.normal(0, 0.022 if len(sources) > 1 else 0.035, size=values.size)
-                ax_dist.scatter(
-                    np.full(values.size, position) + jitter,
-                    values,
-                    s=18,
-                    color=color,
-                    alpha=min(0.65, alpha + 0.18),
-                    linewidths=0,
-                )
-            ax_dist.set_xticks(base_positions)
-            ax_dist.set_xticklabels([])
-            ax_dist.tick_params(axis="x", length=0)
-            for position, group in zip(base_positions, groups):
-                ax_dist.text(
-                    position,
-                    -0.25 if len(sources) > 1 else -0.15,
-                    _wrap_axis_label(group, width=18),
-                    transform=ax_dist.get_xaxis_transform(),
-                    ha="center",
-                    va="top",
-                    fontsize=tick_fontsize - 2,
-                    color="#2f2f2f",
-                    linespacing=1.05,
-                )
-            if len(sources) > 1:
-                for position, source in zip(violin_positions, violin_sources):
-                    ax_dist.text(
-                        position,
-                        -0.07,
-                        _short_source_label(source),
-                        transform=ax_dist.get_xaxis_transform(),
-                        ha="center",
-                        va="top",
-                        fontsize=max(tick_fontsize - 4, 8),
-                        color="#666666",
-                    )
-
-        ax_curve.set_title(metric, fontsize=panel_title_fontsize, fontweight="bold")
-        ax_curve.set_xlabel("")
-        ax_curve.set_ylabel(f"{center_stat.capitalize()} {Y_TITLES[metric].lower()}", fontsize=label_fontsize)
-        ax_curve.set_xticks(list(x_values))
-        ax_curve.set_xticklabels([_cutoff_label(q) for q in x_values], rotation=35, ha="right", rotation_mode="anchor", fontsize=tick_fontsize)
-        ax_dist.set_xlabel("")
-        ax_dist.set_ylabel(Y_TITLES[metric], fontsize=label_fontsize)
-        if metric == "Voltage":
-            voltage_formatter = FormatStrFormatter("%.3f")
-            ax_curve.yaxis.set_major_formatter(voltage_formatter)
-            ax_dist.yaxis.set_major_formatter(voltage_formatter)
-        if metric in y_axis_ranges:
-            ax_curve.set_ylim(y_axis_ranges[metric])
-            ax_dist.set_ylim(y_axis_ranges[metric])
-        for ax in (ax_curve, ax_dist):
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
-            ax.tick_params(axis="both", labelsize=tick_fontsize)
-            ax.grid(True, axis="y", color="#d8d8d8", linewidth=0.8)
-            ax.grid(False, axis="x")
-
-    handles, labels = axes[0, 0].get_legend_handles_labels()
-    if handles and len(labels) > 1:
-        legend_ncols = min(3, len(labels))
-        fig.legend(
-            handles,
-            labels,
-            loc="upper center",
-            ncol=legend_ncols,
-            frameon=False,
-            bbox_to_anchor=(0.5, 0.915),
-            fontsize=legend_fontsize,
-            handlelength=2.8,
-            columnspacing=1.2,
-            labelspacing=0.65,
+    with plt.rc_context(rc):
+        fig, axes = plt.subplots(
+            2, len(selected_metrics), figsize=size, squeeze=False,
+            gridspec_kw={"height_ratios": [1.0, 1.25]},
         )
-    title_text = title if np.isclose(cutoff, 1.0) else f"{title} ({_cutoff_label(cutoff)} retained-{cutoff_unit} cutoff)"
-    fig.suptitle(
-        title_text,
-        y=0.99,
-        fontsize=title_fontsize,
-        fontweight="bold",
-    )
-    fig.subplots_adjust(top=0.72, bottom=0.27, left=0.08, right=0.985, hspace=0.42, wspace=0.35)
+        rng = np.random.default_rng(7)
+        positions = np.arange(1, len(groups) + 1)
+        for col_idx, metric in enumerate(selected_metrics):
+            ax_curve, ax_dist = axes[0, col_idx], axes[1, col_idx]
+            metric_df = df[
+                (df["metric"] == metric) & (df["percentile_norm"] == CRITICAL_PERCENTILE[metric])
+            ].dropna(subset=["value"])
+            reference_values = []
+            for group_index, group in enumerate(groups):
+                for source in sources:
+                    group_df = metric_df[
+                        (metric_df[group_col].astype(str) == group) & (metric_df[source_col].astype(str) == source)
+                    ]
+                    if group_df.empty:
+                        continue
+                    color, style = group_colors[group], source_styles[source]
+                    curve = retained_curve(group_df, metric, x_values, filter_scope=filter_scope, center_stat=center_stat)
+                    # Evenly spaced cutoffs: P90/P95/P99 would overlap on a linear axis.
+                    curve_x = curve["retained_asset_cutoff"].map(cutoff_position)
+                    ax_curve.plot(
+                        curve_x, curve["center"], color=color,
+                        linestyle=style["linestyle"], marker="o", markersize=2.6,
+                    )
+                    if show_band:
+                        ax_curve.fill_between(
+                            curve_x.to_numpy(dtype=float),
+                            curve["band_lower"].to_numpy(dtype=float), curve["band_upper"].to_numpy(dtype=float),
+                            color=color, alpha=float(style["alpha"]) * 0.5, linewidth=0,
+                        )
+                    retained = retained_frame(group_df, metric, cutoff, filter_scope)
+                    if worst_asset_per_grid:
+                        retained = select_worst_asset_per_grid(retained, metric, group_col)
+                    values = retained["value"].astype(float).dropna().to_numpy()
+                    if values.size == 0:
+                        continue
+                    if group == reference_group:
+                        reference_values.append(values)
+                    position = positions[group_index] + float(style["offset"])
+                    parts = ax_dist.violinplot(
+                        [values], positions=[position], widths=violin_width * 0.92,
+                        showmeans=False, showmedians=True, showextrema=False,
+                    )
+                    for body in parts["bodies"]:
+                        body.set_facecolor(color)
+                        body.set_edgecolor(color)
+                        body.set_alpha(float(style["alpha"]))
+                        body.set_linewidth(0.8)
+                        body.set_linestyle(style["linestyle"])
+                    parts["cmedians"].set_color("#222222")
+                    parts["cmedians"].set_linewidth(1.0)
+                    jitter = rng.normal(0.0, violin_width * 0.08, size=values.size)
+                    ax_dist.scatter(position + jitter, values, s=3, color=color,
+                                    alpha=min(0.8, float(style["alpha"]) + 0.3), linewidths=0)
+            if reference_values:
+                ax_dist.axhline(float(np.median(np.concatenate(reference_values))), color=group_colors[reference_group],
+                                linestyle=":", linewidth=0.8, zorder=0)
+            ax_curve.set_title(metric, fontweight="bold")
+            ax_curve.set_xticks(list(range(len(x_values))))
+            ax_curve.set_xticklabels([_cutoff_label(q) for q in x_values], rotation=45, ha="right",
+                                     rotation_mode="anchor")
+            ax_curve.set_xlabel(f"Retained {cutoff_unit} cutoff")
+            ax_curve.set_ylabel(f"{center_stat.capitalize()} {Y_TITLES[metric].lower()}")
+            ax_dist.set_xticks(positions)
+            ax_dist.set_xticklabels([_group_label(group) for group in groups])
+            ax_dist.set_xlim(0.4, len(groups) + 0.6)
+            ax_dist.tick_params(axis="x", length=0)
+            ax_dist.set_ylabel(Y_TITLES[metric])
+            ax_curve.set_ylim(*curve_limits.get(metric, (None, None)))
+            ax_dist.set_ylim(*distribution_limits.get(metric, (None, None)))
+            for ax in (ax_curve, ax_dist):
+                if metric == "Voltage":
+                    ax.yaxis.set_major_locator(MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10]))
+                    ax.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+                ax.grid(True, axis="y", color="#dddddd", linewidth=0.5)
+                ax.grid(False, axis="x")
 
-    if save_path is not None:
-        save_path = Path(save_path)
-        base_path = save_path.with_suffix("") if save_path.suffix else save_path
-        base_path.parent.mkdir(parents=True, exist_ok=True)
-        for image_format in save_formats:
-            fig.savefig(base_path.with_suffix(f".{image_format.lstrip('.')}"), bbox_inches="tight")
+        handles = [Patch(facecolor=group_colors[group], edgecolor="none", label=_group_label(group).replace("\n", " "))
+                   for group in groups]
+        if len(sources) > 1:
+            handles += [Line2D([0], [0], color="#333333", linestyle=source_styles[source]["linestyle"], label=source)
+                        for source in sources]
+        # Panels fill the figure; legend and title sit on top of them (saved with bbox_inches="tight").
+        fig.tight_layout(h_pad=1.2, w_pad=1.0)
+        top = max(ax.get_tightbbox(fig.canvas.get_renderer()).transformed(fig.transFigure.inverted()).y1
+                  for ax in axes[0])
+        if len(handles) > 1:
+            legend = fig.legend(handles=handles, loc="lower center", ncol=len(handles), frameon=False,
+                                bbox_to_anchor=(0.5, top), handlelength=2.4, columnspacing=1.4, borderaxespad=0.2)
+            top = legend.get_window_extent(fig.canvas.get_renderer()).transformed(fig.transFigure.inverted()).y1
+        if title:
+            suffix = "" if np.isclose(cutoff, 1.0) else f" ({_cutoff_label(cutoff)} retained-{cutoff_unit} cutoff)"
+            fig.suptitle(f"{title}{suffix}", y=top, va="bottom", fontweight="bold")
+
+        if save_path is not None:
+            save_path = Path(save_path)
+            base_path = save_path.with_suffix("") if save_path.suffix else save_path
+            base_path.parent.mkdir(parents=True, exist_ok=True)
+            for image_format in save_formats:
+                fig.savefig(base_path.with_suffix(f".{image_format.lstrip('.')}"), bbox_inches="tight")
     return fig
 
 
@@ -823,6 +756,7 @@ def plot_cable_capacity_current_loading_comparison(
     )
     source_styles = {
         "Synthetic": {"linestyle": "-", "marker": "o"},
+        "Real": {"linestyle": "--", "marker": "s"},
         "Real SWF": {"linestyle": "--", "marker": "s"},
         "Synthetic SWF": {"linestyle": "-", "marker": "o"},
         "Synthetic ÜZW": {"linestyle": "-.", "marker": "^"},

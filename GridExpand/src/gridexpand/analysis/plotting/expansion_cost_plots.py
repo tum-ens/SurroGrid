@@ -47,6 +47,7 @@ def plot_expansion_cost_comparison_bar(
     }
     hatch_map = {
         "Synthetic": "",
+        "Real": "//",
         "Real SWF": "//",
         "Synthetic SWF": "",
         "Synthetic ÜZW": "xx",

@@ -127,6 +127,7 @@ def test_case_table_matches_notebook_keys():
 def test_exclusions_are_canonical():
     from gridexpand.analysis.expansion import notebook_workflow as nw
 
-    assert nw._excluded_ids((113, "LV_007"), "Real SWF") == {"113", "7"}
+    assert nw._excluded_ids({"Real SWF": (113, "LV_007")}, "Real SWF") == {"113", "7"}
     assert nw._excluded_ids({"Real ÜZW": ("area-12",)}, "Real ÜZW") == {"12"}
+    assert nw._excluded_ids({"Synthetic SWF": ("91301_1_3",)}, "Synthetic SWF") == {"91301_1_3"}
     assert nw._excluded_ids({"Real ÜZW": ("area-12",)}, "Real SWF") == set()
