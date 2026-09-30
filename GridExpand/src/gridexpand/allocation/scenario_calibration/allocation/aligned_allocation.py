@@ -388,6 +388,8 @@ def build_aligned_allocation(
     inventory = pd.DataFrame(
         {
             "building_objectid": buildings["building_objectid"],
+            # For per-type adoption shares (electrification.<tech>.building_share_by_type).
+            "building_type": buildings["building_type"] if "building_type" in buildings else pd.NA,
             "heat_eligible": is_residential,
             "heat_exclusion_reason": np.where(is_residential, None, "no_residential_component"),
             "mobility_eligible": is_residential & has_household & buildings["deterministic_vehicle_count"].gt(0),

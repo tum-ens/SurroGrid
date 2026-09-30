@@ -58,9 +58,13 @@ electrification: # deterministic_share or source_inventory
   mobility:
     adoption_mode: deterministic_share
     building_share: 1.0
+    # Optional per-type shares (building_share applies to types not listed):
+    # building_share_by_type: {SFH: 0.85, TH: 0.85, MFH: 0.5, AB: 0.5}
   pv_battery:
     adoption_mode: deterministic_share
     building_share: 1.0
+    # Optional share of the selected PV buildings that also get a battery (default 1).
+    # battery_share_of_selected: 0.8
 
 mobility:
   commuting_probability: 0.62

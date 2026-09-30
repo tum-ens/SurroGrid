@@ -87,16 +87,32 @@ asset_sizing:
     buffer_charge_efficiency_method: cop_curve
 
 electrification: # deterministic_share or source_inventory
-  # Shares of eligible physical buildings, selected per provider.
+  # Shares of eligible physical buildings, selected per provider. Central 2045
+  # values from national scenarios (sources: docs/method.md#electrification).
   heat:
+    # Heat pumps in suburban and rural LV grids with little district heating
+    # (national 43-65 % of buildings; rural FfE/Agora grids 0.48-0.77 in 2035).
     adoption_mode: deterministic_share
     building_share: 0.8
   mobility:
+    # Buildings whose vehicles charge at home: battery-electric fleet about 93 %
+    # (dena 2045) times home-charging access (about 85 % one/two-family houses,
+    # about 50 % multi-family; dena 2020, MiD). building_share applies to types
+    # not listed, e.g. untyped mixed-use buildings (multi-family-like).
     adoption_mode: deterministic_share
-    building_share: 1.0
+    building_share: 0.5
+    building_share_by_type:
+      SFH: 0.85
+      TH: 0.85
+      MFH: 0.5
+      AB: 0.5
   pv_battery:
+    # Rooftop PV on 70 % of eligible buildings (34 % of owner-occupied houses
+    # today, KfW 2026); 80 % of them with a battery (BSW-Solar 2026: about 80 %
+    # of new home PV systems are sold with one).
     adoption_mode: deterministic_share
-    building_share: 0.8
+    building_share: 0.7
+    battery_share_of_selected: 0.8
 
 # Mobility behavior and emobpy vehicle-model assumptions.
 mobility:

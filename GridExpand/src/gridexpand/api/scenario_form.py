@@ -65,6 +65,10 @@ SECTIONS: list[dict[str, Any]] = [
         *_adoption_fields("heat", "Heat pumps"),
         *_adoption_fields("mobility", "Electric vehicles"),
         *_adoption_fields("pv_battery", "PV + battery"),
+        _field("electrification.pv_battery.battery_share_of_selected", "Batteries: share of PV buildings", "percent",
+               "%", min=0, max=1, step=0.05, optional=True, default=1.0, after="building_share",
+               hint="Seeded share of the selected PV buildings that also get a battery (optional key, default 1: "
+                    "every PV building). Per-type shares (building_share_by_type) are edited in the YAML."),
     ]},
     {"id": "economics", "title": "Economics", "fields": [
         _field("economics.electricity.import_price_eur_per_kwh", "Electricity import price", "float", "€/kWh",

@@ -60,6 +60,8 @@ Top-level blocks: `scenario`, `economics`, `asset_sizing`, `electrification`, `m
 | `asset_sizing.heat.teaser_retrofit_level` | optional, 0/1/2 (default 0) | TABULA variant of the `teaser` source |
 | `electrification.<heat\|mobility\|pv_battery>.adoption_mode` | `deterministic_share`, `source_inventory` | selection rule per technology |
 | `electrification.<…>.building_share` | 0–1; required for `deterministic_share`, forbidden otherwise | selected share of eligible buildings |
+| `electrification.<…>.building_share_by_type` | optional mapping `SFH`/`TH`/`MFH`/`AB` → 0–1 (`deterministic_share`) | shares per building type; `building_share` applies to the types not listed |
+| `electrification.pv_battery.battery_share_of_selected` | optional, 0–1 (default 1) | seeded share of the selected PV buildings that also get a battery |
 | `mobility.commuting_probability` | 0–1 | emobpy commuter share |
 | `mobility.emobpy_timestep_hours` | > 0 | emobpy resolution |
 | `mobility.reference_year` | must be 2009 | the fixed calendar year of every time axis |

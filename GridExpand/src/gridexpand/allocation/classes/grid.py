@@ -42,6 +42,7 @@ from gridexpand.allocation.electrification import (
     load_prepared_assignment,
 )
 from gridexpand.common.electrification import (
+    battery_buildings,
     assignment_manifest_hash,
     assignment_summary,
     build_electrification_assignment,
@@ -525,7 +526,10 @@ class Grid:
             minimum_pv_kwp_per_annual_mwh=battery.minimum_pv_kwp_per_annual_mwh,
             usable_kwh_per_pv_kwp=pv_coefficient,
             usable_kwh_per_annual_mwh=demand_coefficient,
-            eligible_buildings=self._selected_buildings("pv_battery"),
+            eligible_buildings=battery_buildings(
+                self.df_electrification_assignment,
+                scenario.electrification.pv_battery.battery_share_of_selected,
+            ),
             location_source="electrification_assignment",
         )
         materialized = materialize_battery_urbs_inputs(

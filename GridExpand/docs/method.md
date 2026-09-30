@@ -93,6 +93,22 @@ a controlled comparison matters.
 - `source_inventory`: only buildings backed by explicit source evidence (the SWF 2045 inventory) are
   selected; `building_share` is not allowed.
 
+With `building_share_by_type` (keys `SFH`, `TH`, `MFH`, `AB`) the ranking and the rounded selection run within
+each building type; `building_share` applies to the types not listed (e.g. untyped mixed-use buildings). The
+manifest then carries a `selection_stratum` column, and Step 3 validates the share per stratum; manifests
+without per-type shares keep their columns and hashes. The joint scenario uses this for home charging:
+0.85 for one- and two-family and terraced houses, 0.5 for multi-family houses, from a battery-electric fleet of
+about 93 % in 2045 ([dena-Leitstudie, 2021](https://www.ewi.uni-koeln.de/de/publikationen/dena-ls2/211005_ewi-zusammenfassung_dena-leitstudie-aufbruch-klimaneutralitaet))
+and home-charging access of about 85 % and 50 %
+([dena, 2020](https://www.dena.de/fileadmin/dena/Publikationen/PDFs/2020/dena-STUDIE_Privates_Ladeinfrastrukturpotenzial_in_Deutschland.pdf);
+[MiD 2017](https://www.mobilitaet-in-deutschland.de/archive/pdf/MiD2017_Ergebnisbericht.pdf)).
+`pv_battery.battery_share_of_selected` gives a battery to a seeded share of the selected PV buildings (own
+ranking stream `battery`); 1.0 is the PV + battery bundle. The joint scenario selects PV on 70 % of the eligible
+buildings and a battery on 80 % of them (about 80 % of new home PV systems are sold with a battery,
+[BSW-Solar, 2026](https://www.solarwirtschaft.de/datawall/uploads/2025/10/BSW-Solar_Faktenblatt_Stromspeicher.pdf)),
+and heat pumps on 80 % (national scenarios give 43–65 % of all buildings in 2045, more where district heating is
+rare; [Ariadne, 2025](https://ariadneprojekt.de/media/2025/06/Ariadne-kompakt_Szenarien2025-Gebaeude_Juni2025.pdf)).
+
 The assignment is one manifest per region, written before Step 2 and reused unchanged by Step 3 (which
 checks its hash). For synthetic runs the region is the selected scope of the run (the AGS, one PLZ or one
 grid, see [configuration.md](configuration.md#grid-selection)). A selected PV+battery row is an investment

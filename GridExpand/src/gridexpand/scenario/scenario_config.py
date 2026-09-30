@@ -55,15 +55,26 @@ def _share(value: Any, label: str) -> float:
     return result
 
 
+BUILDING_TYPES = ("SFH", "TH", "MFH", "AB")
+
+
 @dataclass(frozen=True)
 class TechnologyAdoptionConfig:
     adoption_mode: str
     building_share: float | None = None
+    # deterministic_share only: shares per residential building type (SFH, TH, MFH,
+    # AB); building_share applies to buildings whose type is not listed.
+    building_share_by_type: dict[str, float] | None = None
+    # pv_battery only: share of the selected PV buildings that also get a battery.
+    battery_share_of_selected: float = 1.0
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any], label: str) -> "TechnologyAdoptionConfig":
         raw = _mapping(raw, label)
-        _only(raw, {"adoption_mode", "building_share"}, label)
+        allowed = {"adoption_mode", "building_share", "building_share_by_type"}
+        if label.endswith("pv_battery"):
+            allowed.add("battery_share_of_selected")
+        _only(raw, allowed, label)
         if "adoption_mode" not in raw:
             raise ValueError(f"{label}.adoption_mode is required.")
         mode = str(raw["adoption_mode"])
@@ -72,15 +83,37 @@ class TechnologyAdoptionConfig:
                 f"{label}.adoption_mode must be one of {ADOPTION_MODES}."
             )
         has_share = "building_share" in raw
+        by_type = None
         if mode == "deterministic_share":
             if not has_share:
                 raise ValueError(f"{label}.building_share is required for deterministic_share.")
             share = _share(raw["building_share"], f"{label}.building_share")
+            if "building_share_by_type" in raw:
+                mapping = _mapping(raw["building_share_by_type"], f"{label}.building_share_by_type")
+                unknown = sorted(set(map(str, mapping)).difference(BUILDING_TYPES))
+                if unknown or not mapping:
+                    raise ValueError(
+                        f"{label}.building_share_by_type needs keys from {BUILDING_TYPES}; got {unknown or 'none'}."
+                    )
+                by_type = {
+                    str(key): _share(value, f"{label}.building_share_by_type.{key}")
+                    for key, value in mapping.items()
+                }
         else:
-            if has_share:
+            if has_share or "building_share_by_type" in raw:
                 raise ValueError(f"{label}.building_share is not allowed for source_inventory.")
             share = None
-        return cls(adoption_mode=mode, building_share=share)
+        battery = _share(raw.get("battery_share_of_selected", 1.0), f"{label}.battery_share_of_selected")
+        return cls(
+            adoption_mode=mode, building_share=share, building_share_by_type=by_type,
+            battery_share_of_selected=battery,
+        )
+
+    def share_for_type(self, building_type: Any) -> float | None:
+        """Configured share of a building of ``building_type`` (deterministic_share)."""
+        if self.building_share_by_type and str(building_type) in self.building_share_by_type:
+            return self.building_share_by_type[str(building_type)]
+        return self.building_share
 
 
 @dataclass(frozen=True)
