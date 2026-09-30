@@ -52,9 +52,11 @@ Top-level blocks: `scenario`, `economics`, `asset_sizing`, `electrification`, `m
 | `asset_sizing.heat.space_heat_source` | `teaser`, `infdb_ro_heat` | space-heat demand source |
 | `asset_sizing.heat.indoor_design_temperature_c` | > heating limit | degree-day indoor temperature |
 | `asset_sizing.heat.heating_limit_temperature_c` | > 0 | degree-day heating limit |
+| `asset_sizing.heat.degree_day_base_temperature_c` | optional, between heating limit and indoor temperature (default indoor) | degree-day base of the full-load hours: indoor = G20/15, heating limit = Heizgradtage G15 |
 | `asset_sizing.heat.heat_pump_design_share` | (0, 1] | heat-pump share of the design load |
-| `asset_sizing.heat.buffer_volume_l_per_kw_th` | > 0 | buffer litres per kW<sub>th</sub> |
+| `asset_sizing.heat.buffer_volume_l_per_kw_th` | > 0 | buffer litres per kW<sub>th</sub>; t hours of output = t · 1000 / (1.163 · spread) |
 | `asset_sizing.heat.buffer_usable_temperature_spread_k` | > 0 | usable buffer spread |
+| `asset_sizing.heat.buffer_charge_efficiency_method` | optional, `technology` (default), `cop_curve` | buffer charge efficiency: storage value, or per building COP(lift + spread) / COP(lift) |
 | `asset_sizing.heat.teaser_retrofit_level` | optional, 0/1/2 (default 0) | TABULA variant of the `teaser` source |
 | `electrification.<heat\|mobility\|pv_battery>.adoption_mode` | `deterministic_share`, `source_inventory` | selection rule per technology |
 | `electrification.<…>.building_share` | 0–1; required for `deterministic_share`, forbidden otherwise | selected share of eligible buildings |

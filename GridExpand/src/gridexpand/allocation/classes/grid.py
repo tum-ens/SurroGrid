@@ -719,11 +719,7 @@ class Grid:
             self.df_weather_raw["temp_air"],
             sizing_method=sizing_method,
             norm_outside_temperature_c=norm_outside,
-            indoor_design_temperature_c=scenario.heat.indoor_design_temperature_c,
-            heating_limit_temperature_c=scenario.heat.heating_limit_temperature_c,
-            heat_pump_design_share=scenario.heat.heat_pump_design_share,
-            buffer_volume_l_per_kw_th=scenario.heat.buffer_volume_l_per_kw_th,
-            buffer_usable_temperature_spread_k=scenario.heat.buffer_usable_temperature_spread_k,
+            **scenario.heat.sizing_kwargs(),
         )
         materialized = materialize_heat_urbs_inputs(
             self.df_heat_asset_plan,

@@ -204,18 +204,28 @@ class HeatSizingConfig:
     # TABULA variant for the TEASER source: 0 standard (as built),
     # 1 usual refurbishment, 2 advanced refurbishment.
     teaser_retrofit_level: int = 0
+    # Degree-day base of the full-load hours; None is the indoor temperature (G20/15),
+    # the heating limit gives Heizgradtage G15.
+    degree_day_base_temperature_c: float | None = None
+    # technology: charge efficiency of technologies.storages.thermal_storage;
+    # cop_curve: per-building COP penalty of charging by the usable spread.
+    buffer_charge_efficiency_method: str = "technology"
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "HeatSizingConfig":
         raw = _mapping(raw, "asset_sizing.heat")
-        allowed = {
+        required = {
             "space_heat_source",
             "indoor_design_temperature_c", "heating_limit_temperature_c",
             "heat_pump_design_share", "buffer_volume_l_per_kw_th",
             "buffer_usable_temperature_spread_k",
         }
-        _only(raw, allowed | {"teaser_retrofit_level"}, "asset_sizing.heat")
-        if set(raw) - {"teaser_retrofit_level"} != allowed:
+        optional = {
+            "teaser_retrofit_level", "degree_day_base_temperature_c",
+            "buffer_charge_efficiency_method",
+        }
+        _only(raw, required | optional, "asset_sizing.heat")
+        if not required <= set(raw):
             raise ValueError("asset_sizing.heat is incomplete.")
         retrofit = raw.get("teaser_retrofit_level", 0)
         if isinstance(retrofit, bool) or retrofit not in (0, 1, 2):
@@ -232,6 +242,19 @@ class HeatSizingConfig:
         share = _positive(raw["heat_pump_design_share"], "asset_sizing.heat.heat_pump_design_share")
         if share > 1.0:
             raise ValueError("asset_sizing.heat.heat_pump_design_share must be <= 1.")
+        base = raw.get("degree_day_base_temperature_c")
+        if base is not None:
+            base = _positive(base, "asset_sizing.heat.degree_day_base_temperature_c")
+            if not limit <= base <= inside:
+                raise ValueError(
+                    "asset_sizing.heat.degree_day_base_temperature_c must lie between the "
+                    "heating limit and the indoor design temperature."
+                )
+        method = str(raw.get("buffer_charge_efficiency_method", "technology"))
+        if method not in {"technology", "cop_curve"}:
+            raise ValueError(
+                "asset_sizing.heat.buffer_charge_efficiency_method must be technology or cop_curve."
+            )
         return cls(
             space_heat_source=source,
             indoor_design_temperature_c=inside,
@@ -240,7 +263,21 @@ class HeatSizingConfig:
             buffer_volume_l_per_kw_th=_positive(raw["buffer_volume_l_per_kw_th"], "asset_sizing.heat.buffer_volume_l_per_kw_th"),
             buffer_usable_temperature_spread_k=_positive(raw["buffer_usable_temperature_spread_k"], "asset_sizing.heat.buffer_usable_temperature_spread_k"),
             teaser_retrofit_level=int(retrofit),
+            degree_day_base_temperature_c=base,
+            buffer_charge_efficiency_method=method,
         )
+
+    def sizing_kwargs(self) -> dict[str, Any]:
+        """Keyword arguments of ``build_heat_asset_plan`` for this configuration."""
+        return {
+            "indoor_design_temperature_c": self.indoor_design_temperature_c,
+            "heating_limit_temperature_c": self.heating_limit_temperature_c,
+            "heat_pump_design_share": self.heat_pump_design_share,
+            "buffer_volume_l_per_kw_th": self.buffer_volume_l_per_kw_th,
+            "buffer_usable_temperature_spread_k": self.buffer_usable_temperature_spread_k,
+            "degree_day_base_temperature_c": self.degree_day_base_temperature_c,
+            "buffer_charge_efficiency_method": self.buffer_charge_efficiency_method,
+        }
 
 
 @dataclass(frozen=True)

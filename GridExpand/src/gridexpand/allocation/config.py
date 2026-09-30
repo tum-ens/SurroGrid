@@ -126,9 +126,12 @@ class Config:
     C_P_WATER = 4.18                                # kJ/kgK, specific heat capacity
 
     ### Heat pump data, source: https://www.nature.com/articles/s41597-019-0199-y
+    ASHP_COP_COEFFICIENTS = (6.08, -0.09, 0.0005)   # COP = a + b*dT + c*dT^2, dT = sink - source in K
+
     @staticmethod
     def ASHP_COP(delta_T):                          # COP of air source heat pump
-        return pd.DataFrame(6.08 - 0.09*delta_T + 0.0005*np.square(delta_T))
+        a, b, c = Config.ASHP_COP_COEFFICIENTS
+        return pd.DataFrame(a + b*delta_T + c*np.square(delta_T))
 
     ### Heating system type, source: https://www.umweltbundesamt.de/sites/default/files/medien/11850/publikationen/11_2024_cc_waermepumpensysteme.pdf, Abbildung 26
     PROB_RADIATOR = 0.727                           # Probability for building to be heating with radiators 

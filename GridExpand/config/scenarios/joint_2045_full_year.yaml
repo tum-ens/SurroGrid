@@ -63,14 +63,26 @@ asset_sizing:
     teaser_retrofit_level: 1
     # Degree-day reference temperatures used to derive regional full-load hours.
     indoor_design_temperature_c: 20.0
-    # DWD/VDI 20/15 convention for the existing residential building stock.
+    # DWD/VDI heating limit: days below it count as heating days.
     heating_limit_temperature_c: 15.0
+    # Heizgradtage G15 (VDI 3807): days count with 15 degC minus the daily mean.
+    # The Gradtagzahl G20/15 (base 20 degC) also counts the part that internal
+    # and solar gains cover and overstates the full-load hours (about 2,500 h
+    # against 1,500-1,800 h typical for residential heating).
+    degree_day_base_temperature_c: 15.0
     # Thermal HP output at norm outdoor temperature as share of design heat load.
     heat_pump_design_share: 0.65
     # Explicit storage is space-heating-only; hourly OpenDHW demand is direct.
-    buffer_volume_l_per_kw_th: 20.0
-    # Usable temperature range for converting buffer litres to kWhth.
-    buffer_usable_temperature_spread_k: 5.0
+    # Flexibility buffer holding 1 h of thermal HP output over the usable spread:
+    # 1000 / (1.163 * 10 K) = 86 l/kW (2 h = 172 l/kW as high case). Bridging
+    # energy as in VDI 4645 (30-40 l per kW and hour of blocking time at its
+    # larger spread); FfE/Agora 2023 use 700 l at 55-65 degC per single-family home.
+    buffer_volume_l_per_kw_th: 86.0
+    # Usable spread: SG Ready setpoint raise above the normal flow temperature.
+    buffer_usable_temperature_spread_k: 10.0
+    # Charge efficiency per building: COP(lift + spread) / COP(lift) on the COP
+    # curve, the extra electricity of charging 10 K above the normal sink.
+    buffer_charge_efficiency_method: cop_curve
 
 electrification: # deterministic_share or source_inventory
   # Shares of eligible physical buildings, selected per provider.
@@ -187,9 +199,12 @@ technologies:
       installed_power_kw: 0.0
       power_upper_kw: 1500.0
       energy_to_power_hours: 0.15
+      # Replaced per building by the COP penalty (asset_sizing.heat.buffer_charge_efficiency_method).
       charge_efficiency: 0.932
       discharge_efficiency: 1.0
-      self_discharge_per_timestep: 0.0
+      # 0.5 %/h of the usable band energy: about an ErP class-A tank of 700 l
+      # (EU 812/2013 limits at a 45 K test difference, scaled to about 30 K).
+      self_discharge_per_timestep: 0.005
       investment_cost_eur_per_kw: 0.0
       investment_cost_eur_per_kwh: 58.0
       fixed_investment_cost_power_eur: 0.0

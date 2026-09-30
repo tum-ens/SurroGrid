@@ -1355,11 +1355,7 @@ def _build_paired_heat(
         demand.loc[:, pd.IndexSlice[:, ["water_heat"]]], eff_factor, ambient,
         sizing_method=sizing_method,
         norm_outside_temperature_c=get_norm_outside_temperature(postcode),
-        indoor_design_temperature_c=heat_config.indoor_design_temperature_c,
-        heating_limit_temperature_c=heat_config.heating_limit_temperature_c,
-        heat_pump_design_share=heat_config.heat_pump_design_share,
-        buffer_volume_l_per_kw_th=heat_config.buffer_volume_l_per_kw_th,
-        buffer_usable_temperature_spread_k=heat_config.buffer_usable_temperature_spread_k,
+        **heat_config.sizing_kwargs(),
     )
     materialized = materialize_heat_urbs_inputs(
         plan, sizing_method=sizing_method,
