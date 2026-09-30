@@ -27,12 +27,13 @@ from sqlalchemy import text
 from ..paths import ENV_PATH
 
 from gridexpand.db.database import SurroGridDatabase
+from gridexpand.common import ghd
 from gridexpand.common.electrification import (
     assignment_manifest_hash,
     assignment_summary,
     build_electrification_assignment,
 )
-from gridexpand.common.reproducibility import stable_seed
+from gridexpand.common.reproducibility import frame_fingerprint, stable_seed
 from gridexpand.allocation.config import config as grid_config
 import gridexpand.allocation.functions.electricity as electricity
 import gridexpand.allocation.functions.mobility as mobility
@@ -208,17 +209,20 @@ def _grid_components(
     grid: dict[str, Any],
     *,
     profile_seed: int,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Physical buildings and modelled electricity components of one grid."""
+    ghd_config: ghd.GhdConfig,
+    ghd_evidence: pd.DataFrame | None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Physical buildings, modelled electricity components and GHD audit of one grid."""
     physical, _, _ = database.read_step2_input_data(grid)
     components = database.read_building_components(grid, physical)
+    components, ghd_audit = ghd.apply_ghd_policy(physical, components, ghd_config, ghd_evidence)
     components["objectid"] = components["objectid"].astype(str)
     components = electricity.sample_statistics(components, base_seed=profile_seed)
     components, _, _ = electricity.get_elec_demand(
         components, base_seed=profile_seed, return_component_profiles=True
     )
     physical["objectid"] = physical["objectid"].astype(str)
-    return physical, components
+    return physical, components, ghd_audit
 
 
 def build_aligned_allocation(
@@ -268,9 +272,13 @@ def build_aligned_allocation(
         raise ValueError("Metric population buildings missing from pylovo buildings_result.")
     cohort_grids = grids[grids["grid_result_id"].isin(located["grid_result_id"])]
 
-    physical_frames, component_frames = [], []
+    ghd_evidence = ghd.load_evidence(scenario.ghd, sorted(population), engine=database.engine)
+    physical_frames, component_frames, ghd_audits = [], [], []
     for grid in cohort_grids.to_dict("records"):
-        physical, components = _grid_components(database, grid, profile_seed=profile_seed)
+        physical, components, ghd_audit = _grid_components(
+            database, grid, profile_seed=profile_seed, ghd_config=scenario.ghd, ghd_evidence=ghd_evidence
+        )
+        ghd_audits.append(ghd_audit)
         outside = sorted(set(physical["objectid"]) - population)
         if outside:
             raise ValueError(
@@ -287,6 +295,7 @@ def build_aligned_allocation(
         component_frames.append(components)
     physical = pd.concat(physical_frames, ignore_index=True)
     components = pd.concat(component_frames, ignore_index=True)
+    ghd_audit = pd.concat(ghd_audits, ignore_index=True)
     if physical["objectid"].duplicated().any() or set(physical["objectid"]) != population:
         raise ValueError("Synthetic grids do not partition the metric population.")
 
@@ -559,6 +568,14 @@ def build_aligned_allocation(
         "synthetic_grids": int(synthetic_plan["target_grid_id"].nunique()),
         "registered_pylovo_grid_cases": int(len(grids)),
         "registered_pylovo_buildings": int(grids["n_buildings"].sum()),
+        "ghd_policy": {
+            "activity_gating": scenario.ghd.activity_gating,
+            "single_volume_one_storey": scenario.ghd.single_volume_one_storey,
+            "osm_levels": scenario.ghd.osm_levels,
+            "osm_source": None if scenario.ghd.osm is None else scenario.ghd.osm.source,
+            "evidence_fingerprint": None if ghd_evidence is None else frame_fingerprint(ghd_evidence.sort_index()),
+            **ghd.summarize_ghd_audit(ghd_audit),
+        },
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     outputs = {
@@ -572,6 +589,7 @@ def build_aligned_allocation(
         "paired_electrification_assignment": assignment,
         "paired_electrification_assignment_summary": summary,
         "paired_registered_synthetic_grids": grids,
+        "paired_ghd_policy_audit": ghd_audit,
     }
     for name, frame in outputs.items():
         frame.to_csv(output_dir / f"{name}.csv", index=False)

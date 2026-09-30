@@ -33,6 +33,7 @@ from gridexpand.common.reproducibility import (
     physical_building_id,
     realization_id,
 )
+from gridexpand.common import ghd
 from gridexpand.common.building_components import residential_component_mask
 from gridexpand.allocation.electrification import (
     INVENTORY_COLUMNS,
@@ -69,6 +70,7 @@ class Grid:
         ### Basic grid data
         self.df_buildings, self.df_region, self.df_weather_raw = self.SF.get_input_data()
         self.df_building_components = self.SF.get_building_components()
+        self._apply_ghd_policy()
         self.df_demand_components = self.df_building_components.copy()
         self._apply_demand_scope()
         self.profile_seed = int(self.settings.get("profile_seed", 0))
@@ -144,6 +146,16 @@ class Grid:
     ############################################
     ############## Demand Scope ################
     ############################################
+    def _apply_ghd_policy(self):
+        """Apply the scenario's ``ghd:`` rules to the component manifest (no-op while off)."""
+        config = self.settings["scenario_config"].ghd
+        evidence = ghd.load_evidence(config, self.df_buildings["objectid"].astype(str).tolist())
+        self.df_building_components, audit = ghd.apply_ghd_policy(
+            self.df_buildings, self.df_building_components, config, evidence
+        )
+        if config.enabled and isinstance(self.settings.get("scenario_assumptions"), dict):
+            self.settings["scenario_assumptions"]["ghd_policy"] = ghd.summarize_ghd_audit(audit)
+
     def _apply_demand_scope(self):
         demand_scope = self.settings.get("demand_scope", "all")
         if demand_scope not in {"all", "residential"}:
