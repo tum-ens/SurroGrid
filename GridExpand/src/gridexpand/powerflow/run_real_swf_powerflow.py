@@ -529,7 +529,6 @@ def run_one(
         algorithm=["nr", "iwamoto_nr"],
         cable_ids=backbone_cable_ids,
         on_nonconvergence="nan",
-        protect_grid_state=True,
     )
 
     db = SurroGridDatabase()

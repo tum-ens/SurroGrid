@@ -5,8 +5,8 @@ exchange, bus voltages and the line from-side flows as ``T x n`` arrays. Both
 outputs of Step 4 are derived from the same matrices: ``raw_tables`` (the
 ``pwrflw/output`` tables) and ``summarize_powerflow_matrices`` (the compact
 summary). Each timestep is solved from pandapower's flat/DC start (``init="auto"``,
-no recycling), so it does not depend on the previous timestep, on the chunking
-over workers or on copies of the network.
+no recycling), so it does not depend on the previous timestep (converged or
+not) or on the chunking over workers; all timesteps of a chunk reuse one net.
 
 Demand frames have timesteps as rows and ``(bus, component)`` columns with
 ``electricity`` (kW) and ``electricity-reactive`` (kvar) in the load convention
@@ -111,7 +111,7 @@ def _solve(grid, algorithm):
         raise last_error
 
 
-def _run_chunk(grid, p, q, algorithm, on_nonconvergence, protect_grid_state, offset):
+def _run_chunk(grid, p, q, algorithm, on_nonconvergence, offset):
     """Solve the timesteps of one chunk on ``grid`` (a private copy)."""
     n = len(p)
     bus_index = pd.Index(grid.bus.index)
@@ -123,18 +123,15 @@ def _run_chunk(grid, p, q, algorithm, on_nonconvergence, protect_grid_state, off
     line = np.full((n, len(line_index), len(LINE_QUANTITIES)), np.nan, dtype=float)
     failed = []
     for t in range(n):
-        attempt = deepcopy(grid) if protect_grid_state else grid
-        attempt.load["p_mw"] = p[t]
-        attempt.load["q_mvar"] = q[t]
+        grid.load["p_mw"] = p[t]
+        grid.load["q_mvar"] = q[t]
         try:
-            _solve(attempt, algorithm)
+            _solve(grid, algorithm)
         except pp.LoadflowNotConverged:
             if on_nonconvergence == "raise":
                 raise
             failed.append(offset + t)
             continue
-        if protect_grid_state:
-            grid = attempt
         res_ext = grid.res_ext_grid
         if ext is None:
             ext_columns = pd.Index(res_ext.columns)
@@ -159,7 +156,6 @@ def run_timeseries(
     algorithm="bfsw",
     on_nonconvergence="raise",
     n_workers=1,
-    protect_grid_state=False,
 ) -> PowerflowMatrices:
     """Solve the power flow for every demand row.
 
@@ -169,8 +165,6 @@ def run_timeseries(
         algorithm: pandapower algorithm or a list tried in order per timestep.
         on_nonconvergence: ``"raise"`` or ``"nan"`` (record the timestep as failed).
         n_workers: time chunks solved in parallel processes (empty chunks dropped).
-        protect_grid_state: solve every timestep on a fresh copy of the last
-            converged net (not needed for results; kept for callers that ask).
     """
     if on_nonconvergence not in {"raise", "nan"}:
         raise ValueError("on_nonconvergence must be either 'raise' or 'nan'.")
@@ -180,7 +174,7 @@ def run_timeseries(
     chunk_size = max(1, (n + n_workers - 1) // n_workers)
     bounds = [(start, min(start + chunk_size, n)) for start in range(0, n, chunk_size)] or [(0, 0)]
     jobs = [
-        (deepcopy(grid), p[start:stop], q[start:stop], algorithm, on_nonconvergence, protect_grid_state, start)
+        (deepcopy(grid), p[start:stop], q[start:stop], algorithm, on_nonconvergence, start)
         for start, stop in bounds
     ]
     if len(jobs) == 1:

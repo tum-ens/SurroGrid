@@ -309,7 +309,6 @@ def run_one(
         algorithm=["nr", "iwamoto_nr"],
         cable_ids=summary_cable_ids,
         on_nonconvergence="nan",
-        protect_grid_state=True,
     )
 
     db = SurroGridDatabase()
@@ -458,7 +457,6 @@ def run_one_urbs_result(
         algorithm=["nr", "iwamoto_nr"],
         cable_ids=summary_cable_ids,
         on_nonconvergence="nan",
-        protect_grid_state=True,
     )
     if df_post_demand is not None:
         summaries["post"] = pwrflw.pf_summary(
@@ -470,7 +468,6 @@ def run_one_urbs_result(
             algorithm=["nr", "iwamoto_nr"],
             cable_ids=summary_cable_ids,
             on_nonconvergence="nan",
-            protect_grid_state=True,
         )
 
     assumptions = {

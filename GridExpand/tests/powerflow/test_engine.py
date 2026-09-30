@@ -66,13 +66,13 @@ def test_raw_tables_match_the_per_timestep_loop_for_any_chunking():
             assert actual.columns.equals(reference.columns)
 
 
-def test_summary_is_independent_of_chunking_and_grid_copies():
+def test_summary_is_independent_of_chunking():
     grid, buses, rating, cable_max_i_ka = _prepared_grid()
     demand = _demand(buses, n=30)
     cables, voltage_buses = network.comparison_evaluation_scope(grid, buses, scope="full")
     kwargs = dict(transformer_s_rated_mva=rating, cable_max_i_ka=cable_max_i_ka,
                   voltage_buses=voltage_buses, cable_ids=cables, on_nonconvergence="nan")
-    serial = pf_summary(grid, demand, protect_grid_state=True, **kwargs)
+    serial = pf_summary(grid, demand, **kwargs)
     parallel = pf_summary(grid, demand, n_workers=4, **kwargs)
     matrices, station = station_voltage.solve(
         grid, voltage_buses, lambda net: engine.run_timeseries(net, demand, n_workers=3)
@@ -86,6 +86,22 @@ def test_summary_is_independent_of_chunking_and_grid_copies():
         for key, value in serial["grid_summary"].items():
             assert value == other["grid_summary"][key] or (value != value and other["grid_summary"][key] != other["grid_summary"][key]), key
     assert serial["grid_summary"]["n_timesteps"] == 30
+
+
+def test_nonconverged_timestep_does_not_change_the_next_one():
+    """A chunk reuses one net, so a failed solve must leave nothing behind (real grids: NR, Iwamoto)."""
+    grid, buses, _, _ = _prepared_grid()
+    demand = _demand(buses, n=3)
+    demand.iloc[1] = demand.iloc[1].abs() * 400.0  # far beyond the grid's capacity: no convergence
+    kwargs = dict(algorithm=["nr", "iwamoto_nr"], on_nonconvergence="nan")
+    together = engine.run_timeseries(grid, demand, **kwargs)
+    assert together.failed == [1]
+    for t in (0, 2):
+        alone = engine.run_timeseries(grid, demand.iloc[[t]], **kwargs)
+        assert alone.failed == []
+        np.testing.assert_array_equal(together.vm_pu[t], alone.vm_pu[0])
+        np.testing.assert_array_equal(together.line[t], alone.line[0])
+        np.testing.assert_array_equal(together.ext_grid[t], alone.ext_grid[0])
 
 
 def test_more_workers_than_timesteps_does_not_create_empty_chunks():

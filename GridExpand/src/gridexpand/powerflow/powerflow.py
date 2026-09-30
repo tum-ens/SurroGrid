@@ -33,7 +33,6 @@ def pf_summary(
     algorithm="bfsw",
     cable_ids=None,
     on_nonconvergence="raise",
-    protect_grid_state=False,
     n_workers=1,
 ):
     """Run power flow and return compact violation-hour and percentile metrics.
@@ -52,7 +51,6 @@ def pf_summary(
             algorithm=algorithm,
             on_nonconvergence=on_nonconvergence,
             n_workers=n_workers,
-            protect_grid_state=protect_grid_state,
         ),
     )
     summary = summarize(

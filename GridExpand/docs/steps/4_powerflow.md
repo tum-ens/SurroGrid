@@ -116,7 +116,8 @@ in any timestep or adds non-converged timesteps.
 
 **Solve.** Synthetic grids use `pandapower.runpp(algorithm="bfsw")` per timestep (real grids `nr`, then
 `iwamoto_nr`), `tolerance_mva = 1e-6`; timesteps are split into `--n_cpu` chunks solved in parallel processes, and
-results do not depend on the chunking.
+results do not depend on the chunking. Each timestep starts from pandapower's flat/DC start on the chunk's one net,
+so a non-converged timestep does not change the next one.
 
 ## Conventions
 
