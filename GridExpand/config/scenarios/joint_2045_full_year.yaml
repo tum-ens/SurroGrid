@@ -52,8 +52,10 @@ asset_sizing:
     energy_to_power_hours: 2.0
 
   heat:
-    # Building-level space and hot-water heat from TEASER (DistrictGenerator)
-    # with the weather of each synthetic grid's transformer location.
+    # Building-level space and hot-water heat from TEASER (DistrictGenerator).
+    # Paired runs generate heat and COP with the provider weather file, so that
+    # heat, COP, PV and the sizing share one TMY (standalone synthetic runs use
+    # a TMY at each grid's transformer).
     space_heat_source: teaser
     # TABULA variant for TEASER, applied to every residential building relative
     # to its own construction-year class: 0 as built, 1 usual refurbishment,

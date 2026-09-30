@@ -93,6 +93,12 @@ class Grid:
         ### Data to be generated
         if not self.settings["weather_data_exists"]:
             self.df_weather_raw = pd.DataFrame()
+        weather_hdf = self.settings.get("weather_hdf")
+        if weather_hdf is not None:
+            # One weather series per paired dataset: heat, COP and sizing share the
+            # provider weather instead of a TMY at this grid's transformer.
+            self.df_weather_raw, _ = weather.read_weather_hdf(weather_hdf)
+            self.settings["scenario_assumptions"]["weather_source"] = str(weather_hdf)
         self.df_supim_solar = pd.DataFrame()
         self.df_demand_elec = pd.DataFrame()
         self.df_electricity_component_profiles = pd.DataFrame()

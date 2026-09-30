@@ -118,3 +118,20 @@ def test_dew_point_magnus_tetens():
     dew = weather.get_dew_point(temp, pd.Series([100.0, 50.0]))
     assert np.isclose(dew.iloc[0], 20.0)
     assert np.isclose(dew.iloc[1], 237.7 * np.log(0.5) / (17.27 - np.log(0.5)))
+
+
+def test_read_weather_hdf_adds_the_dew_point_and_returns_the_altitude(tmp_path):
+    import numpy as np
+    import pandas as pd
+
+    from gridexpand.common import weather
+
+    path = tmp_path / "w.h5"
+    frame = pd.DataFrame({"temp_air": [5.0, -3.0], "relative_humidity": [80.0, 90.0], "ghi": [0.0, 100.0]})
+    with pd.HDFStore(path, mode="w") as store:
+        store.put("raw_data/weather", frame)
+        store.put("raw_data/region", pd.DataFrame([{"lat": 48.6, "lon": 12.3, "altitude": 376.0, "plz": 84051}]))
+    loaded, altitude = weather.read_weather_hdf(path)
+    assert altitude == 376.0
+    assert np.allclose(loaded["dew_point"], weather.get_dew_point(frame["temp_air"], frame["relative_humidity"]))
+    assert list(loaded.columns[:3]) == ["temp_air", "relative_humidity", "ghi"]

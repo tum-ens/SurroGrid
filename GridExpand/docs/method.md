@@ -240,7 +240,11 @@ The space-heat source is `asset_sizing.heat.space_heat_source`:
   residential effective floor area (footprint × `floor_number`, residential share) as total net leased area;
   the number of floors passed to TEASER does not change the result, and no blanket heated-area factor is
   applied. The TEASER envelope design load is not used for sizing (see below). Occupancy (richardsonpy) and hot
-  water draw on seeded random states per building.
+  water draw on seeded random states per building. Standalone synthetic runs simulate with a PVGIS TMY at the
+  grid's transformer. Paired runs pass the provider weather file (`--weather-hdf`), so heat, COP, PV and sizing
+  share one TMY; a TMY takes each month from a different year, so TMYs of two nearby locations are unrelated
+  hour by hour. The 5R1C model heats to a constant 20 °C and switches heating off on days 135–258; all
+  buildings restart together on 16 September, which can set the auxiliary-heater size.
 
 #### TEASER refurbishment level
 
@@ -351,7 +355,9 @@ P_{\mathrm{HP},i}^{\mathrm{el}}=\frac{P_{\mathrm{HP},i}^{\mathrm{th}}}{\mathrm{C
 $$
 
 where the design COP is the building COP at the weather hour closest to $T_{\mathrm{NAT}}$ (radiator or
-floor-heating sink temperature; air-source COP from `temp_air`). 0.65 is the central value of the 50–80 % range
+floor-heating sink temperature; air-source COP from `temp_air`). The design hour, the degree days, the COP and the
+heat demand must come from one weather series: paired runs generate the heat library with the provider weather
+file (`--weather-hdf`), which the PV library and the sizing also use. 0.65 is the central value of the 50–80 % range
 for modulating monoenergetic air-to-water systems in the
 [BWP dimensioning guide (2025)](https://www.waermepumpe.de/fileadmin/user_upload/waermepumpe/07_Publikationen/BWP_LF_WPDimensionierung.pdf).
 That guide calls for a normative heat-load calculation under
