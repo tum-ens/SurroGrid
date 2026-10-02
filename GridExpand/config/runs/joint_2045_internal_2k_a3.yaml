@@ -1,28 +1,30 @@
-# Internal 1R1C paired SWF + ÜZW full-year comparison on pylovo a2-all.
+# Internal 1R1C paired SWF + ÜZW full-year comparison on pylovo a3.
 # One scenario YAML and one pylovo version for both providers; each provider
 # gets its own paired dataset (weather, PV and corrected RC readiness, adoption
 # selection) built from its alignment bundle. Launch with
-#   uv run gridexpand run config/runs/joint_2045_internal_2k_a2_all.yaml
+#   uv run gridexpand run config/runs/joint_2045_internal_2k_a3.yaml
 run:
-  id: joint_2045_internal_2k_a2_all
+  id: joint_2045_internal_2k_a3
   scenario: ../scenarios/joint_2045_internal_2k.yaml
   pipeline: paired_aligned
 
 resources:
-  pylovo_version_id: a2-all
+  pylovo_version_id: a3
   alignment_dir: ~/data/alignment
-  # The frozen a2-all metric cohort pins the compared physical population.
-  population: ~/data/joint_paired_a2_all/pylovo-a2-all-comparison.json
+  # Frozen copy of pylovo validations_new/metrics/va3/comparison.json
+  # SHA-256: d38918f0cab72d9cac9e8767031b2a68fd7f262f96c807acb9bcbd66c8b57166
+  # Its metric cohort is the compared building population.
+  population: ~/data/joint_paired_a3/pylovo-a3-comparison.json
   # Frozen, fingerprint-checked copy of the ÜZW delivery (87c5e86c…).
   uzw_grids_dir: ~/data/uzw-grids-87c5e86c
   providers:
     swf:
-      paired_dataset_id: joint_2045_internal_2k_a2_all_swf
-      weather_source_hdf: weather_joint_internal_swf_a2_all.h5
+      paired_dataset_id: joint_2045_internal_2k_a3_swf
+      weather_source_hdf: weather_joint_internal_swf_a3.h5
       workers: 3 # fewer, larger grids; Step 4 costs ~11 s per building (ÜZW ~5 s): 3 + 5 balances the providers
     uzw:
-      paired_dataset_id: joint_2045_internal_2k_a2_all_uzw
-      weather_source_hdf: weather_joint_internal_uzw_a2_all.h5
+      paired_dataset_id: joint_2045_internal_2k_a3_uzw
+      weather_source_hdf: weather_joint_internal_uzw_a3.h5
       workers: 5 # 8 jobs in total; <= ~1.7 GB per job in Step 3 (1 PyPSA worker), ~0.7 GB in Step 4
   target_network: both # both, real, or synthetic
 

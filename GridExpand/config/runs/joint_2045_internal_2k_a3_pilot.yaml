@@ -1,28 +1,30 @@
-# PILOT of the internal 1R1C paired run on pylovo a2-all: only the one-real-one-synthetic
-# islands (identical building sets; 5 SWF, 13 ÜZW), InFlex vs HEMS 2 K, intermediates kept.
+# PILOT of the internal 1R1C paired run on pylovo a3: only the one-real-one-synthetic
+# islands (identical building sets; 7 SWF, 13 ÜZW), InFlex vs HEMS 2 K, intermediates kept.
 # Preparation covers the full population, so these grids give the full run's results.
-# HEMS 0 K: joint_2045_internal_0k_a2_all_pilot.yaml (run it after this one). Launch with
-#   uv run gridexpand run config/runs/joint_2045_internal_2k_a2_all_pilot.yaml
+# HEMS 0 K: joint_2045_internal_0k_a3_pilot.yaml (run it after this one). Launch with
+#   uv run gridexpand run config/runs/joint_2045_internal_2k_a3_pilot.yaml
 run:
-  id: joint_2045_internal_2k_a2_all_pilot
+  id: joint_2045_internal_2k_a3_pilot
   scenario: ../scenarios/joint_2045_internal_2k.yaml
   pipeline: paired_aligned
 
 resources:
-  pylovo_version_id: a2-all
+  pylovo_version_id: a3
   alignment_dir: ~/data/alignment
-  # The frozen a2-all metric cohort pins the compared physical population.
-  population: ~/data/joint_paired_a2_all/pylovo-a2-all-comparison.json
+  # Frozen copy of pylovo validations_new/metrics/va3/comparison.json
+  # SHA-256: d38918f0cab72d9cac9e8767031b2a68fd7f262f96c807acb9bcbd66c8b57166
+  # Its metric cohort is the compared building population.
+  population: ~/data/joint_paired_a3/pylovo-a3-comparison.json
   # Frozen, fingerprint-checked copy of the ÜZW delivery (87c5e86c…).
   uzw_grids_dir: ~/data/uzw-grids-87c5e86c
   providers:
     swf:
-      paired_dataset_id: joint_2045_internal_2k_a2_all_swf
-      weather_source_hdf: weather_joint_internal_swf_a2_all.h5
+      paired_dataset_id: joint_2045_internal_2k_a3_swf
+      weather_source_hdf: weather_joint_internal_swf_a3.h5
       workers: 1
     uzw:
-      paired_dataset_id: joint_2045_internal_2k_a2_all_uzw
-      weather_source_hdf: weather_joint_internal_uzw_a2_all.h5
+      paired_dataset_id: joint_2045_internal_2k_a3_uzw
+      weather_source_hdf: weather_joint_internal_uzw_a3.h5
       workers: 2 # 3 jobs in total: about 12 GB RAM are free beside the other processes
   target_network: both # both, real, or synthetic
 
@@ -47,7 +49,7 @@ execution:
   parallel_providers: true
   # Expansion tables for all four groups after both providers finished.
   materialize_expansion: true
-  # All 1:1 overlap components of the a2-all cohort; assignments stay the full-population ones.
+  # All 1:1 overlap components of the a3 cohort; assignments stay the full-population ones.
   grid_subset:
     method: islands
     seed: 20261002
