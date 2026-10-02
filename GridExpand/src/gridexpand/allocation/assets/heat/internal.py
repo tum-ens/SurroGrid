@@ -209,6 +209,31 @@ def solar_irradiance(weather, postcode):
     )[:4]
 
 
+def household_occupants(building, seed):
+    """Residents per household with the household-size rule of the TEASER heat path.
+
+    The households are sampled from the destatis size distribution as in
+    ``electricity._assign_household_occupancy`` (same seed parts) and rounded as
+    for TEASER's occupancy, so no household has more than five residents.
+    """
+    import random
+
+    from gridexpand.allocation.functions.electricity import _get_occupancy_distribution
+    from gridexpand.common.reproducibility import physical_building_id
+
+    sizes = config.HH_SIZE_DISTRIBUTION
+    rng = random.Random(
+        stable_seed(seed, physical_building_id(building), "Residential", "electricity", "occupancy")
+    )
+    sampled = _get_occupancy_distribution(
+        dict(zip(sizes["size"], sizes["probability"])),
+        max(1, int(round(float(building["households"])))),
+        max(0.0, float(building["occupants"])),
+        rng=rng,
+    )
+    return [int(round(size)) for size in sampled]
+
+
 def internal_gains(building, electricity, settings, seed, hours):
     """70 W per present resident plus the existing 0.362 household-electricity share."""
     from gridexpand.allocation.external.districtgenerator.classes.profils import (
@@ -218,12 +243,7 @@ def internal_gains(building, electricity, settings, seed, hours):
     occupancy = np.zeros(hours)
     occ = building.get("occ_list")
     if not isinstance(occ, (list, tuple, np.ndarray)):
-        households = max(1, int(round(float(building["households"]))))
-        residents = max(0, int(round(float(building["occupants"]))))
-        occ = [
-            residents // households + (i < residents % households)
-            for i in range(households)
-        ]
+        occ = household_occupants(building, seed)
     with legacy_random_state(
         stable_seed(seed, building["building_objectid"], "internal_heat", "occupancy")
     ):
@@ -312,12 +332,7 @@ def prepare_internal_heat(
         bid, site = str(row["building_objectid"]), int(row["Site"])
         occ = row.get("occ_list")
         if not isinstance(occ, (list, tuple, np.ndarray)):
-            households = max(1, int(round(float(row["households"]))))
-            residents = max(0, int(round(float(row["occupants"]))))
-            row["occ_list"] = [
-                residents // households + (i < residents % households)
-                for i in range(households)
-            ]
+            row["occ_list"] = household_occupants(row, seed)
         row["households"] = len(row["occ_list"])
         row["number_of_households"] = len(row["occ_list"])
         cache_parameters = {

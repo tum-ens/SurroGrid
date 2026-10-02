@@ -155,3 +155,17 @@ def test_internal_tank_has_no_second_charging_penalty():
     assert thermal["charge_efficiency"] < 1.0
     assert storage["eff-in"].tolist() == [1.0]
     assert storage["discharge"].tolist() == [thermal["self_discharge_per_timestep"]]
+
+
+def test_household_occupants_follow_the_teaser_household_rule():
+    from gridexpand.allocation.assets.heat.internal import household_occupants
+    from gridexpand.allocation.functions.electricity import _assign_household_occupancy
+
+    assert household_occupants({"building_objectid": "A", "households": 1, "occupants": 6}, 7) == [5]
+    buildings = pd.DataFrame({"building_objectid": ["B", "C"], "component_category": "Residential",
+                              "households": [2, 3], "occupants": [5, 13]})
+    teaser = _assign_household_occupancy(buildings.copy(), 7)["occ_list"]
+    for row, sizes in zip(buildings.to_dict("records"), teaser):
+        occupants = household_occupants(row, 7)
+        assert occupants == [int(round(size)) for size in sizes]
+        assert len(occupants) == row["households"] and max(occupants) <= 5

@@ -719,7 +719,8 @@ do not imply an additional 2045 refurbishment projection.
 
 Internal gains reuse Richardson occupancy with the existing nighttime-presence
 rule (70 W per present person), plus 0.362 of residential household electricity.
-Seeds use physical IDs. Civil-time occupancy and DHW are mapped to fixed CET.
+Residents are split into households with the household-size rule of the TEASER
+path (destatis distribution, at most five per household). Seeds use physical IDs. Civil-time occupancy and DHW are mapped to fixed CET.
 Solar irradiance uses the existing DistrictGenerator cardinal-plane calculation.
 The database's total window area is divided equally between four cardinal
 orientations because the available RC envelope lacks window orientations.
