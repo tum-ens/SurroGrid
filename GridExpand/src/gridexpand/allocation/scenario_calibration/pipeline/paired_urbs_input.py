@@ -484,6 +484,7 @@ def materialize_paired_urbs_input(
         battery_usable_kwh_per_pv_kwp=battery_pv_coefficient,
         battery_usable_kwh_per_annual_mwh=battery_demand_coefficient,
         battery_energy_to_power_hours=scenario.battery.energy_to_power_hours,
+        battery_share_of_selected=scenario.electrification.pv_battery.battery_share_of_selected,
         technology_parameters=scenario.technologies,
         heat_sizing_method=heat_sizing_method,
         heat_config=scenario.heat,

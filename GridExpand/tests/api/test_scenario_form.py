@@ -77,6 +77,10 @@ def _other_value(key: str, field: dict, current):
         return current + 1
     if key.endswith("indoor_design_temperature_c"):
         return current + 1.0
+    if key.endswith("degree_day_base_temperature_c"):
+        return 15.0  # must lie between the heating limit and the indoor temperature
+    if isinstance(current, bool) or not isinstance(current, (int, float)):
+        current = field.get("default")  # absent optional key: start from the loader default
     return round(current * 0.9, 6) if current else 0.1
 
 

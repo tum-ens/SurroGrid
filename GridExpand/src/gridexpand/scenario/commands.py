@@ -519,6 +519,7 @@ def aligned_preparation_commands(
             "--scenario-config", scenario_config,
             "--output-directory", paired_dir / "heat_regeneration",
             "--synthetic-library", heat_sources,
+            "--weather-hdf", weather_hdf,
             python=python,
         )),
         ("heat_readiness_sources", module_command(

@@ -134,6 +134,9 @@ def test_preparation_commands():
     assert aligned[0][1][-2:] == ["--uzw-grids-dir", "/u"]
     heat = aligned[2][1]
     assert heat[heat.index("--scenario-config") + 1] == str(SC) and heat[heat.index("--workers") + 1] == "6"
+    # One weather series per provider: the heat runs use the weather file the PV library and sizing use.
+    assert heat[heat.index("--weather-hdf") + 1] == "/w.h5"
+    assert aligned[6][1][aligned[6][1].index("--weather-source-hdf") + 1] == "/w.h5"
     assert commands.electrification_preparation_command(
         "9184137", min_buildings=60, pylovo_version_id="1", demand_scope="all", mobility_source="pool",
         profile_seed=1, scenario_config=SC, output=Path("/o.csv"), plz=85653, kcid=1, bcid=4, python=PY,

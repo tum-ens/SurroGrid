@@ -93,6 +93,22 @@ a controlled comparison matters.
 - `source_inventory`: only buildings backed by explicit source evidence (the SWF 2045 inventory) are
   selected; `building_share` is not allowed.
 
+With `building_share_by_type` (keys `SFH`, `TH`, `MFH`, `AB`) the ranking and the rounded selection run within
+each building type; `building_share` applies to the types not listed (e.g. untyped mixed-use buildings). The
+manifest then carries a `selection_stratum` column, and Step 3 validates the share per stratum; manifests
+without per-type shares keep their columns and hashes. The joint scenario uses this for home charging:
+0.85 for one- and two-family and terraced houses, 0.5 for multi-family houses, from a battery-electric fleet of
+about 93 % in 2045 ([dena-Leitstudie, 2021](https://www.ewi.uni-koeln.de/de/publikationen/dena-ls2/211005_ewi-zusammenfassung_dena-leitstudie-aufbruch-klimaneutralitaet))
+and home-charging access of about 85 % and 50 %
+([dena, 2020](https://www.dena.de/fileadmin/dena/Publikationen/PDFs/2020/dena-STUDIE_Privates_Ladeinfrastrukturpotenzial_in_Deutschland.pdf);
+[MiD 2017](https://www.mobilitaet-in-deutschland.de/archive/pdf/MiD2017_Ergebnisbericht.pdf)).
+`pv_battery.battery_share_of_selected` gives a battery to a seeded share of the selected PV buildings (own
+ranking stream `battery`); 1.0 is the PV + battery bundle. The joint scenario selects PV on 70 % of the eligible
+buildings and a battery on 80 % of them (about 80 % of new home PV systems are sold with a battery,
+[BSW-Solar, 2026](https://www.solarwirtschaft.de/datawall/uploads/2025/10/BSW-Solar_Faktenblatt_Stromspeicher.pdf)),
+and heat pumps on 80 % (national scenarios give 43–65 % of all buildings in 2045, more where district heating is
+rare; [Ariadne, 2025](https://ariadneprojekt.de/media/2025/06/Ariadne-kompakt_Szenarien2025-Gebaeude_Juni2025.pdf)).
+
 The assignment is one manifest per region, written before Step 2 and reused unchanged by Step 3 (which
 checks its hash). For synthetic runs the region is the selected scope of the run (the AGS, one PLZ or one
 grid, see [configuration.md](configuration.md#grid-selection)). A selected PV+battery row is an investment
@@ -240,7 +256,11 @@ The space-heat source is `asset_sizing.heat.space_heat_source`:
   residential effective floor area (footprint × `floor_number`, residential share) as total net leased area;
   the number of floors passed to TEASER does not change the result, and no blanket heated-area factor is
   applied. The TEASER envelope design load is not used for sizing (see below). Occupancy (richardsonpy) and hot
-  water draw on seeded random states per building.
+  water draw on seeded random states per building. Standalone synthetic runs simulate with a PVGIS TMY at the
+  grid's transformer. Paired runs pass the provider weather file (`--weather-hdf`), so heat, COP, PV and sizing
+  share one TMY; a TMY takes each month from a different year, so TMYs of two nearby locations are unrelated
+  hour by hour. The 5R1C model heats to a constant 20 °C and switches heating off on days 135–258; all
+  buildings restart together on 16 September, which can set the auxiliary-heater size.
 - `internal`: corrected ro-heat envelope coefficients,
   weather and gains feed a 1R1C temperature balance. HEMS determines space heating
   within comfort bounds; InFlex uses an independent forward thermostat reference.
@@ -312,20 +332,29 @@ $T_{\mathrm{NAT}}$ is the postcode-specific norm outside temperature `T_ne` in
 the weather year; only an exact postcode entry is accepted. The inherited table should eventually be replaced
 or annotated with traceable DIN/TS 12831-1 data; until then −12.6 °C is an inherited input.
 
-The regional full-load-hour proxy uses the DWD/VDI 3807 degree-day convention with $T_{\mathrm{i}}=20$ °C
-(`indoor_design_temperature_c`) and heating limit $T_{\mathrm{HG}}=15$ °C (`heating_limit_temperature_c`),
-documented by the [German Weather Service](https://opendata.dwd.de/climate_environment/CDC/derived_germany/techn/daily/heating_degreedays/hdd_3807/recent/).
-Full-load hours are computed once per complete weather year, before timeframe selection and TSAM. With daily
-mean outdoor temperature $\bar T_{\mathrm{out},d}$:
+The regional full-load-hour proxy counts heating days with the DWD/VDI 3807 convention: days with a daily mean
+outdoor temperature $\bar T_{\mathrm{out},d}$ below the heating limit $T_{\mathrm{HG}}=15$ °C
+(`heating_limit_temperature_c`) count with the deficit to a base temperature $T_{\mathrm{b}}$
+(`degree_day_base_temperature_c`, default the indoor temperature $T_{\mathrm{i}}=20$ °C,
+`indoor_design_temperature_c`), as documented by the
+[German Weather Service](https://opendata.dwd.de/climate_environment/CDC/derived_germany/techn/daily/heating_degreedays/hdd_3807/recent/).
+Full-load hours are computed once per complete weather year, before timeframe selection and TSAM:
 
 $$
-\mathrm{GTZ}=\sum_{d:\,\bar T_{\mathrm{out},d}<T_{\mathrm{HG}}}\left(T_{\mathrm{i}}-\bar T_{\mathrm{out},d}\right),
+\mathrm{GT}=\sum_{d:\,\bar T_{\mathrm{out},d}<T_{\mathrm{HG}}}\left(T_{\mathrm{b}}-\bar T_{\mathrm{out},d}\right),
 \qquad
-h_{\mathrm{FLH}}=\frac{24\,\mathrm{GTZ}}{T_{\mathrm{i}}-T_{\mathrm{NAT}}}.
+h_{\mathrm{FLH}}=\frac{24\,\mathrm{GT}}{T_{\mathrm{i}}-T_{\mathrm{NAT}}}.
 $$
 
-For the Forchheim weather year this gives about 2,619 h/a. The 20/15 inputs are sourced; converting annual
-simulated energy to a design-load proxy this way is a study choice, not a DIN EN 12831 load calculation.
+With $T_{\mathrm{b}}=T_{\mathrm{i}}$ (Gradtagzahl G20/15) the Forchheim weather year gives about 2,619 h/a. This
+counts the part of the indoor–outdoor difference that internal and solar gains cover, while the simulated annual
+demand is net of these gains: the design-load proxy then reaches only about 0.7 of the simulated winter peak, and
+the heat pump covers about 45 % of it. The joint scenario therefore uses the heating limit as base
+($T_{\mathrm{b}}=15$ °C, Heizgradtage G15): 1,721 h/a for Forchheim, inside the 1,500–1,800 h reported for
+one- and two-family houses from new to unrenovated
+([IER Stuttgart, 2016](https://www.ier.uni-stuttgart.de/forschung/modelle/heizkostenvergleich/pdf/16-05-09-IER_Waermekostenrechner_-_Dokumentation.pdf)),
+and a design proxy of about 1.1 times the simulated peak. Converting annual simulated energy to a design-load
+proxy this way is a study choice, not a DIN EN 12831 load calculation.
 
 ### Heat-pump and auxiliary sizing
 
@@ -347,7 +376,9 @@ P_{\mathrm{HP},i}^{\mathrm{el}}=\frac{P_{\mathrm{HP},i}^{\mathrm{th}}}{\mathrm{C
 $$
 
 where the design COP is the building COP at the weather hour closest to $T_{\mathrm{NAT}}$ (radiator or
-floor-heating sink temperature; air-source COP from `temp_air`). 0.65 is the central value of the 50–80 % range
+floor-heating sink temperature; air-source COP from `temp_air`). The design hour, the degree days, the COP and the
+heat demand must come from one weather series: paired runs generate the heat library with the provider weather
+file (`--weather-hdf`), which the PV library and the sizing also use. 0.65 is the central value of the 50–80 % range
 for modulating monoenergetic air-to-water systems in the
 [BWP dimensioning guide (2025)](https://www.waermepumpe.de/fileadmin/user_upload/waermepumpe/07_Publikationen/BWP_LF_WPDimensionierung.pdf).
 That guide calls for a normative heat-load calculation under
@@ -369,12 +400,8 @@ observed heat peak for the auxiliary heater, and the physical buffer bound.
 ### Space-heating buffer
 
 The buffer volume is tied to installed thermal heat-pump output,
-$V_{\mathrm{buf},i}=v_{\mathrm{buf}}P_{\mathrm{HP},i}^{\mathrm{th}}$ with $v_{\mathrm{buf}}=20$ L/kW<sub>th</sub>
-(`buffer_volume_l_per_kw_th`), following the
-[VDI 4645](https://www.dinmedia.de/de/technische-regel/vdi-4645/364873293) recommendation for runtime
-optimization and inside the 12–35 L/kW range attributed to [DIN EN 15450](https://www.dinmedia.de/de/norm/din-en-15450/98862901)
-([Weck-Ponten, 2023, Sec. 3.3.8](https://publications.rwth-aachen.de/record/969286/files/969286.pdf)). Usable
-energy follows from water heat capacity and a study-defined spread $\Delta T_{\mathrm{buf}}=5$ K
+$V_{\mathrm{buf},i}=v_{\mathrm{buf}}P_{\mathrm{HP},i}^{\mathrm{th}}$ (`buffer_volume_l_per_kw_th`), and its usable
+energy follows from the water heat capacity and the usable spread $\Delta T_{\mathrm{buf}}$
 (`buffer_usable_temperature_spread_k`):
 
 $$
@@ -383,11 +410,40 @@ C_{\mathrm{buf},i}=\frac{V_{\mathrm{buf},i}\cdot 1.163\ \mathrm{Wh/(L\,K)}\cdot\
 P_{\mathrm{buf},i}^{\mathrm{ch,max}}=P_{\mathrm{buf},i}^{\mathrm{dch,max}}=P_{\mathrm{HP},i}^{\mathrm{th}} .
 $$
 
+A buffer that holds $t_{\mathrm{buf}}$ hours of thermal heat-pump output has
+$v_{\mathrm{buf}}=t_{\mathrm{buf}}\cdot 1000/(1.163\,\Delta T_{\mathrm{buf}})$.
+
+- **Hydraulic buffer** (Forchheim scenarios): $v_{\mathrm{buf}}=20$ L/kW<sub>th</sub> and 5 K, i.e. about 7 minutes.
+  This follows the [VDI 4645](https://www.dinmedia.de/de/technische-regel/vdi-4645/364873293) value for runtime
+  optimisation, inside the 12–35 L/kW range of [DIN EN 15450](https://www.dinmedia.de/de/norm/din-en-15450/98862901)
+  ([Weck-Ponten, 2023, Sec. 3.3.8](https://publications.rwth-aachen.de/record/969286/files/969286.pdf)). Such
+  series buffers secure the minimum run time and defrosting and are not meant to bridge blocking times (Dimplex
+  planning manual). They are no load-shifting store.
+- **Flexibility buffer** (joint scenario): $t_{\mathrm{buf}}=1$ h (2 h as high case) at $\Delta T_{\mathrm{buf}}=10$ K,
+  i.e. $v_{\mathrm{buf}}=86$ L/kW<sub>th</sub>. No DIN, EN or EU norm prescribes a time-based buffer rule. The
+  closest is the bridging rule of VDI 4645 and the BWP hydraulics guide (2016): 30–40 L per kW and hour of
+  blocking time, i.e. about one hour of rated output per blocking hour at their larger spread (as applied in the
+  Viessmann Vitocal 150-A planning manual, 2026, p. 301). The 10 K spread is the SG Ready setpoint raise of the
+  buffer ([BWP SG Ready interface 1.1](https://www.waermepumpe.de/fileadmin/user_upload/bwp_service/SG_ready/SG_Ready_Schnittstelle_1.1.pdf)).
+  FfE for Agora Energiewende (2023) give every heat pump a 700 L (single-family) to 1,500 L (multi-family)
+  combined tank at 55–65 °C because building mass is not modelled; the 1 h rule stores a similar energy
+  (about 6 kWh for a 6 kW<sub>th</sub> heat pump against about 8 kWh). It is a scenario assumption, not a picture of
+  today's stock: installers bridge blocking times with building mass and heat-pump oversizing, and under §14a EnWG
+  blocking has become dimming.
+- **Standing loss**: `technologies.storages.thermal_storage.self_discharge_per_timestep` = 0.005 per hour of the
+  stored energy, about an ErP class-A tank of 700 L under EU 812/2013 at 30 K above ambient (real products
+  0.8–0.9 %/h; FfE/Agora use 0.03 %/h).
+- **Charge efficiency** (`buffer_charge_efficiency_method`): `technology` uses the storage's `charge_efficiency`;
+  `cop_curve` gives each building the COP penalty of charging $\Delta T_{\mathrm{buf}}$ above the normal sink,
+  $\eta_{\mathrm{ch},i}=\sum_t \dot Q_{\mathrm{space},i,t}\,\mathrm{COP}(\Delta\vartheta_{i,t}+\Delta T_{\mathrm{buf}})/\mathrm{COP}(\Delta\vartheta_{i,t})\big/\sum_t \dot Q_{\mathrm{space},i,t}$,
+  with the lift $\Delta\vartheta_{i,t}$ recovered from the hourly COP on the model's COP curve (15–90 K). For
+  +10 K this gives 0.86 (EN 14511 product data 0.80–0.89 per 10 K; when2heat regression 0.83).
+
 In heuristic cases the reference is the fixed heat-pump capacity; in the optimized case a linear urbs constraint
-ties the maximum buffer energy to the heat-pump capacity actually installed. The tanks are modest
-(0.0058 kWh<sub>th</sub>/L): about 100 L for a 5 kW<sub>th</sub> single-family heat pump, 1,140 L for a
-20-flat block (57 kW<sub>th</sub>) and 6,000 L for a 100-flat block (300 kW<sub>th</sub>), well below the oil
-tanks they replace (3,000–6,000 L single-family, 20,000–50,000 L apartment block).
+ties the maximum buffer energy to the heat-pump capacity actually installed. With the flexibility buffer
+(0.0116 kWh<sub>th</sub>/L at 10 K) a 5 kW<sub>th</sub> single-family heat pump gets about 430 L and a 20-flat block
+(57 kW<sub>th</sub>) about 4,900 L, within the footprint of the oil tanks they replace (3,000–6,000 L single-family,
+20,000–50,000 L apartment block).
 
 `post-inflex-heuristic` and `post-hems-heuristic` consume the identical heat asset plan. INFLEX ignores buffer
 flexibility, limits heat-pump heat to $\mathrm{COP}_{i,t}P_{\mathrm{HP},i}^{\mathrm{el}}$ and supplies the

@@ -22,7 +22,7 @@ from ...functions.mobility import (
 )
 from ...assets.pv.materialization import materialize_pv_urbs_inputs
 from ...assets.pv.sizing import build_pv_asset_plan
-from gridexpand.common.electrification import validate_electrification_assignment
+from gridexpand.common.electrification import battery_buildings, validate_electrification_assignment
 from gridexpand.common.ev_sessions import (
     SESSION_COLUMNS,
     SESSION_HOUR_COLUMNS,
@@ -570,6 +570,7 @@ def build_paired_sector_urbs_inputs(
     battery_usable_kwh_per_pv_kwp: float = 1.0,
     battery_usable_kwh_per_annual_mwh: float = 1.0,
     battery_energy_to_power_hours: float = 2.0,
+    battery_share_of_selected: float = 1.0,
     synthetic_input_dir: Path = SYNTHETIC_INPUT_DIR,
     technology_parameters=None,
     heat_sizing_method: str = "full_load_hours_rule",
@@ -609,7 +610,10 @@ def build_paired_sector_urbs_inputs(
         )
     else:
         selected_pv_buildings = selected_by_technology["pv_battery"]
-        selected_battery_buildings = selected_by_technology["pv_battery"]
+        # A seeded share of the PV buildings gets a battery (1.0: the PV + battery bundle).
+        selected_battery_buildings = battery_buildings(
+            electrification_assignment, battery_share_of_selected
+        )
     battery_site_by_building = (
         source_asset_sites(
             allocation,
@@ -1389,11 +1393,7 @@ def _build_paired_heat(
         demand.loc[:, pd.IndexSlice[:, ["water_heat"]]], eff_factor, ambient,
         sizing_method=sizing_method,
         norm_outside_temperature_c=get_norm_outside_temperature(postcode),
-        indoor_design_temperature_c=heat_config.indoor_design_temperature_c,
-        heating_limit_temperature_c=heat_config.heating_limit_temperature_c,
-        heat_pump_design_share=heat_config.heat_pump_design_share,
-        buffer_volume_l_per_kw_th=heat_config.buffer_volume_l_per_kw_th,
-        buffer_usable_temperature_spread_k=heat_config.buffer_usable_temperature_spread_k,
+        **heat_config.sizing_kwargs(),
     )
     materialized = materialize_heat_urbs_inputs(
         plan, sizing_method=sizing_method,

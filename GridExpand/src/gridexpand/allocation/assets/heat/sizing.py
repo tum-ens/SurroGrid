@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 WATER_HEAT_CAPACITY_WH_PER_L_K = 1.163
+BUFFER_CHARGE_EFFICIENCY_METHODS = ("technology", "cop_curve")
 
 
 def calculate_full_load_hours(
@@ -14,8 +15,16 @@ def calculate_full_load_hours(
     indoor_design_temperature_c: float,
     heating_limit_temperature_c: float,
     norm_outside_temperature_c: float,
+    degree_day_base_temperature_c: float | None = None,
 ) -> float:
-    """Calculate VDI-style 20/15 full-load hours from daily mean weather."""
+    """Calculate full-load hours from daily mean weather (VDI 3807 day counting).
+
+    Days below the heating limit count with ``base - daily mean``. The base is the
+    indoor design temperature by default (Gradtagzahl G20/15). With the heating limit
+    as base (Heizgradtage G15), the part of the indoor-outdoor difference that
+    internal and solar gains cover is not counted. The design lift stays
+    ``indoor - norm outside``.
+    """
     ambient = pd.Series(ambient_temperature_c, dtype=float).reset_index(drop=True)
     if ambient.empty or ambient.isna().any():
         raise ValueError("Full-load-hour calculation requires complete ambient temperatures.")
@@ -23,9 +32,12 @@ def calculate_full_load_hours(
         raise ValueError("Full-load-hour calculation requires complete 24-hour days.")
     if norm_outside_temperature_c >= indoor_design_temperature_c:
         raise ValueError("Norm outside temperature must be below indoor design temperature.")
+    base = indoor_design_temperature_c if degree_day_base_temperature_c is None else degree_day_base_temperature_c
+    if not heating_limit_temperature_c <= base <= indoor_design_temperature_c:
+        raise ValueError("Degree-day base must lie between the heating limit and the indoor design temperature.")
     daily_mean = ambient.groupby(np.arange(len(ambient)) // 24).mean()
     heating_days = daily_mean[daily_mean < heating_limit_temperature_c]
-    degree_days_kd = (indoor_design_temperature_c - heating_days).sum()
+    degree_days_kd = (base - heating_days).sum()
     result = 24.0 * degree_days_kd / (
         indoor_design_temperature_c - norm_outside_temperature_c
     )
@@ -39,6 +51,29 @@ def _column(frame: pd.DataFrame, site: int, commodity: str) -> pd.Series:
     if key not in frame.columns:
         return pd.Series(0.0, index=frame.index, dtype=float)
     return pd.to_numeric(frame[key], errors="coerce").fillna(0.0)
+
+
+def buffer_charge_efficiency(cop: pd.Series, space_heat: pd.Series, spread_k: float) -> float:
+    """COP penalty of charging the space-heating buffer ``spread_k`` above the normal sink.
+
+    Each hour's COP is mapped back to its temperature lift on the model's COP curve
+    (``config.ASHP_COP``, decreasing branch, 15-90 K). The ratio COP(lift + spread) /
+    COP(lift) is averaged with the space-heat demand as weight. Hours without space
+    heat do not count; a building without space heat gets 1.
+    """
+    from gridexpand.allocation.config import config
+
+    a, b, c = config.ASHP_COP_COEFFICIENTS
+    lift_min, lift_max = 15.0, -b / (2.0 * c)  # the curve's minimum (90 K) ends the physical branch
+    cop_values = pd.to_numeric(cop, errors="coerce").to_numpy(dtype=float)
+    weights = pd.to_numeric(space_heat, errors="coerce").fillna(0.0).clip(lower=0.0).to_numpy(dtype=float)
+    if weights.sum() <= 0.0:
+        return 1.0
+    discriminant = np.clip(b * b - 4.0 * c * (a - cop_values), 0.0, None)
+    lift = np.clip((-b - np.sqrt(discriminant)) / (2.0 * c), lift_min, lift_max)
+    raised = np.clip(lift + float(spread_k), lift_min, lift_max)
+    ratio = (a + b * raised + c * raised**2) / (a + b * lift + c * lift**2)
+    return float(np.clip((ratio * weights).sum() / weights.sum(), 0.0, 1.0))
 
 
 def build_heat_asset_plan(
@@ -55,15 +90,26 @@ def build_heat_asset_plan(
     heat_pump_design_share: float,
     buffer_volume_l_per_kw_th: float,
     buffer_usable_temperature_spread_k: float,
+    degree_day_base_temperature_c: float | None = None,
+    buffer_charge_efficiency_method: str = "technology",
     water_heat_pump_cop: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, dict[str, float]]:
-    """Compile one central residential heat-system plan per physical building."""
+    """Compile one central residential heat-system plan per physical building.
+
+    The buffer holds ``buffer_volume_l_per_kw_th`` litres per kW_th of heat pump over
+    the usable spread; ``t · 1000 / (1.163 · spread)`` litres per kW_th store ``t``
+    hours of thermal output. With ``cop_curve`` the plan carries a per-building charge
+    efficiency: the COP penalty of charging the buffer by the usable spread above the
+    normal sink temperature.
+    """
     required = {"building_objectid", "Site"}
     missing = required.difference(buildings.columns)
     if missing:
         raise ValueError(f"Heat sizing buildings lack columns: {sorted(missing)}")
     if sizing_method not in {"full_load_hours_rule", "optimization"}:
         raise ValueError(f"Unknown heat sizing method {sizing_method!r}.")
+    if buffer_charge_efficiency_method not in BUFFER_CHARGE_EFFICIENCY_METHODS:
+        raise ValueError(f"Unknown buffer charge-efficiency method {buffer_charge_efficiency_method!r}.")
     source = buildings.copy()
     source["building_objectid"] = source["building_objectid"].astype(str)
     source["Site"] = pd.to_numeric(source["Site"], errors="raise").astype(int)
@@ -78,6 +124,7 @@ def build_heat_asset_plan(
         indoor_design_temperature_c=indoor_design_temperature_c,
         heating_limit_temperature_c=heating_limit_temperature_c,
         norm_outside_temperature_c=norm_outside_temperature_c,
+        degree_day_base_temperature_c=degree_day_base_temperature_c,
     )
     design_index = int((ambient - norm_outside_temperature_c).abs().idxmin())
     fixed = sizing_method == "full_load_hours_rule"
@@ -120,6 +167,10 @@ def build_heat_asset_plan(
             buffer_l * WATER_HEAT_CAPACITY_WH_PER_L_K
             * buffer_usable_temperature_spread_k / 1000.0
         )
+        charge_efficiency = (
+            buffer_charge_efficiency(cop, space, buffer_usable_temperature_spread_k)
+            if buffer_charge_efficiency_method == "cop_curve" else np.nan
+        )
         households = pd.to_numeric(
             pd.Series([building.get("number_of_households")]), errors="coerce"
         ).iloc[0]
@@ -144,6 +195,10 @@ def build_heat_asset_plan(
             "norm_outside_temperature_c": float(norm_outside_temperature_c),
             "heating_limit_temperature_c": float(heating_limit_temperature_c),
             "indoor_design_temperature_c": float(indoor_design_temperature_c),
+            "degree_day_base_temperature_c": float(
+                indoor_design_temperature_c if degree_day_base_temperature_c is None
+                else degree_day_base_temperature_c
+            ),
             "design_weather_index": design_index,
             "design_weather_temperature_c": float(ambient.iloc[design_index]),
             "design_cop": design_cop,
@@ -183,6 +238,11 @@ def build_heat_asset_plan(
             "buffer_rule_valid": bool(
                 abs(buffer_l - buffer_volume_l_per_kw_th * reference_hp_kw_th) <= 1e-9
             ),
+            "buffer_bridging_hours": (
+                buffer_kwh / reference_hp_kw_th if reference_hp_kw_th > 0.0 else np.nan
+            ),
+            "buffer_usable_temperature_spread_k": float(buffer_usable_temperature_spread_k),
+            "buffer_charge_efficiency": charge_efficiency,
             "buffer_installed_kwh_th": buffer_kwh if fixed else 0.0,
             "buffer_capacity_upper_kwh_th": buffer_kwh,
             "buffer_installed_power_kw_th": reference_hp_kw_th if fixed else 0.0,
@@ -200,5 +260,9 @@ def build_heat_asset_plan(
         "norm_outside_temperature_c": float(norm_outside_temperature_c),
         "heating_limit_temperature_c": float(heating_limit_temperature_c),
         "indoor_design_temperature_c": float(indoor_design_temperature_c),
+        "degree_day_base_temperature_c": float(
+            indoor_design_temperature_c if degree_day_base_temperature_c is None
+            else degree_day_base_temperature_c
+        ),
     }
     return pd.DataFrame(rows), climate

@@ -241,6 +241,7 @@ def _regenerate_one(
     log_dir: Path,
     scenario_config: Path,
     output_directory: Path | None = None,
+    weather_hdf: Path | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
     log_path = log_dir / f"{Path(source_name).stem}.log"
@@ -270,6 +271,8 @@ def _regenerate_one(
     ]
     if output_directory is not None:
         command.extend(["--output-directory", str(output_directory)])
+    if weather_hdf is not None:
+        command.extend(["--weather-hdf", str(weather_hdf)])
     try:
         with log_path.open("a", encoding="utf-8") as log:
             log.write(f"COMMAND: {' '.join(command)}\n")
@@ -358,6 +361,15 @@ def main() -> None:
         type=Path,
         default=DEFAULT_SYNTHETIC_LIBRARY,
     )
+    parser.add_argument(
+        "--weather-hdf",
+        type=Path,
+        default=None,
+        help=(
+            "Provider weather file for every Step 2 heat run (one weather series for heat, "
+            "COP, PV and sizing). Without it each run downloads a TMY at its transformer."
+        ),
+    )
     args = parser.parse_args()
     if args.workers < 1 or args.n_cpu < 1:
         parser.error("--workers and --n-cpu must be positive integers")
@@ -376,7 +388,9 @@ def main() -> None:
         scenario, scenario_hash = load_scenario_config(args.scenario_config)
         status_name = (
             "paired_heat_profile_regeneration_status_"
-            f"{scenario_identity_key(scenario.scenario_id, scenario_hash)}.csv"
+            f"{scenario_identity_key(scenario.scenario_id, scenario_hash)}"
+            # Profiles from another weather source are not complete for this one.
+            f"{'_' + args.weather_hdf.stem if args.weather_hdf is not None else ''}.csv"
         )
     status = _StatusWriter(paired_dir / status_name)
     if args.resume:
@@ -423,6 +437,7 @@ def main() -> None:
                 output_directory=(
                     None if args.output_directory is None else args.output_directory.resolve()
                 ),
+                weather_hdf=None if args.weather_hdf is None else args.weather_hdf.resolve(),
             )
             futures[future] = source_name
         for future in as_completed(futures):

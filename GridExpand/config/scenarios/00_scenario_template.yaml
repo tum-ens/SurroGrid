@@ -38,9 +38,18 @@ asset_sizing:
     space_heat_source: infdb_ro_heat
     indoor_design_temperature_c: 20.0
     heating_limit_temperature_c: 15.0
+    # Optional degree-day base of the full-load hours (default: the indoor
+    # temperature, Gradtagzahl G20/15); 15.0 = Heizgradtage G15 without the part
+    # that internal and solar gains cover.
+    degree_day_base_temperature_c: 15.0
     heat_pump_design_share: 0.65
-    buffer_volume_l_per_kw_th: 20.0
-    buffer_usable_temperature_spread_k: 5.0
+    # 20 l/kW at 5 K is a hydraulic buffer (about 7 min); 86 l/kW at 10 K holds
+    # 1 h of thermal heat-pump output (1000 / (1.163 * 10)).
+    buffer_volume_l_per_kw_th: 86.0
+    buffer_usable_temperature_spread_k: 10.0
+    # Optional: technology (storage charge_efficiency, default) or cop_curve
+    # (per-building COP penalty of charging by the usable spread).
+    buffer_charge_efficiency_method: cop_curve
 
 electrification: # deterministic_share or source_inventory
   heat:
@@ -49,9 +58,13 @@ electrification: # deterministic_share or source_inventory
   mobility:
     adoption_mode: deterministic_share
     building_share: 1.0
+    # Optional per-type shares (building_share applies to types not listed):
+    # building_share_by_type: {SFH: 0.85, TH: 0.85, MFH: 0.5, AB: 0.5}
   pv_battery:
     adoption_mode: deterministic_share
     building_share: 1.0
+    # Optional share of the selected PV buildings that also get a battery (default 1).
+    # battery_share_of_selected: 0.8
 
 mobility:
   commuting_probability: 0.62
@@ -153,7 +166,8 @@ technologies:
       energy_to_power_hours: 0.15
       charge_efficiency: 0.932
       discharge_efficiency: 1.0
-      self_discharge_per_timestep: 0.0
+      # 0.5 %/h: about an ErP class-A tank of 700 l at 30 K above ambient.
+      self_discharge_per_timestep: 0.005
       investment_cost_eur_per_kw: 0.0
       investment_cost_eur_per_kwh: 58.0
       fixed_investment_cost_power_eur: 0.0

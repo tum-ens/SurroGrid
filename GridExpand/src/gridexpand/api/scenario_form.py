@@ -65,6 +65,10 @@ SECTIONS: list[dict[str, Any]] = [
         *_adoption_fields("heat", "Heat pumps"),
         *_adoption_fields("mobility", "Electric vehicles"),
         *_adoption_fields("pv_battery", "PV + battery"),
+        _field("electrification.pv_battery.battery_share_of_selected", "Batteries: share of PV buildings", "percent",
+               "%", min=0, max=1, step=0.05, optional=True, default=1.0, after="building_share",
+               hint="Seeded share of the selected PV buildings that also get a battery (optional key, default 1: "
+                    "every PV building). Per-type shares (building_share_by_type) are edited in the YAML."),
     ]},
     {"id": "economics", "title": "Economics", "fields": [
         _field("economics.electricity.import_price_eur_per_kwh", "Electricity import price", "float", "€/kWh",
@@ -128,11 +132,23 @@ SECTIONS: list[dict[str, Any]] = [
                step=0.05, hint="Heat-pump thermal output at the norm outdoor temperature as share of the design "
                                "heat load."),
         _field("asset_sizing.heat.buffer_volume_l_per_kw_th", "Buffer volume", "float", "l/kW_th", min=0, step=1,
-               hint="Space-heating buffer litres per kW of heat-pump thermal power."),
+               hint="Space-heating buffer litres per kW of heat-pump thermal power; 1000 / (1.163 \u00b7 spread) "
+                    "litres per kW store one hour of thermal output."),
+        _field("asset_sizing.heat.buffer_charge_efficiency_method", "Buffer charge efficiency", "enum", options=[
+            {"value": "technology", "label": "Thermal-storage technology value"},
+            {"value": "cop_curve", "label": "COP penalty of the usable spread"},
+        ], optional=True, default="technology", after="buffer_usable_temperature_spread_k",
+            hint="technology: charge efficiency of technologies.storages.thermal_storage; cop_curve: per building "
+                 "COP(lift + spread) / COP(lift) on the model's COP curve (optional key, default technology)."),
         _field("asset_sizing.heat.indoor_design_temperature_c", "Indoor design temperature", "float", "°C",
                min=0, step=0.5, hint="Indoor reference temperature of the degree-day method."),
         _field("asset_sizing.heat.heating_limit_temperature_c", "Heating limit temperature", "float", "°C",
                min=0, step=0.5, hint="Heating limit of the degree-day method (below the indoor temperature)."),
+        _field("asset_sizing.heat.degree_day_base_temperature_c", "Degree-day base temperature", "float", "°C",
+               min=0, step=0.5, optional=True, default=None, after="heating_limit_temperature_c",
+               hint="Base of the full-load-hour degree days, between the heating limit and the indoor temperature. "
+                    "Absent: the indoor temperature (Gradtagzahl G20/15); the heating limit gives Heizgradtage G15, "
+                    "which leaves out the part internal and solar gains cover (optional key)."),
     ]},
     {"id": "mobility", "title": "Mobility", "fields": [
         _field("mobility.commuting_probability", "Commuting probability", "percent", "%", min=0, max=1, step=0.01,

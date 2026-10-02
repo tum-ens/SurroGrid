@@ -305,6 +305,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Append the model-case name to the Step-2 HDF output.",
     )
     parser.add_argument("--output-directory", type=Path)
+    parser.add_argument(
+        "--weather-hdf",
+        type=Path,
+        help=(
+            "Use this weather file (raw_data/weather) instead of a PVGIS TMY at the grid's "
+            "transformer; paired heat libraries pass the provider weather."
+        ),
+    )
     return parser
 
 
@@ -382,7 +390,9 @@ def build_settings(args: argparse.Namespace) -> dict[str, Any]:
         "grid_filename": inputfile,         # Name of input file
         "grid_ref": grid_ref,               # DB-mode resolved pylovo grid metadata
         "storage": args.storage,            # h5 or db raw-grid storage
-        "weather_data_exists": args.storage == "h5" or args.profiles == "status_quo",  # DB mode has no raw weather cache.
+        # DB mode has no raw weather cache; an explicit weather file replaces the download.
+        "weather_data_exists": args.storage == "h5" or args.profiles == "status_quo" or args.weather_hdf is not None,
+        "weather_hdf": args.weather_hdf.resolve() if args.weather_hdf is not None else None,
         "parallel": (int(args.n_cpu) > 1),  # Parallelized run?
         "n_cpu": int(args.n_cpu),           # cpus if parallel
         "profiles": args.profiles,

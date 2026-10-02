@@ -37,6 +37,12 @@ def materialize_heat_urbs_inputs(asset_plan, *, sizing_method, process_parameter
         )
     }
     by_site = asset_plan.groupby("Site", as_index=False).agg(**sums)
+    # A per-building charge efficiency (the COP penalty of charging the buffer above the
+    # normal sink) replaces the technology's charge efficiency; one heat site per building.
+    charge_efficiency = (
+        asset_plan.groupby("Site")["buffer_charge_efficiency"].first()
+        if "buffer_charge_efficiency" in asset_plan else pd.Series(dtype=float)
+    )
     process_rows = []
     storage_rows = []
     for row in by_site.to_dict("records"):
@@ -60,6 +66,8 @@ def materialize_heat_urbs_inputs(asset_plan, *, sizing_method, process_parameter
                     storage_parameters, fixed=fixed, ep_ratio=energy_upper / power_upper
                 ),
             }
+            if pd.notna(charge_efficiency.get(site, np.nan)):
+                storage_row["eff-in"] = float(charge_efficiency[site])
             if not fixed:
                 hp_upper_kw_el = float(row["heat_pump_capacity_upper_kw_el"])
                 if hp_upper_kw_el <= 0.0:

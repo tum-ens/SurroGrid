@@ -43,6 +43,7 @@ from gridexpand.allocation.electrification import (
     load_prepared_assignment,
 )
 from gridexpand.common.electrification import (
+    battery_buildings,
     assignment_manifest_hash,
     assignment_summary,
     build_electrification_assignment,
@@ -95,6 +96,12 @@ class Grid:
         ### Data to be generated
         if not self.settings["weather_data_exists"]:
             self.df_weather_raw = pd.DataFrame()
+        weather_hdf = self.settings.get("weather_hdf")
+        if weather_hdf is not None:
+            # One weather series per paired dataset: heat, COP and sizing share the
+            # provider weather instead of a TMY at this grid's transformer.
+            self.df_weather_raw, _ = weather.read_weather_hdf(weather_hdf)
+            self.settings["scenario_assumptions"]["weather_source"] = str(weather_hdf)
         self.df_supim_solar = pd.DataFrame()
         self.df_demand_elec = pd.DataFrame()
         self.df_electricity_component_profiles = pd.DataFrame()
@@ -534,7 +541,10 @@ class Grid:
             minimum_pv_kwp_per_annual_mwh=battery.minimum_pv_kwp_per_annual_mwh,
             usable_kwh_per_pv_kwp=pv_coefficient,
             usable_kwh_per_annual_mwh=demand_coefficient,
-            eligible_buildings=self._selected_buildings("pv_battery"),
+            eligible_buildings=battery_buildings(
+                self.df_electrification_assignment,
+                scenario.electrification.pv_battery.battery_share_of_selected,
+            ),
             location_source="electrification_assignment",
         )
         materialized = materialize_battery_urbs_inputs(
@@ -760,11 +770,7 @@ class Grid:
             self.df_weather_raw["temp_air"],
             sizing_method=sizing_method,
             norm_outside_temperature_c=norm_outside,
-            indoor_design_temperature_c=scenario.heat.indoor_design_temperature_c,
-            heating_limit_temperature_c=scenario.heat.heating_limit_temperature_c,
-            heat_pump_design_share=scenario.heat.heat_pump_design_share,
-            buffer_volume_l_per_kw_th=scenario.heat.buffer_volume_l_per_kw_th,
-            buffer_usable_temperature_spread_k=scenario.heat.buffer_usable_temperature_spread_k,
+            **scenario.heat.sizing_kwargs(),
         )
         materialized = materialize_heat_urbs_inputs(
             self.df_heat_asset_plan,

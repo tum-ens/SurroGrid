@@ -145,3 +145,22 @@ def get_dew_point(temp_celsius, relative_humidity):
     b = 237.7  # degC
     gamma = (a * temp_celsius) / (b + temp_celsius) + np.log(relative_humidity / 100.0)
     return (b * gamma) / (a - gamma)
+
+
+def read_weather_hdf(path) -> tuple[pd.DataFrame, float | None]:
+    """Read a provider weather file (``raw_data/weather``, ``raw_data/region``).
+
+    Returns the weather frame, with the dew point for the mobility model added when
+    relative humidity is present, and the altitude of the weather location (or None).
+    """
+    weather = pd.read_hdf(path, key="raw_data/weather").copy()
+    if "temp_air" not in weather.columns:
+        raise ValueError(f"Weather file {path} has no temp_air column.")
+    if "dew_point" not in weather.columns and "relative_humidity" in weather.columns:
+        weather["dew_point"] = get_dew_point(weather["temp_air"], weather["relative_humidity"])
+    try:
+        region = pd.read_hdf(path, key="raw_data/region")
+        altitude = float(region["altitude"].iloc[0]) if "altitude" in region else None
+    except KeyError:
+        altitude = None
+    return weather, altitude
