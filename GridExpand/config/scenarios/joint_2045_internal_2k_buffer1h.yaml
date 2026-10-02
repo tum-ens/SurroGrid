@@ -1,0 +1,294 @@
+# Internal 1R1C, 2 K permitted building preheating, high-storage buffer sensitivity (1 h at 10 K).
+# Cloned from joint_2045_a2_all_full_year.yaml (G15 sizing, flexibility buffer,
+# central adoption shares, GHD rules). Deliberate differences: scenario id,
+# internal space heat (corrected InfDB ro-heat envelope, HEMS may preheat the
+# building by up to 2 K above 20 degC) and the tank charging rule below.
+scenario:
+  id: joint_2045_internal_2k_buffer1h
+  milestone_year: 2045
+
+economics:
+  electricity:
+    # Retail electricity purchase price used by the building energy model.
+    import_price_eur_per_kwh: 0.398
+    # Compensation for PV exports. Zero represents no feed-in support in 2045.
+    pv_feed_in_tariff_eur_per_kwh: 0.0
+
+asset_sizing:
+  pv:
+    # Heuristic cases use annual base electricity demand; optimized HEMS retains bounds.
+    heuristic_method: annual_electricity_rule
+    optimized_method: optimization
+    # Central compromise across public recommendations of roughly 1--2.5 kWp/MWh.
+    # P_PV = min(E_annual * demand_multiplier / 1000, P_PV_max).
+    demand_multiplier: 2.0
+    # Used only when a selected physical building has no usable LoD2 roof section.
+    fallback_capacity_kwp: 14.5
+    # Publication-quality runs fail if more than this share uses the fallback.
+    maximum_fallback_share: 0.0
+    # Module peak capacity and usable fractions applied to actual LoD2 surface area.
+    module_capacity_kw_per_m2: 0.202
+    flat_roof_utilization: 0.27
+    slanted_roof_utilization: 0.58
+    # Shared pvlib profile grid; validated to remain below 10% annual roof deviation.
+    tilt_bin_degrees: 5.0
+    azimuth_bin_degrees: 15.0
+
+  battery:
+    # INFLEX and heuristic-asset HEMS use a central value below the HTW maximum.
+    heuristic_method: htw_2025_scaled_rule
+    # Optimized HEMS uses HTW's actual maximum as an endogenous sizing bound.
+    optimized_method: optimization
+    # HTW eligibility: PV [kWp] must exceed this factor times annual demand [MWh].
+    minimum_pv_kwp_per_annual_mwh: 0.5
+    # Central heuristic: 1.0 kWh per kWp and per MWh/a base demand.
+    # For sensitivity runs use 0.75 (low) or HTW's 1.5 maximum (high).
+    heuristic_usable_kwh_per_pv_kwp: 1.0
+    heuristic_usable_kwh_per_annual_mwh: 1.0
+    # The optimized model may explore the complete HTW-recommended envelope.
+    optimized_upper_kwh_per_pv_kwp: 1.5
+    optimized_upper_kwh_per_annual_mwh: 1.5
+    # E/P = 2 h means maximum charge/discharge power equals energy / 2.
+    energy_to_power_hours: 2.0
+
+  heat:
+    # Endogenous room heat (1R1C), direct OpenDHW, provider weather and separate
+    # room, DHW and tank-charging COPs. InFlex uses the independent thermostat
+    # reference; HEMS may preheat within [20 degC, 20 degC + uplift].
+    space_heat_source: internal
+    heated_area_fraction: 0.8 # Embedded in imported RC; never applied twice.
+    internal:
+      parameter_source: infdb_rc
+      refurbishment_state: stored_ro_heat
+      minimum_temperature_c: 20.0
+      hems_preheat_uplift_k: 2.0
+      ventilation_air_changes_per_hour: 0.5
+      zone_height_m: 3.125
+      person_gain_w: 70.0
+      electricity_gain_fraction: 0.362
+      glazing_solar_transmittance: 0.6
+      blind_irradiance_threshold_w_per_m2: 100.0
+      closed_blind_transmittance: 0.15
+    # Degree-day reference temperatures used to derive regional full-load hours.
+    indoor_design_temperature_c: 20.0
+    # DWD/VDI heating limit: days below it count as heating days.
+    heating_limit_temperature_c: 15.0
+    # Heizgradtage G15 (VDI 3807): days count with 15 degC minus the daily mean.
+    # The Gradtagzahl G20/15 (base 20 degC) also counts the part that internal
+    # and solar gains cover and overstates the full-load hours (about 2,500 h
+    # against 1,500-1,800 h typical for residential heating).
+    degree_day_base_temperature_c: 15.0
+    # Thermal HP output at norm outdoor temperature as share of design heat load.
+    heat_pump_design_share: 0.65
+    # Explicit storage is space-heating-only; hourly OpenDHW demand is direct.
+    # High-storage sensitivity: 1 h of thermal HP output over the usable spread,
+    # 1000 / (1.163 * 10 K) = 86 l/kW, on top of the 2 K building pre-heat.
+    # Tank-only 2045 studies assume 2-3 h without building mass (Bernath et al.
+    # 2019; BMWK Langfristszenarien T45).
+    buffer_volume_l_per_kw_th: 86.0
+    # Usable spread: SG Ready setpoint raise; tank charging raises the HP sink by it.
+    buffer_usable_temperature_spread_k: 10.0
+    # The internal tank is charged through its own COP route at the normal sink
+    # plus the usable spread, so no second charge-efficiency penalty applies.
+    buffer_charge_efficiency_method: technology
+
+electrification: # deterministic_share or source_inventory
+  # Shares of eligible physical buildings, selected per provider. Central 2045
+  # values from national scenarios (sources: docs/method.md#electrification).
+  heat:
+    # Heat pumps in suburban and rural LV grids with little district heating
+    # (national 43-65 % of buildings; rural FfE/Agora grids 0.48-0.77 in 2035).
+    adoption_mode: deterministic_share
+    building_share: 0.8
+  mobility:
+    # Buildings whose vehicles charge at home: battery-electric fleet about 93 %
+    # (dena 2045) times home-charging access (about 85 % one/two-family houses,
+    # about 50 % multi-family; dena 2020, MiD). building_share applies to types
+    # not listed, e.g. untyped mixed-use buildings (multi-family-like).
+    adoption_mode: deterministic_share
+    building_share: 0.5
+    building_share_by_type:
+      SFH: 0.85
+      TH: 0.85
+      MFH: 0.5
+      AB: 0.5
+  pv_battery:
+    # Rooftop PV on 70 % of eligible buildings (34 % of owner-occupied houses
+    # today, KfW 2026); 80 % of them with a battery (BSW-Solar 2026: about 80 %
+    # of new home PV systems are sold with one).
+    adoption_mode: deterministic_share
+    building_share: 0.7
+    battery_share_of_selected: 0.8
+
+# Mobility behavior and emobpy vehicle-model assumptions.
+mobility:
+  commuting_probability: 0.62
+  emobpy_timestep_hours: 0.5
+  reference_year: 2009
+  passenger_mass_kg: 75.0
+  passenger_sensible_heat_w: 70.0
+  passengers_per_vehicle: 1.5
+  cabin_heat_transfer_coefficient: 10.0
+  cabin_air_flow_m3_per_s: 0.01
+  driving_cycle_type: WLTC
+  road_type: 0
+  road_slope: 0.0
+  # HEMS smart charging spreads each session over its stay: at most 2x the
+  # session's average required power per hour, except in hours of local PV
+  # surplus. Without it, flat prices leave every charging hour equally cheap and
+  # the LP stacks full-power charging into the same hours in all buildings.
+  # InFlex keeps immediate charging at the full charger rating.
+  hems_session_power_factor: 2.0
+
+# Parameters written to the urbs process and storage input tables.
+# Null capacities are derived from upstream asset plans or individual EV profiles.
+technologies:
+  processes:
+    rooftop_pv:
+      installed_capacity_kw: 0.0
+      capacity_upper_kw: 0.0
+      fixed_investment_cost_eur: 6565.0
+      investment_cost_eur_per_kw: 533.7
+      fixed_cost_eur_per_hour: 0.0
+      variable_cost_eur_per_kwh: 0.0
+      wacc: 0.022
+      depreciation_years: 15
+      minimum_power_factor: null
+    heatpump_air:
+      installed_capacity_kw: 0.0
+      capacity_upper_kw: 2000.0
+      fixed_investment_cost_eur: 6600.0
+      investment_cost_eur_per_kw: 750.0
+      fixed_cost_eur_per_hour: 0.0
+      variable_cost_eur_per_kwh: 0.0
+      wacc: 0.0216
+      depreciation_years: 20
+      minimum_power_factor: null
+    heatpump_booster:
+      installed_capacity_kw: 0.0
+      capacity_upper_kw: 2000.0
+      fixed_investment_cost_eur: 100.0
+      investment_cost_eur_per_kw: 83.3
+      fixed_cost_eur_per_hour: 0.0
+      variable_cost_eur_per_kwh: 0.0
+      wacc: 0.0216
+      depreciation_years: 20
+      minimum_power_factor: null
+    heat_dummy:
+      installed_capacity_kw: 2000.0
+      capacity_upper_kw: 2000.0
+      fixed_investment_cost_eur: null
+      investment_cost_eur_per_kw: 0.0
+      fixed_cost_eur_per_hour: 0.0
+      variable_cost_eur_per_kwh: 0.0
+      wacc: 0.07
+      depreciation_years: 1
+      minimum_power_factor: null
+    home_charger:
+      installed_capacity_kw: 11.0
+      capacity_upper_kw: 11.0
+      fixed_investment_cost_eur: null
+      investment_cost_eur_per_kw: 0.0
+      fixed_cost_eur_per_hour: 0.0
+      variable_cost_eur_per_kwh: 0.0
+      wacc: 0.07
+      depreciation_years: 1
+      minimum_power_factor: null
+    grid_connection:
+      installed_capacity_kw: 2000.0
+      capacity_upper_kw: 2000.0
+      fixed_investment_cost_eur: null
+      investment_cost_eur_per_kw: 0.0
+      fixed_cost_eur_per_hour: 0.0
+      variable_cost_eur_per_kwh: 0.0
+      wacc: 0.07
+      depreciation_years: 30
+      minimum_power_factor: null
+  storages:
+    stationary_battery:
+      installed_energy_kwh: null
+      capacity_upper_kwh: null
+      installed_power_kw: null
+      power_upper_kw: null
+      energy_to_power_hours: null
+      charge_efficiency: 0.961
+      discharge_efficiency: 1.0
+      self_discharge_per_timestep: 0.0
+      investment_cost_eur_per_kw: 0.0
+      # 2045 central household-system projection. Sensitivities: 250 / 365 EUR/kWh.
+      # The former 976 was a 2021 German median in 2020 USD/kWh, not a forecast.
+      investment_cost_eur_per_kwh: 300.0
+      fixed_investment_cost_power_eur: 0.0
+      fixed_investment_cost_energy_eur: 0.0
+      variable_cost_eur_per_kwh: 0.001
+      wacc: 0.022
+      depreciation_years: 15
+    thermal_storage:
+      installed_energy_kwh: 0.0
+      capacity_upper_kwh: 10000.0
+      installed_power_kw: 0.0
+      power_upper_kw: 1500.0
+      energy_to_power_hours: 0.15
+      # Not used for the internal tank: its charging route carries the COP penalty
+      # and its storage charge efficiency is 1.
+      charge_efficiency: 0.932
+      discharge_efficiency: 1.0
+      # 0.5 %/h of the usable band energy: about an ErP class-A tank of 700 l
+      # (EU 812/2013 limits at a 45 K test difference, scaled to about 30 K).
+      self_discharge_per_timestep: 0.005
+      investment_cost_eur_per_kw: 0.0
+      investment_cost_eur_per_kwh: 58.0
+      fixed_investment_cost_power_eur: 0.0
+      fixed_investment_cost_energy_eur: 0.0
+      variable_cost_eur_per_kwh: 0.001
+      wacc: 0.0216
+      depreciation_years: 20
+    mobility_storage:
+      installed_energy_kwh: null
+      capacity_upper_kwh: null
+      installed_power_kw: null
+      power_upper_kw: null
+      energy_to_power_hours: null
+      charge_efficiency: 1.0
+      discharge_efficiency: 1.0
+      self_discharge_per_timestep: 0.0
+      investment_cost_eur_per_kw: 0.0
+      investment_cost_eur_per_kwh: 0.0
+      fixed_investment_cost_power_eur: 0.0
+      fixed_investment_cost_energy_eur: 0.0
+      variable_cost_eur_per_kwh: 0.001
+      wacc: 0.07
+      depreciation_years: 20
+
+time_aggregation:
+  # Full-year chronological reference: no TSAM selection, concatenation or
+  # occurrence weighting. Every original operating hour is modeled once with
+  # weight 1. The remaining fields are required by the configuration schema and
+  # are inactive; run_urbs_cluster asserts that TSAM is never invoked.
+  enabled: false
+  number_of_typical_periods: 6
+  hours_per_period: 168
+  extreme_period_method: replace_cluster_center
+  clustering_method: hierarchical
+  cluster_representation: medoid
+  segmentation: false
+  rescale_cluster_periods: false
+  # Selection features and their relative clustering weights.
+  feature_weights:
+    Tamb: 1.0
+    Irradiation: 1.0
+  # Force the coldest and highest-irradiation mean weeks into the representation.
+  extreme_features:
+    - minimum_mean_temperature
+    - maximum_mean_irradiation
+
+# October OSM has building and place data but lacks the POI layers needed for
+# reliable activity gating. Keep gating off until those layers are imported.
+ghd:
+  activity_gating: false
+  single_volume_one_storey: true
+  osm:
+    source: postgis
+    activity_layers:
+      - {table: opendata.osm_building_point, key_column: osm_type, value_column: osm_subtype}
+    building_layer: {table: opendata.osm_building_polygon}
