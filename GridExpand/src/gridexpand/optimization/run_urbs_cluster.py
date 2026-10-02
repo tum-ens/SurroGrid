@@ -136,6 +136,7 @@ def build_global_settings(args, input_file: str, scenario, scenario_hash: str, i
         "electrification_assignment_hash": metadata.get("electrification_assignment_hash"),
         "reduce_only": args.reduce_only,
         "n_cpu": int(args.n_cpu),
+        "hems_session_power_factor": scenario.mobility.hems_session_power_factor,
     }
 
 

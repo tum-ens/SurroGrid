@@ -69,6 +69,7 @@ Top-level blocks: `scenario`, `economics`, `asset_sizing`, `electrification`, `m
 | `mobility.driving_cycle_type` | `WLTC`, `EPA` | emobpy driving cycle |
 | `mobility.road_type` | ≥ 0 integer | emobpy road type |
 | `mobility.road_slope` | number | emobpy road slope |
+| `mobility.hems_session_power_factor` | ≥ 1 or absent | HEMS only: each EV session charges at most this factor × its average required power, except in hours of local PV surplus; absent = charger rating only |
 | `technologies.processes.<name>.*` | numbers or null | urbs process parameters, see below |
 | `technologies.storages.<name>.*` | numbers or null | urbs storage parameters, see below |
 | `time_aggregation.enabled` | boolean | TSAM on/off (Step 3; `--tsam` overrides to on) |

@@ -24,6 +24,7 @@ from .saveload import (
     save_reduced_data,
 )
 from .scenarios import insert_scenario, read_scenario_name
+from gridexpand.common.ev_sessions import hems_session_fractions
 
 CONCURRENCY_ENV = "URBS_CLUSTER_CONCURRENCY"
 
@@ -175,6 +176,52 @@ def _check_full_year_input(mode, data):
         )
 
 
+def pv_surplus_hours(data):
+    """``(site, t)`` -> True where the site's PV potential exceeds its fixed electricity demand.
+
+    PV potential is the capacity bound of every process fed by a SupIm commodity
+    times its availability and electricity output ratio; the fixed demand is the
+    site's ``electricity`` demand column (heat and EV charging are flexible).
+    """
+    commodity = data["commodity"].reset_index()
+    supim = set(zip(commodity.loc[commodity["Type"].eq("SupIm"), "Site"], commodity.loc[commodity["Type"].eq("SupIm"), "Commodity"]))
+    ratios = data["process_commodity"].reset_index()
+    inputs = ratios[ratios["Direction"].eq("In")]
+    outputs = ratios[ratios["Direction"].eq("Out") & ratios["Commodity"].eq("electricity")].set_index("Process")["ratio"]
+    process = data["process"].reset_index()
+    supply = data["supim"].droplevel("support_timeframe")
+    demand = data["demand"].droplevel("support_timeframe")
+    potential = {}
+    for row in process.to_dict("records"):
+        site, name = row["Site"], row["Process"]
+        for commodity_in in inputs.loc[inputs["Process"].eq(name), "Commodity"]:
+            if (site, commodity_in) in supim and name in outputs.index and (site, commodity_in) in supply.columns:
+                series = supply[(site, commodity_in)] * float(row["cap-up"]) * float(outputs[name])
+                potential[site] = potential.get(site, 0.0) + series
+    rows = []
+    for site, series in potential.items():
+        fixed = demand[(site, "electricity")] if (site, "electricity") in demand.columns else 0.0
+        surplus = series > fixed
+        rows.append(pd.Series(surplus.to_numpy(dtype=bool), index=pd.MultiIndex.from_product([[site], surplus.index], names=["site", "t"])))
+    if not rows:
+        return pd.Series(dtype=bool, index=pd.MultiIndex.from_arrays([[], []], names=["site", "t"]))
+    return pd.concat(rows)
+
+
+def apply_hems_session_cap(data, factor):
+    """Add the HEMS charging limit (``hems_available_fraction``) to the session hours.
+
+    Step 3 only: InFlex reconstructs charging from the unchanged
+    ``available_fraction`` of the Step 2 input. ``factor`` None leaves data unchanged.
+    """
+    if factor is None or data.get("ev_sessions") is None or data["ev_sessions"].empty:
+        return data
+    data["ev_session_hours"] = hems_session_fractions(
+        data["ev_sessions"], data["ev_session_hours"], factor=float(factor), uncapped=pv_surplus_hours(data),
+    )
+    return data
+
+
 def load_and_prepare(input_path, global_settings, solver_name):
     """Read the input, record the run settings and identify the model features.
 
@@ -198,6 +245,7 @@ def load_and_prepare(input_path, global_settings, solver_name):
     print(f"Identified running modes: {mode}")
     if not mode["tsam"]:
         _check_full_year_input(mode, data)
+    data = apply_hems_session_cap(data, global_settings.get("hems_session_power_factor"))
     return data, mode, scenario_name
 
 

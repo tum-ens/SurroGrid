@@ -18,6 +18,8 @@ storage: a session's obligation can never be served during a different session.
 
 import pyomo.core as pyomo
 
+from gridexpand.common.ev_sessions import HEMS_FRACTION_COLUMN
+
 
 def add_ev_sessions(m, data):
     """Add the dedicated session variables' constraints to model ``m``."""
@@ -47,7 +49,8 @@ def add_ev_sessions(m, data):
                 f"EV session hour references unknown session {key!r}."
             )
         timestep = int(row["t"])
-        fraction = float(row["available_fraction"])
+        # The HEMS charging limit of Step 3 when present (see apply_hems_session_cap).
+        fraction = float(row.get(HEMS_FRACTION_COLUMN, row["available_fraction"]))
         session_hours[key].append((timestep, fraction))
         charger_key = session_process[key] + (timestep,)
         if charger_key in charger_hours:

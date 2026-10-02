@@ -407,6 +407,15 @@ Vehicle ownership, model and schedule are sampled per household with the stable 
   session` and frozen with `--freeze-manifest`) and write dedicated EV sessions (`urbs_in/ev_sessions`), which
   INFLEX needs. This is why synthetic runs cannot run INFLEX (open question for the user).
 
+**HEMS session spreading.** Under flat prices every charging hour inside a session costs the same unless
+local PV is available, so the HEMS optimum is degenerate: the LP returns full-power bursts that coincide
+across buildings by solver choice, not by modelled behaviour. `mobility.hems_session_power_factor` (α ≥ 1)
+caps each session in Step 3 at α × its average required power (session energy over connected hours) in
+every hour without local PV surplus, i.e. where the site's PV potential (capacity bound × availability)
+does not exceed its fixed electricity demand; PV-surplus hours keep the charger rating. The cap only
+tightens the session's charging fraction (`hems_available_fraction`), adds no variables and keeps every
+session feasible. InFlex charging is unchanged.
+
 ## Prices and temporal aggregation
 
 Import price (0.398 EUR/kWh) and PV feed-in tariff (0.0 EUR/kWh in every repository scenario; a zero tariff keeps

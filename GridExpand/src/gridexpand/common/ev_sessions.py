@@ -50,6 +50,9 @@ SESSION_COLUMNS = [
 
 SESSION_HOUR_COLUMNS = ["session_id", "t", "order", "available_fraction"]
 
+# Step 3 only: the HEMS charging limit per session hour (InFlex keeps available_fraction).
+HEMS_FRACTION_COLUMN = "hems_available_fraction"
+
 
 class SessionError(ValueError):
     """A session table violates the shared contract."""
@@ -578,6 +581,48 @@ def earliest_feasible_schedule(
 # ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
+
+
+def hems_session_fractions(
+    sessions: pd.DataFrame,
+    hours: pd.DataFrame,
+    *,
+    factor: float,
+    uncapped: pd.Series,
+) -> pd.DataFrame:
+    """Session hours with the HEMS charging limit in ``hems_available_fraction``.
+
+    HEMS spreads each session over its stay: in every hour the charger may draw at
+    most ``factor`` times the session's average required power (energy over
+    connected hours), as a fraction of its rating, and never more than the
+    connected fraction. Hours where ``uncapped`` (a boolean Series indexed by
+    ``(site, t)``, e.g. local PV surplus) is True keep the connected fraction.
+    ``factor >= 1`` keeps every session feasible: with ``c`` the capped fraction,
+    ``min(f, c) >= c * f`` for ``f <= 1`` gives at least ``factor`` times the
+    energy over the session.
+    """
+    if not factor >= 1.0:
+        raise ValueError("The HEMS session power factor must be at least 1.")
+    frame = hours.merge(
+        sessions[["session_id", "site", "charger_kw", "energy_kwh"]],
+        on="session_id", how="left", validate="many_to_one",
+    )
+    if frame["site"].isna().any():
+        raise SessionError("Session hours reference unknown sessions.")
+    available = pd.to_numeric(frame["available_fraction"], errors="raise").to_numpy(dtype=float)
+    connected = frame.groupby("session_id")["available_fraction"].transform("sum").to_numpy(dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        cap = np.where(
+            connected > 0,
+            float(factor) * frame["energy_kwh"].to_numpy(dtype=float)
+            / connected / frame["charger_kw"].to_numpy(dtype=float),
+            0.0,
+        )
+    keys = pd.MultiIndex.from_arrays([frame["site"], frame["t"].astype(int)], names=["site", "t"])
+    keep = uncapped.reindex(keys, fill_value=False).to_numpy(dtype=bool)
+    result = hours.copy()
+    result[HEMS_FRACTION_COLUMN] = np.where(keep, available, np.minimum(available, cap))
+    return result
 
 
 def _put_table(store, key, frame, columns):

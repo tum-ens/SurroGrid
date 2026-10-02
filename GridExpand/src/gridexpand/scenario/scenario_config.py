@@ -354,6 +354,10 @@ class MobilityConfig:
     driving_cycle_type: str
     road_type: int
     road_slope: float
+    # HEMS spreads each charging session over its stay: at most this factor times
+    # the session's average required power, except in hours of local PV surplus.
+    # None: no limit beyond the charger rating. InFlex charging is unaffected.
+    hems_session_power_factor: float | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "MobilityConfig":
@@ -365,7 +369,12 @@ class MobilityConfig:
             "cabin_air_flow_m3_per_s", "driving_cycle_type", "road_type",
             "road_slope",
         }
-        _only(raw, allowed, "mobility")
+        _only(raw, allowed | {"hems_session_power_factor"}, "mobility")
+        factor = raw.get("hems_session_power_factor")
+        if factor is not None:
+            factor = _positive(factor, "mobility.hems_session_power_factor")
+            if factor < 1.0:
+                raise ValueError("mobility.hems_session_power_factor must be at least 1 (sessions stay feasible).")
         probability = _positive(raw["commuting_probability"], "mobility.commuting_probability", allow_zero=True)
         if probability > 1:
             raise ValueError("mobility.commuting_probability must be <= 1.")
@@ -392,6 +401,7 @@ class MobilityConfig:
             driving_cycle_type=cycle,
             road_type=int(_positive(raw["road_type"], "mobility.road_type", allow_zero=True)),
             road_slope=float(_number_or_none(raw["road_slope"], "mobility.road_slope")),
+            hems_session_power_factor=factor,
         )
 
 

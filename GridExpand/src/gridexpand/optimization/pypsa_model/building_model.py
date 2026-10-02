@@ -36,6 +36,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from gridexpand.common.ev_sessions import HEMS_FRACTION_COLUMN
+
 from gridexpand.optimization.urbs.features.modelhelper import invcost_factor
 
 EPS = 1e-9
@@ -347,9 +349,12 @@ def _session_fractions(data: dict, snapshots: pd.Index) -> dict[str, pd.Series]:
     if data.get("ev_sessions") is None or data["ev_sessions"].empty:
         return {}
     fractions = {}
-    for name, group in _session_hours(data).groupby("name", sort=False):
+    hours = _session_hours(data)
+    # The HEMS charging limit of Step 3 when present (see apply_hems_session_cap).
+    column = HEMS_FRACTION_COLUMN if HEMS_FRACTION_COLUMN in hours.columns else "available_fraction"
+    for name, group in hours.groupby("name", sort=False):
         fraction = pd.Series(0.0, index=snapshots)
-        fraction.loc[group["t"].to_numpy()] = group["available_fraction"].to_numpy(dtype=float)
+        fraction.loc[group["t"].to_numpy()] = group[column].to_numpy(dtype=float)
         fractions[name] = fraction
     return fractions
 
