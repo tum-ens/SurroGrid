@@ -55,8 +55,10 @@ first `len % n_cpu` clusters get one more building; empty clusters are dropped).
 it needs a Gurobi installation and licence (`GUROBI_HOME`, `GRB_LICENSE_FILE`, see the
 [README](../../README.md#install)). `appsi_highs` needs no licence (`mip_rel_gap=0.05`); the heuristic cases are
 degenerate LPs and the optimized case a MIP stopped at a 5 % gap, so another solver can return a different optimal
-vertex or MIP solution: treat the solver as part of the scenario. A solve that does not terminate optimally fails
-the run.
+vertex or MIP solution: treat the solver as part of the scenario. With the PyPSA optimizer, a Gurobi solve that
+does not end optimal is solved once more with `Presolve=0`: Gurobi's presolve can declare a feasible internal-heat
+model infeasible or unbounded. The solver audit records the options of the final solve. A solve that does not
+terminate optimally fails the run.
 
 **TSAM.** With `time_aggregation.enabled` (or `--tsam`), typical periods are selected from `Tamb` and
 `Irradiation` only. TSAM is refused when the input has EV sessions (paired inputs), and the paired and aligned

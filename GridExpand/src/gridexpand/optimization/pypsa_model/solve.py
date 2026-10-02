@@ -71,6 +71,14 @@ def solve_network(data: dict, mode: dict, *, solver_name: str, log_file=None, en
         kwargs["env"] = env
     start = time.time()
     status, condition = network.model.solve(**kwargs, **options)
+    if (status != "ok" or condition != "optimal") and solver == "gurobi" and options.get("Presolve") != 0:
+        # Gurobi's presolve can declare a feasible, bounded internal-heat model
+        # infeasible or unbounded (2026-10-02 pilot); solve once more without it.
+        # The audit's solver options then record Presolve 0.
+        print(f"Building group {index}: gurobi ended {condition} after presolve; "
+              "solving again without presolve.", flush=True)
+        options = {**options, "Presolve": 0}
+        status, condition = network.model.solve(**kwargs, **options)
     solve_seconds = time.time() - start
     if status != "ok" or condition != "optimal":
         raise RuntimeError(
