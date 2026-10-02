@@ -241,6 +241,11 @@ The space-heat source is `asset_sizing.heat.space_heat_source`:
   the number of floors passed to TEASER does not change the result, and no blanket heated-area factor is
   applied. The TEASER envelope design load is not used for sizing (see below). Occupancy (richardsonpy) and hot
   water draw on seeded random states per building.
+- `internal`: corrected ro-heat envelope coefficients,
+  weather and gains feed a 1R1C temperature balance. HEMS determines space heating
+  within comfort bounds; InFlex uses an independent forward thermostat reference.
+  See [Internal space heat and building preheating](#internal-space-heat-and-building-preheating)
+  for the effective heated zone, source provenance and boundaries.
 
 #### TEASER refurbishment level
 
@@ -525,3 +530,78 @@ unit, target bus and target:
 Use an absolute tolerance of 1e-6 for deterministic capacity and energy transformations and report a separate
 relative tolerance for solver results. These checks are not automated end to end: the fixed-grid smoke runners
 that ran part of them were removed on 2026-09-25.
+
+### Internal space heat and building preheating
+
+`asset_sizing.heat.space_heat_source: internal` activates a chronological 1R1C
+model in both urbs/Pyomo and PyPSA/Linopy. For each physical residential building:
+
+```
+C / dt * (T[t] - T[t-1]) = Q_room[t] + G_internal[t] + G_solar[t]
+                         - (H_transmission + H_ventilation) * (T[t] - T_out[t])
+```
+
+The discretization is implicit Euler, following urbs-lvds. Units are kWh/K,
+kW/K, kW, hours and °C. Delivered room heat is nonnegative and replaces fixed
+space-heat demand in HEMS. Buildings sharing an electrical site retain separate
+temperature states. HEMS optimizes the complete horizon with perfect foresight.
+Internal+TSAM and discontinuous period selection are rejected.
+
+The coefficient source is corrected `ro_heat.buildings_rc`: resistance K/W and
+capacitance J/K. Its upstream 0.8 heated-area fraction is already embedded in R/C
+and is not applied again. A mixed building's residential component share scales
+conductance and capacitance once. The thermal floor area is 80% of residential
+component area; ventilation uses this area and the configured zone height.
+Household electricity, occupancy and direct DHW are not reduced by 20%.
+The stored refurbishment years and RC changelog are exported; these coefficients
+do not imply an additional 2045 refurbishment projection.
+
+Internal gains reuse Richardson occupancy with the existing nighttime-presence
+rule (70 W per present person), plus 0.362 of residential household electricity.
+Seeds use physical IDs. Civil-time occupancy and DHW are mapped to fixed CET.
+Solar irradiance uses the existing DistrictGenerator cardinal-plane calculation.
+The database's total window area is divided equally between four cardinal
+orientations because the available RC envelope lacks window orientations.
+Window area follows the same residential/thermal area convention. The initial
+solar approximation includes transmitted window gains with configurable glazing
+transmittance (0.6), and blinds transmitting 0.15 above 100 W/m². It excludes
+opaque-surface absorption and long-wave sky exchange; this is a documented
+simplification relative to the TEASER 5R1C envelope gain calculation.
+
+A forward, year-round thermostat supplies only enough heat to maintain the
+minimum temperature (20°C by default), allowing passive overheating. Its annual
+cycle is warmed up until the temperature boundary closes to 1e-9 K. HEMS starts
+and ends at that recorded state. The upper bound is the larger of the baseline
+passive temperature and minimum plus permitted preheating (0/1/2 K scenarios).
+There is no cooling, comfort slack or artificial weekly temperature reset.
+
+The independent reference sizes the fixed HP/rod/buffer with the configured
+full-load-hour rule ([Climate inputs and full-load hours](#climate-inputs-and-full-load-hours)).
+Separate room, DHW and tank charging COP curves consume one shared electrical HP
+capacity; the rod likewise has one capacity. Only tank charging raises its sink
+curve, by the usable buffer spread (`buffer_usable_temperature_spread_k`). That
+COP route carries the charging penalty, so the internal tank's storage charge
+efficiency is 1; the tank keeps the configured discharge efficiency and standing
+loss. Tank charging must enter storage; DHW remains direct. Fixed COP curves do
+not change with optimized room uplift. The buffer and building mass are distinct
+stores. Service routing adds no new investment or integer decisions.
+
+InFlex uses the independent thermostat reference, fixed capacities and an
+instantaneous HP dispatch to the highest-COP service first, with the rod supplying
+remaining heat. It has no preheating or forecast. Its EV and greedy battery rules
+are unchanged. The `heatpump_air` parent throughput exports total HP electricity
+for Step-4 active/reactive demand, while service routes retain separate flows.
+
+Physical references are cached by envelope provenance, area, occupancy,
+residential electricity, weather, seed, thermal settings, generator source
+fingerprints and dependency versions, independently of
+target topology and permitted uplift. The 0/1/2 K cases reuse the same reference
+and equipment. `raw_data/thermal_building_parameters`,
+`raw_data/internal_heat_reference` and `urbs_in/building_thermal_*` record the
+inputs. Results include `building_temperature`, `building_heat`,
+`building_gains`, `building_loss` and `building_energy_residual`.
+
+Internal preparation does not require TEASER heat/COP libraries. TEASER's
+80%-area alignment and matched rerun remain deferred. Archived TEASER results
+are historical context; grid expansion savings require a matched full-year
+Step-4 comparison and cannot be inferred from building operating cost savings.

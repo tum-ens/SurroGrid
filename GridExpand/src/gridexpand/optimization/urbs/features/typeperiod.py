@@ -289,6 +289,10 @@ def run_tsam(data, noTypicalPeriods, hoursPerPeriod, extremePeriodMethod="replac
 
 
 def select_predefined_timesteps(data, timesteps):
+    if 'building_thermal_timeseries' in data:
+        if list(timesteps) != list(range(int(data['demand'].index.get_level_values('t').max())+1)):
+            raise ValueError('Internal thermal inputs cannot be sliced into independent representative periods.')
+        data['building_thermal_timeseries'] = data['building_thermal_timeseries'][data['building_thermal_timeseries'].index.get_level_values('t').isin(timesteps)]
     data['demand'] = data['demand'][data['demand'].index.get_level_values(1).isin(timesteps)]
     data['supim'] = data['supim'][data['supim'].index.get_level_values(1).isin(timesteps)]
     data['eff_factor'] = data['eff_factor'][data['eff_factor'].index.get_level_values(1).isin(timesteps)]

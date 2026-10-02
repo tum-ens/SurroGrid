@@ -22,6 +22,7 @@ def add_urbs_constraints(network, parts: ModelParts) -> None:
     _storage_input_costs(network, parts)
     _ev_sessions(network, parts)
     _linked_storages(network, parts)
+    _thermal(network, parts)
 
 
 def _fixed_investment_costs(network, parts: ModelParts) -> None:
@@ -111,3 +112,38 @@ def _linked_storages(network, parts: ModelParts) -> None:
         max_hours = xr.DataArray(parts.storages.loc[group["storage"], "max_hours"].to_numpy(), **along)
         ratio = xr.DataArray(group["ratio"].to_numpy(), **along)
         m.add_constraints(max_hours * power - ratio * capacity <= 0, name=f"linked-storage-{component}")
+
+
+def _thermal(network, parts):
+    """1R1C states use the same implicit-Euler interval balance as Pyomo."""
+    if parts.thermal_parameters.empty:
+        return
+    m = network.model
+    params = parts.thermal_parameters.set_index("building_objectid")
+    ids = pd.Index(params.index.astype(str), name="building")
+    snapshots = parts.snapshots
+    def series(field):
+        frame = parts.thermal_timeseries.xs(field, level=1, axis=1).xs(parts.stf, level=0)
+        return xr.DataArray(frame.loc[snapshots, ids].to_numpy(), coords={"snapshot": snapshots, "building": ids}, dims=("snapshot", "building"))
+    def coefficient(field):
+        return xr.DataArray(params.loc[ids, field].to_numpy(), coords={"building": ids}, dims="building")
+    temp = m.add_variables(lower=series("minimum_temperature_c"), upper=series("upper_temperature_c"), name="Building-temperature")
+    heat = -m["Generator-p"].sel(name=[f"thermal|{bid}" for bid in ids]).rename(name="building").assign_coords(building=ids)
+    h, c = coefficient("conductance_kw_per_k"), coefficient("capacitance_kwh_per_k")
+    outside = series("outside_temperature_c")
+    gains = series("internal_gains_kw") + series("solar_gains_kw")
+    # Inputs are hourly. Unsupported resolutions are rejected by the Step-3 runner.
+    m.add_constraints((c+h)*temp.isel(snapshot=0) - heat.isel(snapshot=0)
+                      == c*coefficient("initial_temperature_c") + h*outside.isel(snapshot=0) + gains.isel(snapshot=0), name="Building-first-balance")
+    if len(snapshots) > 1:
+        current = temp.isel(snapshot=slice(1,None))
+        previous = temp.isel(snapshot=slice(None,-1)).assign_coords(snapshot=snapshots[1:])
+        m.add_constraints((c+h)*current - c*previous - heat.isel(snapshot=slice(1,None))
+                          == (h*outside+gains).isel(snapshot=slice(1,None)), name="Building-balance")
+    m.add_constraints(temp.isel(snapshot=-1) == coefficient("terminal_temperature_c"), name="Building-terminal-temperature")
+    for row in parts.thermal_parameters.itertuples():
+        name = f"{row.Site}|heat_storage_{row.building_objectid}"
+        if name in parts.storages.index:
+            route = f"{row.Site}|HP_buffer_{row.building_objectid}"
+            cop = network.links_t.efficiency[route].to_xarray()
+            m.add_constraints(m["Link-p"].sel(name=route)*cop == m["StorageUnit-p_store"].sel(name=name),name=f"Building-tank-charge-{row.building_objectid}")

@@ -115,7 +115,7 @@ def result_entities(network, parts: ModelParts) -> dict[str, pd.Series]:
     sto_keys = [sto["site"].to_numpy(), sto["storage"].to_numpy(), sto["commodity"].to_numpy()]
     sto_index = pd.MultiIndex.from_arrays([np.full(len(sto), stf), *sto_keys], names=["stf", "sit", "sto", "com"])
     content = pd.concat([sto_con.iloc[[-1]], sto_con])  # t = 0 equals the last step (cyclic)
-    return {
+    results = {
         "tau_pro": hourly(tau, pro_keys, ["sit", "pro"], steps, "tau_pro"),
         "cap_pro": pd.Series(capacity.to_numpy(dtype=float), name="cap_pro", index=pd.MultiIndex.from_arrays(
             [np.full(len(pro), stf), *pro_keys], names=["stf", "sit", "pro"])),
@@ -126,3 +126,25 @@ def result_entities(network, parts: ModelParts) -> dict[str, pd.Series]:
         "e_sto_con": hourly(content, sto_keys, ["sit", "sto", "com"], np.concatenate([[0], steps]), "e_sto_con"),
         "costs": costs,
     }
+    if not parts.thermal_parameters.empty:
+        params = parts.thermal_parameters
+        ids = params.building_objectid.astype(str).tolist()
+        temperature = _solution(network.model, "Building-temperature")[ids]
+        initial = pd.DataFrame([params.initial_temperature_c.to_numpy()], columns=ids)
+        heat = -_solution(network.model, "Generator-p")[[f"thermal|{bid}" for bid in ids]]
+        keys = [params.Site.to_numpy(), np.asarray(ids)]
+        results["building_temperature"] = hourly(pd.concat([initial,temperature]), keys, ["sit", "building"], np.r_[0,steps], "building_temperature")
+        results["building_heat"] = hourly(heat, keys, ["sit", "building"], steps, "building_heat")
+        temperature.index = parts.snapshots
+        initial.index = [0]
+        all_temperature = pd.concat([initial,temperature])
+        thermal = parts.thermal_timeseries.xs(parts.stf,level=0)
+        gains = thermal.xs("internal_gains_kw",axis=1,level=1).loc[steps,ids] + thermal.xs("solar_gains_kw",axis=1,level=1).loc[steps,ids]
+        outside = thermal.xs("outside_temperature_c",axis=1,level=1).loc[steps,ids]
+        h = pd.Series(params.conductance_kw_per_k.to_numpy(),index=ids)
+        c = pd.Series(params.capacitance_kwh_per_k.to_numpy(),index=ids)
+        loss = (temperature-outside)*h
+        residual = all_temperature.diff().loc[steps]*c-heat.set_axis(ids,axis=1)-gains+loss
+        for name,frame in (("building_gains",gains),("building_loss",loss),("building_energy_residual",residual)):
+            results[name] = hourly(frame,keys,["sit","building"],steps,name)
+    return results

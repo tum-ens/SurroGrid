@@ -111,6 +111,9 @@ class Grid:
         self.df_battery_asset_plan = pd.DataFrame()
         self.df_battery_storage = pd.DataFrame()
         self.df_battery_audit = pd.DataFrame()
+        self.df_thermal_parameters = pd.DataFrame()
+        self.df_thermal_timeseries = pd.DataFrame()
+        self.df_internal_heat_reference = pd.DataFrame()
         self.df_heat_asset_plan = pd.DataFrame()
         self.df_heat_audit = pd.DataFrame()
         self.df_heat_process = pd.DataFrame()
@@ -621,6 +624,32 @@ class Grid:
                     )
                 self.df_buildings[column] = sampled_values
 
+        if self.settings["scenario_config"].heat.space_heat_source == "internal":
+            from gridexpand.allocation.assets.heat.internal import prepare_internal_heat
+            scenario = self.settings["scenario_config"]
+            buildings = residential.rename(columns={"objectid": "building_objectid", "bus": "Site"})
+            electricity = {}
+            for component in residential_components.to_dict("records"):
+                bid = str(component["objectid"])
+                key = (str(component["component_id"]), "electricity")
+                electricity[bid] = dst_shift_output(self.df_electricity_component_profiles[[key]]).iloc[:,0].to_numpy()
+            internal = prepare_internal_heat(buildings,self.df_weather_raw,self.plz,
+                heat_config=scenario.heat,technologies=scenario.technologies,
+                sizing_method=scenario.heat_sizing_method(self.settings["model_case"]),
+                seed=self.profile_seed,electricity_by_building=electricity)
+            self.df_thermal_parameters = internal.parameters
+            self.df_thermal_timeseries = internal.timeseries
+            self.df_internal_heat_reference = internal.reference
+            self.df_heat_asset_plan = internal.asset_plan
+            self.df_heat_audit = internal.audit
+            self.df_demand_heat_space = internal.demand.loc[:,pd.IndexSlice[:,["space_heat"]]]
+            self.df_demand_heat_water = internal.demand.loc[:,pd.IndexSlice[:,["water_heat"]]]
+            self.df_tve_hpcop = internal.eff_factor
+            for attribute in ("process","commodity","process_commodity","storage"):
+                setattr(self,"df_heat_"+attribute,getattr(internal,attribute))
+            self.settings["scenario_assumptions"].update(internal.metadata)
+            self.SF.update_timeframe_metadata(self.settings["scenario_assumptions"])
+            return
         if self.settings["scenario_config"].heat.space_heat_source == "infdb_ro_heat":
             # The INFDB loader aggregates by bus. Re-load with the selected
             # physical buildings so an unselected building sharing a bus cannot
@@ -847,6 +876,8 @@ class Grid:
         )
 
     def apply_timeframe_slice(self):
+        if not self.df_thermal_parameters.empty and self.timeframe_mode != "full_year":
+            raise ValueError("Internal thermal inertia requires chronological full-year inputs; week slicing is unsupported.")
         if self.timeframe_mode == "full_year" or self._timeframe_slice_applied:
             return
         start = self.timeframe_metadata.get("selected_start_hour")

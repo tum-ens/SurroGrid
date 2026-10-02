@@ -194,6 +194,37 @@ class PvSizingConfig:
 
 
 @dataclass(frozen=True)
+class InternalHeatConfig:
+    """Explicit 1R1C assumptions; coefficients use the stored ro-heat envelope."""
+    parameter_source: str = "infdb_rc"
+    refurbishment_state: str = "stored_ro_heat"
+    minimum_temperature_c: float = 20.0
+    hems_preheat_uplift_k: float = 2.0
+    ventilation_air_changes_per_hour: float = 0.5
+    zone_height_m: float = 3.125
+    person_gain_w: float = 70.0
+    electricity_gain_fraction: float = 0.362
+    glazing_solar_transmittance: float = 0.6
+    blind_irradiance_threshold_w_per_m2: float = 100.0
+    closed_blind_transmittance: float = 0.15
+
+    @classmethod
+    def from_dict(cls, raw):
+        raw = _mapping(raw, "asset_sizing.heat.internal")
+        fields = cls.__dataclass_fields__
+        _only(raw, set(fields), "asset_sizing.heat.internal")
+        values = {name: raw.get(name, field.default) for name, field in fields.items()}
+        if values["parameter_source"] != "infdb_rc" or values["refurbishment_state"] != "stored_ro_heat":
+            raise ValueError("Internal heat requires infdb_rc and the traceable stored_ro_heat refurbishment state.")
+        for name in set(fields) - {"parameter_source", "refurbishment_state"}:
+            values[name] = _positive(values[name], f"asset_sizing.heat.internal.{name}", allow_zero=name in {"hems_preheat_uplift_k", "person_gain_w", "electricity_gain_fraction", "glazing_solar_transmittance", "closed_blind_transmittance"})
+        for name in ("electricity_gain_fraction", "glazing_solar_transmittance", "closed_blind_transmittance"):
+            if values[name] > 1:
+                raise ValueError(f"Internal heat {name} must be <= 1.")
+        return cls(**values)
+
+
+@dataclass(frozen=True)
 class HeatSizingConfig:
     space_heat_source: str
     indoor_design_temperature_c: float
@@ -204,6 +235,8 @@ class HeatSizingConfig:
     # TABULA variant for the TEASER source: 0 standard (as built),
     # 1 usual refurbishment, 2 advanced refurbishment.
     teaser_retrofit_level: int = 0
+    heated_area_fraction: float = 0.8
+    internal: InternalHeatConfig | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "HeatSizingConfig":
@@ -214,17 +247,23 @@ class HeatSizingConfig:
             "heat_pump_design_share", "buffer_volume_l_per_kw_th",
             "buffer_usable_temperature_spread_k",
         }
-        _only(raw, allowed | {"teaser_retrofit_level"}, "asset_sizing.heat")
-        if set(raw) - {"teaser_retrofit_level"} != allowed:
+        _only(raw, allowed | {"teaser_retrofit_level", "heated_area_fraction", "internal"}, "asset_sizing.heat")
+        if set(raw) - {"teaser_retrofit_level", "heated_area_fraction", "internal"} != allowed:
             raise ValueError("asset_sizing.heat is incomplete.")
         retrofit = raw.get("teaser_retrofit_level", 0)
         if isinstance(retrofit, bool) or retrofit not in (0, 1, 2):
             raise ValueError("asset_sizing.heat.teaser_retrofit_level must be 0, 1 or 2.")
         source = str(raw["space_heat_source"])
-        if source not in {"teaser", "infdb_ro_heat"}:
+        if source not in {"teaser", "infdb_ro_heat", "internal"}:
             raise ValueError(
-                "asset_sizing.heat.space_heat_source must be teaser or infdb_ro_heat."
+                "asset_sizing.heat.space_heat_source must be teaser, infdb_ro_heat or internal."
             )
+        fraction = _positive(raw.get("heated_area_fraction", 0.8), "asset_sizing.heat.heated_area_fraction")
+        if fraction > 1 or (source == "internal" and fraction != 0.8):
+            raise ValueError("Internal InfDB RC inputs already embed heated_area_fraction=0.8; another fraction requires regenerated coefficients.")
+        internal = InternalHeatConfig.from_dict(raw.get("internal", {})) if source == "internal" else None
+        if source != "internal" and raw.get("internal") is not None:
+            raise ValueError("The internal heat block requires space_heat_source=internal.")
         inside = _positive(raw["indoor_design_temperature_c"], "asset_sizing.heat.indoor_design_temperature_c")
         limit = _positive(raw["heating_limit_temperature_c"], "asset_sizing.heat.heating_limit_temperature_c")
         if limit >= inside:
@@ -240,6 +279,8 @@ class HeatSizingConfig:
             buffer_volume_l_per_kw_th=_positive(raw["buffer_volume_l_per_kw_th"], "asset_sizing.heat.buffer_volume_l_per_kw_th"),
             buffer_usable_temperature_spread_k=_positive(raw["buffer_usable_temperature_spread_k"], "asset_sizing.heat.buffer_usable_temperature_spread_k"),
             teaser_retrofit_level=int(retrofit),
+            heated_area_fraction=fraction,
+            internal=internal,
         )
 
 

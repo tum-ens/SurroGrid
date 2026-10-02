@@ -110,7 +110,14 @@ SECTIONS: list[dict[str, Any]] = [
         _field("asset_sizing.heat.space_heat_source", "Space-heat source", "enum", options=[
             {"value": "teaser", "label": "TEASER building models"},
             {"value": "infdb_ro_heat", "label": "InfDB ro_heat"},
-        ], hint="Space-heat demand from TEASER, or from the InfDB ro_heat schema (must exist in the database)."),
+            {"value": "internal", "label": "Internal heat and building preheating"},
+        ], hint="Fixed heat demand from TEASER/InfDB, or internal room heating with corrected InfDB building parameters."),
+        _field("asset_sizing.heat.internal.minimum_temperature_c", "Minimum room temperature", "float", "°C", min=0, step=0.5,
+               requires={"key":"asset_sizing.heat.space_heat_source","value":"internal"},default=20.0,
+               hint="Thermostat and HEMS minimum comfort temperature."),
+        _field("asset_sizing.heat.internal.hems_preheat_uplift_k", "Building preheating allowance", "float", "K", min=0, step=0.5,
+               requires={"key":"asset_sizing.heat.space_heat_source","value":"internal"},default=2.0,
+               hint="Permitted HEMS temperature uplift; use 0 K for the matched control."),
         _field("asset_sizing.heat.teaser_retrofit_level", "TEASER retrofit level", "enum", options=[
             {"value": 0, "label": "0 · as built"},
             {"value": 1, "label": "1 · usual refurbishment"},
@@ -408,6 +415,13 @@ def apply_changes(text: str, changes: dict[str, Any], scenario_id: str | None = 
         for other in FIELDS[key].get("mirror", ()):
             if get_value(doc, other) is not _MISSING:
                 put(other, value)
+    if typed.get("asset_sizing.heat.space_heat_source") == "internal" and get_value(doc,"asset_sizing.heat.internal") is _MISSING:
+        from dataclasses import asdict
+        from gridexpand.scenario.scenario_config import InternalHeatConfig
+        values = asdict(InternalHeatConfig())
+        get_value(doc,"asset_sizing.heat")["internal"] = CommentedMap(values)
+        get_value(expected,"asset_sizing.heat")["internal"] = dict(values)
+        changed = True
     for key, field in FIELDS.items():
         if not field.get("requires"):
             continue
@@ -420,6 +434,12 @@ def apply_changes(text: str, changes: dict[str, Any], scenario_id: str | None = 
         elif leaf in mapping and field["requires"]["key"] in typed:
             _delete(mapping, leaf)
             del get_value(expected, key.rsplit(".", 1)[0])[leaf]
+            changed = True
+    if typed.get("asset_sizing.heat.space_heat_source") in {"teaser","infdb_ro_heat"}:
+        mapping = get_value(doc,"asset_sizing.heat")
+        if "internal" in mapping:
+            _delete(mapping,"internal")
+            get_value(expected,"asset_sizing.heat").pop("internal",None)
             changed = True
     if scenario_id is not None:
         put("scenario.id", scenario_id)
@@ -488,7 +508,7 @@ def form_sections(text: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         for field in section["fields"]:
             value = get_value(data, field["key"])
             parent_exists = get_value(data, field["key"].rsplit(".", 1)[0]) is not _MISSING
-            if value is _MISSING and not (parent_exists and (field.get("optional") or field.get("requires"))):
+            if value is _MISSING and not (field.get("requires") or (parent_exists and field.get("optional"))):
                 continue
             fields.append(field | {
                 "value": field.get("default") if value is _MISSING else value,

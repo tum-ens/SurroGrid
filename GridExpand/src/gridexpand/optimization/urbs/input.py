@@ -10,6 +10,7 @@ from .features.modelhelper import invcost_factor
 from .identify import identify_mode
 
 EV_SESSION_KEYS = ("ev_sessions", "ev_session_hours")
+TIME_SERIES_KEYS = ("buy_sell_price", "demand", "eff_factor", "supim", "weather", "building_thermal_timeseries")
 
 # The single support timeframe of every table (a relic of intertemporal urbs). It
 # labels the `stf` index level of all urbs_out results. It used to be the
@@ -43,9 +44,9 @@ def read_input_h5(input_path):
 
     # Add an initialization row to timeseries data:
     for key in raw_data_dict.keys():
-        if key in ["buy_sell_price", "demand", "eff_factor", "supim", "weather"]:
+        if key in TIME_SERIES_KEYS:
             columns = raw_data_dict[key].columns
-            zero_row = pd.DataFrame([np.zeros(len(columns))], columns=columns)
+            zero_row = raw_data_dict[key].iloc[[0]].copy() if key == "building_thermal_timeseries" else pd.DataFrame([np.zeros(len(columns))], columns=columns)
             raw_data_dict[key] = pd.concat([zero_row, raw_data_dict[key]], ignore_index=True)
 
     ### Convert columns to multiindex:
@@ -69,7 +70,7 @@ def read_input_h5(input_path):
         # they carry their own model-hour column and must not be reindexed.
         if key in EV_SESSION_KEYS:
             continue
-        if key in ["buy_sell_price", "demand", "eff_factor", "supim", "weather"]:
+        if key in TIME_SERIES_KEYS:
             raw_data_dict[key] = pd.concat([raw_data_dict[key]], keys=[support_timeframe], names=['support_timeframe', 't'])
         else:
             raw_data_dict[key] = pd.concat([raw_data_dict[key]], keys=[support_timeframe], names=['support_timeframe'])
@@ -233,7 +234,12 @@ def get_cluster_data(data, cluster):
         retained = set(sessions['session_id'])
     cluster_data = {}
     for key, value in data.items():
-        if key in ('commodity', 'process', 'site', 'storage'):
+        if key == 'building_thermal_parameters':
+            cluster_data[key] = value[value['Site'].isin(sites)].copy()
+        elif key == 'building_thermal_timeseries':
+            retained_buildings = set(data['building_thermal_parameters'].loc[data['building_thermal_parameters']['Site'].isin(sites), 'building_objectid'].astype(str))
+            cluster_data[key] = value.loc[:, value.columns.get_level_values(0).isin(retained_buildings)].copy()
+        elif key in ('commodity', 'process', 'site', 'storage'):
             cluster_data[key] = value[value.index.get_level_values(1).isin(cluster)]
         elif key in ('demand', 'supim', 'eff_factor'):
             cluster_data[key] = value[[column for column in value.columns if column[0] in sites]]

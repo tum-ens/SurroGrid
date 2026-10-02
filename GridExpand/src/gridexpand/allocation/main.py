@@ -12,6 +12,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+import pandas as pd
 from typing import Any
 
 from gridexpand.allocation.config import config
@@ -434,6 +435,11 @@ def write_outputs(grid: grd.Grid, kind: str) -> None:
     save_file.save_timeframe_metadata()
     save_file.flush_metadata()
     with save_file.output_store():
+        if not getattr(grid,"df_thermal_parameters",pd.DataFrame()).empty:
+            save_file.save_df(grid.df_thermal_parameters,"raw_data/thermal_building_parameters")
+            save_file.save_df(grid.df_internal_heat_reference,"raw_data/internal_heat_reference")
+            save_file.save_df(grid.df_thermal_parameters,"urbs_in/building_thermal_parameters")
+            save_file.save_df(grid.df_thermal_timeseries,"urbs_in/building_thermal_timeseries")
         for key, attribute, skip_if_empty in OUTPUT_KEYS[kind]:
             frame = getattr(grid, attribute)
             if skip_if_empty and (frame is None or frame.empty):

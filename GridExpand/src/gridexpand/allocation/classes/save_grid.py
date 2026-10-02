@@ -178,6 +178,8 @@ class SaveFile:
             "raw_data/battery_asset_plan",
             "raw_data/battery_asset_audit",
             "raw_data/heat_asset_plan",
+            "raw_data/thermal_building_parameters",
+            "raw_data/internal_heat_reference",
             "raw_data/building_components",
             "raw_data/demand_component_audit",
             "raw_data/heat_asset_audit",

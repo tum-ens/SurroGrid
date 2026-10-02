@@ -63,7 +63,9 @@ def installed_assets(cap_pro: pd.Series, cap_sto_c: pd.Series | None = None,
             rows.append({"bus": row.bus, "technology": PROCESS_TECHNOLOGY[row.pro], "building_objectid": "",
                          "units": 1, "power_kw": float(row.value), "energy_kwh": None})
     for row in storages.itertuples(index=False):
-        if row.sto in STORAGE_TECHNOLOGY and row.value >= MIN_CAPACITY:
+        if str(row.sto).startswith("heat_storage_") and row.value >= MIN_CAPACITY:
+            rows.append({"bus":row.bus,"technology":"heat_storage","building_objectid":str(row.sto)[len("heat_storage_"):],"units":1,"power_kw":None if pd.isna(row.power) else float(row.power),"energy_kwh":float(row.value)})
+        elif row.sto in STORAGE_TECHNOLOGY and row.value >= MIN_CAPACITY:
             rows.append({"bus": row.bus, "technology": STORAGE_TECHNOLOGY[row.sto], "building_objectid": "",
                          "units": 1, "power_kw": None if pd.isna(row.power) else float(row.power),
                          "energy_kwh": float(row.value)})

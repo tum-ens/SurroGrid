@@ -296,6 +296,7 @@ def main() -> None:
         default=SYNTHETIC_INPUT_DIR,
     )
     parser.add_argument("--heat-profile-library", type=Path)
+    parser.add_argument("--scenario-config",type=Path)
     args = parser.parse_args()
     paired_dir = args.paired_dir.resolve()
     allocation = pd.read_csv(paired_dir / "paired_real_bus_allocation_plan.csv")
@@ -311,17 +312,28 @@ def main() -> None:
             "building_objectid",
         ].astype(str)
     )
-    catalog = build_heat_profile_catalog(
-        allocation,
-        buildings,
-        synthetic_input_dir=args.synthetic_input_dir.resolve(),
-        heat_profile_library=(
-            args.heat_profile_library.resolve()
-            if args.heat_profile_library is not None
-            else None
-        ),
-        building_ids=eligible_heat_buildings,
-    )
+    internal = False
+    if args.scenario_config is not None:
+        from gridexpand.scenario.config_loader import load_scenario_config
+        scenario,_ = load_scenario_config(args.scenario_config)
+        internal = scenario.heat.space_heat_source == "internal"
+    if internal:
+        from ...assets.heat.internal import load_rc
+        rc = load_rc(eligible_heat_buildings)
+        catalog = rc.assign(profile_source_kind="internal_rc",profile_method="internal_rc",publication_ready=True,
+                            building_floor_area=rc.residential_component_area_m2)
+    else:
+        catalog = build_heat_profile_catalog(
+            allocation,
+            buildings,
+            synthetic_input_dir=args.synthetic_input_dir.resolve(),
+            heat_profile_library=(
+                args.heat_profile_library.resolve()
+                if args.heat_profile_library is not None
+                else None
+            ),
+            building_ids=eligible_heat_buildings,
+        )
     output = paired_dir / "paired_heat_profile_catalog.csv"
     catalog.to_csv(output, index=False)
     summary = profile_readiness_summary(catalog)

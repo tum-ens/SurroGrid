@@ -254,6 +254,8 @@ def _run_identity(args: argparse.Namespace) -> dict[str, Any]:
         "run_id": str(args.run_dir.name),
         "scenario_id": str(args.scenario_id),
         "scenario_hash": str(args.scenario_hash),
+        "thermal_rc_fingerprint": getattr(args,"thermal_rc_fingerprint",None),
+        "thermal_weather_fingerprint": getattr(args,"thermal_weather_fingerprint",None),
         "temporal_method": (
             "shared_weather_tsam" if args.tsam else "full_year_no_tsam"
         ),
@@ -643,6 +645,10 @@ def main(argv: list[str] | None = None) -> None:
         if pool_manifest_path.exists()
         else ""
     )
+    if scenario.heat.space_heat_source == "internal":
+        if args.tsam:
+            raise ValueError("Internal thermal inertia requires chronological inputs; TSAM is unsupported.")
+        args.heat_profile_library = None
     args.paired_dir = args.paired_dir.resolve()
     if args.grid_data_path is not None:
         args.grid_data_path = args.grid_data_path.resolve()
@@ -661,42 +667,53 @@ def main(argv: list[str] | None = None) -> None:
     args.run_dir.mkdir(parents=True, exist_ok=True)
     (args.run_dir / "logs").mkdir(parents=True, exist_ok=True)
 
-    catalog_path = args.paired_dir / "paired_heat_profile_catalog.csv"
-    catalog = pd.read_csv(catalog_path)
-    library_sources = (
-        catalog.get("profile_source_kind", pd.Series(dtype=str))
-        .astype(str)
-        .eq("physical_heat_library")
-    )
-    if library_sources.any() and args.heat_profile_library is None:
-        raise ValueError(
-            "The paired heat catalog uses the physical heat-profile library. "
-            "Pass --heat-profile-library with the library used by readiness."
+    if scenario.heat.space_heat_source == "internal":
+        from gridexpand.allocation.assets.heat.internal import load_rc
+        from gridexpand.common.reproducibility import frame_fingerprint
+        assignments = pd.read_csv(args.paired_dir / "paired_electrification_assignment.csv")
+        eligible = assignments.loc[assignments.technology.eq("heat") & assignments.eligible.astype(bool),"building_objectid"]
+        rc = load_rc(eligible).sort_values("building_objectid").reset_index(drop=True)
+        args.thermal_rc_fingerprint = frame_fingerprint(rc)
+        weather = pd.read_hdf(args.weather_source_hdf,key="raw_data/weather")
+        args.thermal_weather_fingerprint = frame_fingerprint(weather[["temp_air","dni","dhi"]])
+        diagnostic_profiles = 0
+    else:
+        catalog_path = args.paired_dir / "paired_heat_profile_catalog.csv"
+        catalog = pd.read_csv(catalog_path)
+        library_sources = (
+            catalog.get("profile_source_kind", pd.Series(dtype=str))
+            .astype(str)
+            .eq("physical_heat_library")
         )
-    if library_sources.any():
-        expected_profile_sets = (
-            catalog.loc[library_sources, "profile_set_id"].dropna().astype(str).unique()
-        )
-        if len(expected_profile_sets) != 1:
+        if library_sources.any() and args.heat_profile_library is None:
             raise ValueError(
-                "The paired heat catalog must reference exactly one profile set; "
-                f"found {expected_profile_sets.tolist()}."
+                "The paired heat catalog uses the physical heat-profile library. "
+                "Pass --heat-profile-library with the library used by readiness."
             )
-        with h5py.File(args.heat_profile_library, "r") as store:
-            actual_profile_set = str(store.attrs.get("profile_set_id", ""))
-        if actual_profile_set != expected_profile_sets[0]:
+        if library_sources.any():
+            expected_profile_sets = (
+                catalog.loc[library_sources, "profile_set_id"].dropna().astype(str).unique()
+            )
+            if len(expected_profile_sets) != 1:
+                raise ValueError(
+                    "The paired heat catalog must reference exactly one profile set; "
+                    f"found {expected_profile_sets.tolist()}."
+                )
+            with h5py.File(args.heat_profile_library, "r") as store:
+                actual_profile_set = str(store.attrs.get("profile_set_id", ""))
+            if actual_profile_set != expected_profile_sets[0]:
+                raise ValueError(
+                    "Heat-profile library mismatch: paired catalog expects "
+                    f"{expected_profile_sets[0]!r}, got {actual_profile_set!r}."
+                )
+        diagnostic_profiles = int((~catalog["publication_ready"].astype(bool)).sum())
+        if diagnostic_profiles and not args.allow_diagnostic_heat_fallback:
             raise ValueError(
-                "Heat-profile library mismatch: paired catalog expects "
-                f"{expected_profile_sets[0]!r}, got {actual_profile_set!r}."
+                f"Strict paired run blocked: {diagnostic_profiles} heat-pump "
+                "buildings lack exact physical heat profiles. Regenerate full-local "
+                "Step 2 sources or pass --allow-diagnostic-heat-fallback for a "
+                "non-publication diagnostic run."
             )
-    diagnostic_profiles = int((~catalog["publication_ready"].astype(bool)).sum())
-    if diagnostic_profiles and not args.allow_diagnostic_heat_fallback:
-        raise ValueError(
-            f"Strict paired run blocked: {diagnostic_profiles} heat-pump "
-            "buildings lack exact physical heat profiles. Regenerate full-local "
-            "Step 2 sources or pass --allow-diagnostic-heat-fallback for a "
-            "non-publication diagnostic run."
-        )
 
     jobs = _load_jobs(
         args.paired_dir,

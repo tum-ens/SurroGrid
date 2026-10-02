@@ -273,3 +273,30 @@ def test_changed_values_lists_added_and_removed_leaves():
         {"key": "a.c", "label": None, "kind": "removed", "old": 2.0, "new": None},
         {"key": "a.e", "label": None, "kind": "added", "old": None, "new": True},
     ]
+
+
+def test_internal_heat_controls_create_and_remove_the_nested_block():
+    base = text_of(SCHWEINFURT)
+    result = sf.preview(
+        base,
+        base_name="schweinfurt_2045.yaml",
+        changes={
+            "asset_sizing.heat.space_heat_source": "internal",
+            "asset_sizing.heat.internal.hems_preheat_uplift_k": 1.0,
+        },
+    )
+    assert result["ok"], result["issues"]
+    text = result["text"]
+    assert (
+        yaml.safe_load(text)["asset_sizing"]["heat"]["internal"][
+            "hems_preheat_uplift_k"
+        ]
+        == 1.0
+    )
+    back = sf.preview(
+        text,
+        base_name="schweinfurt_2045.yaml",
+        changes={"asset_sizing.heat.space_heat_source": "teaser"},
+    )
+    assert back["ok"], back["issues"]
+    assert "internal" not in yaml.safe_load(back["text"])["asset_sizing"]["heat"]

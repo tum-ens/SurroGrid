@@ -20,6 +20,7 @@ from .features.modelhelper import commodity_balance, commodity_subset
 from .features.storage import add_storage, storage_cost
 from .features.typeperiod import add_typeperiod
 from .input import pyomo_model_prep
+from .features.thermal import add_thermal
 
 
 def create_model(data, global_settings):
@@ -42,6 +43,8 @@ def create_model(data, global_settings):
         rule=def_process_capacity_rule,
         doc='total process capacity')
     m = pyomo_assign_advanced_features(m, global_settings, data)
+    if m.mode.get("thermal"):
+        m = add_thermal(m, data)
     m = pyomo_assign_basic_constraints(m, global_settings)
     m = pyomo_assign_objective(m, global_settings)
     return m
@@ -304,8 +307,11 @@ def res_vertex_rule(m, tm, stf, sit, com, com_type):
     if m.mode['bsp']:
         power_surplus += bsp_surplus(m, tm, stf, sit, com, com_type)
 
+    thermal_building = getattr(m, '_thermal_commodities', {}).get((stf, sit, com))
+    if thermal_building is not None:
+        power_surplus -= m.building_heat[tm, stf, sit, thermal_building]
     # surplus - demand
-    if com in m.com_demand:
+    elif com in m.com_demand:
         try:
             power_surplus -= m.demand_dict[(sit, com)][(stf, tm)]
         except KeyError:

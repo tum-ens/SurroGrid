@@ -789,11 +789,12 @@ def _process_inflex_demands(inflex_inputs, df_raw_demand, df_pre_demand_elec, df
     df_supim = _align_table_to_timesteps(inflex_inputs["supim"], timesteps, "INFLEX supim", reference_label)
     df_process = inflex_inputs["process"]
 
-    df_heat_elec, df_heat_hp_elec, _df_heat_auxiliary_elec = _inflex_heat_electricity(
-        df_raw_demand,
-        df_eff_factor,
-        inflex_inputs["process"],
-    )
+    if inflex_inputs.get("thermal_parameters") is not None:
+        df_heat_elec, df_heat_hp_elec, _df_heat_auxiliary_elec = _inflex_internal_heat(inflex_inputs,df_raw_demand.index)
+    else:
+        df_heat_elec, df_heat_hp_elec, _df_heat_auxiliary_elec = _inflex_heat_electricity(
+            df_raw_demand, df_eff_factor, inflex_inputs["process"],
+        )
     df_ev_elec = _mobility_electricity(
         inflex_inputs["ev_sessions"],
         inflex_inputs["ev_session_hours"],
@@ -933,3 +934,30 @@ def obtain_demand(SF, save_reactive=True, post_demand_mode="flexible", ev_charge
     if save_reactive:
         SF.save_df(df_react_save, "pwrflw/urbs_out/MILP/reactive")
     return df_pre_demand, df_post_demand
+
+
+def _inflex_internal_heat(inputs,index):
+    """Independent forward thermostat, service COPs and fixed shared HP/rod assets."""
+    from gridexpand.common.thermal import dispatch_heat_services
+    params = inputs["thermal_parameters"]
+    reference = inputs.get("internal_heat_reference")
+    if reference is None or len(reference) != len(index):
+        raise ValueError("Internal InFlex requires the complete independent thermostat reference.")
+    buses = sorted(params.Site.unique())
+    hp_caps = _input_capacity_by_bus(inputs["process"],"heatpump_air",buses)
+    rod_caps = _input_capacity_by_bus(inputs["process"],"heatpump_booster",buses)
+    hp_elec,rod_elec = {},{}
+    for site,group in params.groupby("Site"):
+        heat,cops = [],[]
+        for bid in group.building_objectid.astype(str):
+            for service in ("space","water"):
+                heat.append(reference[bid,service+"_heat_kw"].to_numpy())
+                cops.append(reference[bid,service+"_cop"].to_numpy())
+        hp,rod=dispatch_heat_services(np.column_stack(heat),np.column_stack(cops),hp_caps[site])
+        if (rod.sum(axis=1)>rod_caps[site]+1e-7).any():
+            raise ValueError(f"Fixed internal InFlex heat capacity cannot maintain comfort at site {site}.")
+        hp_elec[site,"electricity"]=hp.sum(axis=1)
+        rod_elec[site,"electricity"]=rod.sum(axis=1)
+    hp_frame=pd.DataFrame(hp_elec,index=index)
+    rod_frame=pd.DataFrame(rod_elec,index=index)
+    return hp_frame+rod_frame,hp_frame,rod_frame

@@ -107,6 +107,12 @@ def check_heat_profile_source(source: str, heat_buildings: pd.DataFrame, *, engi
     """
     if source == "teaser":
         return
+    if source == "internal":
+        from .assets.heat.internal import load_rc
+        id_column = "building_objectid" if "building_objectid" in heat_buildings else "objectid"
+        if not heat_buildings.empty:
+            load_rc(heat_buildings[id_column], engine=engine)
+        return
     if source != "infdb_ro_heat":
         raise ValueError(f"Unknown space heat source {source!r}.")
     if heat_buildings.empty:

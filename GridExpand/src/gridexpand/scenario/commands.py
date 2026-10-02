@@ -436,7 +436,7 @@ def paired_preparation_commands(
     python: str | None = None,
 ) -> list[tuple[str, list[str]]]:
     """``(stage, argv)`` that build a SWF paired dataset (``pipeline: paired_validation``)."""
-    return [
+    stages = [
         ("prepare_allocation", module_command(
             PAIRED_ALLOCATION,
             "--ags", ags,
@@ -463,6 +463,15 @@ def paired_preparation_commands(
             python=python,
         )),
     ]
+
+    from .config_loader import load_scenario_config
+    if Path(scenario_config).exists():
+        scenario,_ = load_scenario_config(scenario_config)
+        if scenario.heat.space_heat_source == "internal":
+            stages[1] = ("prepare_heat_profiles",module_command(
+                f"{PROFILES}.paired_profile_readiness","--paired-dir",paired_dir,
+                "--scenario-config",scenario_config,python=python))
+    return stages
 
 
 def aligned_preparation_commands(
@@ -498,7 +507,7 @@ def aligned_preparation_commands(
     if provider == "uzw":
         allocation += ["--uzw-grids-dir", str(uzw_grids_dir)]
     readiness = f"{PROFILES}.paired_profile_readiness"
-    return [
+    stages = [
         ("allocation", allocation),
         ("weather", module_command(
             f"{PROFILES}.aligned_weather", "--paired-dir", paired_dir, "--output", weather_hdf, python=python,
@@ -536,3 +545,11 @@ def aligned_preparation_commands(
             python=python,
         )),
     ]
+    from .config_loader import load_scenario_config
+    if Path(scenario_config).exists():
+        scenario,_ = load_scenario_config(scenario_config)
+        if scenario.heat.space_heat_source == "internal":
+            stages = [stage for stage in stages if stage[0] in {"allocation","weather","pv_library"}]
+            stages.insert(2,("internal_heat_readiness",module_command(
+                readiness,"--paired-dir",paired_dir,"--scenario-config",scenario_config,python=python)))
+    return stages

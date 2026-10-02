@@ -39,6 +39,9 @@ def identify_mode(data):
     # methodology; its row count only decides whether any constraint is
     # instantiated. A building population with no electric vehicles still uses
     # the dedicated contract.
+    mode['thermal'] = 'building_thermal_parameters' in data and not data['building_thermal_parameters'].empty
+    if mode['thermal'] and (mode['tsam'] or mode['tdy']):
+        raise ValueError('Internal thermal inertia requires chronological inputs; TSAM is unsupported.')
     if 'ev_sessions' in data:
         mode['evs'] = True
     return mode

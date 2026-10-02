@@ -31,7 +31,7 @@ scenarios use is mapped; anything else raises ``NotImplementedError``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -76,6 +76,8 @@ class ModelParts:
     linked: list[tuple[str, str, float]]
     ev_label: pd.DataFrame | None
     ev_energy: np.ndarray | None
+    thermal_parameters: pd.DataFrame = field(default_factory=pd.DataFrame)
+    thermal_timeseries: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def component_name(site, name) -> str:
@@ -130,11 +132,24 @@ def build_building_model(data: dict, mode: dict):
     network.add("Carrier", sorted({key[1] for key in balances}))
     network.add("Bus", [bus[key] for key in balances], carrier=[key[1] for key in balances])
     demand = data["demand"]
-    loads = [key for key in balances if com_type[key] == "Demand" and key in demand.columns]
+    thermal_params = data.get("building_thermal_parameters",pd.DataFrame())
+    thermal_balances = set(zip(thermal_params.get("Site",[]),thermal_params.get("heat_commodity",[])))
+    loads = [key for key in balances if com_type[key] == "Demand" and key in demand.columns and key not in thermal_balances]
     network.add(
         "Load", [f"{bus[key]}|demand" for key in loads], bus=[bus[key] for key in loads],
         p_set=pd.DataFrame({f"{bus[key]}|demand": _series(demand, key, snapshots) for key in loads}),
     )
+
+    thermal_parameters = data.get("building_thermal_parameters", pd.DataFrame()).reset_index(drop=True)
+    thermal_timeseries = data.get("building_thermal_timeseries", pd.DataFrame())
+    if not thermal_parameters.empty:
+        from gridexpand.common.thermal import validate_thermal_input
+        validate_thermal_input(thermal_parameters, thermal_timeseries,
+                               steps=[(stf, t) for t in snapshots])
+        network.add("Generator", [f"thermal|{bid}" for bid in thermal_parameters.building_objectid],
+                    bus=[bus[(r.Site, r.heat_commodity)] for r in thermal_parameters.itertuples()],
+                    p_nom=thermal_parameters["room_heat_upper_kw"].to_numpy(),
+                    p_min_pu=-1.0, p_max_pu=0.0, marginal_cost=0.0)
 
     fractions = _session_fractions(data, snapshots) if mode.get("evs") else {}
     rows, generators, links, prices = [], [], [], {}
@@ -210,6 +225,7 @@ def build_building_model(data: dict, mode: dict):
         stf=stf, snapshots=snapshots, weight=weight, bsp=bool(mode.get("bsp")),
         processes=processes, prices=prices, storages=storages,
         linked=_linked_storages(data, storages, processes), ev_label=ev_label, ev_energy=ev_energy,
+        thermal_parameters=thermal_parameters, thermal_timeseries=thermal_timeseries,
     )
     return network, parts
 

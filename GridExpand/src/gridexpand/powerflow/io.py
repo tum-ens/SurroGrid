@@ -192,6 +192,8 @@ class ScenarioResultReader:
         temporal = self.temporal_method()
         return {
             "source": "post-flex",
+            "thermal_parameters": (self.read("urbs_in/building_thermal_parameters") if self.has("urbs_in/building_thermal_parameters") else None),
+            "internal_heat_reference": (self.read("raw_data/internal_heat_reference") if self.has("raw_data/internal_heat_reference") else None),
             "demand": self.get_pre_demand(),
             "ev_sessions": sessions,
             "ev_session_hours": session_hours,

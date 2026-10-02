@@ -49,7 +49,10 @@ Top-level blocks: `scenario`, `economics`, `asset_sizing`, `electrification`, `m
 | `asset_sizing.battery.heuristic_usable_kwh_per_pv_kwp`, `heuristic_usable_kwh_per_annual_mwh` | (0, 1.5] | heuristic coefficients |
 | `asset_sizing.battery.optimized_upper_kwh_per_pv_kwp`, `optimized_upper_kwh_per_annual_mwh` | (0, 1.5] | upper bounds of the optimized case |
 | `asset_sizing.battery.energy_to_power_hours` | > 0 | E/P ratio |
-| `asset_sizing.heat.space_heat_source` | `teaser`, `infdb_ro_heat` | space-heat demand source |
+| `asset_sizing.heat.space_heat_source` | `teaser`, `infdb_ro_heat`, `internal` | fixed space-heat source or internal temperature model |
+| `asset_sizing.heat.heated_area_fraction` | 0.8 for `internal` | effective thermal zone; already embedded in imported RC |
+| `asset_sizing.heat.internal.minimum_temperature_c` | finite (default 20) | thermostat and HEMS comfort minimum |
+| `asset_sizing.heat.internal.hems_preheat_uplift_k` | ≥ 0 (default 2) | permitted active preheating above the minimum |
 | `asset_sizing.heat.indoor_design_temperature_c` | > heating limit | degree-day indoor temperature |
 | `asset_sizing.heat.heating_limit_temperature_c` | > 0 | degree-day heating limit |
 | `asset_sizing.heat.heat_pump_design_share` | (0, 1] | heat-pump share of the design load |
@@ -264,3 +267,16 @@ is loaded with override: its values win over variables of the same name in the p
 
 The `GRIDEXPAND_*_DIR`/`_FILE` variables are read from the process environment when `gridexpand.paths` is first
 imported (not from `.env`); child processes of the orchestrators inherit them.
+
+Internal heat is configured under `asset_sizing.heat`. Select
+`space_heat_source: internal`, `heated_area_fraction: 0.8` and an `internal` block.
+Its other keys (ventilation, zone height, gains, glazing, blinds) default to the
+values in [method.md](method.md#internal-space-heat-and-building-preheating).
+`parameter_source: infdb_rc` and `refurbishment_state: stored_ro_heat` are the
+supported coefficient contract. Missing coefficients, uncorrected unit provenance,
+invalid areas and TSAM fail explicitly. Each scenario has its own hash; physical
+references and fixed assets are shared across preheating sensitivities.
+
+A paired run with internal heat prepares its own paired dataset. Its preparation
+checks RC coverage and builds provider weather/PV inputs; it does not regenerate
+TEASER heat. Check worker memory on a pilot grid before starting the full batch.

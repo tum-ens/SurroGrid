@@ -9,6 +9,7 @@ import re
 
 import h5py
 import pandas as pd
+import numpy as np
 
 from gridexpand.paths import ALLOCATION_RESULTS_DIR, SCENARIO_CALIBRATION_OUTPUT_DIR
 
@@ -24,7 +25,7 @@ class PairedDataset:
     plz: int
     pylovo_version_id: str
     weather_source_hdf: Path
-    heat_profile_library: Path
+    heat_profile_library: Path | None
 
 
 def _one_profile_set(catalog_path: Path) -> str:
@@ -90,17 +91,22 @@ def resolve_paired_dataset(
             "Run pylovo version does not match paired dataset metadata: "
             f"{expected_pylovo_version_id!r} != {pylovo_version_id!r}."
         )
-    heat_profile_set = _one_profile_set(heat_catalog)
-    heat_library = HEAT_LIBRARY_ROOT / f"{heat_profile_set}.h5"
-    if not heat_library.exists():
-        raise FileNotFoundError(heat_library)
-    with h5py.File(heat_library, "r") as store:
-        actual_set = str(store.attrs.get("profile_set_id", ""))
-    if actual_set != heat_profile_set:
-        raise ValueError(
-            f"Heat library profile_set_id mismatch: expected {heat_profile_set!r}, "
-            f"got {actual_set!r}."
-        )
+    catalog = pd.read_csv(heat_catalog)
+    internal = catalog.get("profile_source_kind",pd.Series(dtype=str)).eq("internal_rc").all() and "profile_source_kind" in catalog
+    if internal:
+        heat_library = None
+    else:
+        heat_profile_set = _one_profile_set(heat_catalog)
+        heat_library = HEAT_LIBRARY_ROOT / f"{heat_profile_set}.h5"
+        if not heat_library.exists():
+            raise FileNotFoundError(heat_library)
+        with h5py.File(heat_library, "r") as store:
+            actual_set = str(store.attrs.get("profile_set_id", ""))
+        if actual_set != heat_profile_set:
+            raise ValueError(
+                f"Heat library profile_set_id mismatch: expected {heat_profile_set!r}, "
+                f"got {actual_set!r}."
+            )
     return PairedDataset(
         dataset_id=dataset_id,
         paired_dir=paired_dir,
@@ -166,14 +172,23 @@ def validate_prepared_dataset(
     assignment_hash = assignment_manifest_hash(assignment)
     if metadata.get("electrification_assignment_hash") != assignment_hash:
         raise ValueError("Prepared paired electrification assignment hash does not match metadata.")
+    if not heat.empty and heat.get("profile_source_kind",pd.Series(dtype=str)).eq("internal_rc").all():
+        from gridexpand.allocation.assets.heat.internal import load_rc
+        current = load_rc(heat.building_objectid).set_index("building_objectid")
+        frozen = heat.set_index("building_objectid").loc[current.index]
+        # A prepared internal dataset freezes its corrected generator/envelope.
+        # Refuse outer-orchestrator resume before completed child jobs are reused.
+        for column in ("resistance","capacitance","changelog_id","source_footprint_m2","source_floor_number","source_window_area_m2","wall_refurbishment_year","roof_refurbishment_year","window_refurbishment_year"):
+            if column not in frozen or not np.allclose(current[column].to_numpy(dtype=float),frozen[column].to_numpy(dtype=float),rtol=1e-12,atol=0,equal_nan=True):
+                raise ValueError(f"Prepared internal RC/envelope inputs changed ({column}); prepare a new dataset/run.")
     if require_publication_ready:
         not_ready = int((~heat["publication_ready"].astype(bool)).sum())
         if not_ready:
             raise ValueError(f"Paired heat readiness failed for {not_ready} buildings.")
     if require_exact_heat:
-        not_exact = heat["profile_method"].ne("exact_physical_building") | heat["profile_source_kind"].ne(
-            "physical_heat_library"
-        )
+        exact_fixed = heat["profile_method"].eq("exact_physical_building") & heat["profile_source_kind"].eq("physical_heat_library")
+        exact_internal = heat["profile_method"].eq("internal_rc") & heat["profile_source_kind"].eq("internal_rc")
+        not_exact = ~(exact_fixed | exact_internal)
         if not_exact.any():
             raise ValueError(f"{int(not_exact.sum())} heat profiles are not exact library profiles.")
     real_buildings = set(real["building_objectid"].astype(str))

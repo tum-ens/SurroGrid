@@ -75,6 +75,9 @@ class SectorUrbsInputs:
     )
     # Pinned content identity of the EV session pool the vehicles came from.
     ev_pool_id: str = ""
+    thermal_parameters: pd.DataFrame = field(default_factory=pd.DataFrame)
+    thermal_timeseries: pd.DataFrame = field(default_factory=pd.DataFrame)
+    internal_heat_reference: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def _empty_timeseries(hours: int) -> pd.DataFrame:
@@ -571,6 +574,7 @@ def build_paired_sector_urbs_inputs(
     technology_parameters=None,
     heat_sizing_method: str = "full_load_hours_rule",
     heat_config=None,
+    component_plan: pd.DataFrame | None = None,
     heat_profile_catalog: pd.DataFrame | None = None,
     heat_profile_library: Path | None = None,
     allow_diagnostic_heat_fallback: bool = False,
@@ -677,6 +681,7 @@ def build_paired_sector_urbs_inputs(
         heat_config=heat_config,
         technology_parameters=technology_parameters,
         selected_buildings=selected_by_technology["heat"],
+        seed=seed, component_plan=component_plan,
     )
 
     parts = [part for part in (pv, mobility, heat) if part is not None]
@@ -723,7 +728,11 @@ def build_paired_sector_urbs_inputs(
             else mobility.session_hours
         ),
         ev_pool_id=("" if mobility is None else mobility.pool_id),
+        thermal_parameters=getattr(heat,"parameters",pd.DataFrame()),
+        thermal_timeseries=getattr(heat,"timeseries",pd.DataFrame()),
+        internal_heat_reference=getattr(heat,"reference",pd.DataFrame()),
         metadata={
+            **getattr(heat,"metadata",{}),
             "sector_assets_simulated": bool(audit_parts),
             "sector_assets_simulated_components": [
                 name
@@ -737,8 +746,8 @@ def build_paired_sector_urbs_inputs(
             ],
             "profile_contract": "physical_building_component_paired_v2",
             "heat_profile_source": (
-                "matched physical building from pylovo version-specific "
-                "synthetic URBS input"
+                "corrected InfDB RC with endogenous 1R1C room heating" if heat_config is not None and heat_config.space_heat_source == "internal" else
+                "matched physical building from pylovo version-specific synthetic URBS input"
             ),
             "stationary_battery_model": (
                 "SWF rows provide location evidence; capacity follows the shared "
@@ -1259,6 +1268,7 @@ def _build_paired_heat(
     heat_config,
     technology_parameters,
     selected_buildings: set[str] | None = None,
+    seed: int = 0, component_plan: pd.DataFrame | None = None,
 ) -> _HeatInputs | None:
     # The first heat heuristic is residential only. Commercial HP rows remain
     # outside scope until a separate commercial sizing method is documented.
@@ -1288,6 +1298,30 @@ def _build_paired_heat(
     if heat_config is None:
         raise ValueError("Paired heat materialization requires scenario heat configuration.")
 
+    if heat_config.space_heat_source == "internal":
+        from ...assets.heat.internal import prepare_internal_heat, load_rc
+        if hours != 8760:
+            raise ValueError("Internal paired inputs require the complete chronological year.")
+        weather = pd.read_hdf(weather_source_hdf,key="raw_data/weather").reset_index(drop=True)
+        _,postcode = _weather_and_postcode(weather_source_hdf,hours)
+        buildings = selected.sort_values("_profile_site_id").drop_duplicates("building_objectid").copy()
+        buildings["Site"] = buildings.apply(_target_bus,axis=1)
+        rc = load_rc(buildings.building_objectid)
+        # The household electricity component is prepared with the same physical
+        # seed and component manifest, excluding a mixed building's commercial gains.
+        electricity = {}
+        if component_plan is None:
+            raise ValueError("Internal paired heat needs its residential component manifest.")
+        for bid in buildings.building_objectid.astype(str):
+            physical = component_plan.loc[component_plan.building_objectid.astype(str).eq(bid) & component_plan.component_category.eq("Residential")].copy()
+            if physical.empty:
+                raise ValueError(f"Internal heat lacks the residential component for {bid}.")
+            buildings.loc[buildings.building_objectid.astype(str).eq(bid),'households'] = float(physical.households.iloc[0])
+            buildings.loc[buildings.building_objectid.astype(str).eq(bid),'occupants'] = float(physical.occupants.iloc[0])
+            group = allocation.loc[allocation.building_objectid.astype(str).eq(bid)]
+            electric,_ = build_paired_base_electric_demand(group,seed=seed,component_plan=physical)
+            electricity[bid] = electric.sum(axis=1).to_numpy()
+        return prepare_internal_heat(buildings,weather,postcode,heat_config=heat_config,technologies=technology_parameters,sizing_method=sizing_method,seed=seed,electricity_by_building=electricity,rc=rc)
     library = PhysicalHeatProfileLibrary(heat_profile_library) if heat_profile_library is not None else None
     source_cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
     demand_entries: list[tuple[tuple[int, str], pd.Series]] = []

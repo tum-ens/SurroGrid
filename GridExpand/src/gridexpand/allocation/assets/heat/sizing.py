@@ -55,6 +55,7 @@ def build_heat_asset_plan(
     heat_pump_design_share: float,
     buffer_volume_l_per_kw_th: float,
     buffer_usable_temperature_spread_k: float,
+    water_heat_pump_cop: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, dict[str, float]]:
     """Compile one central residential heat-system plan per physical building."""
     required = {"building_objectid", "Site"}
@@ -98,7 +99,19 @@ def build_heat_asset_plan(
         maximum_hp_kw_th = design_kw_th
         heuristic_hp_kw_el = heuristic_hp_kw_th / design_cop
         maximum_hp_kw_el = maximum_hp_kw_th / design_cop
-        residual = (space + water - cop * heuristic_hp_kw_el).clip(lower=0.0)
+        if water_heat_pump_cop is not None:
+            from gridexpand.common.thermal import dispatch_heat_services
+            water_cop = _column(water_heat_pump_cop,site,"heatpump_air")
+            if (water_cop <= 0).any():
+                raise ValueError("Internal DHW COP must be positive.")
+            # The design electrical capacity uses the service-specific COPs.
+            full_design_electricity = space_design_kw_th/design_cop + dhw_allowance_kw_th/float(water_cop.iloc[design_index])
+            heuristic_hp_kw_el = heat_pump_design_share*full_design_electricity
+            maximum_hp_kw_el = full_design_electricity
+            _, rod = dispatch_heat_services(np.column_stack([space,water]),np.column_stack([cop,water_cop]),heuristic_hp_kw_el)
+            residual = pd.Series(rod.sum(axis=1),index=space.index)
+        else:
+            residual = (space + water - cop * heuristic_hp_kw_el).clip(lower=0.0)
         heuristic_aux_kw_el = float(residual.max())
         maximum_aux_kw_el = float((space + water).max())
         reference_hp_kw_th = heuristic_hp_kw_th if fixed else maximum_hp_kw_th
@@ -113,7 +126,11 @@ def build_heat_asset_plan(
         households = float(households) if pd.notna(households) and households > 0.0 else np.nan
         planned_hp_kw_el = heuristic_hp_kw_el if fixed else maximum_hp_kw_el
         planned_aux_kw_el = heuristic_aux_kw_el if fixed else maximum_aux_kw_el
-        peak_coverage_margin = cop * planned_hp_kw_el + planned_aux_kw_el - space - water
+        if water_heat_pump_cop is not None:
+            _, residual_check = dispatch_heat_services(np.column_stack([space,water]),np.column_stack([cop,water_cop]),planned_hp_kw_el)
+            peak_coverage_margin = pd.Series(planned_aux_kw_el-residual_check.sum(axis=1))
+        else:
+            peak_coverage_margin = cop * planned_hp_kw_el + planned_aux_kw_el - space - water
         hp_installed_kw_el = heuristic_hp_kw_el if fixed else 0.0
         hp_upper_kw_el = heuristic_hp_kw_el if fixed else maximum_hp_kw_el
         aux_installed_kw_el = heuristic_aux_kw_el if fixed else 0.0

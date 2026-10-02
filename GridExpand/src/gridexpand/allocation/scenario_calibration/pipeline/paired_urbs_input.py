@@ -397,9 +397,14 @@ def materialize_paired_urbs_input(
         )
     allocation["_profile_site_id"] = allocation["scenario_unit_id"].astype(int)
     catalog_path = paired_dir / "paired_heat_profile_catalog.csv"
-    if not catalog_path.exists():
-        raise FileNotFoundError(f"Run paired_profile_readiness first: {catalog_path}")
-    heat_catalog = pd.read_csv(catalog_path)
+    if scenario.heat.space_heat_source == "internal":
+        if scenario.time_aggregation.enabled:
+            raise ValueError("Internal thermal inertia requires chronological inputs; TSAM is unsupported.")
+        heat_catalog = pd.DataFrame()
+    else:
+        if not catalog_path.exists():
+            raise FileNotFoundError(f"Run paired_profile_readiness first: {catalog_path}")
+        heat_catalog = pd.read_csv(catalog_path)
     roof_catalog_path = paired_dir / "paired_roof_sections.csv"
     if not roof_catalog_path.exists():
         raise FileNotFoundError(
@@ -482,6 +487,7 @@ def materialize_paired_urbs_input(
         technology_parameters=scenario.technologies,
         heat_sizing_method=heat_sizing_method,
         heat_config=scenario.heat,
+        component_plan=component_plan,
         pv_demand_multiplier=scenario.pv.demand_multiplier,
         heat_profile_catalog=heat_catalog,
         heat_profile_library=heat_profile_library,
@@ -625,6 +631,11 @@ def materialize_paired_urbs_input(
             "raw_data/sector_profile_audit",
             sector_inputs.audit.reset_index(drop=True),
         )
+        if not sector_inputs.thermal_parameters.empty:
+            store.put("raw_data/thermal_building_parameters",sector_inputs.thermal_parameters)
+            store.put("raw_data/internal_heat_reference",sector_inputs.internal_heat_reference)
+            store.put("urbs_in/building_thermal_parameters",sector_inputs.thermal_parameters)
+            store.put("urbs_in/building_thermal_timeseries",sector_inputs.thermal_timeseries)
         store.put("urbs_in/demand", demand)
         store.put("urbs_in/supim", sector_inputs.supim)
         store.put("urbs_in/eff_factor", sector_inputs.eff_factor)
