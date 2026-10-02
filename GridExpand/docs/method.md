@@ -427,6 +427,68 @@ synthetic scenarios and disabled in the paired and aligned scenarios, which run 
 Step 3 refuses TSAM together with EV sessions and asserts that full-year inputs carry no type-period weights.
 With TSAM, Step 4 simulates the representative hours (6 × 168 = 1,008) instead of 8,760.
 
+## Commercial and public (GHD) electricity
+
+**Model.** The component manifest (`gridexpand.common.building_components`) gives a building at most one
+residential and one non-residential component. The non-residential component (`Commercial` or `Public`, pylovo's
+`nonresidential_use`) has the effective floor area of the InfDB split: LoD2 footprint × `floor_number` × the
+non-residential share (`floor_number` is the LoD2 storey count, otherwise the height divided by the median storey
+height of the building function). Step 2 draws one synPRO use type per component from the IWU shares of its
+category and multiplies the type's hourly kWh/m² profile by the area (`allocation/functions/electricity.py`);
+paired runs keep that annual energy and reshape it with the category-mean synPRO shape. There is no net-floor-area
+factor and no BDEW standard load profile.
+
+**Unknown is non-demand.** An InfDB building with function 31001_9998 ("not specifiable from the source") has the
+non-residential use `Unknown`. It passes validation, but its non-residential part yields no component and no load;
+a mixed building with an Unknown part keeps only its residential component. pylovo 8afedcc dimensions such parts
+with the Public load values; GridExpand models no demand for them. The SQL view `surrogrid.grid_building_component`
+applies the same rule (run `gridexpand db migrate --apply` once to update an existing database).
+
+**Rules of the `ghd:` scenario block** (`gridexpand.common.ghd`, all off by default and in every repository
+scenario):
+
+| rule | effect |
+|---|---|
+| `single_volume_one_storey` | a fully non-residential single-volume building counts one storey (GHD area = footprint) |
+| `osm_levels` | other fully non-residential buildings use OSM `building:levels` instead of `floor_number` |
+| `activity_gating` | a GHD component needs a specific non-residential function or OSM activity evidence |
+
+*Single volume.* A specific OSM `building` value of the footprint decides (church, chapel, cathedral, mosque,
+synagogue, temple, shrine, religious, train_station, transportation, castle, parking, garage, garages, carport); a
+missing or generic value (`yes`) falls back to the ALKIS function list: 3040–3043 and 3045–3047 (religious
+buildings, without 3044 Gemeindehaus), 3031 Schloss, 3038 Burg, 3090, 3091, 3094, 3095, 3097 (station buildings,
+without 3092 airport terminals), 2460–2465 (parking). The LoD2-height storeys otherwise count a 20 m nave as five or
+six floors. Mixed buildings keep their split (the InfDB assigns the ground floor to the non-residential part).
+
+*Activity gating.* A component is active if its ALKIS function names a non-residential use (every function except
+31001_2000 generic commercial, the residential functions 31001_1xxx and 31001_9998), or if an OSM feature with an
+activity tag lies on or near the footprint. Generic commercial buildings and the shop part of residential-function
+buildings therefore need evidence; an Unknown building with evidence becomes a GHD component of the evidence's
+category. Activity tags: every `shop`, `craft` and `office` value (government offices count as Public), every
+`healthcare` value, `amenity` services (food and drink, banks, pharmacies, cinemas, fuel, schools, kindergartens,
+libraries, town halls, police and fire stations, post offices, community and social facilities, places of worship,
+hospitals, clinics, doctors, dentists, nursing homes), `tourism` accommodation, museums and galleries, and indoor
+`leisure` (fitness and sports centres, sports halls, bowling, dance, sauna, arcades, ice rinks). Street furniture
+and outdoor amenities (parking, benches, waste, vending, post boxes, toilets, shelters, charging points, ATMs) and
+vacant or disused shops are not evidence. The rationale: a DSO supplies a building-bound business or public service
+through its own connection, while a cadastral Commercial/Public polygon need not host one. In the Forchheim SWF
+area only 72 of the 345 buildings with modelled GHD had an SWF GHD connection; on those 72 the floor-area model
+matched the metered energy within 3 %, while 8.2 GWh sat on connections that SWF supplies with household meters
+or a placeholder load.
+
+*Evidence matching* (`match_osm_evidence`): a point (or a line's representative point) belongs to the footprint
+that contains it, otherwise to the nearest footprint within `point_buffer_m` (default 5 m); a polygon belongs to
+every footprint it covers by at least `polygon_min_overlap` (default 50 %) of the footprint area, otherwise to the
+footprint of its representative point; an OSM building polygon gives its `building` value and `building:levels`
+to the footprint it covers most (at least the same share). Sources: PostGIS tables next to the footprints with
+configurable tables and columns (pgosm-flex layout by default), a CSV of per-building evidence, or a frame.
+MV-direct components stay as pylovo classified them.
+
+**Audits.** Aligned datasets write `paired_ghd_policy_audit.csv` (one row per building with a non-residential
+part: decision, storey rule, source and GHD area, matched tags, OSM building value and levels) and a summary in
+`paired_scenario_metadata.json` (`ghd_policy`); Step 2 records the summary in the run assumptions while a rule is
+on.
+
 ## Paired validation contract
 
 The paired pipelines compare real DSO grids (SWF; SWF and ÜZW in aligned runs) with synthetic pylovo grids under
@@ -474,6 +536,9 @@ not an installation limit. Charging-point capacities are fixed.
 
 ### GHD and mixed-use evidence rules
 
+These rules belong to the SWF-inventory pipeline (`pipeline: paired_validation`); aligned runs model GHD for both
+providers as in "Commercial and public (GHD) electricity" above.
+
 pylovo's open building layer contains many more Commercial/Public polygons than a DSO has GHD customers; an ALKIS
 polygon is not necessarily an active electricity customer, and one connection can serve a mixed-use building. The
 paired scenario therefore:
@@ -488,6 +553,37 @@ The Forchheim evidence table behind these rules is in
 still dimensioned with the open-data GHD assumptions; an open-data rule for load-active generic commercial buildings
 is a separate topology sensitivity and must not use DSO matching (that would leak the reference network into the
 synthetic generation).
+
+### Status-quo test
+
+Before pylovo generation, `gridexpand status-quo-test` checks every real grid of a provider under its status-quo
+base electricity (households and GHD of the model above, with the scenario's `ghd:` rules) and writes the exclusion
+list: the alignment removes the flagged real grids and their buildings from both sides, so that the comparison is
+not dominated by grids that already fail today.
+
+*Demand.* The alignment bundle gives the real grid, bus and grid file per building; the building attributes come
+read-only from InfDB `basedata.buildings`. The pylovo derivations the model needs before pylovo has run mirror pylovo
+8afedcc: the non-residential use (Mixed buildings take the class of their function, Residential ones Commercial),
+missing households by type (1 for SFH/TH, area/181 m² for MFH and untyped residential with at least 2 and 1, area/146
+m² for AB with at least 5), component peaks (16.825 kW per household; 79, 29 and 29 W/m² for Commercial, Public and
+Unknown) and MV-direct above 100 kW; missing occupants are households × 2.03. Components, sampling, annual energies,
+seeds and the paired profile builder are those of the aligned allocation. `--dataset` takes the demand of a prepared
+paired dataset instead.
+
+*Power flow and flags.* Step 4's grid preparation and summary: LV busbar at 0.96 p.u. with up to two off-load tap
+steps, Newton-Raphson with the Iwamoto fallback, non-converged hours recorded. A grid is flagged for
+`transformer_overload` (> 100 % of the rating; skipped for grids without a rating), `cable_overload` (a cable above
+100 % of its rated current), `undervoltage` (a load bus below 0.90 p.u. after the taps) or `nonconvergence`. The
+evaluated hours are the 60 largest hours of the grid total plus the 24 largest household and GHD hours (`--all-hours`
+evaluates the year). On the prepared joint datasets this reproduces the full-year `pre` stage of
+`joint_2045_v1_full_year`: the transformer loading of all 48 converging SWF grids to 0.0 percentage points and the same
+eight flagged grids (LV 32, 35, 38, 59, 80, 99, 113, 137); ÜZW has none (one grid has no transformer rating and is
+checked for cables, voltage and convergence only).
+
+*Output* (per provider): `status_quo_<provider>_exclusions.csv` with the columns `provider, real_grid_id, reason`
+(`real_grid_id` is the bundle's own id, SWF `station_id` such as `LV_059` and ÜZW `area_id`; `reason` joins the
+flags with `;`), `status_quo_<provider>_grids.csv` (demand and power-flow metrics of every grid),
+`status_quo_<provider>_ghd_audit.csv` and `status_quo_<provider>_metadata.json`.
 
 ### Shared profile libraries
 

@@ -4,6 +4,11 @@ The PyLoVo mixed-use contract keeps topology physical-building scoped while
 representing electricity demand as at most one residential and one
 non-residential component.  This module is deliberately independent of the
 database and HDF5 layers so both handoff paths apply exactly the same rules.
+
+A non-residential part whose use is ``Unknown`` (InfDB building function
+31001_9998, "not specifiable from the source") is non-demand: it passes
+validation but yields no component, so it carries no load. A mixed building
+with an Unknown non-residential part keeps only its residential component.
 """
 
 from __future__ import annotations
@@ -16,6 +21,8 @@ import pandas as pd
 
 RESIDENTIAL = "Residential"
 NONRESIDENTIAL_CATEGORIES = frozenset({"Commercial", "Public"})
+# Accepted non-residential uses that model no demand (no component, no load).
+NON_DEMAND_NONRESIDENTIAL_USES = frozenset({"Unknown"})
 AREA_RTOL = 1e-6
 AREA_ATOL_M2 = 1e-5
 
@@ -149,13 +156,15 @@ def validate_physical_buildings(
 
     nonres_use = result["nonresidential_use"].astype("string").str.strip()
     nonres_area = numeric["nonresidential_floor_area"]
-    invalid_nonres_use = nonres_area.gt(0) & ~nonres_use.isin(NONRESIDENTIAL_CATEGORIES)
+    accepted_uses = NONRESIDENTIAL_CATEGORIES | NON_DEMAND_NONRESIDENTIAL_USES
+    invalid_nonres_use = nonres_area.gt(0) & ~nonres_use.isin(accepted_uses)
     if invalid_nonres_use.any():
         examples = result.loc[invalid_nonres_use, ["objectid", "nonresidential_use"]].to_dict("records")[:5]
         raise ValueError(
-            "Positive non-residential area requires nonresidential_use Commercial "
-            f"or Public; examples={examples}"
+            "Positive non-residential area requires nonresidential_use Commercial, "
+            f"Public or Unknown; examples={examples}"
         )
+    demand_nonres = nonres_area.gt(0) & nonres_use.isin(NONRESIDENTIAL_CATEGORIES).fillna(False)
 
     residential_area = numeric["residential_floor_area"]
     residential_mask = residential_area.gt(0)
@@ -181,7 +190,7 @@ def validate_physical_buildings(
         )
 
     nonres_peak = numeric["nonresidential_peak_load_in_kw"]
-    invalid_nonres_peak = nonres_area.gt(0) & (nonres_peak.isna() | nonres_peak.le(0))
+    invalid_nonres_peak = demand_nonres & (nonres_peak.isna() | nonres_peak.le(0))
     if invalid_nonres_peak.any():
         examples = result.loc[
             invalid_nonres_peak,
@@ -216,8 +225,9 @@ def build_building_components(
 ) -> pd.DataFrame:
     """Build the deterministic long-form component manifest.
 
-    The returned frame has one row for every positive source component.  An
-    excluded MV-direct non-residential component remains visible in the frame.
+    The returned frame has one row for every positive source component with
+    demand.  An excluded MV-direct non-residential component remains visible
+    in the frame; an ``Unknown`` non-residential part has no row.
     """
     physical = validate_physical_buildings(buildings)
     if grid_case_id is not None:
@@ -261,8 +271,8 @@ def build_building_components(
                 }
             )
         nonresidential_area = float(building["nonresidential_floor_area"])
-        if nonresidential_area > 0:
-            category = str(building["nonresidential_use"]).strip()
+        category = str(building["nonresidential_use"]).strip()
+        if nonresidential_area > 0 and category not in NON_DEMAND_NONRESIDENTIAL_USES:
             direct = bool(building["nonresidential_mv_direct"])
             rows.append(
                 {

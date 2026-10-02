@@ -82,7 +82,9 @@ LEFT JOIN LATERAL (
 ) loads ON TRUE;
 
 -- One row per positive Residential or Commercial/Public component of a
--- physical building (MV-direct components with included_in_lv = false).
+-- physical building (MV-direct components with included_in_lv = false). An
+-- Unknown non-residential part is non-demand and has no row; the pandas twin is
+-- gridexpand.common.building_components.build_building_components.
 CREATE OR REPLACE VIEW surrogrid.grid_building_component AS
 SELECT
     CONCAT(p.objectid, '::residential') AS component_id,
@@ -136,7 +138,8 @@ SELECT
     p.building_use_id AS source_building_use_id,
     p.building_type AS source_building_type
 FROM surrogrid.grid_building_bus p
-WHERE p.nonresidential_floor_area > 0;
+WHERE p.nonresidential_floor_area > 0
+  AND p.nonresidential_use IN ('Commercial', 'Public');
 
 -- QGIS layers of the synthetic expansion results. Created once (never dropped
 -- by schema code); refreshed by refresh_qgis_views() after materializations.

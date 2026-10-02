@@ -27,7 +27,8 @@ changes the shipped files.
 ## Scenario YAML
 
 Top-level blocks: `scenario`, `economics`, `asset_sizing`, `electrification`, `mobility`, `technologies`,
-`time_aggregation`; all are required, and every listed key is required unless marked optional.
+`time_aggregation`; all are required, and every listed key is required unless marked optional. The block `ghd`
+is optional (see [`ghd:` block](#ghd-block)).
 
 | key | type / allowed values | meaning |
 |---|---|---|
@@ -95,6 +96,46 @@ each with all of: `installed_energy_kwh`, `capacity_upper_kwh`, `installed_power
 `investment_cost_eur_per_kwh` (`inv-cost-c`), `fixed_investment_cost_power_eur` (`fix-cost-p`),
 `fixed_investment_cost_energy_eur` (`fix-cost-c`), `variable_cost_eur_per_kwh` (`var-cost-p`), `wacc`,
 `depreciation_years`. Fixed (heuristic) assets are written without investment costs whatever these values are.
+
+### `ghd:` block
+
+Optional GHD (commercial/public) demand rules, all off when the block is missing (every repository scenario);
+method in [method.md](method.md#commercial-and-public-ghd-electricity). Unknown (31001_9998) non-residential parts
+carry no demand in every case.
+
+| key | type / default | meaning |
+|---|---|---|
+| `ghd.activity_gating` | boolean, `false` | GHD only for a specific non-residential function or OSM activity evidence; needs `ghd.osm` |
+| `ghd.single_volume_one_storey` | boolean, `false` | one storey for fully non-residential single-volume buildings (OSM `building` value, else the ALKIS list) |
+| `ghd.osm_levels` | boolean, `false` | OSM `building:levels` instead of `floor_number` for the other fully non-residential buildings; needs `ghd.osm` with a building layer |
+| `ghd.osm.source` | `postgis` or `file` | evidence from PostGIS tables or from a CSV |
+| `ghd.osm.file` | path, required for `file` | CSV with `objectid` and any of `activity`, `activity_tags`, `activity_category`, `osm_building`, `osm_levels` (absolute or relative to the working directory) |
+| `ghd.osm.buildings_table` | `basedata.buildings` | footprint table (same database as the OSM tables) |
+| `ghd.osm.building_id_column`, `building_geometry_column` | `objectid`, `geom` | footprint id and geometry |
+| `ghd.osm.point_buffer_m` | ≥ 0, `5.0` | a point outside every footprint belongs to the nearest one within this distance |
+| `ghd.osm.polygon_min_overlap` | (0, 1], `0.5` | share of a footprint a feature or OSM building polygon must cover |
+| `ghd.osm.activity_layers` | list | OSM feature tables: `table`, `geometry_column` (`geom`), either `key_column` (the column holding the OSM key) or `key` (a fixed key), and `value_column` (`osm_subtype`) |
+| `ghd.osm.building_layer` | mapping or null | OSM building polygons: `table`, `geometry_column` (`geom`), `building_column` (`osm_subtype`), `levels_column` (`levels`, or null), `type_column`/`type_value` (`osm_type`/`building`: only these rows; both null for no filter) |
+
+Table and column names must be plain SQL identifiers (`schema.table`). The defaults follow the pgosm-flex tables
+that InfDB imports into `opendata.osm_<table>`. Its `building` layer has the polygons (`osm_type` building,
+building_part or address; the `building` value in `osm_subtype`; `levels`) and the points `osm_building_point`
+(`osm_type` is the key: address, entrance, office, building, door; `osm_subtype` the value). Shops, amenities and
+other points of interest need further pgosm-flex layers (for example `poi`, `amenity`, `shop`) in the InfDB OSM
+`layerset`. With the October 2026 import (layers `building` and `place`):
+
+```yaml
+ghd:
+  activity_gating: true
+  single_volume_one_storey: true
+  osm:
+    source: postgis
+    activity_layers:
+      - {table: opendata.osm_building_point, key_column: osm_type, value_column: osm_subtype}  # office=* nodes
+    building_layer: {table: opendata.osm_building_polygon}
+```
+
+The PostGIS source reads with the pipeline's database connection (`DB_*`, the status-quo test's `--db-env-prefix`).
 
 Repository scenarios: `forchheim_2045_synthetic.yaml` and `schweinfurt_2045.yaml` (synthetic runs),
 `forchheim_2045_full_year.yaml` (paired SWF runs), `joint_2045_full_year.yaml` (aligned SWF + ÜZW runs),
@@ -208,6 +249,38 @@ Every provider (SWF, ÜZW) of a pylovo alignment bundle, each against its synthe
 The heat library of a provider is derived: `<paired_dataset_id>_teaser_heat_<scenario_hash[:12]>`.
 `grid_subset` picks whole pylovo overlap components (`components`, in seeded random order up to
 `real_grids_per_provider` real grids) or only one-real-one-synthetic components (`islands`).
+
+## Status-quo test
+
+`gridexpand status-quo-test` checks the real grids of one provider under status-quo base electricity before pylovo
+generation (method in [method.md](method.md#status-quo-test)); read-only on the database.
+
+```bash
+uv run gridexpand status-quo-test --provider swf --alignment-dir <bundle root> \
+    --scenario-config config/scenarios/joint_2045_full_year.yaml --output-dir <dir> --jobs 4
+uv run gridexpand status-quo-test --provider uzw --alignment-dir <bundle root> --uzw-grids-dir <delivery> \
+    --scenario-config <scenario.yaml> --db-env-prefix INFDB_ --output-dir <dir>
+uv run gridexpand status-quo-test --provider swf --dataset work/allocation/outputs/scenario_calibration/<dataset> \
+    --output-dir <dir>                                        # regression: demand of a prepared paired dataset
+```
+
+| option | default | meaning |
+|---|---|---|
+| `--provider` | required | `swf` or `uzw` |
+| `--alignment-dir` / `--dataset` | one required | bundle root (`<dir>/<provider>/building-mapping.json`) or a prepared paired dataset |
+| `--uzw-grids-dir` | – | frozen ÜZW delivery (bundle input) |
+| `--scenario-config` | required with `--alignment-dir` | its `ghd:` block applies |
+| `--db-env-prefix` | `DB_` | InfDB connection from `<prefix>HOST`, `PORT`, `NAME`, `USER`, `PASSWORD` (read-only session) |
+| `--basedata-schema` | `basedata` | schema of `buildings` and `classify_building_use` |
+| `--profile-seed` | 481527 | realization seed (a dataset must match its own) |
+| `--peak-hours`, `--all-hours` | 60, off | evaluated hours per grid |
+| `--grids` | all | comma-separated real grid numbers |
+| `--jobs` | 1 | grids in parallel |
+
+The exclusion list `status_quo_<provider>_exclusions.csv` has exactly the columns `provider` (`swf`, `uzw`),
+`real_grid_id` (the bundle's id: SWF `station_id`, e.g. `LV_059`; ÜZW `area_id`, e.g. `113`) and `reason`
+(`transformer_overload`, `cable_overload`, `undervoltage`, `nonconvergence`, joined by `;`), one row per excluded
+grid; a pylovo alignment option consumes it to drop these grids and their buildings.
 
 ## Grid selection
 

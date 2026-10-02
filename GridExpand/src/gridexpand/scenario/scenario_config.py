@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from dataclasses import dataclass
+from dataclasses import field
 import math
 from typing import Any
 
+from gridexpand.common.ghd import GhdConfig
 from gridexpand.common.timeframe import REFERENCE_YEAR
 
 from .model_cases import get_model_case
@@ -526,11 +528,13 @@ class ScenarioConfig:
     electrification: ElectrificationConfig
     technologies: TechnologyParameters
     time_aggregation: TimeAggregationConfig
+    # Optional ``ghd:`` block (GHD demand rules, all off by default; gridexpand.common.ghd).
+    ghd: GhdConfig = field(default_factory=GhdConfig)
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "ScenarioConfig":
         raw = _mapping(raw, "scenario configuration")
-        _only(raw, {"scenario", "economics", "asset_sizing", "mobility", "electrification", "technologies", "time_aggregation"}, "top-level scenario")
+        _only(raw, {"scenario", "economics", "asset_sizing", "mobility", "electrification", "technologies", "time_aggregation", "ghd"}, "top-level scenario")
         scenario = _mapping(raw["scenario"], "scenario")
         _only(scenario, {"id", "milestone_year"}, "scenario")
         economics = _mapping(raw["economics"], "economics")
@@ -548,6 +552,7 @@ class ScenarioConfig:
             electrification=ElectrificationConfig.from_dict(raw["electrification"]),
             technologies=TechnologyParameters.from_dict(raw["technologies"]),
             time_aggregation=TimeAggregationConfig.from_dict(raw["time_aggregation"]),
+            ghd=GhdConfig.from_dict(raw.get("ghd")),
         )
 
     def to_dict(self) -> dict[str, Any]:

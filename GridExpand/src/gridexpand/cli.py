@@ -53,6 +53,10 @@ COMMANDS: dict[str, tuple[str, str]] = {
         "gridexpand.analysis.expansion.grid_expansion",
         "Step 5: materialize grid-expansion results from power-flow summaries.",
     ),
+    "status-quo-test": (
+        "gridexpand.paired.status_quo",
+        "Status-quo power flow of the real grids at alignment; writes the exclusion list per provider.",
+    ),
     "db": (
         "gridexpand.db.maintenance",
         "Database maintenance: init-schema, migrate, compress, relink-pylovo, delete-scenario.",
