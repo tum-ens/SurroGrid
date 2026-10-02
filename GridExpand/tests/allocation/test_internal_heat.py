@@ -120,6 +120,22 @@ def test_inflex_uses_reference_not_hems_dispatch():
     )
 
 
+def test_internal_heat_rejects_the_cop_curve_charge_efficiency():
+    raw = {
+        "space_heat_source": "internal",
+        "indoor_design_temperature_c": 20.0,
+        "heating_limit_temperature_c": 15.0,
+        "heat_pump_design_share": 0.65,
+        "buffer_volume_l_per_kw_th": 86.0,
+        "buffer_usable_temperature_spread_k": 10.0,
+        "buffer_charge_efficiency_method": "cop_curve",
+    }
+    with pytest.raises(ValueError, match="own COP route"):
+        HeatSizingConfig.from_dict(raw)
+    config = HeatSizingConfig.from_dict({**raw, "buffer_charge_efficiency_method": "technology"})
+    assert config.space_heat_source == "internal"
+
+
 def test_internal_tank_has_no_second_charging_penalty():
     from gridexpand.allocation.assets.heat.internal import materialize_internal_assets
     from gridexpand.paths import SCENARIO_CONFIG_DIR

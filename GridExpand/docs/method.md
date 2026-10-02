@@ -737,15 +737,17 @@ passive temperature and minimum plus permitted preheating (0/1/2 K scenarios).
 There is no cooling, comfort slack or artificial weekly temperature reset.
 
 The independent reference sizes the fixed HP/rod/buffer with the configured
-full-load-hour rule ([Climate inputs and full-load hours](#climate-inputs-and-full-load-hours)).
-Separate room, DHW and tank charging COP curves consume one shared electrical HP
-capacity; the rod likewise has one capacity. Only tank charging raises its sink
-curve, by the usable buffer spread (`buffer_usable_temperature_spread_k`). That
-COP route carries the charging penalty, so the internal tank's storage charge
-efficiency is 1; the tank keeps the configured discharge efficiency and standing
-loss. Tank charging must enter storage; DHW remains direct. Fixed COP curves do
-not change with optimized room uplift. The buffer and building mass are distinct
-stores. Service routing adds no new investment or integer decisions.
+full-load-hour rule ([Climate inputs and full-load hours](#climate-inputs-and-full-load-hours),
+including `degree_day_base_temperature_c`, e.g. Heizgradtage G15). Separate room,
+DHW and tank charging COP curves consume one shared electrical HP capacity; the
+rod likewise has one capacity. Only tank charging raises its sink curve, by the
+usable buffer spread (`buffer_usable_temperature_spread_k`). That COP route
+carries the charging penalty, so the internal tank's storage charge efficiency is
+1 and `buffer_charge_efficiency_method: cop_curve` is rejected; the tank keeps the
+configured discharge efficiency and standing loss. Tank charging must enter
+storage; DHW remains direct. Fixed COP curves do not change with optimized room
+uplift. The buffer and building mass are distinct stores. Service routing adds no
+new investment or integer decisions.
 
 InFlex uses the independent thermostat reference, fixed capacities and an
 instantaneous HP dispatch to the highest-COP service first, with the rod supplying

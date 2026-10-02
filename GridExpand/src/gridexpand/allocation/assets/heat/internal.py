@@ -454,11 +454,7 @@ def prepare_internal_heat(
             weather.temp_air,
             sizing_method=sizing_method,
             norm_outside_temperature_c=get_norm_outside_temperature(postcode),
-            indoor_design_temperature_c=heat_config.indoor_design_temperature_c,
-            heating_limit_temperature_c=heat_config.heating_limit_temperature_c,
-            heat_pump_design_share=heat_config.heat_pump_design_share,
-            buffer_volume_l_per_kw_th=heat_config.buffer_volume_l_per_kw_th,
-            buffer_usable_temperature_spread_k=heat_config.buffer_usable_temperature_spread_k,
+            **heat_config.sizing_kwargs(),
             water_heat_pump_cop=pd.DataFrame({(site, "heatpump_air"): cop_water}),
         )
         per_building_plans.append(plan)

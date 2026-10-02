@@ -329,6 +329,12 @@ class HeatSizingConfig:
             raise ValueError(
                 "asset_sizing.heat.buffer_charge_efficiency_method must be technology or cop_curve."
             )
+        if source == "internal" and method == "cop_curve":
+            # Internal tank charging already uses its own COP at the raised sink temperature.
+            raise ValueError(
+                "space_heat_source internal charges the tank through its own COP route; "
+                "buffer_charge_efficiency_method must be technology."
+            )
         return cls(
             space_heat_source=source,
             indoor_design_temperature_c=inside,
