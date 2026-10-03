@@ -25,9 +25,9 @@ from gridexpand.analysis.expansion.notebook_workflow import (
 )
 from gridexpand.paths import ANALYSIS_OUTPUT_DIR, RUN_CONFIG_DIR, SCENARIO_CALIBRATION_OUTPUT_DIR
 
-RUN_ID = "joint_2045_internal_2k_a3"
+RUN_ID = "joint_2045_internal_2k_a4"
 PROVIDERS = ("swf", "uzw")
-EXPECTED_GRID_COUNTS = {"Real SWF": 44, "Synthetic SWF": 45, "Real ÜZW": 213, "Synthetic ÜZW": 203}
+EXPECTED_GRID_COUNTS = {"Real SWF": 44, "Synthetic SWF": 45, "Real ÜZW": 213, "Synthetic ÜZW": 183}
 MIN_FAILED_SHARE = 0.01  # 1 % of the hours of one case (88 h of 8,760)
 MIN_SYNTHETIC_BUILDINGS = 5  # smaller synthetic grids (clustering fragments) are left out, as in the reference
 
