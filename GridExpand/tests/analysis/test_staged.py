@@ -172,14 +172,27 @@ def test_neighbours_over_the_limit_share_new_stations(staged_assumption):
     assert [s.new_stations for s in states] == pytest.approx([1.0, 1.0])
 
 
-def test_spare_capacity_is_used_once(staged_assumption):
+def test_spare_capacity_up_to_the_neighbours_limit_is_used_once(staged_assumption):
     params = _params(staged_assumption)
     a = _grid("A", 800, 1100)  # excess 100
     b = _grid("B", 800, 1200, origin=(0.0, 30.0))  # excess 200
-    c = _grid("C", 630, 400, origin=(30.0, 0.0))  # spare 230, adjacent to both
+    c = _grid("C", 630, 400, origin=(30.0, 0.0))  # adjacent to both; may take 1000 - 400 = 600
     states = {s.key: s for s in staged.run_stages([a, b, c], params)}
-    assert states["B"].measure == "transfer"  # larger excess first: takes 200 of 230
-    assert states["A"].measure == "new_station"  # 30 left < 100
+    assert states["B"].measure == states["A"].measure == "transfer"  # larger excess first, then the rest
+    station = states["C"].station
+    assert (station.required_kva, station.exchange_cost_eur) == (800, 12500)  # 400 + 300 received
+    assert station.peak_kva == 400 and station.cost_basis == "exchange_to_800kva_with_transfer_in"
+
+
+def test_partial_transfer_and_new_stations_for_the_rest(staged_assumption):
+    params = _params(staged_assumption)
+    over = _grid("A", 630, 1800)  # excess 800 above the 1000 kVA limit
+    neighbour = _grid("B", 1000, 900, origin=(40.0, 0.0))  # at the limit: 100 left
+    a, b = staged.run_stages([over, neighbour], params)
+    assert a.transfer_partners == ["B"] and a.transfer_kva == pytest.approx(100)
+    assert a.load_transfer_cost_eur == 20000
+    assert a.measure == "new_station" and a.new_stations == pytest.approx(2.0)  # ceil(700 / 630)
+    assert b.station.measure == "none" and b.station.exchange_cost_eur == 0  # 900 + 100 fits 1000 kVA
 
 
 def test_trench_escalation_without_station_problem(staged_assumption):

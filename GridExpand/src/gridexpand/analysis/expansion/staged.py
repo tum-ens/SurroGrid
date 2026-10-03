@@ -15,11 +15,12 @@ literature. Per grid (``evaluate_grid``):
 
 Per analysis (``resolve_over_limit``):
 
-4. **Grids over the limit or escalated.** First the excess goes to neighbouring stations with spare
-   capacity (load transfer; neighbours are grids whose buses come within ``load_transfer_adjacency_m``).
-   Otherwise neighbouring remaining grids form a cluster that shares whole new substations. Routes
-   that need two or more added cables (and unresolved routes) count as relieved; routes with one
-   added cable keep their cost.
+4. **Grids over the limit or escalated.** First as much of the excess as possible goes to neighbouring
+   stations (load transfer, also partial; neighbours are grids whose buses come within
+   ``load_transfer_adjacency_m``). A neighbour may take load up to its own station limit and then
+   gets the transformer exchange its peak plus the received load needs. Only the remaining excess
+   needs whole new substations, shared by neighbouring remaining grids. Routes that need two or more
+   added cables (and unresolved routes) count as relieved; routes with one added cable keep their cost.
 
 Per grid (``resolve_voltage``):
 
@@ -39,7 +40,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Hashable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -505,39 +506,63 @@ def neighbours(states: Sequence[GridState], adjacency_m: float) -> dict[Hashable
 
 
 def _spare_kva(state: GridState, params: StagedParameters) -> float:
-    """Spare capacity of a station after its own stage 1 (none for grids that need stage 4)."""
+    """Spare capacity of a station up to its limit (none for grids that need stage 4).
+
+    A station may take transferred load up to the largest transformer it can host; ``_receive``
+    then gives it the exchange that its peak plus the received load needs.
+    """
     if state.station is None or state.over_limit:
         return 0.0
-    rating = state.station.required_kva if state.station.measure == "exchange" else state.station.rated_kva
-    return max(params.planning_limit * rating - state.station.peak_kva, 0.0)
+    ceiling = max(state.station.limit_kva, state.station.rated_kva)
+    return max(params.planning_limit * ceiling - state.station.peak_kva, 0.0)
+
+
+def _receive(state: GridState, load_kva: float, params: StagedParameters) -> None:
+    """A neighbour that takes transferred load gets the station its peak plus that load needs.
+
+    ``peak_kva`` stays the grid's own peak; the cost basis marks the received load.
+    """
+    station = state.station
+    decision = station_decision(station.rated_kva, station.peak_kva + load_kva, state.input.settlement_type, params)
+    if (decision.required_kva, decision.exchange_cost_eur) == (station.required_kva, station.exchange_cost_eur):
+        return
+    state.station = replace(decision, peak_kva=station.peak_kva, cost_basis=f"{decision.cost_basis}_with_transfer_in")
 
 
 def resolve_over_limit(states: Sequence[GridState], params: StagedParameters) -> None:
-    """Stage 4 over all grids of an analysis: load transfer first, then shared whole new substations."""
+    """Stage 4 over all grids of an analysis: load transfer first (also partial), then shared whole new substations."""
     candidates = [state for state in states if state.over_limit]
     if not candidates:
         return
     adjacency = neighbours(states, params.adjacency_m)
     spare = {state.key: _spare_kva(state, params) for state in states}
+    received = {state.key: 0.0 for state in states}
     by_key = {state.key: state for state in states}
+    left_over: dict[Hashable, float] = {}
     for state in sorted(candidates, key=lambda s: (-s.excess_kva, str(s.key))):
         partners = sorted((key for key in adjacency[state.key] if spare[key] > KVA_EPSILON),
                           key=lambda key: (-spare[key], str(key)))
-        if sum(spare[key] for key in partners) + KVA_EPSILON < state.excess_kva:
-            continue
         remaining = state.excess_kva
         for key in partners:
             take = min(spare[key], remaining)
             spare[key] -= take
+            received[key] += take
             remaining -= take
             state.transfer_partners.append(key)
             if remaining <= KVA_EPSILON:
                 break
-        state.measure = "transfer"
-        state.transfer_kva = state.excess_kva
-        state.load_transfer_cost_eur = params.transfer_eur
-    remaining_states = [state for state in candidates if state.measure != "transfer"]
-    remaining_keys = {state.key for state in remaining_states}
+        if state.excess_kva - remaining > KVA_EPSILON:
+            state.transfer_kva = state.excess_kva - remaining
+            state.load_transfer_cost_eur = params.transfer_eur
+        if remaining <= KVA_EPSILON:
+            state.measure = "transfer"
+        else:
+            left_over[state.key] = remaining
+    for key, load_kva in received.items():
+        if load_kva > KVA_EPSILON:
+            _receive(by_key[key], load_kva, params)
+    remaining_states = [by_key[key] for key in left_over]
+    remaining_keys = set(left_over)
     seen: set[Hashable] = set()
     cluster_index = 0
     for state in sorted(remaining_states, key=lambda s: str(s.key)):
@@ -554,11 +579,11 @@ def resolve_over_limit(states: Sequence[GridState], params: StagedParameters) ->
                 if other in remaining_keys and other not in seen:
                     seen.add(other)
                     stack.append(other)
-        total_excess = sum(member.excess_kva for member in members)
+        total_excess = sum(left_over[member.key] for member in members)
         n_new = math.ceil(total_excess / (params.planning_limit * params.new_station_kva) - 1e-9)
         n_new = max(n_new, 1)
         for member in members:
-            share = n_new * member.excess_kva / total_excess
+            share = n_new * left_over[member.key] / total_excess
             member.measure = "new_station"
             member.new_station_cluster = f"c{cluster_index}"
             member.new_stations = share

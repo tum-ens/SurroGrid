@@ -82,14 +82,18 @@ most `line_max_added_cables`.
 - **(a) Load transfer.**
   - *Neighbours:* grids whose buses come within `load_transfer_adjacency_m`. Bus coordinates are in EPSG:25832;
     pylovo's WGS84 coordinates are projected.
-  - *Spare capacity* of a neighbour: τ·rating after its own stage 1, minus its P100.
+  - *Spare capacity* of a neighbour: τ·S_max (its station limit, or its larger rating) minus its P100. A neighbour
+    may take load up to its own limit and then gets the transformer exchange that its P100 plus the received load
+    needs (its row keeps its own P100; the cost basis ends in `_with_transfer_in`).
   - *Order:* grids by descending excess; the largest spare is used first, and each kVA only once.
-  - *If the spare covers the excess:* `load_transfer_eur` plus the own exchange to S_max.
-- **(b) Whole new substations.**
-  - The remaining neighbouring grids form a cluster that shares ⌈Σ excess / (τ·S_new)⌉ new substations.
+  - *Partial transfers:* as much of the excess as the neighbours can take moves to them, for `load_transfer_eur`
+    plus the own exchange to S_max. This is the shift of feeders or feeder sections to less loaded stations of
+    Niederle et al. (2026), combined with an exchange at the receiving station.
+- **(b) Whole new substations** for the excess that no neighbour can take.
+  - The remaining neighbouring grids form a cluster that shares ⌈Σ remaining excess / (τ·S_new)⌉ new substations.
   - Each substation costs `new_station_eur` + `new_station_mv_loop_in_km`·`mv_cable_eur_per_km` +
     `new_station_lv_connection_km`·trench cost of the settlement.
-  - The cluster cost is allocated to the grids by excess.
+  - The cluster cost is allocated to the grids by remaining excess.
 - **In both cases:**
   - routes that need two or more added cables, and unresolved routes, count as relieved (measure
     `relieved_by_transfer` / `relieved_by_new_station`, no cable cost);
@@ -237,8 +241,8 @@ Use the result as an order-of-magnitude screening layer:
     capacity, n-1) is not checked;
   - inferring electrical parallel cables from QGIS helper geometries.
 - **Lumpy measures.** Whole substations make the cost a step function of the peak load. Report measure counts
-  (transfers, new substations, `expansion_grid_result`) next to the euros. The load transfer softens the steps
-  where neighbours have spare capacity.
+  (transfers, new substations, `expansion_grid_result`) next to the euros. The load transfer, also partial and
+  with upgraded neighbours, softens the steps where neighbouring stations can still grow.
 
 Cost-basis labels such as `catalog_rural_duct20_trench80_150x1_185x0_240x0` round the shares to whole percent. The
 result tables keep the cost basis, per-km costs, measures and breakdown columns, so QGIS users can see why a feature
