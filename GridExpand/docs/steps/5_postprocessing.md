@@ -116,8 +116,8 @@ uv run jupyter lab notebooks/analysis
 - `analysis_powerflow.ipynb`: status-quo validation of the joint aligned run, synthetic vs real (distribution
   similarity, paper figure `asset-percentiles`);
 - `analysis_expansion.ipynb`: status quo, INFLEX and HEMS of the joint run (paper figure
-  `pre_post_flex_no_flex_asset_cutoff_overview`, expansion costs on one grid set for all cases, cable and voltage
-  diagnostics);
+  `pre_post_flex_no_flex_asset_cutoff_overview`, expansion costs on one grid set for all cases with figure
+  `expansion_cost_overview`, cable and voltage diagnostics);
 - `joint_setup.py`: the setup both notebooks import (run id, providers, case colors and labels, exclusion
   threshold, `CURVE_Y_LIMITS`: the fixed top-row scale shared by both paper figures). `prepare_joint_analysis()` calls `prepare_expansion_analysis(providers=("swf", "uzw"))` (in
   `expansion.notebook_workflow`), which prepares the four groups and enforces consistent provenance, and adds

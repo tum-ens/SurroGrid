@@ -6,6 +6,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+from matplotlib.collections import PolyCollection
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -59,6 +60,15 @@ def test_pooled_layout_legend_and_labels():
     assert [label.get_text() for label in bottom.get_xticklabels()] == ["Status quo", "No HEMS", "HEMS"]
     width, _ = fig.get_size_inches()
     assert np.isclose(width, 180 / 25.4)
+    plt.close(fig)
+
+
+def test_real_violins_have_a_visible_dashed_outline():
+    fig = _figure()
+    bottom = fig.axes[3]
+    synthetic, real = [collection for collection in bottom.collections if isinstance(collection, PolyCollection)][:2]
+    assert real.get_linestyle() != synthetic.get_linestyle()
+    assert real.get_edgecolor()[0][3] == 1.0 and real.get_facecolor()[0][3] < 1.0  # dashed outline stays visible
     plt.close(fig)
 
 

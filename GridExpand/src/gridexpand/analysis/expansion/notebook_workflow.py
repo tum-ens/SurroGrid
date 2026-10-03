@@ -286,7 +286,7 @@ def expansion_cost_comparison(
 
     Returns:
         ``costs`` (``stage``, ``data_source`` = the ``by`` value, ``component``, ``cost_eur``,
-        the input of ``plot_expansion_cost_comparison_bar``), ``grids`` (grids and total per
+        the input of ``plot_expansion_cost_overview_static``), ``grids`` (grids and total per
         stage), ``reinforcements`` (standard cables added) and ``excluded`` (grid, reason).
     """
     empty = {"costs": pd.DataFrame(), "grids": pd.DataFrame(), "reinforcements": pd.DataFrame(),

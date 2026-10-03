@@ -7,6 +7,7 @@ from pathlib import Path
 import textwrap
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import to_rgba
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.ticker import MaxNLocator, ScalarFormatter
@@ -647,9 +648,10 @@ def plot_powerflow_asset_cutoff_overview_static(
                         showmeans=False, showmedians=True, showextrema=False,
                     )
                     for body in parts["bodies"]:
-                        body.set_facecolor(color)
+                        # Opaque outline: the source line style stays visible on the light fill.
+                        body.set_alpha(None)  # violinplot sets 0.3 on the whole body
+                        body.set_facecolor(to_rgba(color, float(style["alpha"])))
                         body.set_edgecolor(color)
-                        body.set_alpha(float(style["alpha"]))
                         body.set_linewidth(0.8)
                         body.set_linestyle(style["linestyle"])
                     parts["cmedians"].set_color("#222222")
