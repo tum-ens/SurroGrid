@@ -490,6 +490,7 @@ def aligned_preparation_commands(
     heat_profile_set_id: str,
     heat_workers: int,
     reference_year: int,
+    weather_year: int | None = None,
     python: str | None = None,
 ) -> list[tuple[str, list[str]]]:
     """``(stage, argv)`` that build one provider's aligned paired dataset."""
@@ -507,11 +508,14 @@ def aligned_preparation_commands(
     if provider == "uzw":
         allocation += ["--uzw-grids-dir", str(uzw_grids_dir)]
     readiness = f"{PROFILES}.paired_profile_readiness"
+    weather = module_command(
+        f"{PROFILES}.aligned_weather", "--paired-dir", paired_dir, "--output", weather_hdf, python=python,
+    )
+    if weather_year is not None:
+        weather += ["--weather-year", str(weather_year)]
     stages = [
         ("allocation", allocation),
-        ("weather", module_command(
-            f"{PROFILES}.aligned_weather", "--paired-dir", paired_dir, "--output", weather_hdf, python=python,
-        )),
+        ("weather", weather),
         ("heat_regeneration", module_command(
             f"{PROFILES}.paired_heat_profile_regeneration",
             "--paired-dir", paired_dir, "--refresh-catalog", "--resume",

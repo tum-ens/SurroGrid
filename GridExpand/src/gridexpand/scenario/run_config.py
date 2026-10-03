@@ -472,6 +472,8 @@ class AlignedRun:
     materialize_expansion: bool
     grid_subset: dict[str, Any] | None
     optimizer: str | None = None
+    # None: PVGIS TMY per provider; a year: that real calendar year for every provider.
+    weather_year: int | None = None
     pipeline: str = "paired_aligned"
 
     @classmethod
@@ -485,7 +487,7 @@ class AlignedRun:
         base_dir: Path,
     ) -> "AlignedRun":
         only(resources, {"pylovo_version_id", "alignment_dir", "population", "uzw_grids_dir", "providers",
-                         "target_network"}, "paired_aligned resources")
+                         "target_network", "weather_year"}, "paired_aligned resources")
         only(execution, {"model_cases", "workers", "step3_cpus", "step3_cluster_concurrency", "step4_cpus",
                          "heat_workers", "powerflow_grid_scope", "powerflow_max_timesteps", "profile_seed",
                          "cleanup_intermediates", "resume", "parallel_providers", "materialize_expansion",
@@ -538,6 +540,8 @@ class AlignedRun:
             materialize_expansion=flag(execution.get("materialize_expansion", False), "execution.materialize_expansion"),
             grid_subset=_grid_subset(execution.get("grid_subset")),
             optimizer=_optimizer(execution),
+            weather_year=(None if resources.get("weather_year") is None
+                          else positive_int(resources["weather_year"], "resources.weather_year")),
         )
 
     def provider(self, name: str) -> ProviderResources:
