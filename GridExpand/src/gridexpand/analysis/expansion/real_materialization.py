@@ -4,9 +4,11 @@ The rules are those of ``staged`` (rule set ``staged_2026``), with the grid topo
 and the bus voltages of Step 4.
 Real grids have no pylovo display lines, so parallel rows between the same bus pair
 with lengths within 5 % form one cable corridor (capacity and peak current summed,
-longest length); a corridor is one route of the staged rules. Grids with failed power-flow
-timesteps are ``incomplete`` (P100 cost unknown); ``--exclude-real-lv-id`` grids are
-``excluded``; both stay in the status table and take no part in the staged stages.
+longest length); a corridor is one route of the staged rules. A grid whose power flow failed in
+fewer than ``MAX_FAILED_SHARE`` of its timesteps is costed from the converged ones, a lower
+bound (the failed hours lie beyond voltage collapse); with more it is ``incomplete`` (P100
+cost unknown). ``--exclude-real-lv-id`` grids are ``excluded``; incomplete and excluded grids
+stay in the status table and take no part in the staged stages.
 
 ``prepare_real_results`` reads everything (summaries, grid files) without writing;
 ``insert_real_results`` writes the rows inside the caller's transaction.
@@ -37,6 +39,9 @@ if TYPE_CHECKING:
     import pandapower as pp
 
 CORRIDOR_LENGTH_RELATIVE_TOLERANCE = 0.05
+# Below this share of failed power-flow timesteps a real grid is costed from its converged
+# timesteps (lower bound); the analysis notebooks exclude grids at the same share.
+MAX_FAILED_SHARE = 0.01
 REAL_GRID_SOURCES = {"real_swf": "swf", "real_uzw": "uzw"}
 
 
@@ -292,12 +297,17 @@ def _grid_status(run: dict[str, Any], excluded: set[str]) -> dict[str, Any]:
     """Status row of one real grid: ``excluded``, ``incomplete`` (failed timesteps) or ``complete``."""
     lv_id = canonical_real_grid_id(run["lv_id"])
     failed = int(run["n_failed_timesteps"] or 0)
+    timesteps = int(run["n_timesteps"])
     if lv_id in excluded:
         cost_status = "excluded"
         reason = "Explicitly excluded from the comparison scope."
-    elif failed > 0:
+    elif failed >= MAX_FAILED_SHARE * timesteps:
         cost_status = "incomplete"
         reason = f"{failed} power-flow timesteps did not converge; P100 expansion cost is unknown."
+    elif failed > 0:
+        cost_status = "complete"
+        reason = (f"{failed} of {timesteps} power-flow timesteps did not converge; "
+                  "costed from the converged timesteps (lower bound).")
     else:
         cost_status = "complete"
         reason = None

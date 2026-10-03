@@ -660,8 +660,9 @@ A publication run requires:
 3. identical scenario-unit inputs and optimization settings for both targets;
 4. an identical temporal horizon and, with TSAM, identical representative periods for both targets (the runner
    records one canonical mapping and rejects results that do not reproduce it);
-5. no silently skipped power-flow timesteps: non-convergence is reported (real grids with failed timesteps are
-   `incomplete` in the expansion analysis, not zero-cost);
+5. no silently skipped power-flow timesteps: non-convergence is reported (real grids with failed timesteps in 1 %
+   of the hours or more are `incomplete` in the expansion analysis, not zero-cost; below that they are costed from the
+   converged hours as a lower bound);
 6. a separate meshed-versus-radial sensitivity for critical real grids where radialization materially changes
    stress.
 

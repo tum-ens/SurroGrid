@@ -85,7 +85,9 @@ uv run python -m gridexpand.analysis.expansion.aligned_expansion --run-id joint_
 5. **Residual voltage** after the Step 4 tap: an rONT, or a feeder split at 2/3.
 
 The rules run in Python for both sources and use the same assumption row. Real grid-stages with failed
-power-flow timesteps are `incomplete` (no cost rows, not zero cost); explicit exclusions are `excluded`.
+power-flow timesteps in fewer than 1 % of the timesteps are costed from the converged ones (a lower bound, noted in the
+status reason); with 1 % or more they are `incomplete` (no cost rows, not zero cost); explicit exclusions are
+`excluded`.
 
 ## Outputs
 

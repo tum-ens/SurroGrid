@@ -211,7 +211,9 @@ geometry differs:
   - The grid file also gives the topology and the coordinates.
 
 **Coverage.**
-- A real grid-stage is priced only when every simulated timestep converged. A grid with failed timesteps is
+- A real grid-stage whose power flow failed in fewer than 1 % of its timesteps
+  (`real_materialization.MAX_FAILED_SHARE`) is priced from the converged timesteps; its status reason marks the
+  cost as a lower bound (the failed hours lie beyond voltage collapse). With 1 % or more failed timesteps the grid is
   `incomplete`, gets no cost rows and takes no part in the staged stage 4 (it offers no spare capacity).
 - Methodological exclusions are `excluded`.
 - Cost comparisons must report both total cost and coverage.
