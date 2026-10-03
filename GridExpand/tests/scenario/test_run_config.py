@@ -118,6 +118,13 @@ def test_aligned_run(tmp_path):
     raw["run"]["scenario"] = str(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")
     raw["resources"]["alignment_dir"] = "alignment"  # relative: next to the YAML, not the working directory
     assert run_config_from_dict(raw, base_dir=tmp_path).alignment_dir == tmp_path / "alignment"
+    assert run.weather_year is None  # PVGIS TMY per provider
+    raw["resources"]["weather_year"] = 2016
+    assert run_config_from_dict(raw, base_dir=tmp_path).weather_year == 2016
+    raw["resources"]["weather_year"] = 2016.5
+    with pytest.raises(ValueError, match="weather_year"):
+        run_config_from_dict(raw, base_dir=tmp_path)
+    raw["resources"]["weather_year"] = None
     raw["execution"]["parallel_providers"] = "false"
     with pytest.raises(ValueError, match="true or false"):
         run_config_from_dict(raw, base_dir=tmp_path)

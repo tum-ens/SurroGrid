@@ -113,6 +113,46 @@ def test_unexpected_payload_raises(monkeypatch, no_sleep):
         weather.get_pvgis_tmy_sarah3_dataframe(48.0, 11.7)
 
 
+def _series_payload():
+    """Horizontal seriescalc hours of a leap year: 1 Jan 00:10, 29 Feb 12:10, 1 Mar 12:10, 31 Dec 23:10 UTC."""
+    hours = [
+        {"time": stamp, "Gb(i)": beam, "Gd(i)": diffuse, "Gr(i)": 0.0, "H_sun": height, "T2m": temp,
+         "WS10m": 2.0, "Int": 0.0}
+        for stamp, beam, diffuse, height, temp in (
+            ("20160101:0010", 0.0, 0.0, 0.0, -3.0),
+            ("20160229:1210", 100.0, 50.0, 30.0, 1.0),
+            ("20160301:1210", 100.0, 50.0, 30.0, 4.0),
+            ("20161231:2310", 0.0, 0.0, 0.0, -1.0),
+        )
+    ]
+    return {"inputs": {"location": {"latitude": 48.0, "longitude": 11.7, "elevation": 512.0}},
+            "outputs": {"hourly": hours}}
+
+
+def test_real_year_from_seriescalc(monkeypatch, no_sleep):
+    calls = []
+
+    def fake_get(url, params, timeout):
+        calls.append((url, dict(params)))
+        return _Response(200, _series_payload())
+
+    monkeypatch.setattr(weather.requests, "get", fake_get)
+    df, altitude = weather.get_pvgis_year_sarah3_dataframe(48.0, 11.7, 2016, reference_year=2009)
+    assert altitude == 512.0
+    assert calls == [(weather.PVGIS_SERIES_URL, {
+        "lat": 48.0, "lon": 11.7, "raddatabase": "PVGIS-SARAH3", "startyear": 2016, "endyear": 2016,
+        "outputformat": "json", "usehorizon": 1, "angle": 0, "aspect": 0, "components": 1})]
+    # 29 February is dropped; 31 Dec 23:10 UTC lies in the next year in UTC+1 and moves to the start.
+    assert list(df["temp_air"]) == [-1.0, -3.0, 4.0]
+    assert str(df["time(UTC+1)"].iloc[0]) == "2009-01-01 00:00:00+01:00"
+    assert str(df["time(inst)"].iloc[1]) == "2009-01-01 01:10:00+01:00"
+    noon = df.iloc[2]
+    assert str(noon["time(UTC+1)"]) == "2009-03-01 13:00:00+01:00"
+    assert (noon["ghi"], noon["dhi"]) == (150.0, 50.0)
+    assert np.isclose(noon["dni"], 200.0)  # beam on the horizontal / sin(30 deg)
+    assert df.loc[[0, 1], "dni"].eq(0.0).all() and df["wind_speed"].eq(2.0).all()
+
+
 def test_dew_point_magnus_tetens():
     temp = pd.Series([20.0, 0.0])
     dew = weather.get_dew_point(temp, pd.Series([100.0, 50.0]))

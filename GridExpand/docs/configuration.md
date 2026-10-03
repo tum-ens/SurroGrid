@@ -238,6 +238,7 @@ Every provider (SWF, ÜZW) of a pylovo alignment bundle, each against its synthe
 | `resources.uzw_grids_dir` | required with `uzw` | ÜZW grid delivery (fingerprint checked against the bundle) |
 | `resources.providers.<swf\|uzw>.paired_dataset_id` | required | dataset directory per provider |
 | `resources.providers.<…>.weather_source_hdf` | required | weather file name in `work/allocation/results/` |
+| `resources.weather_year` | null | null: PVGIS TMY per provider; a year (2005–2023): that real year for every provider ([method](method.md#time-axis)) |
 | `resources.providers.<…>.workers` | `execution.workers` | grids in parallel for this provider |
 | `resources.target_network` | `both` | `both`, `real` or `synthetic` |
 | `execution.model_cases` | required | post cases only |

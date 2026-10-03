@@ -1,10 +1,11 @@
 """Write one provider's shared weather HDF for an aligned paired dataset.
 
-The weather is a PVGIS SARAH3 TMY at the centroid of the dataset's buildings.
-The file carries ``raw_data/weather`` and ``raw_data/region`` for the PV
-profile library and ``urbs_in/weather`` for Step 3. ``raw_data/region.plz`` is
-the dataset's most common building postcode; heat sizing takes the design
-outdoor temperature from it.
+The weather is a PVGIS SARAH3 TMY at the centroid of the dataset's buildings,
+or with ``--weather-year`` that real calendar year from the same sources. The
+file carries ``raw_data/weather`` and ``raw_data/region`` for the PV profile
+library and ``urbs_in/weather`` for Step 3. ``raw_data/region.plz`` is the
+dataset's most common building postcode; heat sizing takes the design outdoor
+temperature from it.
 """
 
 from __future__ import annotations
@@ -21,7 +22,9 @@ from gridexpand.common.timeframe import build_full_year_metadata, write_hdf_meta
 import gridexpand.common.weather as weather_functions
 
 
-def write_aligned_weather(paired_dir: Path, output: Path, reference_year: int) -> Path:
+def write_aligned_weather(
+    paired_dir: Path, output: Path, reference_year: int, weather_year: int | None = None
+) -> Path:
     plan = pd.read_csv(paired_dir / "paired_real_bus_allocation_plan.csv")
     plz = int(plan["postcode"].mode().iloc[0])
     database = SurroGridDatabase()
@@ -40,9 +43,14 @@ def write_aligned_weather(paired_dir: Path, output: Path, reference_year: int) -
                 "ids": plan["building_objectid"].astype(str).tolist(),
             },
         ).mappings().one()
-    weather, altitude = weather_functions.get_pvgis_tmy_sarah3_dataframe(
-        float(centroid["lat"]), float(centroid["lon"]), reference_year=int(reference_year)
-    )
+    if weather_year is None:
+        weather, altitude = weather_functions.get_pvgis_tmy_sarah3_dataframe(
+            float(centroid["lat"]), float(centroid["lon"]), reference_year=int(reference_year)
+        )
+    else:
+        weather, altitude = weather_functions.get_pvgis_year_sarah3_dataframe(
+            float(centroid["lat"]), float(centroid["lon"]), int(weather_year), reference_year=int(reference_year)
+        )
     region = pd.DataFrame(
         [{"lat": float(centroid["lat"]), "lon": float(centroid["lon"]),
           "altitude": float(altitude), "plz": int(plz)}]
@@ -72,8 +80,11 @@ def main() -> None:
     parser.add_argument("--paired-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--reference-year", type=int, default=2009)
+    parser.add_argument("--weather-year", type=int, default=None,
+                        help="Real calendar year from PVGIS seriescalc instead of the TMY.")
     args = parser.parse_args()
-    print(write_aligned_weather(args.paired_dir.resolve(), args.output.resolve(), args.reference_year))
+    print(write_aligned_weather(args.paired_dir.resolve(), args.output.resolve(), args.reference_year,
+                                args.weather_year))
 
 
 if __name__ == "__main__":

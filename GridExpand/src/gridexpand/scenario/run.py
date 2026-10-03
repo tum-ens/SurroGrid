@@ -468,7 +468,7 @@ def aligned_preparation(ctx: RunContext, provider: ProviderResources) -> list[tu
         scenario_config=run.scenario_path, profile_seed=run.profile_seed, paired_dir=provider.paired_dir,
         weather_hdf=provider.weather_hdf, heat_sources=provider.heat_sources, heat_library=provider.heat_library,
         heat_profile_set_id=provider.heat_profile_set_id, heat_workers=run.heat_workers,
-        reference_year=ctx.scenario.mobility.reference_year,
+        reference_year=ctx.scenario.mobility.reference_year, weather_year=run.weather_year,
     )
 
 

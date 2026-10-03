@@ -137,6 +137,14 @@ def test_preparation_commands():
     # One weather series per provider: the heat runs use the weather file the PV library and sizing use.
     assert heat[heat.index("--weather-hdf") + 1] == "/w.h5"
     assert aligned[6][1][aligned[6][1].index("--weather-source-hdf") + 1] == "/w.h5"
+    assert "--weather-year" not in aligned[1][1]  # PVGIS TMY
+    year = commands.aligned_preparation_commands(
+        provider="swf", alignment_dir=Path("/a"), population=Path("/p.json"), uzw_grids_dir=None,
+        pylovo_version_id="1", scenario_config=SC, profile_seed=1, paired_dir=Path("/d"), weather_hdf=Path("/w.h5"),
+        heat_sources=Path("/d/heat_sources/tag"), heat_library=Path("/h.h5"), heat_profile_set_id="set",
+        heat_workers=6, reference_year=2009, weather_year=2016, python=PY,
+    )
+    assert year[1][0] == "weather" and year[1][1][-2:] == ["--weather-year", "2016"]
     assert commands.electrification_preparation_command(
         "9184137", min_buildings=60, pylovo_version_id="1", demand_scope="all", mobility_source="pool",
         profile_seed=1, scenario_config=SC, output=Path("/o.csv"), plz=85653, kcid=1, bcid=4, python=PY,

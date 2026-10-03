@@ -65,6 +65,13 @@ October) and mapped back to UTC+1 (`allocation/functions/dst.py`). Full-year run
 one-week timeframes (`min_temperature_week`, `max_solar_radiation_week`, `max_base_electricity_demand_week`)
 select 168 hours and are operational stress screenings, not annual investment optima.
 
+An aligned paired run can take one real calendar year instead of the TMY (`resources.weather_year`): PVGIS
+`seriescalc` hourly data from the same sources (SARAH3 irradiance, ERA5 meteorology) on the horizontal plane,
+with `dni = Gb / sin(sun height)`, 29 February dropped and the year moved to 2009. One year for all providers
+keeps irradiance and temperature physically consistent and gives every region the same meteorological year;
+a TMY selects each month per site and can pick an atypically mild or cold winter. The series has no humidity,
+pressure or wind direction, which the paired pipeline does not use.
+
 ## Reproducible profile realization
 
 Stochastic input realization is separated from asset sizing and dispatch. Every stochastic choice uses a
