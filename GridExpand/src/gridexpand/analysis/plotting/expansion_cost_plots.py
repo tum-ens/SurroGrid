@@ -17,7 +17,7 @@ import pandas as pd
 # Analyses written before migration 0007 have Cables and Transformers only; later ones split the
 # station-level cost.
 COMPONENT_ORDER = (
-    "Cables", "Transformers", "Transformer exchange", "Load transfer", "New substations", "Voltage measures",
+    "Cables", "Transformers", "Transformer exchange", "Load transfer", "Additional stations", "Voltage measures",
 )
 # The small station-level measures, plotted together as "Other" (the caption names them).
 OTHER_COMPONENTS = ("Load transfer", "Voltage measures")

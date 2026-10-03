@@ -231,7 +231,7 @@ def load_expansion_stage_context(
 STAGED_STATION_COMPONENTS = (
     ("Transformer exchange", "transformer_exchange_cost_eur"),
     ("Load transfer", "load_transfer_cost_eur"),
-    ("New substations", "new_station_cost_eur"),
+    ("Additional stations", "new_station_cost_eur"),
     ("Voltage measures", "voltage_cost_eur"),
 )
 

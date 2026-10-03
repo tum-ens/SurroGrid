@@ -26,7 +26,7 @@ def _costs() -> pd.DataFrame:
     for network, scale in (("Real", 1.0), ("Synthetic", 1.2)):
         for case, factor in zip(CASES, (0.0, 1.0, 0.5)):
             for component, cost in (("Cables", 2e6), ("Transformer exchange", 1e6), ("Load transfer", 0.1e6),
-                                    ("New substations", 1.8e6), ("Voltage measures", 0.1e6)):
+                                    ("Additional stations", 1.8e6), ("Voltage measures", 0.1e6)):
                 rows.append({"stage": case, "data_source": network, "component": component,
                              "cost_eur": cost * factor * scale})
     return pd.DataFrame(rows)
@@ -50,7 +50,7 @@ def test_layout_legend_and_labels():
     assert [label.get_text() for label in total.get_xticklabels()] == ["Status quo", "No HEMS", "HEMS"]
     assert [label.get_text() for label in total.get_xticklabels(minor=True)] == ["Syn.", "Real"] * 3
     assert [label.get_text() for label in assets.get_xticklabels()] == [
-        "Cables", "Transformer\nexchange", "New\nsubstations", "Other",  # load transfer + voltage measures
+        "Cables", "Transformer\nexchange", "Additional\nstations", "Other",  # load transfer + voltage measures
     ]
     assert len(total.patches) == 6 and len(assets.patches) == 24
     assert np.isclose(assets.patches[-3].get_height(), 0.2)  # Other of real in INFLEX
@@ -84,7 +84,7 @@ def test_stacked_variant_stacks_the_assets_and_marks_the_reduction():
     (ax,) = fig.axes
     legend = fig.legends[0]
     assert [text.get_text() for text in legend.get_texts()] == [
-        "Cables", "Transformer exchange", "New substations", "Other",
+        "Cables", "Transformer exchange", "Additional stations", "Other",
     ]
     # Each swatch is split into the No HEMS (left) and HEMS shade (right).
     swatches = [patch for patch in legend.findobj(Rectangle) if patch is not legend.legendPatch]
