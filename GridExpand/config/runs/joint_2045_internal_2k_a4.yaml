@@ -1,0 +1,53 @@
+# Internal 1R1C paired SWF + ÜZW full-year comparison on pylovo a4 (reduced greenfield
+# fragments) with one common real weather year, PVGIS SARAH3 2016, for both providers.
+# The scenario is the a3 run's. Launch with
+#   uv run gridexpand run config/runs/joint_2045_internal_2k_a4.yaml
+run:
+  id: joint_2045_internal_2k_a4
+  scenario: ../scenarios/joint_2045_internal_2k.yaml
+  pipeline: paired_aligned
+
+resources:
+  pylovo_version_id: a4
+  alignment_dir: ~/data/alignment
+  # Frozen copy of pylovo validations_new/metrics/va4/comparison.json
+  # SHA-256: b2f22887630a7af9743417c09001a9e43c9ca823dd53d3769d49871beb063d25
+  # Its metric cohort is the compared building population.
+  population: ~/data/joint_paired_a4/pylovo-a4-comparison.json
+  # Frozen, fingerprint-checked copy of the ÜZW delivery (87c5e86c…).
+  uzw_grids_dir: ~/data/uzw-grids-87c5e86c
+  # 2016 is closest to the 2005-2023 heating degree days and cold extremes at both sites
+  # (AI/SurroGrid/GridExpand/weather-year-alignment-2026-10-03/ANALYSIS.md).
+  weather_year: 2016
+  providers:
+    swf:
+      paired_dataset_id: joint_2045_internal_2k_a4_swf
+      weather_source_hdf: weather_joint_internal_swf_a4_2016.h5
+      workers: 3 # fewer, larger grids; Step 4 costs ~11 s per building (ÜZW ~5 s): 3 + 5 balances the providers
+    uzw:
+      paired_dataset_id: joint_2045_internal_2k_a4_uzw
+      weather_source_hdf: weather_joint_internal_uzw_a4_2016.h5
+      workers: 5 # 8 jobs in total; <= ~1.7 GB per job in Step 3 (1 PyPSA worker), ~0.7 GB in Step 4
+  target_network: both # both, real, or synthetic
+
+execution:
+  optimizer: pypsa
+  powerflow_grid_scope: full
+  model_cases:
+    - post-inflex-heuristic
+    - post-hems-heuristic
+  workers: 2
+  step3_cpus: 40
+  # 1 PyPSA worker per job: 2 workers x 8 jobs filled RAM + swap when all jobs were in Step 3 (2026-09-29).
+  step3_cluster_concurrency: 1
+  step4_cpus: 2
+  heat_workers: 8
+  # null = the full 8760 h year; a number caps Step-4 power flow (smoke tests).
+  powerflow_max_timesteps: null
+  profile_seed: 481527
+  cleanup_intermediates: true
+  resume: false
+  # Run both providers' runners at the same time (each with `workers`).
+  parallel_providers: true
+  # Expansion tables for all four groups after both providers finished.
+  materialize_expansion: true
