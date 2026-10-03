@@ -11,7 +11,7 @@ resources:
   pylovo_version_id: a4
   alignment_dir: ~/data/alignment
   # Frozen copy of pylovo validations_new/metrics/va4/comparison.json
-  # SHA-256: b2f22887630a7af9743417c09001a9e43c9ca823dd53d3769d49871beb063d25
+  # SHA-256: 4df3cffc368e39125735b455bf41ca873717dc78b75e81cc7fcbf7606f0082e6
   # Its metric cohort is the compared building population.
   population: ~/data/joint_paired_a4/pylovo-a4-comparison.json
   # Frozen, fingerprint-checked copy of the ÜZW delivery (87c5e86c…).
