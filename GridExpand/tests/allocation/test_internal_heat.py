@@ -169,3 +169,20 @@ def test_household_occupants_follow_the_teaser_household_rule():
         occupants = household_occupants(row, 7)
         assert occupants == [int(round(size)) for size in sizes]
         assert len(occupants) == row["households"] and max(occupants) <= 5
+
+
+def test_internal_gain_electricity_is_zero_without_modelled_household_demand(monkeypatch):
+    from gridexpand.allocation.scenario_calibration.profiles import paired_profiles
+
+    def no_model(*args, **kwargs):
+        raise AssertionError("a suppressed component has no electricity model")
+
+    monkeypatch.setattr(paired_profiles, "build_paired_base_electric_demand", no_model)
+    residential = pd.DataFrame({"included_in_lv": [False], "households": [1.0], "occupants": [2.0]})
+    gains = paired_profiles.internal_gain_electricity(pd.DataFrame(), residential, seed=1, hours=24)
+    assert gains.shape == (24,) and not gains.any()
+
+    demand = pd.DataFrame({(1, "electricity"): np.ones(24), (2, "electricity"): np.full(24, 0.5)})
+    monkeypatch.setattr(paired_profiles, "build_paired_base_electric_demand", lambda *a, **k: (demand, None))
+    residential["included_in_lv"] = True
+    np.testing.assert_allclose(paired_profiles.internal_gain_electricity(pd.DataFrame(), residential, seed=1, hours=24), 1.5)

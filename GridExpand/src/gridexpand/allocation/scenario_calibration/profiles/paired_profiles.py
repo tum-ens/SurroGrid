@@ -396,6 +396,18 @@ def _build_paired_component_electric_demand(
     return demand, pd.DataFrame(audit_rows)
 
 
+def internal_gain_electricity(allocation: pd.DataFrame, residential: pd.DataFrame, *, seed: int, hours: int) -> np.ndarray:
+    """Household electricity of one building for its internal heat gains (kW per hour).
+
+    A residential component without modelled demand (``included_in_lv`` false, e.g.
+    ``no_modelled_demand``) has no electricity gains; its residents' gains remain.
+    """
+    if not residential.included_in_lv.astype(bool).any():
+        return np.zeros(hours)
+    electric, _ = build_paired_base_electric_demand(allocation, seed=seed, component_plan=residential)
+    return electric.sum(axis=1).to_numpy()
+
+
 def build_paired_base_electric_demand(
     allocation: pd.DataFrame,
     *,
@@ -1323,8 +1335,7 @@ def _build_paired_heat(
             buildings.loc[buildings.building_objectid.astype(str).eq(bid),'households'] = float(physical.households.iloc[0])
             buildings.loc[buildings.building_objectid.astype(str).eq(bid),'occupants'] = float(physical.occupants.iloc[0])
             group = allocation.loc[allocation.building_objectid.astype(str).eq(bid)]
-            electric,_ = build_paired_base_electric_demand(group,seed=seed,component_plan=physical)
-            electricity[bid] = electric.sum(axis=1).to_numpy()
+            electricity[bid] = internal_gain_electricity(group, physical, seed=seed, hours=hours)
         return prepare_internal_heat(buildings,weather,postcode,heat_config=heat_config,technologies=technology_parameters,sizing_method=sizing_method,seed=seed,electricity_by_building=electricity,rc=rc)
     library = PhysicalHeatProfileLibrary(heat_profile_library) if heat_profile_library is not None else None
     source_cache: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
