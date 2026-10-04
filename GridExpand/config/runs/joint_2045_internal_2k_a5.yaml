@@ -1,0 +1,54 @@
+# Internal 1R1C paired SWF + ÜZW full-year comparison: run a5 = the pylovo a4 grids of
+# joint_2045_internal_2k_a4 with the cold weather year 2012 (PVGIS SARAH3) for both providers.
+# The scenario is the a3 run's. Launch with
+#   uv run gridexpand run config/runs/joint_2045_internal_2k_a5.yaml
+run:
+  id: joint_2045_internal_2k_a5
+  scenario: ../scenarios/joint_2045_internal_2k.yaml
+  pipeline: paired_aligned
+
+resources:
+  pylovo_version_id: a4
+  alignment_dir: ~/data/alignment
+  # Frozen copy of pylovo validations_new/metrics/va4/comparison.json
+  # SHA-256: 4df3cffc368e39125735b455bf41ca873717dc78b75e81cc7fcbf7606f0082e6
+  # Its metric cohort is the compared building population.
+  population: ~/data/joint_paired_a4/pylovo-a4-comparison.json
+  # Frozen, fingerprint-checked copy of the ÜZW delivery (87c5e86c…).
+  uzw_grids_dir: ~/data/uzw-grids-87c5e86c
+  # 2012: the February 2012 cold wave gives the coldest 48 h of 2005-2023 at both sites (about the
+  # norm temperatures), with heating degree days only 5-6 % above the mean (planning case; 2016 in a4
+  # is the typical year).
+  weather_year: 2012
+  providers:
+    swf:
+      paired_dataset_id: joint_2045_internal_2k_a5_swf
+      weather_source_hdf: weather_joint_internal_swf_a4_2012.h5
+      workers: 2 # fewer, larger grids; Step 4 costs ~11 s per building (ÜZW ~5 s): 2 + 4 balances the providers
+    uzw:
+      paired_dataset_id: joint_2045_internal_2k_a5_uzw
+      weather_source_hdf: weather_joint_internal_uzw_a4_2012.h5
+      workers: 4 # 6 jobs in total (about 10 GB RAM free); <= ~1.7 GB per job in Step 3 (1 PyPSA worker), ~0.7 GB in Step 4
+  target_network: both # both, real, or synthetic
+
+execution:
+  optimizer: pypsa
+  powerflow_grid_scope: full
+  model_cases:
+    - post-inflex-heuristic
+    - post-hems-heuristic
+  workers: 2
+  step3_cpus: 40
+  # 1 PyPSA worker per job: 2 workers x 8 jobs filled RAM + swap when all jobs were in Step 3 (2026-09-29).
+  step3_cluster_concurrency: 1
+  step4_cpus: 2
+  heat_workers: 8
+  # null = the full 8760 h year; a number caps Step-4 power flow (smoke tests).
+  powerflow_max_timesteps: null
+  profile_seed: 481527
+  cleanup_intermediates: true
+  resume: false
+  # Run both providers' runners at the same time (each with `workers`).
+  parallel_providers: true
+  # Expansion tables for all four groups after both providers finished.
+  materialize_expansion: true
