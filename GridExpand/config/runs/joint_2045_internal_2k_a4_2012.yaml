@@ -1,9 +1,9 @@
-# Internal 1R1C paired SWF + ÜZW full-year comparison: run a5 = the pylovo a4 grids of
-# joint_2045_internal_2k_a4 with the cold weather year 2012 (PVGIS SARAH3) for both providers.
-# The scenario is the a3 run's. Launch with
-#   uv run gridexpand run config/runs/joint_2045_internal_2k_a5.yaml
+# Internal 1R1C paired SWF + ÜZW full-year comparison: the pylovo a4 grids of
+# joint_2045_internal_2k_a4 (weather 2016) with the cold weather year 2012 (PVGIS SARAH3) for both
+# providers. The scenario is the a3 run's. Launch with
+#   uv run gridexpand run config/runs/joint_2045_internal_2k_a4_2012.yaml
 run:
-  id: joint_2045_internal_2k_a5
+  id: joint_2045_internal_2k_a4_2012
   scenario: ../scenarios/joint_2045_internal_2k.yaml
   pipeline: paired_aligned
 
@@ -22,11 +22,11 @@ resources:
   weather_year: 2012
   providers:
     swf:
-      paired_dataset_id: joint_2045_internal_2k_a5_swf
+      paired_dataset_id: joint_2045_internal_2k_a4_2012_swf
       weather_source_hdf: weather_joint_internal_swf_a4_2012.h5
       workers: 2 # fewer, larger grids; Step 4 costs ~11 s per building (ÜZW ~5 s): 2 + 4 balances the providers
     uzw:
-      paired_dataset_id: joint_2045_internal_2k_a5_uzw
+      paired_dataset_id: joint_2045_internal_2k_a4_2012_uzw
       weather_source_hdf: weather_joint_internal_uzw_a4_2012.h5
       workers: 4 # 6 jobs in total (about 10 GB RAM free); <= ~1.7 GB per job in Step 3 (1 PyPSA worker), ~0.7 GB in Step 4
   target_network: both # both, real, or synthetic
