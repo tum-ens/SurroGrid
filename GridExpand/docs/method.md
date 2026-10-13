@@ -113,8 +113,14 @@ and home-charging access of about 85 % and 50 %
 ranking stream `battery`); 1.0 is the PV + battery bundle. The joint scenario selects PV on 70 % of the eligible
 buildings and a battery on 80 % of them (about 80 % of new home PV systems are sold with a battery,
 [BSW-Solar, 2026](https://www.solarwirtschaft.de/datawall/uploads/2025/10/BSW-Solar_Faktenblatt_Stromspeicher.pdf)),
-and heat pumps on 80 % (national scenarios give 43–65 % of all buildings in 2045, more where district heating is
-rare; [Ariadne, 2025](https://ariadneprojekt.de/media/2025/06/Ariadne-kompakt_Szenarien2025-Gebaeude_Juni2025.pdf)).
+and heat pumps on 80 % of the residential buildings. The study grids are treated as areas without district heating:
+outside district heating, national climate-neutrality scenarios reach 69–93 % heat pumps in 2045 (own calculation,
+heat pumps / (all heating systems − heat network), from Fig. 4.2 of the
+[Ariadne report 2025](https://ariadneprojekt.de/media/2025/03/Ariadne-Report_Szenarien2025_Maerz2025_lowres.pdf)
+and Tables 1-5 and 1-7 of the
+[Langfristszenarien O45 building report](https://www.ifeu.de/fileadmin/uploads/Publikationen/Energie/Langfristszenarien/20240924_Bericht_Gebaeude_LFS3_O45_clean.pdf)).
+Heat of the other residential buildings and of all non-residential buildings is not electrified, i.e. it is assumed
+to come from non-electric sources such as biomass or renewable gas.
 
 The assignment is one manifest per region, written before Step 2 and reused unchanged by Step 3 (which
 checks its hash). For synthetic runs the region is the selected scope of the run (the AGS, one PLZ or one

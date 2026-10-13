@@ -1,0 +1,56 @@
+# Internal 1R1C paired SWF + ÜZW full-year comparison on pylovo a5 with one common real weather
+# year, PVGIS SARAH3 2016, for both providers. a5 = the a4 settings on the pylovo generator of
+# 2026-10-13 (house cables end at the facade instead of the building centroid, last connection
+# point planned like any other branch, service cables at the cable utilization 0.8); grids and
+# fragments as in a4 (257 reference / 213 synthetic). Scenario and weather year as in the a4 run.
+# Plan: AI/SurroGrid/GridExpand/paired-rerun-2026-10-13/PLAN.md. Launch with
+#   uv run gridexpand run config/runs/joint_2045_internal_2k_a5.yaml
+run:
+  id: joint_2045_internal_2k_a5
+  scenario: ../scenarios/joint_2045_internal_2k.yaml
+  pipeline: paired_aligned
+
+resources:
+  pylovo_version_id: a5
+  alignment_dir: ~/data/alignment
+  # Frozen copy of pylovo validations_new/metrics/va5/comparison.json
+  # SHA-256: 1cb77e36f79e9aec0f74068ac8a573737a6183b8d05625c0fab7e5f8048db22f
+  # Its metric cohort is the compared building population.
+  population: ~/data/joint_paired_a5/pylovo-a5-comparison.json
+  # Frozen, fingerprint-checked copy of the ÜZW delivery (87c5e86c…).
+  uzw_grids_dir: ~/data/uzw-grids-87c5e86c
+  # 2016 is closest to the 2005-2023 heating degree days and cold extremes at both sites
+  # (AI/SurroGrid/GridExpand/weather-year-alignment-2026-10-03/ANALYSIS.md).
+  weather_year: 2016
+  providers:
+    swf:
+      paired_dataset_id: joint_2045_internal_2k_a5_swf
+      weather_source_hdf: weather_joint_internal_swf_a5_2016.h5
+      workers: 2 # fewer, larger grids; Step 4 costs ~11 s per building (ÜZW ~5 s): 2 + 4 balances the providers
+    uzw:
+      paired_dataset_id: joint_2045_internal_2k_a5_uzw
+      weather_source_hdf: weather_joint_internal_uzw_a5_2016.h5
+      workers: 4 # 6 jobs in total (about 10 GB RAM free); <= ~1.7 GB per job in Step 3 (1 PyPSA worker), ~0.7 GB in Step 4
+  target_network: both # both, real, or synthetic
+
+execution:
+  optimizer: pypsa
+  powerflow_grid_scope: full
+  model_cases:
+    - post-inflex-heuristic
+    - post-hems-heuristic
+  workers: 2
+  step3_cpus: 40
+  # 1 PyPSA worker per job: 2 workers x 8 jobs filled RAM + swap when all jobs were in Step 3 (2026-09-29).
+  step3_cluster_concurrency: 1
+  step4_cpus: 2
+  heat_workers: 8
+  # null = the full 8760 h year; a number caps Step-4 power flow (smoke tests).
+  powerflow_max_timesteps: null
+  profile_seed: 481527
+  cleanup_intermediates: true
+  resume: false
+  # Run both providers' runners at the same time (each with `workers`).
+  parallel_providers: true
+  # Expansion tables for all four groups after both providers finished.
+  materialize_expansion: true

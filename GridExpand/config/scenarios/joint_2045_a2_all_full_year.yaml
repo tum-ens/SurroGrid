@@ -90,8 +90,10 @@ electrification: # deterministic_share or source_inventory
   # Shares of eligible physical buildings, selected per provider. Central 2045
   # values from national scenarios (sources: docs/method.md#electrification).
   heat:
-    # Heat pumps in suburban and rural LV grids with little district heating
-    # (national 43-65 % of buildings; rural FfE/Agora grids 0.48-0.77 in 2035).
+    # Heat pumps in LV grids treated as areas without district heating: national
+    # 2045 scenarios reach 69-93 % of buildings/dwellings outside district heating
+    # (Ariadne 2025 report Fig. 4.2, Langfristszenarien O45); remaining 20 % and
+    # non-residential heat stay non-electric (docs/method.md#electrification-assignment).
     adoption_mode: deterministic_share
     building_share: 0.8
   mobility:
@@ -107,7 +109,7 @@ electrification: # deterministic_share or source_inventory
       MFH: 0.5
       AB: 0.5
   pv_battery:
-    # Rooftop PV on 70 % of eligible buildings (34 % of owner-occupied houses
+    # Rooftop PV on 70 % of eligible buildings (38 % of owner-occupied houses
     # today, KfW 2026); 80 % of them with a battery (BSW-Solar 2026: about 80 %
     # of new home PV systems are sold with one).
     adoption_mode: deterministic_share
