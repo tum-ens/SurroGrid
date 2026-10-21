@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from gridexpand.analysis.plotting.expansion_cost_plots import (
+    COST_COMPONENT_COLORS,
     plot_expansion_cost_overview_static,
     plot_expansion_cost_stacked_static,
 )
@@ -99,6 +100,23 @@ def test_stacked_variant_stacks_the_assets_and_marks_the_reduction():
     assert [(patch.get_y(), patch.get_height()) for patch in boxes] == [(3.0, 3.0), (2.5, 2.5)]
     texts = [text.get_text() for text in ax.texts]
     assert texts.count("\u221250 %") == 2 and "Reduction through HEMS" in texts
+    plt.close(fig)
+
+
+def test_stacked_variant_with_fixed_asset_colors():
+    fig = plot_expansion_cost_stacked_static(
+        _costs(), stage_order=("INFLEX", "HEMS"), color_map=COLORS, component_colors=COST_COMPONENT_COLORS,
+    )
+    (ax,) = fig.axes
+    legend = fig.legends[0]
+    # One swatch per asset in its own color, the same in both cases.
+    swatches = [patch for patch in legend.findobj(Rectangle) if patch is not legend.legendPatch]
+    assert [swatch.get_facecolor()[:3] for swatch in swatches] == [
+        to_rgb(COST_COMPONENT_COLORS[name]) for name in ("Cables", "Transformer exchange", "Additional stations", "Other")
+    ]
+    cables = [patch for patch in ax.patches if np.isclose(patch.get_y(), 0.0)]
+    assert len(cables) == 4 and all(patch.get_facecolor()[:3] == to_rgb(COST_COMPONENT_COLORS["Cables"])
+                                    for patch in cables)
     plt.close(fig)
 
 

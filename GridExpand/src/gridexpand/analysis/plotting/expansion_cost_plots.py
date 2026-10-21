@@ -21,6 +21,11 @@ COMPONENT_ORDER = (
 )
 # The small station-level measures, plotted together as "Other" (the caption names them).
 OTHER_COMPONENTS = ("Load transfer", "Voltage measures")
+# Browns from dark to beige for the stacked assets, apart from the green, red and blue of the cases.
+COST_COMPONENT_COLORS = {
+    "Cables": "#5C3D2E", "Transformers": "#9C6B4E", "Transformer exchange": "#9C6B4E",
+    "Additional stations": "#CDA882", "Other": "#EADBC4",
+}
 
 
 # Short network names under the total bars (a full "Synthetic" is wider than its bar slot).
@@ -229,6 +234,7 @@ def plot_expansion_cost_stacked_static(
     stage_labels: Mapping[str, str] | None = None,
     source_order: Sequence[str] = ("Synthetic", "Real"),
     reduction_stages: tuple[str, str] | None = None,
+    component_colors: Mapping[str, str] | None = None,
     width_mm: float = 120.0,
     height_mm: float | None = None,
     font_size: float = 8.0,
@@ -244,6 +250,8 @@ def plot_expansion_cost_stacked_static(
     enough for it carry their cost, the bars their total. With ``reduction_stages=(from, to)``,
     a ``to`` bar below the ``from`` total of its network gets a dotted box up to that total and
     an arrow with the relative reduction; the boxes share the label "Reduction through <to>".
+    With ``component_colors`` (e.g. ``COST_COMPONENT_COLORS``), each asset keeps one color in every
+    case instead of the case shades, and the legend shows one swatch per asset.
     """
     if expansion_cost_comparison.empty:
         print("No expansion cost summaries available yet.")
@@ -255,6 +263,16 @@ def plot_expansion_cost_stacked_static(
 
     def _tint(color: str, share: float) -> tuple[float, float, float]:
         return tuple(share * channel + (1.0 - share) for channel in to_rgb(color))
+
+    def _fill(stage_color: str, component: str, shade: float) -> tuple[float, float, float]:
+        if component_colors:
+            return to_rgb(component_colors.get(component, "#777777"))
+        return _tint(stage_color, shade)
+
+    def _dark(fill: tuple[float, float, float], shade: float) -> bool:
+        if component_colors:
+            return 0.2126 * fill[0] + 0.7152 * fill[1] + 0.0722 * fill[2] < 0.5
+        return shade > 0.9
 
     width_in = width_mm / 25.4
     size = (width_in, (height_mm / 25.4) if height_mm else width_in * 0.62)
@@ -273,11 +291,11 @@ def plot_expansion_cost_stacked_static(
                     value = float(million_eur.get((source, stage, component), 0.0))
                     if value <= 0:
                         continue
-                    ax.bar(x, value, bottom=bottom, width=slot * 0.9, color=_tint(color, shade), edgecolor="white",
-                           linewidth=0.6)
+                    fill = _fill(color, component, shade)
+                    ax.bar(x, value, bottom=bottom, width=slot * 0.9, color=fill, edgecolor="white", linewidth=0.6)
                     if value >= total_max * 0.06:
                         ax.text(x, bottom + value / 2, f"{value:.2f}", ha="center", va="center",
-                                fontsize=font_size - 2, color="white" if shade > 0.9 else "#333333")
+                                fontsize=font_size - 2, color="white" if _dark(fill, shade) else "#333333")
                     bottom += value
                 ax.text(x, bottom + total_max * 0.015, f"{bottom:.2f}", ha="center", va="bottom",
                         fontsize=font_size - 1.5, color="#333333")
@@ -307,10 +325,12 @@ def plot_expansion_cost_stacked_static(
         _style_axes(ax)
 
         # One swatch per asset, split into the shades of the cases with visible bars, left to right as in the axis.
+        # Fixed asset colors need no split.
         shown = [stage for stage in stages
                  if max(float(totals.get((source, stage), 0.0)) for source in sources) >= total_max * 0.01] or stages
-        handles = [tuple(Patch(facecolor=_tint(color_map.get(stage, "#777777"), shade), edgecolor="none")
-                         for stage in shown) for shade in shades]
+        shown = shown[:1] if component_colors else shown
+        handles = [tuple(Patch(facecolor=_fill(color_map.get(stage, "#777777"), component, shade), edgecolor="none")
+                         for stage in shown) for component, shade in zip(components, shades)]
         fig.tight_layout()
         top = ax.get_tightbbox(fig.canvas.get_renderer()).transformed(fig.transFigure.inverted()).y1
         fig.legend(handles=handles, labels=components, loc="lower center", ncol=len(components), frameon=False,
