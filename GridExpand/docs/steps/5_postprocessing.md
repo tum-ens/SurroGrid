@@ -113,23 +113,25 @@ uv sync --extra notebooks
 uv run jupyter lab notebooks/analysis
 ```
 
-- `analysis_powerflow.ipynb`: status-quo validation of the joint aligned run, synthetic vs real (distribution
-  similarity, paper figure `asset-percentiles`);
-- `analysis_expansion.ipynb`: status quo, INFLEX and HEMS of the joint run (paper figure
+- `analysis_powerflow.ipynb`: status-quo validation of an aligned run, synthetic vs real (distribution
+  similarity, figure `asset-percentiles`);
+- `analysis_expansion.ipynb`: status quo, INFLEX and HEMS of an aligned run (figure
   `pre_post_flex_no_flex_asset_cutoff_overview`, expansion costs on one grid set for all cases with figure
   `expansion_cost_overview`, cable and voltage diagnostics);
-- `joint_setup.py`: the setup both notebooks import (run id, providers, case colors and labels, exclusion
-  threshold, `CURVE_Y_LIMITS`: the fixed top-row scale shared by both paper figures). `prepare_joint_analysis()` calls `prepare_expansion_analysis(providers=("swf", "uzw"))` (in
+- `joint_setup.py`: the setup both notebooks import (`RUN_ID`, the run to analyse; providers, case colors and
+  labels, exclusion threshold, `CURVE_Y_LIMITS`: the fixed top-row scale shared by both figures).
+  `prepare_joint_analysis()` calls `prepare_expansion_analysis(providers=("swf", "uzw"))` (in
   `expansion.notebook_workflow`), which prepares the four groups and enforces consistent provenance, and adds
   `nonconverged_grids` and their `excluded_grids`: a grid with non-converged power-flow hours in at least 1 % of
   the hours of any case is left out of every case of its own group. The loaders take `excluded_grids`
   (group → LV/area ids or `PLZ_kcid_bcid`); `expansion_cost_comparison` also leaves out real grids whose cost is
-  incomplete in one of the cases. The paper figures pool the providers as `Real`/`Synthetic` (column `network`),
+  incomplete in one of the cases. The pooled figures label the providers as `Real`/`Synthetic` (column `network`),
   so no DSO is named;
 - `grid_area_envelope_comparison.ipynb`: supplied-area envelope diagnostic (OSM tiles need `contextily` and
   network access).
 
-`notebooks/archive/` keeps run-bound notebooks with their outputs as a historical record; they are not maintained.
+The notebooks ship without outputs. Set `RUN_ID` in `joint_setup.py` (and `PLZ` in the envelope notebook) to a run
+of your database.
 
 ## Audits
 
@@ -143,4 +145,4 @@ uv run python -m gridexpand.analysis.audits.topology_bottleneck --real-run-name 
 
 `audits.feeder_structure` (graph-normalized feeder, downstream-demand and path-depth comparison) and the plotting
 modules are used from notebooks; `python -m gridexpand.analysis.plotting.powerflow_heatmaps` plots one grid from
-an HDF5 file or, with `--storage db --run-name <run>`, from the database. Findings of earlier audits are in [docs/research/](../research/).
+an HDF5 file or, with `--storage db --run-name <run>`, from the database.

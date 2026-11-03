@@ -9,7 +9,7 @@ One run and two exclusion rules for both notebooks, applied to every case:
   of pylovo's clustering) is left out, as the reference has no grids that small. The
   rule reads the building count of each synthetic grid of the run, so it follows
   whatever grids a pylovo version generates.
-The paper figures pool the providers as ``Real`` and ``Synthetic`` so that no DSO is named.
+The pooled figures label the providers as ``Real`` and ``Synthetic`` so that no DSO is named.
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ from gridexpand.analysis.expansion.notebook_workflow import (
 )
 from gridexpand.paths import ANALYSIS_OUTPUT_DIR, RUN_CONFIG_DIR, SCENARIO_CALIBRATION_OUTPUT_DIR
 
-RUN_ID = "joint_2045_internal_2k_a5"
+RUN_ID = "joint_2045_v1_full_year"  # the aligned run to analyse: config/runs/<RUN_ID>.yaml
 PROVIDERS = ("swf", "uzw")
-EXPECTED_GRID_COUNTS = {"Real SWF": 44, "Synthetic SWF": 45, "Real ÜZW": 213, "Synthetic ÜZW": 183}
+EXPECTED_GRID_COUNTS = None  # optional, e.g. {"Real SWF": 10, "Synthetic SWF": 12}: fail on another count
 MIN_FAILED_SHARE = 0.01  # 1 % of the hours of one case (88 h of 8,760)
 MIN_SYNTHETIC_BUILDINGS = 5  # smaller synthetic grids (clustering fragments) are left out, as in the reference
 
@@ -36,10 +36,9 @@ CASE_COLORS = {"status-quo": "#2E7D32", "INFLEX": "#D62728", "HEMS": "#1F77B4"}
 CASE_DISPLAY = {"status-quo": "Status quo", "INFLEX": "INFLEX", "HEMS": "HEMS"}
 NETWORK_COLORS = {"Synthetic": "#335C81", "Real": "#D95D39"}
 
-# Top row of both paper figures (status quo, and status quo + INFLEX + HEMS): one wide, fixed scale, so that
-# narrow limits do not magnify the synthetic-vs-real gaps. Loading starts at 0; the upper bounds leave headroom
-# above the largest curve of either figure (P99 cutoff, 2026-09-30: transformer 130 %, cables 42 %). Voltage runs
-# from the 0.90 p.u. lower limit to nominal (curves 0.92-0.96 p.u.).
+# Top row of both figures (status quo, and status quo + INFLEX + HEMS): one wide, fixed scale, so that narrow
+# limits do not magnify the synthetic-vs-real gaps. Loading starts at 0; raise an upper bound when a curve of your
+# run exceeds it. Voltage runs from the 0.90 p.u. lower limit to nominal.
 CURVE_Y_LIMITS = {"Transformer": (0.0, 150.0), "Cables": (0.0, 60.0), "Voltage": (0.90, 1.00)}
 
 OUTPUT_DIR = ANALYSIS_OUTPUT_DIR / "plots" / RUN_ID
