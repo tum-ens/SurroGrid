@@ -307,17 +307,16 @@ The joint 2045 scenario uses level 1:
    the 2045 floor area is built from 2000 on, about 55 % refurbished since 2000 and about 20 % refurbished
    before 2000 or unrefurbished. Level 1 for all buildings therefore overstates the 2045 refurbished share by up
    to roughly a fifth of the floor area relative to that path, and by much more relative to current trends.
-3. Its depth matches the target paths: on a median SWF grid (67 residential buildings, Forchheim TMY) level 1
-   gives a median of 62 kWh/m² space heat and 36 W/m² peak (level 0: 149 kWh/m², 74 W/m²); Klimaneutrales
+3. Its depth matches the target paths: on a median reference grid (TMY weather) level 1 gives a median of
+   62 kWh/m² space heat and 36 W/m² peak (level 0: 149 kWh/m², 74 W/m²); Klimaneutrales
    Deutschland 2045 assumes about 60 kWh/m² after full refurbishment of a single- or two-family house (about
    KfW-Effizienzhaus 70) and 40–45 kWh/m² for multi-family houses.
 4. Consequence: level 1 yields lower heat-pump and heating-rod peaks than a stock refurbished along today's
    trend, so grid stress from space heating is a lower-end estimate. A share-based variant (level 1 for about
    70–80 % of pre-2000 buildings, deterministically selected) is the natural sensitivity.
 
-A comparison with INFDB `ro_heat` on 1,203 SWF buildings (TEASER level 0 about 1.9× INFDB in annual space heat
-and 3× in peak) is kept as a research note:
-[2026-09-24_teaser_vs_infdb_ro_heat.md](research/2026-09-24_teaser_vs_infdb_ro_heat.md).
+A comparison with INFDB `ro_heat` on the reference buildings gave TEASER level 0 about 1.9× INFDB in annual space
+heat and 3× in peak.
 
 Sources: Cischinsky, H.; Diefenbach, N. (2018): *Datenerhebung Wohngebäudebestand 2016.* IWU (as reported
 below). Prognos, Öko-Institut, Wuppertal Institut (2021): *Klimaneutrales Deutschland 2045.* Long version for
@@ -540,9 +539,9 @@ hospitals, clinics, doctors, dentists, nursing homes), `tourism` accommodation, 
 `leisure` (fitness and sports centres, sports halls, bowling, dance, sauna, arcades, ice rinks). Street furniture
 and outdoor amenities (parking, benches, waste, vending, post boxes, toilets, shelters, charging points, ATMs) and
 vacant or disused shops are not evidence. The rationale: a DSO supplies a building-bound business or public service
-through its own connection, while a cadastral Commercial/Public polygon need not host one. In the Forchheim SWF
-area only 72 of the 345 buildings with modelled GHD had an SWF GHD connection; on those 72 the floor-area model
-matched the metered energy within 3 %, while 8.2 GWh sat on connections that SWF supplies with household meters
+through its own connection, while a cadastral Commercial/Public polygon need not host one. In the reference area
+only a minority of the buildings with modelled GHD had a GHD connection of the DSO; on those the floor-area model
+matched the metered energy closely, while much of the metered GHD energy sat on connections with household meters
 or a placeholder load.
 
 *Evidence matching* (`match_osm_evidence`): a point (or a line's representative point) belongs to the footprint
@@ -591,10 +590,10 @@ electricity (ties: lowest bus id). A building matched to connections in differen
 connection preserves both transformer assignments). Both counts are recorded in the scope audit and the dataset
 metadata.
 
-**Reference-grid scope and topology (SWF).** The Forchheim reference population uses the curated `swf_clear`
-dataset: 49 station workbooks with exactly one transformer each, so no multi-transformer station splitting is
-needed. The source grids are meshed (combined cycle rank 112); their validated radialized derivatives (cycle rank 0,
-no unsupplied load buses) are used for power flow and reinforcement. `station_split_manifest.csv` and
+**Reference-grid scope and topology (SWF).** The reference population uses a curated dataset of station
+workbooks with exactly one transformer each, so no multi-transformer station splitting is needed. The source grids
+are meshed; their validated radialized derivatives (cycle rank 0, no unsupplied load buses) are used for power flow
+and reinforcement. `station_split_manifest.csv` and
 `station_radialization_manifest.csv` below `GRID_DATA_PATH` record the eligible stations and the derived workbooks;
 allocation and real-grid power flow select the same entries. They describe provenance, not scenario parameters.
 
@@ -617,9 +616,8 @@ paired scenario therefore:
 3. adds pylovo per-square-metre GHD defaults to neither network;
 4. excludes an unmatched GHD row individually and audits it, without rejecting its otherwise valid LV grid.
 
-The Forchheim evidence table behind these rules is in
-[2026-07-21_forchheim_ghd_calibration_v5.md](research/2026-07-21_forchheim_ghd_calibration_v5.md). pylovo grids are
-still dimensioned with the open-data GHD assumptions; an open-data rule for load-active generic commercial buildings
+pylovo grids are still dimensioned with the open-data GHD assumptions; an open-data rule for load-active generic
+commercial buildings
 is a separate topology sensitivity and must not use DSO matching (that would leak the reference network into the
 synthetic generation).
 
@@ -644,10 +642,9 @@ steps, Newton-Raphson with the Iwamoto fallback, non-converged hours recorded. A
 `transformer_overload` (> 100 % of the rating; skipped for grids without a rating), `cable_overload` (a cable above
 100 % of its rated current), `undervoltage` (a load bus below 0.90 p.u. after the taps) or `nonconvergence`. The
 evaluated hours are the 60 largest hours of the grid total plus the 24 largest household and GHD hours (`--all-hours`
-evaluates the year). On the prepared joint datasets this reproduces the full-year `pre` stage of
-`joint_2045_v1_full_year`: the transformer loading of all 48 converging SWF grids to 0.0 percentage points and the same
-eight flagged grids (LV 32, 35, 38, 59, 80, 99, 113, 137); ÜZW has none (one grid has no transformer rating and is
-checked for cables, voltage and convergence only).
+evaluates the year). On the prepared joint datasets this reproduces the full-year `pre` stage of the
+aligned run: the same transformer loadings (to 0.0 percentage points) and the same flagged grids. A grid without a
+transformer rating is checked for cables, voltage and convergence only.
 
 *Output* (per provider): `status_quo_<provider>_exclusions.csv` with the columns `provider, real_grid_id, reason`
 (`real_grid_id` is the bundle's own id, SWF `station_id` such as `LV_059` and ÜZW `area_id`; `reason` joins the

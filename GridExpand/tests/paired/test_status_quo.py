@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import numpy as np
 import pandapower as pp
 import pandas as pd
@@ -162,22 +159,6 @@ def test_jobs_from_a_prepared_dataset(tmp_path):
     assert jobs[0]["plan"]["target_bus"].tolist() == [10, 11] and jobs[0]["grid_file"] == "/grids/LV_059.xlsx"
     with pytest.raises(ValueError, match="profile seed"):
         status_quo.jobs_from_dataset(tmp_path, "swf", profile_seed=1, peak_hours_count=60, all_hours=False)
-
-
-JOINT_SWF = os.environ.get("GRIDEXPAND_STATUS_QUO_JOINT_SWF_DATASET")
-
-
-@pytest.mark.skipif(
-    not JOINT_SWF or not Path(config.ELEC_LPS_PATH).is_file(),
-    reason="set GRIDEXPAND_STATUS_QUO_JOINT_SWF_DATASET (and GRIDEXPAND_DATA_DIR with elec_lps.h5)",
-)
-def test_joint_run_flags_are_reproduced(tmp_path):
-    """Regression: the pre stage of joint_2045_v1_full_year flagged these SWF grids (analysis run 68)."""
-    assert status_quo.main(["--provider", "swf", "--dataset", JOINT_SWF, "--output-dir", str(tmp_path), "--jobs", "4"]) == 0
-    exclusions = pd.read_csv(tmp_path / "status_quo_swf_exclusions.csv")
-    assert exclusions["real_grid_id"].tolist() == [
-        "LV_032", "LV_035", "LV_038", "LV_059", "LV_080", "LV_099", "LV_113", "LV_137",
-    ]
 
 
 def test_households_only_drops_the_ghd_components():

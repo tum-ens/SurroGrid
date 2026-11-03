@@ -189,7 +189,7 @@ cable cap.
 - **`expansion_grid_result`:** one row per grid and analysis with the decision trail. It holds the
   escalation reason, transfer partners, new-station cluster and share of stations, panels, route counts, voltage
   measure and every cost component.
-  - A grid without a transformer rating (one ÜZW area) has no transformer row; its station-level costs are only in
+  - A grid without a transformer rating has no transformer row; its station-level costs are only in
     this table.
 
 ## History
@@ -222,10 +222,9 @@ geometry differs:
 - Methodological exclusions are `excluded`.
 - Cost comparisons must report both total cost and coverage.
 
-**Structural differences between the sources.** Real stations have a median of 6–7 outlets, synthetic a1 stations
-3. The panel count is therefore reported, not a trigger. Real grids have more parallel cables than synthetic ones
-(route length with two or more cables: real SWF 1.9 %, real ÜZW 7.5 %, synthetic a1 0.7 %); they count at their
-nominal capacity.
+**Structural differences between the sources.** Real stations have more outlets than synthetic ones. The panel
+count is therefore reported, not a trigger. Real grids have more parallel cables than synthetic ones; they count at
+their nominal capacity.
 
 ## Interpretation guidance
 

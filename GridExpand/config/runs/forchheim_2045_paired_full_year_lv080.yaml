@@ -1,21 +1,16 @@
-# Focused INFLEX-vs-HEMS dispatch comparison on the largest usable real SWF grid.
+# Focused INFLEX-vs-HEMS dispatch comparison on one real grid.
 #
 # This is NOT a paired real/synthetic comparison. The two networks partition the
-# same 4,193 buildings along different territory boundaries, so no synthetic grid
-# corresponds to real LV 80: its 217 buildings scatter across 4 synthetic grids.
-# Only the dispatch comparison is meaningful here, because both controllers run on
-# the identical topology, buildings and fixed assets.
+# same buildings along different territory boundaries, so the buildings of one
+# real grid scatter across several synthetic grids. Only the dispatch comparison
+# is meaningful here, because both controllers run on the identical topology,
+# buildings and fixed assets.
 #
 # Regional expansion cost also cannot come from one grid: cost is a sum over grids
 # and the effect of interest is distributional. gridexpand run additionally emits no
 # expansion commands when target_grid_id is set.
-# Cloned from forchheim_2045_paired.yaml. Deliberate differences: new run id
-# and output namespace, the full-year scenario, retained intermediates for the
-# reference audit, and no resume of TSAM-era results. Topology version, grid
-# scope, seeds, building assignment and every economic/technology value are
-# unchanged, including the configured exclusion of real LV 113.
-# Repository paths are resolved from paired_dataset_id; the external SWF grid
-# root comes from GRID_DATA_PATH in GridExpand/.env.
+# Same resources as forchheim_2045_paired_full_year.yaml; the external grid root
+# comes from GRID_DATA_PATH in GridExpand/.env.
 run:
   # Version-qualified identity prevents results from different PyLoVo topologies
   # from being combined by the post-processing notebook.
@@ -35,15 +30,14 @@ resources:
   heat_profile_set_id: forchheim_2045_infdb_ro_heat_v1
   # Existing weather source used to create the shared angle-binned PV library.
   weather_source_hdf: 9474126-00_91301_1_2.h5
-  # Known incomplete SWF grid retained in coverage but omitted from expansion cost.
+  # Real grids kept in coverage but omitted from the expansion cost (incomplete data).
   excluded_real_lv_ids: [113]
   # Prepared allocation/artifact folder name under scenario_calibration outputs.
   paired_dataset_id: swf_2045_paired_v11_91301_swf_clear
   # One network only: target_grid_id is an adapter-specific id, and the two
   # networks do not share an id space.
   target_network: real_swf
-  # Largest real SWF grid excluding LV 113: 325 EVs, 211 buildings, 1.46 GWh/a.
-  # LV 113 is larger but is the configured exclusion and a known-incomplete grid.
+  # The real grid to run (adapter-specific id).
   target_grid_id: 80
 
 execution:
@@ -59,10 +53,10 @@ execution:
   #
   # step3_cpus is the number of building CLUSTERS the grid is split into; only
   # step3_cluster_concurrency of them run simultaneously. Raising step3_cpus
-  # therefore SHRINKS each model. LV 80 has 216 sites: at step3_cpus=2 one worker
-  # had to build ~108 buildings x 8760 h and was killed by the OOM killer. At 32
-  # it builds ~7 buildings per model, close to the ~4 that solved comfortably on
-  # LV 28. The clusters run sequentially either way, so this costs little time.
+  # therefore SHRINKS each model: on a grid of a few hundred sites, step3_cpus=2
+  # made one worker build half the grid x 8760 h and run out of memory, while 32
+  # gives models of a few buildings each. The clusters run sequentially either
+  # way, so this costs little time.
   workers: 1
   step3_cpus: 32
   step3_cluster_concurrency: 1

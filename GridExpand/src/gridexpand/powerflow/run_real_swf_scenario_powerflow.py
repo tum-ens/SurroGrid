@@ -535,7 +535,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Run real SWF scenario-plan base-electricity power-flow summaries."
     )
-    parser.add_argument("--plz", type=int, default=91301)
+    parser.add_argument("--plz", type=int, required=True)
     parser.add_argument("--grid-data-path", type=Path, default=None)
     parser.add_argument("--allocation-plan", type=Path, default=DEFAULT_ALLOCATION_PLAN)
     parser.add_argument(

@@ -1048,7 +1048,7 @@ def run_audit(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--plz", type=int, default=91301)
+    parser.add_argument("--plz", type=int, required=True)
     parser.add_argument("--final-year", type=int, default=2045)
     parser.add_argument("--grid-data-path", type=Path, default=None)
     parser.add_argument(

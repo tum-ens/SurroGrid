@@ -576,7 +576,7 @@ def run_one(
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run compact SWF real-grid power-flow summaries.")
-    parser.add_argument("--plz", type=int, default=91301)
+    parser.add_argument("--plz", type=int, required=True)
     parser.add_argument("--grid-data-path", type=Path, default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--lv-id", default=None)
