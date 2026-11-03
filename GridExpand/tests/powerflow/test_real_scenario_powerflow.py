@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from gridexpand.powerflow import run_real_swf_scenario_powerflow as module
+from gridexpand.powerflow import run_real_scenario_powerflow as module
 
 
 @pytest.mark.parametrize(

@@ -8,7 +8,7 @@ former overload heuristic was retired on 2026-09-29 (see [History](#history)).
 
 **One implementation for both sources.** The rules run in Python for synthetic and real grids alike:
 - `synthetic_materialization.py`: the SQL keeps only the scope and the mapping to the visible pylovo lines.
-- `real_materialization.py`: the real SWF and ÜZW grids.
+- `real_materialization.py`: the real DSO A and DSO B grids.
 
 **Where the numbers come from.** The rows are seeded by migration `0007_staged_expansion.sql` (`ON CONFLICT DO
 NOTHING`, so manual edits survive). Every row documents each parameter in the JSON column `parameter_provenance`:
@@ -211,7 +211,7 @@ geometry differs:
   - Unmapped root connectors of at most 5 m count as station busbar.
 - **Real grids.**
   - The rows are joined through `real_grid_case_id`, pandapower line indices, transformer ratings and the grid file
-    of the power-flow run (SWF: Excel workbook, ÜZW: pandapower JSON).
+    of the power-flow run (DSO A: Excel workbook, DSO B: pandapower JSON).
   - The grid file also gives the topology and the coordinates.
 
 **Coverage.**

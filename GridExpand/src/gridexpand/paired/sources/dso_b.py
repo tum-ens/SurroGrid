@@ -1,4 +1,4 @@
-"""ÜZW real-grid adapter for paired validation (aligned datasets only)."""
+"""DSO B real-grid adapter for paired validation (aligned datasets only)."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from typing import Any
 
 from gridexpand.common.orchestration import StatusLog
 
-from .swf import load_real_jobs, run_real_powerflows
+from .dso_a import load_real_jobs, run_real_powerflows
 
-TARGET_NETWORK = "real_uzw"
+TARGET_NETWORK = "real_dso_b"
 
 
 def load_jobs(paired_dir: Path, target_grid_id: int | None) -> list[dict[str, Any]]:
@@ -18,7 +18,7 @@ def load_jobs(paired_dir: Path, target_grid_id: int | None) -> list[dict[str, An
 
 
 def input_name(job: dict[str, Any], scenario_label: str) -> str:
-    return f"paired_real_uzw_area_{int(job['target_grid_id']):04d}_{scenario_label}.h5"
+    return f"paired_real_dso_b_area_{int(job['target_grid_id']):04d}_{scenario_label}.h5"
 
 
 def run_powerflows(
@@ -32,5 +32,5 @@ def run_powerflows(
     run_real_powerflows(
         job=job, args=args, result_hdf=result_hdf,
         log_path=log_path, status=status,
-        target_network=TARGET_NETWORK, provider="uzw",
+        target_network=TARGET_NETWORK, provider="dso_b",
     )

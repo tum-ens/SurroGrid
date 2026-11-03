@@ -17,7 +17,7 @@ ALLOCATION = "gridexpand.allocation.main"
 ELECTRIFICATION_PREPARATION = "gridexpand.allocation.electrification_preparation"
 OPTIMIZATION = "gridexpand.optimization.run_urbs_cluster"
 POWERFLOW = "gridexpand.powerflow.run_pwrflw"
-REAL_POWERFLOW = "gridexpand.powerflow.run_real_swf_scenario_powerflow"
+REAL_POWERFLOW = "gridexpand.powerflow.run_real_scenario_powerflow"
 GRID_EXPANSION = "gridexpand.analysis.expansion.grid_expansion"
 ALIGNED_EXPANSION = "gridexpand.analysis.expansion.aligned_expansion"
 PAIRED_RUNNER = "gridexpand.paired.runner"
@@ -435,7 +435,7 @@ def paired_preparation_commands(
     reference_year: int,
     python: str | None = None,
 ) -> list[tuple[str, list[str]]]:
-    """``(stage, argv)`` that build a SWF paired dataset (``pipeline: paired_validation``)."""
+    """``(stage, argv)`` that build a DSO A paired dataset (``pipeline: paired_validation``)."""
     stages = [
         ("prepare_allocation", module_command(
             PAIRED_ALLOCATION,
@@ -479,7 +479,7 @@ def aligned_preparation_commands(
     provider: str,
     alignment_dir: Path,
     population: Path,
-    uzw_grids_dir: Path | None,
+    dso_b_grids_dir: Path | None,
     pylovo_version_id: str,
     scenario_config: Path,
     profile_seed: int,
@@ -491,6 +491,7 @@ def aligned_preparation_commands(
     heat_workers: int,
     reference_year: int,
     weather_year: int | None = None,
+    bundle_name: str | None = None,
     python: str | None = None,
 ) -> list[tuple[str, list[str]]]:
     """``(stage, argv)`` that build one provider's aligned paired dataset."""
@@ -505,8 +506,10 @@ def aligned_preparation_commands(
         "--output-dir", paired_dir,
         python=python,
     )
-    if provider == "uzw":
-        allocation += ["--uzw-grids-dir", str(uzw_grids_dir)]
+    if provider == "dso_b":
+        allocation += ["--dso-b-grids-dir", str(dso_b_grids_dir)]
+    if bundle_name and bundle_name != provider:
+        allocation += ["--bundle-name", bundle_name]
     readiness = f"{PROFILES}.paired_profile_readiness"
     weather = module_command(
         f"{PROFILES}.aligned_weather", "--paired-dir", paired_dir, "--output", weather_hdf, python=python,

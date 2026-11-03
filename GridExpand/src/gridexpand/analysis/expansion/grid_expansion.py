@@ -3,7 +3,7 @@
 One analysis (``surrogrid.expansion_analysis_run``) reduces the peak loading of
 one power-flow run name and stage to reinforcement needs and costs per visible
 pylovo cable and per transformer (synthetic grids, ``synthetic_materialization`` with
-the SQL in ``sql/``) or per cable corridor and transformer of the real SWF/ÜZW grids
+the SQL in ``sql/``) or per cable corridor and transformer of the real DSO A/DSO B grids
 (``real_materialization``), plus one ``expansion_grid_result`` row per grid. The rules
 are those of ``staged`` (rule set ``staged_2026``, default key ``de_lv_staged_2026`` or one
 of its sensitivity rows). Each analysis is written in one transaction: a failure leaves no
@@ -35,8 +35,8 @@ SQL_DIR = Path(__file__).with_name("sql")
 DEFAULT_ASSUMPTION_KEY = "de_lv_staged_2026"
 DATA_SOURCE_LABELS = {
     "synthetic": "Synthetic",
-    "real_swf": "Real SWF",
-    "real_uzw": "Real ÜZW",
+    "real_dso_a": "Real DSO A",
+    "real_dso_b": "Real DSO B",
 }
 
 
@@ -417,7 +417,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--exclude-real-lv-id",
         action="append",
         default=[],
-        help="Real grid id (SWF LV or ÜZW area) to retain in coverage reporting but exclude from costing; repeatable.",
+        help="Real grid id (DSO A LV or DSO B area) to retain in coverage reporting but exclude from costing; repeatable.",
     )
     parser.add_argument(
         "--assumption-key",

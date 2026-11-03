@@ -241,7 +241,7 @@ def load_expansion_overview(
                 GROUP BY real_grid_case_id
             ), real_rows AS (
                 SELECT (SELECT data_source FROM ar) AS data_source, s.real_grid_case_id::TEXT AS source_grid_id,
-                       CASE WHEN rgc.source = 'uzw' THEN CONCAT('ÜZW area-', LPAD(s.lv_id, 4, '0'))
+                       CASE WHEN rgc.source = 'dso_b' THEN CONCAT('DSO B area-', LPAD(s.lv_id, 4, '0'))
                             ELSE CONCAT(UPPER(rgc.source), ' LV_', LPAD(s.lv_id, 3, '0'))
                        END AS grid_label,
                        NULL::BIGINT AS grid_case_id, s.real_grid_case_id,

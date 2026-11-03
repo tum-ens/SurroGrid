@@ -8,8 +8,8 @@ resources). Every key, default and the grid selection are documented in
 | `run.pipeline` | template | what `gridexpand run` does |
 |---|---|---|
 | `synthetic` | `runs/00_run_scenario_template.yaml` | Steps 2-4 and the expansion analyses for the synthetic grids of one region |
-| `paired_validation` | `runs/00_run_paired_validation_template.yaml` | SWF real vs synthetic grids of one prepared paired dataset |
-| `paired_aligned` | see `runs/joint_2045_v1_*.yaml` | every provider (SWF, ÜZW) of a pylovo alignment bundle |
+| `paired_validation` | `runs/00_run_paired_validation_template.yaml` | DSO A real vs synthetic grids of one prepared paired dataset |
+| `paired_aligned` | see `runs/joint_2045_v1_*.yaml` | every provider (DSO A, DSO B) of a pylovo alignment bundle |
 
 `runs/sandbox_example.yaml` is the regression-harness run (sandbox database only).
 

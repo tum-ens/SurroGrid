@@ -1,7 +1,7 @@
 """Radial topology of one LV grid for the staged expansion rules (synthetic and real grids alike).
 
 The station root is the LV side of an in-service transformer fed by the external grid (pylovo nets),
-else the external-grid bus (the real SWF and ÜZW grids carry the external grid on the LV busbar). The
+else the external-grid bus (the real DSO A and DSO B grids carry the external grid on the LV busbar). The
 station busbar is the root plus everything tied to it by zero-length lines or closed bus-bus switches.
 
 - An **outlet** route leaves the station busbar.

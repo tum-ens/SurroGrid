@@ -26,7 +26,7 @@ from gridexpand.powerflow import network
 
 
 def _load_real_runner():
-    import gridexpand.powerflow.run_real_swf_powerflow as real_runner
+    import gridexpand.powerflow.run_real_powerflow as real_runner
 
     return real_runner
 
@@ -577,7 +577,7 @@ def audit_critical_topology(
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Audit topology bottlenecks in critical real-grid voltage cases.")
-    parser.add_argument("--real-run-name", required=True, help="Real (SWF) power-flow run name.")
+    parser.add_argument("--real-run-name", required=True, help="Real (DSO A) power-flow run name.")
     parser.add_argument("--plz", type=int, required=True, help="Majority PLZ of the real grids.")
     parser.add_argument("--stage", default="pre")
     parser.add_argument("--voltage-threshold", type=float, default=0.90)

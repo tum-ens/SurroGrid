@@ -7,10 +7,10 @@ quoted below are those of every repository scenario YAML unless a table says oth
 
 | Scenario YAML | used by | heat source | adoption (heat / mobility / PV+battery) | TSAM |
 |---|---|---|---|---|
-| `forchheim_2045_synthetic.yaml` | synthetic runs | `infdb_ro_heat` | deterministic 1.0 / 1.0 / 1.0 | on |
+| `ro_heat_2045_synthetic.yaml` | synthetic runs | `infdb_ro_heat` | deterministic 1.0 / 1.0 / 1.0 | on |
 | `schweinfurt_2045.yaml` | synthetic runs | `teaser` (level 0) | deterministic 0.75 / 0.75 / 0.75 | on |
-| `forchheim_2045_full_year.yaml` | paired SWF runs | `infdb_ro_heat` | source inventory (SWF) | off |
-| `joint_2045_full_year.yaml` | aligned SWF + ÜZW runs | `teaser` (level 1) | deterministic 0.8 / 1.0 / 0.8 | off |
+| `dso_a_2045_full_year.yaml` | paired DSO A runs | `infdb_ro_heat` | source inventory (DSO A) | off |
+| `joint_2045_full_year.yaml` | aligned DSO A + DSO B runs | `teaser` (level 1) | deterministic 0.8 / 1.0 / 0.8 | off |
 | `00_scenario_template.yaml` | template | `infdb_ro_heat` | deterministic 1.0 / 1.0 / 1.0 | on |
 
 ## Model cases
@@ -97,7 +97,7 @@ a controlled comparison matters.
 
 - `deterministic_share`: eligible physical buildings are ranked by a stable seed and the exact rounded
   `building_share` is selected;
-- `source_inventory`: only buildings backed by explicit source evidence (the SWF 2045 inventory) are
+- `source_inventory`: only buildings backed by explicit source evidence (the DSO A 2045 inventory) are
   selected; `building_share` is not allowed.
 
 With `building_share_by_type` (keys `SFH`, `TH`, `MFH`, `AB`) the ranking and the rounded selection run within
@@ -158,7 +158,7 @@ A building without any usable LoD2 section receives one 14.5 kWp fallback sectio
 
 Profiles are computed with [pvlib](https://doi.org/10.21105/joss.05994) once per binned tilt and azimuth
 (`tilt_bin_degrees` 5°, `azimuth_bin_degrees` 15°); the largest observed annual-yield deviation of these
-bins against exact LoD2 angles was 9.30 % for the Forchheim roofs. Capacity always uses the exact
+bins against exact LoD2 angles was 9.30 % for the roofs of the DSO A region. Capacity always uses the exact
 surface area. Paired runs build one angle-binned profile library (`paired_pv_profile_library.h5`) before
 the grid jobs start, so real and synthetic grids use identical normalized profiles.
 
@@ -193,7 +193,7 @@ process bounded by their summed LoD2 `cap-up`.
 
 ## Stationary-battery sizing
 
-Only buildings selected for `pv_battery` are battery candidates. Battery rows of a source inventory (SWF)
+Only buildings selected for `pv_battery` are battery candidates. Battery rows of a source inventory (DSO A)
 are location evidence only; their capacities do not set the scenario capacity. With annual base
 electricity $E_{\mathrm{el},i}^{\mathrm{MWh}}$ in MWh/a and PV capacity $P_{\mathrm{PV},i}$ in kWp, the
 heuristic is
@@ -256,7 +256,7 @@ pumps; paired validation uses residential heat-pump inventory rows only.
 
 The space-heat source is `asset_sizing.heat.space_heat_source`:
 
-- `infdb_ro_heat` (Forchheim scenarios): building-level hourly heating loads from the INFDB `ro_heat` schema
+- `infdb_ro_heat` (DSO A region scenarios): building-level hourly heating loads from the INFDB `ro_heat` schema
   (1R1C model), converted from W to hourly kWh. The source holds 8,736 contiguous hours (1 January to
   30 December 2023); as a preliminary rule the last available day is duplicated to form 8,760 hours, and every
   affected building is audited. The library must be rebuilt when a complete export is available. A missing
@@ -265,7 +265,7 @@ The space-heat source is `asset_sizing.heat.space_heat_source`:
   region (paired preparation uses the tiers same grid and type, same grid and use, same grid, same type, same
   use, region; it uses the LoD2 footprint as size proxy). Source building, match scope and scale are stored.
   These are approved pragmatic fallbacks, not exact simulations.
-- `teaser` (Schweinfurt and joint SWF + ÜZW scenarios): TEASER `tabula_de` archetypes with the component's
+- `teaser` (Schweinfurt and joint DSO A + DSO B scenarios): TEASER `tabula_de` archetypes with the component's
   residential effective floor area (footprint × `floor_number`, residential share) as total net leased area;
   the number of floors passed to TEASER does not change the result, and no blanket heated-area factor is
   applied. The TEASER envelope design load is not used for sizing (see below). Occupancy (richardsonpy) and hot
@@ -340,7 +340,7 @@ with a thermostatically controlled tank. The urbs `heat_storage` is a space-heat
 ### Climate inputs and full-load hours
 
 $T_{\mathrm{NAT}}$ is the postcode-specific norm outside temperature `T_ne` in
-`data/statistics/general/site_data.txt` (PLZ 91301: −12.6 °C). It is a design condition, not the minimum of
+`data/statistics/general/site_data.txt` (PLZ 99999: −12.6 °C). It is a design condition, not the minimum of
 the weather year; only an exact postcode entry is accepted. The inherited table should eventually be replaced
 or annotated with traceable DIN/TS 12831-1 data; until then −12.6 °C is an inherited input.
 
@@ -358,11 +358,11 @@ $$
 h_{\mathrm{FLH}}=\frac{24\,\mathrm{GT}}{T_{\mathrm{i}}-T_{\mathrm{NAT}}}.
 $$
 
-With $T_{\mathrm{b}}=T_{\mathrm{i}}$ (Gradtagzahl G20/15) the Forchheim weather year gives about 2,619 h/a. This
+With $T_{\mathrm{b}}=T_{\mathrm{i}}$ (Gradtagzahl G20/15) the DSO A region's weather year gives about 2,619 h/a. This
 counts the part of the indoor–outdoor difference that internal and solar gains cover, while the simulated annual
 demand is net of these gains: the design-load proxy then reaches only about 0.7 of the simulated winter peak, and
 the heat pump covers about 45 % of it. The joint scenario therefore uses the heating limit as base
-($T_{\mathrm{b}}=15$ °C, Heizgradtage G15): 1,721 h/a for Forchheim, inside the 1,500–1,800 h reported for
+($T_{\mathrm{b}}=15$ °C, Heizgradtage G15): 1,721 h/a for the DSO A region, inside the 1,500–1,800 h reported for
 one- and two-family houses from new to unrenovated
 ([IER Stuttgart, 2016](https://www.ier.uni-stuttgart.de/forschung/modelle/heizkostenvergleich/pdf/16-05-09-IER_Waermekostenrechner_-_Dokumentation.pdf)),
 and a design proxy of about 1.1 times the simulated peak. Converting annual simulated energy to a design-load
@@ -425,7 +425,7 @@ $$
 A buffer that holds $t_{\mathrm{buf}}$ hours of thermal heat-pump output has
 $v_{\mathrm{buf}}=t_{\mathrm{buf}}\cdot 1000/(1.163\,\Delta T_{\mathrm{buf}})$.
 
-- **Hydraulic buffer** (Forchheim scenarios): $v_{\mathrm{buf}}=20$ L/kW<sub>th</sub> and 5 K, i.e. about 7 minutes.
+- **Hydraulic buffer** (DSO A region scenarios): $v_{\mathrm{buf}}=20$ L/kW<sub>th</sub> and 5 K, i.e. about 7 minutes.
   This follows the [VDI 4645](https://www.dinmedia.de/de/technische-regel/vdi-4645/364873293) value for runtime
   optimisation, inside the 12–35 L/kW range of [DIN EN 15450](https://www.dinmedia.de/de/norm/din-en-15450/98862901)
   ([Weck-Ponten, 2023, Sec. 3.3.8](https://publications.rwth-aachen.de/record/969286/files/969286.pdf)). Such
@@ -559,7 +559,7 @@ on.
 
 ## Paired validation contract
 
-The paired pipelines compare real DSO grids (SWF; SWF and ÜZW in aligned runs) with synthetic pylovo grids under
+The paired pipelines compare real DSO grids (DSO A; DSO A and DSO B in aligned runs) with synthetic pylovo grids under
 the same post-electrification scenario. They hold the physical demand and technology realization constant and
 change only the electrical network and the mapping of scenario units to buses. Paired validation may project a
 compiled scenario onto real and synthetic buses; it may not redefine scenario assumptions.
@@ -568,7 +568,7 @@ compiled scenario onto real and synthetic buses; it may not redefine scenario as
 |---|---|---|
 | Scope | physical buildings retained by both network models, same minimum-building rule | grid partition |
 | Base demand | household rows, measured annual household energy, calibrated GHD energy, sampled profile realization | allocation bus |
-| Sector assets | deduplicated source inventory (SWF 2045 PV, EV, heat pump) or deterministic selection | allocation bus |
+| Sector assets | deduplicated source inventory (DSO A 2045 PV, EV, heat pump) or deterministic selection | allocation bus |
 | Time series | profile seed, weather, mobility pool, heat demand, COP, temporal horizon | none |
 | Optimization | identical scenario-unit inputs, formulation, technology assumptions, solver settings, temporal method | target-grid batch partition |
 | Power flow | active-power time series and metric definitions | pandapower topology, impedance, equipment, bus mapping |
@@ -590,21 +590,21 @@ electricity (ties: lowest bus id). A building matched to connections in differen
 connection preserves both transformer assignments). Both counts are recorded in the scope audit and the dataset
 metadata.
 
-**Reference-grid scope and topology (SWF).** The reference population uses a curated dataset of station
+**Reference-grid scope and topology (DSO A).** The reference population uses a curated dataset of station
 workbooks with exactly one transformer each, so no multi-transformer station splitting is needed. The source grids
 are meshed; their validated radialized derivatives (cycle rank 0, no unsupplied load buses) are used for power flow
 and reinforcement. `station_split_manifest.csv` and
 `station_radialization_manifest.csv` below `GRID_DATA_PATH` record the eligible stations and the derived workbooks;
 allocation and real-grid power flow select the same entries. They describe provenance, not scenario parameters.
 
-**Source inventory (SWF).** Heat-pump rows are location evidence only (no positive capacities); the three component
+**Source inventory (DSO A).** Heat-pump rows are location evidence only (no positive capacities); the three component
 records of one installation (`load_type` `hp`, `heat`, `dhw`, same `Baujahr`) form one physical system. PV rows with
-`Baujahr <= 2045` (and legacy rows without a usable year) mark a building as a PV location; the SWF PV capacity is
+`Baujahr <= 2045` (and legacy rows without a usable year) mark a building as a PV location; the DSO A PV capacity is
 not an installation limit. Charging-point capacities are fixed.
 
 ### GHD and mixed-use evidence rules
 
-These rules belong to the SWF-inventory pipeline (`pipeline: paired_validation`); aligned runs model GHD for both
+These rules belong to the DSO A inventory pipeline (`pipeline: paired_validation`); aligned runs model GHD for both
 providers as in "Commercial and public (GHD) electricity" above.
 
 pylovo's open building layer contains many more Commercial/Public polygons than a DSO has GHD customers; an ALKIS
@@ -647,7 +647,7 @@ aligned run: the same transformer loadings (to 0.0 percentage points) and the sa
 transformer rating is checked for cables, voltage and convergence only.
 
 *Output* (per provider): `status_quo_<provider>_exclusions.csv` with the columns `provider, real_grid_id, reason`
-(`real_grid_id` is the bundle's own id, SWF `station_id` such as `LV_059` and ÜZW `area_id`; `reason` joins the
+(`real_grid_id` is the bundle's own id, DSO A `station_id` such as `LV_059` and DSO B `area_id`; `reason` joins the
 flags with `;`), `status_quo_<provider>_grids.csv` (demand and power-flow metrics of every grid),
 `status_quo_<provider>_ghd_audit.csv` and `status_quo_<provider>_metadata.json`.
 

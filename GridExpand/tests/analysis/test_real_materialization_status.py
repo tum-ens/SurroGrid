@@ -5,7 +5,7 @@ from gridexpand.analysis.expansion.real_materialization import MAX_FAILED_SHARE,
 
 def _run(failed, timesteps=8760, lv_id="LV_153"):
     return {"lv_id": lv_id, "n_failed_timesteps": failed, "n_timesteps": timesteps, "real_powerflow_run_id": 1,
-            "real_grid_case_id": 2, "scenario_id": 3, "plz": 91301}
+            "real_grid_case_id": 2, "scenario_id": 3, "plz": 99999}
 
 
 def test_few_failed_timesteps_give_a_lower_bound_cost():

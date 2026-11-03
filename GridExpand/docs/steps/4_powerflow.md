@@ -12,7 +12,7 @@ Entry point: `gridexpand powerflow` = `src/gridexpand/powerflow/run_pwrflw.py` (
 | `engine.py` | `run_timeseries` (chunked, parallel), raw tables, `summarize_powerflow_matrices` |
 | `io.py` | `HDF_KEYS`, `ScenarioResultReader`, database and HDF5 sinks |
 | `config.py` | power factors |
-| `run_real_swf_powerflow.py`, `run_real_swf_scenario_powerflow.py` | real-grid (SWF, ÜZW with `--provider`) runners called by the paired runner |
+| `run_real_powerflow.py`, `run_real_scenario_powerflow.py` | real-grid (DSO A, DSO B with `--provider`) runners called by the paired runner |
 
 ## Inputs
 

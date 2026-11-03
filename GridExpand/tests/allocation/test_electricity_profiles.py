@@ -85,7 +85,7 @@ def _old_audit(base, profiled_components, component_profiles):
         axis=1,
     )
     audit["source_asset_count"] = pd.NA
-    audit["matched_swf_asset_count"] = pd.NA
+    audit["matched_dso_asset_count"] = pd.NA
     audit["mv_direct"] = audit["mv_direct"].astype(bool)
     return audit
 

@@ -9,34 +9,34 @@
 # Regional expansion cost also cannot come from one grid: cost is a sum over grids
 # and the effect of interest is distributional. gridexpand run additionally emits no
 # expansion commands when target_grid_id is set.
-# Same resources as forchheim_2045_paired_full_year.yaml; the external grid root
+# Same resources as dso_a_2045_paired_full_year.yaml; the external grid root
 # comes from GRID_DATA_PATH in GridExpand/.env.
 run:
   # Version-qualified identity prevents results from different PyLoVo topologies
   # from being combined by the post-processing notebook.
-  id: forchheim_2045_paired_full_year_lv080
-  scenario: ../scenarios/forchheim_2045_full_year.yaml
+  id: dso_a_2045_paired_full_year_lv080
+  scenario: ../scenarios/dso_a_2045_full_year.yaml
   pipeline: paired_validation
 
 resources:
   # Municipality and postcode whose complete eligible PyLoVo grid set is registered.
-  ags: 9474126
-  plz: 91301
+  ags: 9999999
+  plz: 99999
   # Exact pylovo topology version; never inferred from the environment.
   pylovo_version_id: 11
   # Small grids are removed symmetrically after physical-building pairing.
   min_buildings: 5
   # Stable shared heat library; paths are derived from repository conventions.
-  heat_profile_set_id: forchheim_2045_infdb_ro_heat_v1
+  heat_profile_set_id: dso_a_2045_infdb_ro_heat_v1
   # Existing weather source used to create the shared angle-binned PV library.
-  weather_source_hdf: 9474126-00_91301_1_2.h5
+  weather_source_hdf: 9999999-00_99999_1_2.h5
   # Real grids kept in coverage but omitted from the expansion cost (incomplete data).
   excluded_real_lv_ids: [113]
   # Prepared allocation/artifact folder name under scenario_calibration outputs.
-  paired_dataset_id: swf_2045_paired_v11_91301_swf_clear
+  paired_dataset_id: dso_a_2045_paired_v11
   # One network only: target_grid_id is an adapter-specific id, and the two
   # networks do not share an id space.
-  target_network: real_swf
+  target_network: real_dso_a
   # The real grid to run (adapter-specific id).
   target_grid_id: 80
 

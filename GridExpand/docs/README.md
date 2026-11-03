@@ -7,7 +7,7 @@ Start with the [GridExpand README](../README.md) (install, data, database, quick
 | document | read it when you |
 |---|---|
 | [configuration.md](configuration.md) | write a scenario or run YAML; need a key, a default, the grid selection, the run directory or an environment variable |
-| [paired_validation.md](paired_validation.md) | run the paired SWF or the aligned SWF/ÜZW validation |
+| [paired_validation.md](paired_validation.md) | run the paired DSO A or the aligned DSO A/DSO B validation |
 | [api.md](api.md) | run the HTTP API (for the GridPlanner UI) or the Docker image; its contract |
 | [database.md](database.md) | set up or migrate the `surrogrid` schema, query results, run maintenance commands |
 

@@ -10,32 +10,32 @@ import pytest
 
 from gridexpand.paired import runner
 from gridexpand.paired.aligned import real_grid_number, select_grid_subset
-from gridexpand.paired.sources import swf, synthetic
+from gridexpand.paired.sources import dso_a, synthetic
 
 
 def test_job_keys_and_legacy_rows(tmp_path):
     jobs = runner._number_jobs([
-        {"target_network": "real_swf", "target_grid_id": 12},
+        {"target_network": "real_dso_a", "target_grid_id": 12},
         {"target_network": "synthetic", "target_grid_id": 7},
     ])
-    assert [(job["job_index"], job["job"]) for job in jobs] == [(0, "real_swf:12"), (1, "synthetic:7")]
+    assert [(job["job_index"], job["job"]) for job in jobs] == [(0, "real_dso_a:12"), (1, "synthetic:7")]
     # a status.tsv from before job keys: rows keyed by list position, grid only in the log name
     (tmp_path / "status.tsv").write_text(
         "candidate_index\tstatus\tlog_file\n"
-        f"0\tdone\t{tmp_path}/logs/real_uzw_12.log\n"
+        f"0\tdone\t{tmp_path}/logs/real_dso_b_12.log\n"
         f"1\tfailed\t{tmp_path}/logs/synthetic_7.log\n"
     )
     status = runner.open_status(tmp_path, resume=True)
-    assert status.status_for("real_uzw:12") == "done" and status.status_for("synthetic:7") == "failed"
-    assert status.status_for("real_uzw:0") is None
-    status.update("real_uzw:13", target_network="real_uzw", target_grid_id=13, status="running")
+    assert status.status_for("real_dso_b:12") == "done" and status.status_for("synthetic:7") == "failed"
+    assert status.status_for("real_dso_b:0") is None
+    status.update("real_dso_b:13", target_network="real_dso_b", target_grid_id=13, status="running")
     header = (tmp_path / "status.tsv").read_text().splitlines()[0].split("\t")
     assert header[:3] == ["job", "target_network", "target_grid_id"]  # orch B5: the file names the grid
 
 
 def _args(tmp_path, **extra):
     base = dict(paired_dataset_id="ds", pylovo_version_id="1", scenario_config=Path("/s.yaml"), target="both",
-                provider="swf", target_grid_id=None, run_dir=tmp_path, scenario_id="s", scenario_hash="h",
+                provider="dso_a", target_grid_id=None, run_dir=tmp_path, scenario_id="s", scenario_hash="h",
                 tsam=False, operating_hours=8760, tsam_periods=None, tsam_hours_per_period=None,
                 tsam_extreme_method=None, profile_seed=1, powerflow_grid_scope="full", max_timesteps=None,
                 job_subset=None, resume=False)
@@ -57,23 +57,23 @@ def _capture(monkeypatch, module):
 
 
 def test_real_adapter_commands(tmp_path, monkeypatch):
-    calls = _capture(monkeypatch, swf)
-    args = argparse.Namespace(result_cases=("post-inflex-heuristic", "post-hems-heuristic"), skip_pre=False, plz=91301,
+    calls = _capture(monkeypatch, dso_a)
+    args = argparse.Namespace(result_cases=("post-inflex-heuristic", "post-hems-heuristic"), skip_pre=False, plz=99999,
                               profile_seed=1, powerflow_grid_scope="full", tsam=False, pre_only=False,
                               grid_data_path=Path("/grids"), max_timesteps=None, run_name_prefix="run")
-    job = {"target_network": "real_swf", "target_grid_id": 80, "job": "real_swf:80"}
-    swf.run_powerflows(job=job, args=args, result_hdf=Path("/r.h5"), log_path=tmp_path / "x.log", status=None)
-    assert [stage for stage, _, _ in calls] == ["step4_real_swf_pre", "step4_real_swf_post-inflex-heuristic",
-                                                "step4_real_swf_post-hems-heuristic"]
+    job = {"target_network": "real_dso_a", "target_grid_id": 80, "job": "real_dso_a:80"}
+    dso_a.run_powerflows(job=job, args=args, result_hdf=Path("/r.h5"), log_path=tmp_path / "x.log", status=None)
+    assert [stage for stage, _, _ in calls] == ["step4_real_dso_a_pre", "step4_real_dso_a_post-inflex-heuristic",
+                                                "step4_real_dso_a_post-hems-heuristic"]
     modes = [cmd[cmd.index("--post-demand-mode") + 1] for _, _, cmd in calls]
     labels = [cmd[cmd.index("--scenario-label") + 1] for _, _, cmd in calls]
     assert modes == ["pre-only", "inflex", "flexible"]
     # The pre stage is solved once, by the pre case; result cases solve the post stage only.
     assert ["--post-only" in cmd for _, _, cmd in calls] == [False, True, True]
-    assert labels == ["Paired 2045 real_swf pre electricity-only", "Paired 2045 real_swf heuristic-assets INFLEX",
-                      "Paired 2045 real_swf heuristic-assets HEMS"]
+    assert labels == ["Paired 2045 real_dso_a pre electricity-only", "Paired 2045 real_dso_a heuristic-assets INFLEX",
+                      "Paired 2045 real_dso_a heuristic-assets HEMS"]
     assert all("--expect-temporal-method" in cmd and "--grid-data-path" in cmd for _, _, cmd in calls)
-    assert {key for _, key, _ in calls} == {"real_swf:80"}
+    assert {key for _, key, _ in calls} == {"real_dso_a:80"}
 
 
 def test_synthetic_adapter_commands(tmp_path, monkeypatch):
@@ -111,13 +111,13 @@ def test_synthetic_adapter_jobs(tmp_path):
 
 def test_grid_subset(tmp_path):
     population = tmp_path / "population.json"
-    population.write_text(__import__("json").dumps({"metric_cohort": {"uzw": {"successful_components": [
-        {"real": ["uzw:area-1"], "synthetic": [101]},
-        {"real": ["uzw:area-2", "uzw:area-3"], "synthetic": [102]},
+    population.write_text(__import__("json").dumps({"metric_cohort": {"dso_b": {"successful_components": [
+        {"real": ["dso_b:area-1"], "synthetic": [101]},
+        {"real": ["dso_b:area-2", "dso_b:area-3"], "synthetic": [102]},
     ]}}}))
     pd.DataFrame({"grid_result_id": [101, 102], "grid_case_id": [11, 12]}).to_csv(
         tmp_path / "paired_registered_synthetic_grids.csv", index=False)
-    subset = select_grid_subset(population=population, provider="uzw", paired_dir=tmp_path,
+    subset = select_grid_subset(population=population, provider="dso_b", paired_dir=tmp_path,
                                 grid_subset={"method": "islands", "seed": 1, "real_grids_per_provider": None})
-    assert subset["real_uzw"] == [1] and subset["synthetic"] == [11]
-    assert real_grid_number("swf", "LV_080__x") == 80
+    assert subset["real_dso_b"] == [1] and subset["synthetic"] == [11]
+    assert real_grid_number("dso_a", "LV_080__x") == 80

@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 
-SOURCE_COLORS = {"Synthetic": "#326891", "Real SWF": "#D07A32"}
+SOURCE_COLORS = {"Synthetic": "#326891", "Real DSO A": "#D07A32"}
 
 
 def _save(fig, save_path: str | Path | None, save_formats: tuple[str, ...]) -> None:
@@ -26,7 +26,7 @@ def _save(fig, save_path: str | Path | None, save_formats: tuple[str, ...]) -> N
 def plot_feeder_structure_comparison(
     grid_metrics: pd.DataFrame,
     *,
-    title: str = "Feeder Structure: Synthetic vs Real SWF",
+    title: str = "Feeder Structure: Synthetic vs Real DSO A",
     figsize: tuple[float, float] = (14.5, 8.0),
     save_path: str | Path | None = None,
     save_formats: tuple[str, ...] = ("svg", "pdf"),
@@ -54,7 +54,7 @@ def plot_feeder_structure_comparison(
     )
     sources = [
         source
-        for source in ("Synthetic", "Real SWF")
+        for source in ("Synthetic", "Real DSO A")
         if source in set(grid_metrics["data_source"])
     ]
     fig, axes = plt.subplots(2, 3, figsize=figsize)
@@ -106,7 +106,7 @@ def plot_feeder_section_loading_percentiles(
     """Compare section bottleneck-loading percentiles after excluding control lines."""
     sources = [
         source
-        for source in ("Synthetic", "Real SWF")
+        for source in ("Synthetic", "Real DSO A")
         if source in set(section_loading["data_source"])
     ]
     fig, ax = plt.subplots(figsize=figsize)

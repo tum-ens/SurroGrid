@@ -1,4 +1,4 @@
-"""GHD calibration helpers for SWF-to-pylovo scenario audits."""
+"""GHD calibration helpers for DSO A to pylovo scenario audits."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ def build_synthetic_ghd_calibration(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Build a no-scaling GHD calibration audit.
 
-    Synthetic Commercial/Public buildings keep GHD demand only where SWF has
-    directly matched GHD evidence. The calibrated annual GHD demand is the SWF
+    Synthetic Commercial/Public buildings keep GHD demand only where DSO A has
+    directly matched GHD evidence. The calibrated annual GHD demand is the DSO A
     annual demand at that building, not a scaled synthetic default.
     """
     if buildings.empty:
@@ -46,9 +46,9 @@ def build_synthetic_ghd_calibration(
     ghd_by_building = (
         ghd.groupby("building_match_id", dropna=False)
         .agg(
-            swf_ghd_rows=("asset_id", "count"),
-            swf_ghd_annual_kwh=(
-                "swf_annual_demand_kwh",
+            dso_a_ghd_rows=("asset_id", "count"),
+            dso_a_ghd_annual_kwh=(
+                "dso_a_annual_demand_kwh",
                 lambda s: float(pd.to_numeric(s, errors="coerce").sum()),
             ),
         )
@@ -57,9 +57,9 @@ def build_synthetic_ghd_calibration(
     hh_by_building = (
         hh.groupby("building_match_id", dropna=False)
         .agg(
-            swf_hh_rows=("asset_id", "count"),
-            swf_hh_annual_kwh=(
-                "swf_annual_demand_kwh",
+            dso_a_hh_rows=("asset_id", "count"),
+            dso_a_hh_annual_kwh=(
+                "dso_a_annual_demand_kwh",
                 lambda s: float(pd.to_numeric(s, errors="coerce").sum()),
             ),
         )
@@ -69,10 +69,10 @@ def build_synthetic_ghd_calibration(
     calibration = candidates.merge(ghd_by_building, on="building_match_id", how="left")
     calibration = calibration.merge(hh_by_building, on="building_match_id", how="left")
     for column in [
-        "swf_ghd_rows",
-        "swf_ghd_annual_kwh",
-        "swf_hh_rows",
-        "swf_hh_annual_kwh",
+        "dso_a_ghd_rows",
+        "dso_a_ghd_annual_kwh",
+        "dso_a_hh_rows",
+        "dso_a_hh_annual_kwh",
     ]:
         calibration[column] = pd.to_numeric(
             calibration[column], errors="coerce"
@@ -80,17 +80,17 @@ def build_synthetic_ghd_calibration(
 
     def _classify(row: pd.Series) -> str:
         has_default_ghd = row["synthetic_default_ghd_kwh_per_m2"] > 0
-        if row["swf_ghd_rows"] > 0 and row["swf_hh_rows"] > 0 and has_default_ghd:
-            return "direct_swf_ghd_match_with_hh_proxy"
-        if row["swf_ghd_rows"] > 0 and row["swf_hh_rows"] > 0:
-            return "direct_swf_ghd_match_on_residential_with_hh_proxy"
-        if row["swf_ghd_rows"] > 0 and has_default_ghd:
-            return "direct_swf_ghd_match"
-        if row["swf_ghd_rows"] > 0:
-            return "direct_swf_ghd_match_on_residential"
-        if row["swf_hh_rows"] > 0:
+        if row["dso_a_ghd_rows"] > 0 and row["dso_a_hh_rows"] > 0 and has_default_ghd:
+            return "direct_dso_a_ghd_match_with_hh_proxy"
+        if row["dso_a_ghd_rows"] > 0 and row["dso_a_hh_rows"] > 0:
+            return "direct_dso_a_ghd_match_on_residential_with_hh_proxy"
+        if row["dso_a_ghd_rows"] > 0 and has_default_ghd:
+            return "direct_dso_a_ghd_match"
+        if row["dso_a_ghd_rows"] > 0:
+            return "direct_dso_a_ghd_match_on_residential"
+        if row["dso_a_hh_rows"] > 0:
             return "mixed_residential_proxy_no_ghd"
-        return "no_swf_ghd_evidence"
+        return "no_dso_a_ghd_evidence"
 
     calibration["ghd_calibration_class"] = calibration.apply(_classify, axis=1)
     calibration["has_address"] = (
@@ -99,26 +99,26 @@ def build_synthetic_ghd_calibration(
     )
 
     def _evidence_class(row: pd.Series) -> str:
-        if row["swf_ghd_rows"] > 0:
-            return "direct_swf_ghd"
-        if row["swf_hh_rows"] > 0:
-            return "direct_swf_hh_mixed_use_proxy"
+        if row["dso_a_ghd_rows"] > 0:
+            return "direct_dso_a_ghd"
+        if row["dso_a_hh_rows"] > 0:
+            return "direct_dso_a_hh_mixed_use_proxy"
         generic_unaddressed = (
             row.get("building_use_id") == "31001_2000"
             and not row["has_address"]
         )
         if generic_unaddressed:
             return "generic_commercial_structure_without_load_evidence"
-        return "building_without_swf_load_evidence"
+        return "building_without_dso_a_load_evidence"
 
     calibration["ghd_evidence_class"] = calibration.apply(_evidence_class, axis=1)
     calibration["independent_ghd_load_supported"] = calibration[
-        "swf_ghd_rows"
+        "dso_a_ghd_rows"
     ].gt(0)
-    direct_mask = calibration["swf_ghd_rows"].gt(0)
+    direct_mask = calibration["dso_a_ghd_rows"].gt(0)
     calibration["calibrated_annual_ghd_kwh"] = np.where(
         direct_mask,
-        calibration["swf_ghd_annual_kwh"],
+        calibration["dso_a_ghd_annual_kwh"],
         0.0,
     )
     calibration["excluded_default_annual_ghd_kwh"] = np.where(
@@ -143,10 +143,10 @@ def build_synthetic_ghd_calibration(
         "ghd_evidence_class",
         "has_address",
         "independent_ghd_load_supported",
-        "swf_ghd_rows",
-        "swf_ghd_annual_kwh",
-        "swf_hh_rows",
-        "swf_hh_annual_kwh",
+        "dso_a_ghd_rows",
+        "dso_a_ghd_annual_kwh",
+        "dso_a_hh_rows",
+        "dso_a_hh_annual_kwh",
         "synthetic_default_ghd_kwh_per_m2",
         "synthetic_default_annual_ghd_kwh",
         "calibrated_annual_ghd_kwh",
@@ -183,8 +183,8 @@ def _summarize_calibration(
                     "synthetic_default_annual_ghd_kwh": float(
                         group["synthetic_default_annual_ghd_kwh"].sum()
                     ),
-                    "swf_ghd_rows": int(group["swf_ghd_rows"].sum()),
-                    "swf_ghd_annual_kwh": float(group["swf_ghd_annual_kwh"].sum()),
+                    "dso_a_ghd_rows": int(group["dso_a_ghd_rows"].sum()),
+                    "dso_a_ghd_annual_kwh": float(group["dso_a_ghd_annual_kwh"].sum()),
                     "calibrated_annual_ghd_kwh": float(
                         group["calibrated_annual_ghd_kwh"].sum()
                     ),
@@ -201,16 +201,16 @@ def _summarize_calibration(
     if not unmatched_ghd.empty:
         rows.append(
             {
-                "ghd_calibration_class": "unmatched_swf_ghd_not_allocated",
-                "ghd_evidence_class": "unmatched_swf_ghd_row",
+                "ghd_calibration_class": "unmatched_dso_a_ghd_not_allocated",
+                "ghd_evidence_class": "unmatched_dso_a_ghd_row",
                 "building_use": "unmatched",
                 "buildings": 0,
                 "floor_area_m2": 0.0,
                 "synthetic_default_annual_ghd_kwh": 0.0,
-                "swf_ghd_rows": int(len(unmatched_ghd)),
-                "swf_ghd_annual_kwh": float(
+                "dso_a_ghd_rows": int(len(unmatched_ghd)),
+                "dso_a_ghd_annual_kwh": float(
                     pd.to_numeric(
-                        unmatched_ghd["swf_annual_demand_kwh"], errors="coerce"
+                        unmatched_ghd["dso_a_annual_demand_kwh"], errors="coerce"
                     ).sum()
                 ),
                 "calibrated_annual_ghd_kwh": 0.0,

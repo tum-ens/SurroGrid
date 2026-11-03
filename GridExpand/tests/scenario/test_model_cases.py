@@ -26,7 +26,7 @@ def test_table():
         "post-hems-heuristic": "post",
         "post-hems-optimized": "post_hems_optimized",
     }
-    # real-grid adapter modes and labels (were a dict in sources/swf.py)
+    # real-grid adapter modes and labels (were a dict in sources/dso_a.py)
     assert {name: (MODEL_CASES[name].powerflow_mode, MODEL_CASES[name].label) for name in POST_MODEL_CASES} == {
         "post-hems-optimized": ("flexible", "optimized HEMS"),
         "post-hems-heuristic": ("flexible", "heuristic-assets HEMS"),

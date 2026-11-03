@@ -59,20 +59,20 @@ from ...assets.pv.roof_catalog import (
     roof_catalog_options,
 )
 
-PROVIDERS = ("swf", "uzw")
-UZW_INDEX_FILE = "index.json"
-UZW_LEDGER_FILE = "source-ledger.json"
+PROVIDERS = ("dso_a", "dso_b")
+DSO_B_INDEX_FILE = "index.json"
+DSO_B_LEDGER_FILE = "source-ledger.json"
 
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def uzw_delivery_fingerprint(root: Path) -> str:
+def dso_b_delivery_fingerprint(root: Path) -> str:
     """Same hash as pylovo ``validations_new.buildings.fingerprint``."""
     root = Path(root).resolve()
-    index = json.loads((root / UZW_INDEX_FILE).read_text(encoding="utf-8"))
-    paths = {UZW_INDEX_FILE, UZW_LEDGER_FILE}
+    index = json.loads((root / DSO_B_INDEX_FILE).read_text(encoding="utf-8"))
+    paths = {DSO_B_INDEX_FILE, DSO_B_LEDGER_FILE}
     for row in index:
         if row.get("file"):
             paths.add(f"{row['cohort']}/{row['file']}")
@@ -83,18 +83,22 @@ def uzw_delivery_fingerprint(root: Path) -> str:
 def real_building_mapping(
     provider: str,
     alignment_dir: Path,
-    uzw_grids_dir: Path | None,
+    dso_b_grids_dir: Path | None,
+    bundle_name: str | None = None,
 ) -> pd.DataFrame:
-    """Return one real grid, bus and grid file per bundle building."""
-    bundle = alignment_dir / provider
+    """Return one real grid, bus and grid file per bundle building.
+
+    ``bundle_name`` is the provider's directory name inside the bundle (default: ``provider``).
+    """
+    bundle = alignment_dir / (bundle_name or provider)
     document = json.loads((bundle / "building-mapping.json").read_text(encoding="utf-8"))
     postcode = {}
-    if provider == "swf":
+    if provider == "dso_a":
         workbooks = {}
         for station in document["stations"]:
             path = Path(station["workbook"])
             if _sha256(path) != station["sha256"]:
-                raise ValueError(f"SWF workbook differs from its bundle hash: {path}")
+                raise ValueError(f"DSO A workbook differs from its bundle hash: {path}")
             workbooks[station["station_id"]] = str(path)
         rows = [
             {
@@ -109,20 +113,20 @@ def real_building_mapping(
         ]
         return pd.DataFrame(rows)
 
-    if provider != "uzw":
+    if provider != "dso_b":
         raise ValueError(f"Unknown provider {provider!r}.")
-    if uzw_grids_dir is None:
-        raise ValueError("ÜZW needs the frozen delivery directory (--uzw-grids-dir).")
+    if dso_b_grids_dir is None:
+        raise ValueError("DSO B needs the frozen delivery directory (--dso-b-grids-dir).")
     manifest = json.loads((bundle / "generation-manifest.json").read_text(encoding="utf-8"))
-    actual = uzw_delivery_fingerprint(uzw_grids_dir)
+    actual = dso_b_delivery_fingerprint(dso_b_grids_dir)
     if actual != manifest["delivery_fingerprint"]:
         raise ValueError(
-            f"ÜZW delivery {uzw_grids_dir} has fingerprint {actual}, the bundle "
+            f"DSO B delivery {dso_b_grids_dir} has fingerprint {actual}, the bundle "
             f"expects {manifest['delivery_fingerprint']}."
         )
-    index = json.loads((uzw_grids_dir / UZW_INDEX_FILE).read_text(encoding="utf-8"))
+    index = json.loads((dso_b_grids_dir / DSO_B_INDEX_FILE).read_text(encoding="utf-8"))
     area_files = {
-        int(row["area"]): str(uzw_grids_dir / row["cohort"] / row["file"])
+        int(row["area"]): str(dso_b_grids_dir / row["cohort"] / row["file"])
         for row in index
         if row.get("file") and row.get("cohort") == "resolved"
     }
@@ -142,19 +146,19 @@ def real_building_mapping(
     split = links.groupby("building_objectid").size()
     if split.gt(1).any():
         raise ValueError(
-            "ÜZW buildings with several supplies: "
+            "DSO B buildings with several supplies: "
             f"{split[split.gt(1)].index.tolist()[:10]}"
         )
     links["real_grid_file"] = links["real_grid_id"].map(area_files)
     if links["real_grid_file"].isna().any():
-        raise ValueError("ÜZW bundle areas without a resolved grid file.")
+        raise ValueError("DSO B bundle areas without a resolved grid file.")
     links["postcode"] = links["building_objectid"].map(postcode)
     return links[links["postcode"].notna()].astype({"postcode": int})
 
 
-def metric_population(population_json: Path, provider: str) -> set[str]:
+def metric_population(population_json: Path, provider: str, bundle_name: str | None = None) -> set[str]:
     document = json.loads(population_json.read_text(encoding="utf-8"))
-    return {str(value) for value in document["metric_cohort"][provider]["metric_building_ids"]}
+    return {str(value) for value in document["metric_cohort"][bundle_name or provider]["metric_building_ids"]}
 
 
 def _read_sql(database: SurroGridDatabase, query: str, **params) -> pd.DataFrame:
@@ -234,7 +238,8 @@ def build_aligned_allocation(
     scenario_config_path: Path,
     profile_seed: int,
     output_dir: Path,
-    uzw_grids_dir: Path | None = None,
+    dso_b_grids_dir: Path | None = None,
+    bundle_name: str | None = None,
 ) -> dict[str, Any]:
     load_dotenv(ENV_PATH, override=True)
     os.environ["PYLOVO_VERSION_ID"] = str(pylovo_version_id)
@@ -244,8 +249,8 @@ def build_aligned_allocation(
         if scenario.electrification.for_technology(technology).adoption_mode != "deterministic_share":
             raise ValueError("Aligned allocation has no source inventory; use deterministic_share.")
 
-    real = real_building_mapping(provider, alignment_dir, uzw_grids_dir)
-    population = metric_population(population_json, provider)
+    real = real_building_mapping(provider, alignment_dir, dso_b_grids_dir, bundle_name)
+    population = metric_population(population_json, provider, bundle_name)
     missing = sorted(population - set(real["building_objectid"]))
     if missing:
         raise ValueError(f"Metric population buildings missing from the bundle: {missing[:10]}")
@@ -505,7 +510,7 @@ def build_aligned_allocation(
             ),
             "stable_seed": int(seed),
             "profile_seed": int(profile_seed),
-            "matched_swf_asset_count": 0,
+            "matched_dso_asset_count": 0,
             "source_asset_ids": "",
             "source_use_conflict": None,
             "suppression_reason": reason,
@@ -533,10 +538,11 @@ def build_aligned_allocation(
     ])
     summary = assignment_summary(assignment)
     bundle_manifest = json.loads(
-        (alignment_dir / provider / "generation-manifest.json").read_text(encoding="utf-8")
+        (alignment_dir / (bundle_name or provider) / "generation-manifest.json").read_text(encoding="utf-8")
     )
     metadata = {
         "provider": provider,
+        "bundle_name": bundle_name or provider,
         "ags": int(buildings["ags"].mode().iloc[0]),
         "ags_list": sorted(int(value) for value in buildings["ags"].unique()),
         "plz": int(postcodes[0]),
@@ -544,7 +550,7 @@ def build_aligned_allocation(
         "pylovo_version_id": str(pylovo_version_id),
         "alignment_dir": str(alignment_dir),
         "alignment_fingerprint": bundle_manifest["alignment_fingerprint"],
-        "uzw_grids_dir": None if uzw_grids_dir is None else str(uzw_grids_dir),
+        "dso_b_grids_dir": None if dso_b_grids_dir is None else str(dso_b_grids_dir),
         "population_json": str(population_json),
         "population_sha256": _sha256(population_json),
         "min_physical_buildings_per_target_grid": 5,
@@ -611,7 +617,9 @@ def main() -> None:
     parser.add_argument("--provider", choices=PROVIDERS, required=True)
     parser.add_argument("--alignment-dir", type=Path, required=True)
     parser.add_argument("--population", type=Path, required=True)
-    parser.add_argument("--uzw-grids-dir", type=Path, default=None)
+    parser.add_argument("--dso-b-grids-dir", type=Path, default=None)
+    parser.add_argument("--bundle-name", default=None,
+                        help="Provider name inside the alignment bundle and the comparison JSON (default: --provider).")
     parser.add_argument("--pylovo-version-id", required=True)
     parser.add_argument("--scenario-config", type=Path, required=True)
     parser.add_argument("--profile-seed", type=int, default=481527)
@@ -625,7 +633,8 @@ def main() -> None:
         scenario_config_path=args.scenario_config.resolve(),
         profile_seed=args.profile_seed,
         output_dir=args.output_dir.resolve(),
-        uzw_grids_dir=None if args.uzw_grids_dir is None else args.uzw_grids_dir.expanduser().resolve(),
+        dso_b_grids_dir=None if args.dso_b_grids_dir is None else args.dso_b_grids_dir.expanduser().resolve(),
+        bundle_name=args.bundle_name,
     )
     print(json.dumps({key: metadata[key] for key in (
         "provider", "real_grids", "synthetic_grids", "component_rows",

@@ -261,7 +261,7 @@ DEMAND_COMPONENT_AUDIT_COLUMNS = (
     "component_id", "objectid", "scenario_unit_id", "bus", "category",
     "commodity", "annual_energy_kwh", "max_profile_value", "profile_hash",
     "profile_method", "stable_seed", "source_asset_count",
-    "matched_swf_asset_count", "included_in_lv", "suppression_reason",
+    "matched_dso_asset_count", "included_in_lv", "suppression_reason",
     "pylovo_version_id", "mix_score", "mix_rule", "mix_confidence", "mv_direct",
 )
 

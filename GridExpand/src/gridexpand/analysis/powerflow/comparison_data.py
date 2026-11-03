@@ -498,7 +498,7 @@ def load_synthetic_powerflow_cutoff_profile(
     profile["comparison_group"] = "Synthetic"
     return profile
 
-REAL_COMPARISON_GROUPS = {"swf": "Real SWF", "uzw": "Real ÜZW"}
+REAL_COMPARISON_GROUPS = {"dso_a": "Real DSO A", "dso_b": "Real DSO B"}
 
 
 
@@ -510,7 +510,7 @@ def real_powerflow_headline_summary_db(
     lv_id: str | int | None = None,
     source: str | None = None,
 ) -> pd.DataFrame:
-    """Read compact real-grid (SWF or ÜZW) DB-backed headline power-flow metrics."""
+    """Read compact real-grid (DSO A or DSO B) DB-backed headline power-flow metrics."""
     db = SurroGridDatabase()
     lv_id_text = None if lv_id is None else canonical_real_grid_id(lv_id)
     query = text(
@@ -656,7 +656,7 @@ def real_powerflow_percentile_profile_db(
     lv_id: str | int | None = None,
     source: str | None = None,
 ) -> pd.DataFrame:
-    """Read real-grid (SWF or ÜZW) per-asset time-percentiles in long form."""
+    """Read real-grid (DSO A or DSO B) per-asset time-percentiles in long form."""
     grid_summary = real_powerflow_headline_summary_db(
         run_name=run_name,
         stage=stage,
@@ -707,7 +707,7 @@ def powerflow_distribution_similarity_summary(
     profile: pd.DataFrame,
     group_col: str = "comparison_group",
     synthetic_group: str = "Synthetic",
-    real_group: str = "Real SWF",
+    real_group: str = "Real DSO A",
 ) -> pd.DataFrame:
     """Compare critical synthetic and real power-flow result distributions.
 

@@ -37,7 +37,7 @@ from .profile_contract import (
     stable_seed,
     sum_series_by_key,
 )
-from .real_swf_electricity_profiles import (
+from .dso_a_electricity_profiles import (
     DEFAULT_MEASURED_PROFILE_BAND_PCT,
     DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES,
     MEASURED_PROFILE_SELECTION_RANDOM_BAND,
@@ -593,7 +593,7 @@ def build_paired_sector_urbs_inputs(
     allow_diagnostic_heat_fallback: bool = False,
     electrification_assignment: pd.DataFrame | None = None,
 ) -> SectorUrbsInputs:
-    """Build SWF-2045 sector profiles once and remap them to target buses."""
+    """Build DSO A 2045 sector profiles once and remap them to target buses."""
     if electrification_assignment is None:
         raise ValueError(
             "Paired sector materialization requires the shared electrification assignment."
@@ -766,7 +766,7 @@ def build_paired_sector_urbs_inputs(
                 "matched physical building from pylovo version-specific synthetic URBS input"
             ),
             "stationary_battery_model": (
-                "SWF rows provide location evidence; capacity follows the shared "
+                "DSO A rows provide location evidence; capacity follows the shared "
                 "HTW bound and the selected heuristic or optimization sizing mode"
             ),
         },
@@ -943,7 +943,7 @@ def _build_paired_battery(
     site_by_building: dict[str, int] | None,
     technical_parameters: dict,
 ) -> _BatteryInputs | None:
-    """Size batteries consistently while using SWF rows only as location evidence."""
+    """Size batteries consistently while using DSO A rows only as location evidence."""
     eligible_buildings = (
         {str(value) for value in eligible_buildings}
         if eligible_buildings is not None

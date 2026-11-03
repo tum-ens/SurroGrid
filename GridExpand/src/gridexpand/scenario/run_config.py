@@ -6,7 +6,7 @@ A run YAML has three blocks: ``run`` (``id``, ``scenario``, ``pipeline``),
 - ``synthetic``: Steps 2-4 and the expansion analyses for the synthetic grids
   of one AGS (optionally one PLZ or one grid), one batch per execution group
   (:class:`SyntheticRun`);
-- ``paired_validation``: SWF real vs synthetic grids of one prepared paired
+- ``paired_validation``: DSO A real vs synthetic grids of one prepared paired
   dataset (:class:`PairedRun`);
 - ``paired_aligned``: every provider of a pylovo alignment bundle
   (:class:`AlignedRun`).
@@ -307,12 +307,12 @@ class SyntheticRun:
         }
 
 
-# Paired validation (SWF) --------------------------------------------------------------------
+# Paired validation (DSO A) --------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class PairedRun:
-    """``pipeline: paired_validation``: SWF real and synthetic grids of one prepared dataset."""
+    """``pipeline: paired_validation``: DSO A real and synthetic grids of one prepared dataset."""
 
     run_id: str
     scenario_path: Path
@@ -368,7 +368,7 @@ class PairedRun:
             excluded_real_lv_ids=tuple(int(value) for value in resources.get("excluded_real_lv_ids") or ()),
             paired_dataset_id=directory_safe(resources.get("paired_dataset_id"), "resources.paired_dataset_id"),
             target_network=choice(resources.get("target_network", "both"), "resources.target_network",
-                                  ("both", "real_swf", "synthetic")),
+                                  ("both", "real_dso_a", "synthetic")),
             target_grid_id=optional_int(resources.get("target_grid_id"), "resources.target_grid_id"),
             model_cases=validate_cases(execution.get("model_cases") or (), allowed=POST_MODEL_CASES),
             workers=positive_int(execution.get("workers", 1), "execution.workers"),
@@ -409,7 +409,7 @@ class PairedRun:
         }
 
 
-# Paired aligned (SWF + ÜZW) ------------------------------------------------------------------
+# Paired aligned (DSO A + DSO B) ------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -423,6 +423,13 @@ class ProviderResources:
     # First 12 characters of the scenario hash: heat profiles depend on the
     # scenario (e.g. TEASER retrofit level), so their library does too.
     scenario_tag: str = ""
+    # The provider's name inside the pylovo alignment bundle and the comparison
+    # JSON; empty: the provider key.
+    bundle_name: str = ""
+
+    @property
+    def bundle_key(self) -> str:
+        return self.bundle_name or self.provider
 
     @property
     def paired_dir(self) -> Path:
@@ -454,7 +461,7 @@ class AlignedRun:
     pylovo_version_id: str
     alignment_dir: Path
     population: Path
-    uzw_grids_dir: Path | None
+    dso_b_grids_dir: Path | None
     providers: tuple[ProviderResources, ...]
     target_network: str
     model_cases: tuple[str, ...]
@@ -486,7 +493,7 @@ class AlignedRun:
         *,
         base_dir: Path,
     ) -> "AlignedRun":
-        only(resources, {"pylovo_version_id", "alignment_dir", "population", "uzw_grids_dir", "providers",
+        only(resources, {"pylovo_version_id", "alignment_dir", "population", "dso_b_grids_dir", "providers",
                          "target_network", "weather_year"}, "paired_aligned resources")
         only(execution, {"model_cases", "workers", "step3_cpus", "step3_cluster_concurrency", "step4_cpus",
                          "heat_workers", "powerflow_grid_scope", "powerflow_max_timesteps", "profile_seed",
@@ -495,23 +502,24 @@ class AlignedRun:
         scenario_tag = load_scenario_config(scenario_path)[1][:12]
         providers = []
         for name, block in mapping(resources.get("providers"), "resources.providers").items():
-            if name not in {"swf", "uzw"}:
+            if name not in {"dso_a", "dso_b"}:
                 raise ValueError(f"Unknown provider {name!r}.")
             block = mapping(block, f"resources.providers.{name}")
-            only(block, {"paired_dataset_id", "weather_source_hdf", "workers"}, f"provider {name}")
+            only(block, {"paired_dataset_id", "weather_source_hdf", "workers", "bundle_name"}, f"provider {name}")
             providers.append(ProviderResources(
                 provider=name,
                 paired_dataset_id=directory_safe(block.get("paired_dataset_id"),
                                                  f"resources.providers.{name}.paired_dataset_id"),
                 weather_source_hdf=str(block["weather_source_hdf"]),
+                bundle_name=str(block.get("bundle_name") or ""),
                 workers=None if block.get("workers") is None
                 else positive_int(block["workers"], f"provider {name} workers"),
                 scenario_tag=scenario_tag,
             ))
         if not providers:
             raise ValueError("resources.providers must name at least one provider.")
-        if any(p.provider == "uzw" for p in providers) and resources.get("uzw_grids_dir") in (None, ""):
-            raise ValueError("resources.uzw_grids_dir is required for the uzw provider.")
+        if any(p.provider == "dso_b" for p in providers) and resources.get("dso_b_grids_dir") in (None, ""):
+            raise ValueError("resources.dso_b_grids_dir is required for the dso_b provider.")
         max_steps = execution.get("powerflow_max_timesteps")
         return cls(
             run_id=run_id,
@@ -519,7 +527,7 @@ class AlignedRun:
             pylovo_version_id=_pylovo_version(resources),
             alignment_dir=_resolve(resources["alignment_dir"], base_dir),
             population=_resolve(resources["population"], base_dir),
-            uzw_grids_dir=_resolve(resources["uzw_grids_dir"], base_dir) if resources.get("uzw_grids_dir") else None,
+            dso_b_grids_dir=_resolve(resources["dso_b_grids_dir"], base_dir) if resources.get("dso_b_grids_dir") else None,
             providers=tuple(providers),
             target_network=choice(resources.get("target_network", "both"), "resources.target_network",
                                   ("both", "real", "synthetic")),

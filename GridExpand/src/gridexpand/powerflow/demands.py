@@ -503,7 +503,7 @@ def _pv_generation(df_supim, df_process, cap_pro):
 
 
 def _fixed_stationary_batteries(df_storage):
-    """Return fixed SWF batteries; ignore generic zero-installed potentials."""
+    """Return fixed DSO A batteries; ignore generic zero-installed potentials."""
     if df_storage is None or df_storage.empty:
         return pd.DataFrame()
 

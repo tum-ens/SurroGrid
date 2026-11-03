@@ -1,4 +1,4 @@
-"""Audit physical heat-profile coverage for the paired SWF scenario."""
+"""Audit physical heat-profile coverage for the paired DSO A scenario."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ PUBLICATION_READY_HEAT_METHODS = frozenset({
 })
 DEFAULT_PAIRED_DIR = (
     OUTPUT_DIR
-    / "swf_2045_paired_v5_91301_station_hybrid_v2"
+    / "dso_a_2045_paired_v5_99999_station_hybrid_v2"
 )
 
 

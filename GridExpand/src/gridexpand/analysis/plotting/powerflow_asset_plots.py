@@ -759,10 +759,10 @@ def plot_cable_capacity_current_loading_comparison(
     source_styles = {
         "Synthetic": {"linestyle": "-", "marker": "o"},
         "Real": {"linestyle": "--", "marker": "s"},
-        "Real SWF": {"linestyle": "--", "marker": "s"},
-        "Synthetic SWF": {"linestyle": "-", "marker": "o"},
-        "Synthetic ÜZW": {"linestyle": "-.", "marker": "^"},
-        "Real ÜZW": {"linestyle": ":", "marker": "D"},
+        "Real DSO A": {"linestyle": "--", "marker": "s"},
+        "Synthetic DSO A": {"linestyle": "-", "marker": "o"},
+        "Synthetic DSO B": {"linestyle": "-.", "marker": "^"},
+        "Real DSO B": {"linestyle": ":", "marker": "D"},
     }
     stages = [
         stage for stage in stage_order if stage in set(cable_data["comparison_stage"].astype(str))

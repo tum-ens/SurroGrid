@@ -89,31 +89,31 @@ def test_with_cases():
     assert with_cases(run, ("pre",)).model_cases == ("pre",)
     with pytest.raises(ValueError):
         with_cases(run, ("post-inflex-heuristic",))
-    paired, _ = load_run_config(RUN_CONFIG_DIR / "forchheim_2045_paired_full_year.yaml")
+    paired, _ = load_run_config(RUN_CONFIG_DIR / "dso_a_2045_paired_full_year.yaml")
     with pytest.raises(ValueError, match="not allowed"):
         with_cases(paired, ("pre",))  # was accepted by run_scenario and emitted pre twice
 
 
 def test_paired_run():
-    run, _ = load_run_config(RUN_CONFIG_DIR / "forchheim_2045_paired_full_year.yaml")
+    run, _ = load_run_config(RUN_CONFIG_DIR / "dso_a_2045_paired_full_year.yaml")
     assert isinstance(run, PairedRun)
-    assert (run.ags, run.plz, run.excluded_real_lv_ids, run.target_grid_id) == (9474126, 91301, (113,), None)
+    assert (run.ags, run.plz, run.excluded_real_lv_ids, run.target_grid_id) == (9999999, 99999, (113,), None)
     assert run.model_cases == ("post-inflex-heuristic", "post-hems-heuristic", "post-hems-optimized")
-    assert run.paired_dir.name == "swf_2045_paired_v11_91301_swf_clear"
-    assert run.heat_library.name == "forchheim_2045_infdb_ro_heat_v1.h5"
-    lv080, _ = load_run_config(RUN_CONFIG_DIR / "forchheim_2045_paired_full_year_lv080.yaml")
+    assert run.paired_dir.name == "dso_a_2045_paired_v11"
+    assert run.heat_library.name == "dso_a_2045_infdb_ro_heat_v1.h5"
+    lv080, _ = load_run_config(RUN_CONFIG_DIR / "dso_a_2045_paired_full_year_lv080.yaml")
     assert lv080.target_grid_id == 80 and lv080.identity()["target_grid_id"] == 80
 
 
 def test_aligned_run(tmp_path):
     run, _ = load_run_config(RUN_CONFIG_DIR / "joint_2045_v1_islands.yaml")
     assert isinstance(run, AlignedRun)
-    assert [p.provider for p in run.providers] == ["swf", "uzw"] and run.provider("uzw").workers == 2
+    assert [p.provider for p in run.providers] == ["dso_a", "dso_b"] and run.provider("dso_b").workers == 2
     assert run.alignment_dir == Path("~/data/alignment").expanduser().resolve()
     assert run.grid_subset == {"method": "islands", "seed": 20260924, "real_grids_per_provider": None}
-    assert run.parallel_providers is True and run.target_for(run.provider("uzw")) == "both"
+    assert run.parallel_providers is True and run.target_for(run.provider("dso_b")) == "both"
     tag = run.providers[0].scenario_tag
-    assert len(tag) == 12 and run.providers[0].heat_profile_set_id == f"joint_2045_v1_swf_teaser_heat_{tag}"
+    assert len(tag) == 12 and run.providers[0].heat_profile_set_id == f"joint_2045_v1_dso_a_teaser_heat_{tag}"
     raw = yaml.safe_load((RUN_CONFIG_DIR / "joint_2045_v1_islands.yaml").read_text(encoding="utf-8"))
     raw["run"]["scenario"] = str(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")
     raw["resources"]["alignment_dir"] = "alignment"  # relative: next to the YAML, not the working directory
@@ -137,7 +137,7 @@ def test_optimizer_for_every_pipeline(tmp_path):
     assert synthetic(execution__optimizer="pypsa").optimizer == "pypsa"
     with pytest.raises(ValueError, match="execution.optimizer"):
         synthetic(execution__optimizer="oemof")
-    for name in ("forchheim_2045_paired_full_year.yaml", "joint_2045_v1_islands.yaml"):
+    for name in ("dso_a_2045_paired_full_year.yaml", "joint_2045_v1_islands.yaml"):
         raw = yaml.safe_load((RUN_CONFIG_DIR / name).read_text(encoding="utf-8"))
         raw["run"]["scenario"] = str(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")
         assert run_config_from_dict(raw, base_dir=tmp_path).optimizer is None

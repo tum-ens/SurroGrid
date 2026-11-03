@@ -49,8 +49,8 @@ Not tracked; copy or symlink them into place (the `*_required.txt` files mark th
 
 The database must provide the `pylovo` schema (grids, buildings), `citydb` LoD2 roof surfaces for PV (without
 them every building gets the PV fallback) and, for `infdb_ro_heat` scenarios, the INFDB `ro_heat` schema. Paired
-validation needs confidential DSO data: SWF exports below `GRID_DATA_PATH` (`.env`) and, for aligned runs, the
-alignment bundle and ÜZW delivery named in the run YAML.
+validation needs confidential DSO data: DSO A exports below `GRID_DATA_PATH` (`.env`) and, for aligned runs, the
+alignment bundle and DSO B delivery named in the run YAML.
 
 ## Database
 
@@ -90,7 +90,7 @@ uv run gridexpand run config/runs/joint_2045_v1_smoke24.yaml --prepare-only   # 
 uv run gridexpand run config/runs/joint_2045_v1_smoke24.yaml --skip-prepare   # real and synthetic runs + expansion
 ```
 
-`pipeline: paired_validation` compares SWF grids, `pipeline: paired_aligned` SWF and ÜZW grids of a pylovo
+`pipeline: paired_validation` compares DSO A grids, `pipeline: paired_aligned` DSO A and DSO B grids of a pylovo
 alignment bundle with their synthetic counterparts. See [docs/paired_validation.md](docs/paired_validation.md).
 
 ## Quick start: API and Docker
@@ -189,7 +189,7 @@ tests/analysis` (SQL parity), `GRIDEXPAND_API_TEST_DATABASE=<sandbox db> uv run 
 | [docs/configuration.md](docs/configuration.md) | scenario and run YAML reference, grid selection, run directories, environment |
 | [docs/method.md](docs/method.md) | model cases, sizing rules, heat, mobility, paired contract, acceptance checks |
 | [docs/steps/](docs/steps/) | Steps 1-5: inputs, outputs, HDF keys, options, conventions |
-| [docs/paired_validation.md](docs/paired_validation.md) | paired SWF and aligned SWF/ÜZW pipelines |
+| [docs/paired_validation.md](docs/paired_validation.md) | paired DSO A and aligned DSO A/DSO B pipelines |
 | [docs/database.md](docs/database.md) | `surrogrid` schema, migrations, maintenance |
 | [docs/expansion_costs.md](docs/expansion_costs.md) | reinforcement rules and cost assumptions |
 | [docs/api.md](docs/api.md) | HTTP API, its contract, container |

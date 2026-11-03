@@ -1,8 +1,8 @@
-# Scientific assumptions for the joint SWF + ÜZW paired full-year comparison on
+# Scientific assumptions for the joint DSO A + DSO B paired full-year comparison on
 # pylovo v1 (aligned building populations). Cloned from
-# forchheim_2045_full_year.yaml. Deliberate differences: scenario id, TEASER
+# dso_a_2045_full_year.yaml. Deliberate differences: scenario id, TEASER
 # space heat for both regions (INFDB ro_heat has no time series), and
-# deterministic adoption shares instead of the SWF-only source inventory.
+# deterministic adoption shares instead of the DSO A source inventory.
 scenario:
   id: joint_2045_full_year
   milestone_year: 2045

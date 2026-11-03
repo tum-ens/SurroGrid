@@ -1,4 +1,4 @@
-"""SWF real-grid adapter for paired validation."""
+"""DSO A real-grid adapter for paired validation."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from gridexpand.common.orchestration import StatusLog, run_command
 from gridexpand.scenario import commands
 from gridexpand.scenario.model_cases import MODEL_CASES
 
-TARGET_NETWORK = "real_swf"
+TARGET_NETWORK = "real_dso_a"
 ALLOCATION_PLAN_FILENAME = "paired_real_bus_allocation_plan.csv"
 
 
@@ -46,7 +46,7 @@ def load_jobs(paired_dir: Path, target_grid_id: int | None) -> list[dict[str, An
 
 def input_name(job: dict[str, Any], scenario_label: str) -> str:
     grid_id = int(job["target_grid_id"])
-    return f"paired_real_swf_LV_{grid_id:03d}_{scenario_label}.h5"
+    return f"paired_real_dso_a_LV_{grid_id:03d}_{scenario_label}.h5"
 
 
 def run_powerflows(
@@ -60,7 +60,7 @@ def run_powerflows(
     run_real_powerflows(
         job=job, args=args, result_hdf=result_hdf,
         log_path=log_path, status=status,
-        target_network=TARGET_NETWORK, provider="swf",
+        target_network=TARGET_NETWORK, provider="dso_a",
     )
 
 

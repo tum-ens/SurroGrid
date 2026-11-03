@@ -48,7 +48,7 @@ from gridexpand.allocation.scenario_calibration.profiles.profile_contract import
 
 DEFAULT_PAIRED_DIR = (
     OUTPUT_DIR
-    / "swf_2045_paired_v5_91301_station_hybrid_v2"
+    / "dso_a_2045_paired_v5_99999_station_hybrid_v2"
 )
 DEFAULT_OUTPUT_DIR = SYNTHETIC_INPUT_DIR
 
@@ -130,10 +130,10 @@ def _output_name(
     target_grid_id: int,
     scenario_label: str,
 ) -> str:
-    if target_network == "real_swf":
-        prefix = f"paired_real_swf_LV_{int(target_grid_id):03d}"
-    elif target_network == "real_uzw":
-        prefix = f"paired_real_uzw_area_{int(target_grid_id):04d}"
+    if target_network == "real_dso_a":
+        prefix = f"paired_real_dso_a_LV_{int(target_grid_id):03d}"
+    elif target_network == "real_dso_b":
+        prefix = f"paired_real_dso_b_area_{int(target_grid_id):04d}"
     else:
         bridge_names = (
             allocation["synthetic_bridge_filename"].dropna().astype(str).unique()
@@ -673,13 +673,13 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument(
         "--target-network",
-        choices=["real_swf", "real_uzw", "synthetic"],
+        choices=["real_dso_a", "real_dso_b", "synthetic"],
         required=True,
     )
     parser.add_argument("--target-grid-id", type=int, required=True)
     parser.add_argument(
         "--scenario-label",
-        default="swf_2045_paired_full_local",
+        default="dso_a_2045_paired_full_local",
     )
     parser.add_argument(
         "--profile-seed",

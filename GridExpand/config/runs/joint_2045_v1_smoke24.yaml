@@ -1,4 +1,4 @@
-# SMOKE TEST (24 power-flow timesteps, not for publication) of the joint paired SWF + ÜZW comparison on pylovo v1 aligned grids.
+# SMOKE TEST (24 power-flow timesteps, not for publication) of the joint paired DSO A + DSO B comparison on pylovo v1 aligned grids.
 # One scenario YAML and one pylovo version for both providers; each provider
 # gets its own paired dataset (weather, PV and TEASER heat libraries, adoption
 # selection) built from its alignment bundle. Launch with
@@ -14,15 +14,15 @@ resources:
   # Frozen copy of pylovo validations_new/metrics/v1/comparison.json; its
   # metric cohort is the compared building population.
   population: ~/data/joint_paired_v1/pylovo-v1-comparison.json
-  # Frozen, fingerprint-checked copy of the ÜZW delivery (87c5e86c…).
-  uzw_grids_dir: ~/data/uzw-grids-87c5e86c
+  # Frozen, fingerprint-checked copy of the DSO B delivery (87c5e86c…).
+  dso_b_grids_dir: ~/data/dso-b-grids-87c5e86c
   providers:
-    swf:
-      paired_dataset_id: joint_2045_v1_swf
-      weather_source_hdf: weather_joint_swf_v1.h5
-    uzw:
-      paired_dataset_id: joint_2045_v1_uzw
-      weather_source_hdf: weather_joint_uzw_v1.h5
+    dso_a:
+      paired_dataset_id: joint_2045_v1_dso_a
+      weather_source_hdf: weather_joint_dso_a_v1.h5
+    dso_b:
+      paired_dataset_id: joint_2045_v1_dso_b
+      weather_source_hdf: weather_joint_dso_b_v1.h5
   target_network: both # both, real, or synthetic
 
 execution:

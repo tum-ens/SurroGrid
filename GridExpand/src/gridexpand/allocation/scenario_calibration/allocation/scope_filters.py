@@ -1,4 +1,4 @@
-"""Comparison-scope flags for SWF scenario calibration audits."""
+"""Comparison-scope flags for DSO A scenario calibration audits."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def build_grid_scope_summary(
         & matches["comparison_asset_class"].isin(RESIDENTIAL_EQUIVALENT_HH_CLASSES)
     ].copy()
     hh_summary = _summarize_hh(hh)
-    ghd_summary = _summarize_swf_ghd(matches)
+    ghd_summary = _summarize_dso_a_ghd(matches)
     calibration_summary = _summarize_calibrated_ghd_by_grid(matches, ghd_calibration)
 
     summary = lv_ids.merge(hh_summary, on="lv_id", how="left")
@@ -37,7 +37,7 @@ def build_grid_scope_summary(
     numeric_columns = [column for column in summary.columns if column != "lv_id"]
     summary[numeric_columns] = summary[numeric_columns].fillna(0.0)
 
-    summary["ghd_to_hh_annual_demand_ratio"] = summary["swf_ghd_annual_kwh"] / summary[
+    summary["ghd_to_hh_annual_demand_ratio"] = summary["dso_a_ghd_annual_kwh"] / summary[
         "residential_equivalent_hh_annual_kwh"
     ].where(summary["residential_equivalent_hh_annual_kwh"].gt(0))
     summary["passes_min_residential_equivalent_hh_buildings"] = summary[
@@ -49,7 +49,7 @@ def build_grid_scope_summary(
     summary["ghd_heavy_extreme"] = summary["ghd_to_hh_annual_demand_ratio"].gt(
         float(ghd_to_hh_extreme_ratio)
     )
-    summary["has_unmatched_ghd"] = summary["unmatched_swf_ghd_rows"].gt(0)
+    summary["has_unmatched_ghd"] = summary["unmatched_dso_a_ghd_rows"].gt(0)
     summary["recommended_for_residential_equivalent_scope"] = summary[
         "passes_min_residential_equivalent_hh_buildings"
     ]
@@ -99,7 +99,7 @@ def _summarize_hh(hh: pd.DataFrame) -> pd.DataFrame:
             residential_equivalent_hh_buildings=("building_match_id", "nunique"),
             residential_equivalent_hh_rows=("asset_id", "count"),
             residential_equivalent_hh_annual_kwh=(
-                "swf_annual_demand_kwh",
+                "dso_a_annual_demand_kwh",
                 lambda s: float(pd.to_numeric(s, errors="coerce").sum()),
             ),
         )
@@ -107,28 +107,28 @@ def _summarize_hh(hh: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _summarize_swf_ghd(matches: pd.DataFrame) -> pd.DataFrame:
+def _summarize_dso_a_ghd(matches: pd.DataFrame) -> pd.DataFrame:
     ghd = matches[matches["asset_type"].eq("GHD")].copy()
     if ghd.empty:
         return pd.DataFrame(columns=["lv_id"])
-    ghd["swf_annual_demand_kwh_num"] = pd.to_numeric(
-        ghd["swf_annual_demand_kwh"], errors="coerce"
+    ghd["dso_a_annual_demand_kwh_num"] = pd.to_numeric(
+        ghd["dso_a_annual_demand_kwh"], errors="coerce"
     ).fillna(0.0)
     ghd["unmatched_ghd_kwh_num"] = np.where(
         ghd["comparison_asset_class"].eq("unmatched"),
-        ghd["swf_annual_demand_kwh_num"],
+        ghd["dso_a_annual_demand_kwh_num"],
         0.0,
     )
     return (
         ghd.groupby("lv_id")
         .agg(
-            swf_ghd_rows=("asset_id", "count"),
-            swf_ghd_annual_kwh=("swf_annual_demand_kwh_num", "sum"),
-            unmatched_swf_ghd_rows=(
+            dso_a_ghd_rows=("asset_id", "count"),
+            dso_a_ghd_annual_kwh=("dso_a_annual_demand_kwh_num", "sum"),
+            unmatched_dso_a_ghd_rows=(
                 "comparison_asset_class",
                 lambda s: int((s == "unmatched").sum()),
             ),
-            unmatched_swf_ghd_annual_kwh=("unmatched_ghd_kwh_num", "sum"),
+            unmatched_dso_a_ghd_annual_kwh=("unmatched_ghd_kwh_num", "sum"),
         )
         .reset_index()
     )
@@ -145,13 +145,13 @@ def _summarize_calibrated_ghd_by_grid(
     if ghd.empty:
         calibrated = pd.DataFrame(columns=["lv_id", "calibrated_annual_ghd_kwh"])
     else:
-        ghd["swf_annual_demand_kwh_num"] = pd.to_numeric(
-            ghd["swf_annual_demand_kwh"],
+        ghd["dso_a_annual_demand_kwh_num"] = pd.to_numeric(
+            ghd["dso_a_annual_demand_kwh"],
             errors="coerce",
         ).fillna(0.0)
         calibrated = (
             ghd.groupby("lv_id")
-            .agg(calibrated_annual_ghd_kwh=("swf_annual_demand_kwh_num", "sum"))
+            .agg(calibrated_annual_ghd_kwh=("dso_a_annual_demand_kwh_num", "sum"))
             .reset_index()
         )
 
@@ -196,7 +196,7 @@ def _scope_row(label: str, group: pd.DataFrame) -> dict[str, float | int | str]:
         if not group.empty
         else 0.0
     )
-    ghd_kwh = float(group["swf_ghd_annual_kwh"].sum()) if not group.empty else 0.0
+    ghd_kwh = float(group["dso_a_ghd_annual_kwh"].sum()) if not group.empty else 0.0
     return {
         "scope_filter": label,
         "grids": int(len(group)),
@@ -211,14 +211,14 @@ def _scope_row(label: str, group: pd.DataFrame) -> dict[str, float | int | str]:
         if not group.empty
         else 0,
         "residential_equivalent_hh_annual_kwh": hh_kwh,
-        "swf_ghd_rows": int(group["swf_ghd_rows"].sum()) if not group.empty else 0,
-        "swf_ghd_annual_kwh": ghd_kwh,
+        "dso_a_ghd_rows": int(group["dso_a_ghd_rows"].sum()) if not group.empty else 0,
+        "dso_a_ghd_annual_kwh": ghd_kwh,
         "ghd_to_hh_annual_demand_ratio": ghd_kwh / hh_kwh if hh_kwh else np.nan,
-        "unmatched_swf_ghd_rows": int(group["unmatched_swf_ghd_rows"].sum())
+        "unmatched_dso_a_ghd_rows": int(group["unmatched_dso_a_ghd_rows"].sum())
         if not group.empty
         else 0,
-        "unmatched_swf_ghd_annual_kwh": float(
-            group["unmatched_swf_ghd_annual_kwh"].sum()
+        "unmatched_dso_a_ghd_annual_kwh": float(
+            group["unmatched_dso_a_ghd_annual_kwh"].sum()
         )
         if not group.empty
         else 0.0,

@@ -16,7 +16,7 @@ buildings from both sides before pylovo generation. Output (``--output-dir``):
 
 ``status_quo_<provider>_exclusions.csv``
     ``provider, real_grid_id, reason``: one row per flagged grid; ``real_grid_id`` is the
-    bundle's own id (SWF ``station_id`` such as ``LV_059``, ÜZW ``area_id``), ``reason`` the
+    bundle's own id (DSO A ``station_id`` such as ``LV_059``, DSO B ``area_id``), ``reason`` the
     flags joined by ``;``.
 ``status_quo_<provider>_grids.csv``
     every grid with its demand and power-flow metrics.
@@ -54,7 +54,7 @@ from gridexpand.common import ghd
 from gridexpand.common.building_components import build_building_components
 from gridexpand.common.reproducibility import DEFAULT_PROFILE_SEED, stable_seed
 
-PROVIDERS = ("swf", "uzw")
+PROVIDERS = ("dso_a", "dso_b")
 REASONS = ("transformer_overload", "cable_overload", "undervoltage", "nonconvergence")
 PLAN_COLUMNS = (
     "component_id", "building_objectid", "component_category", "included_in_lv", "annual_energy_kwh",
@@ -95,8 +95,8 @@ WHERE objectid = ANY(:ids)
 
 
 def bundle_grid_id(provider: str, number: int) -> str:
-    """The bundle's own id of a real grid: SWF ``LV_059``, ÜZW ``59``."""
-    return f"LV_{int(number):03d}" if provider == "swf" else str(int(number))
+    """The bundle's own id of a real grid: DSO A ``LV_059``, DSO B ``59``."""
+    return f"LV_{int(number):03d}" if provider == "dso_a" else str(int(number))
 
 
 def read_only_engine(prefix: str = "DB_"):
@@ -175,11 +175,13 @@ def pylovo_equivalent_buildings(rows: pd.DataFrame) -> pd.DataFrame:
     return impute_missing_occupants(b)
 
 
-def bundle_buildings(provider: str, alignment_dir: Path, uzw_grids_dir: Path | None) -> pd.DataFrame:
+def bundle_buildings(
+    provider: str, alignment_dir: Path, dso_b_grids_dir: Path | None, bundle_name: str | None = None
+) -> pd.DataFrame:
     """Real grid number, bus and grid file of every bundle building (``aligned_allocation``'s mapping)."""
     from gridexpand.allocation.scenario_calibration.allocation.aligned_allocation import real_building_mapping
 
-    return real_building_mapping(provider, alignment_dir, uzw_grids_dir)
+    return real_building_mapping(provider, alignment_dir, dso_b_grids_dir, bundle_name)
 
 
 # ---------------------------------------------------------------------------------------
@@ -276,7 +278,7 @@ def evaluate_grid(net, rating_mva: float, demand_kw: pd.DataFrame) -> dict[str, 
     import gridexpand.powerflow.demands as dmnds
     import gridexpand.powerflow.powerflow as pwrflw
     from gridexpand.powerflow.config import config as pf_config
-    from gridexpand.powerflow.run_real_swf_scenario_powerflow import _prepare_real_grid_for_allocation
+    from gridexpand.powerflow.run_real_scenario_powerflow import _prepare_real_grid_for_allocation
 
     buses = [int(bus) for bus in demand_kw.columns]
     grid, trafo_mva, cable_max, voltage_buses, cable_ids, _ = _prepare_real_grid_for_allocation(
@@ -328,7 +330,7 @@ def flag_reasons(metrics: dict[str, Any]) -> list[str]:
 
 
 def _evaluate_job(job: dict[str, Any]) -> dict[str, Any]:
-    from gridexpand.powerflow.run_real_swf_scenario_powerflow import load_real_net
+    from gridexpand.powerflow.run_real_scenario_powerflow import load_real_net
 
     if not job["plan"]["included_in_lv"].astype(bool).any():
         # No LV demand left (e.g. every GHD component gated off): nothing can overload.
@@ -467,7 +469,9 @@ def _parser() -> argparse.ArgumentParser:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--alignment-dir", type=Path, help="Alignment bundle root (<dir>/<provider>/building-mapping.json).")
     source.add_argument("--dataset", type=Path, help="Prepared paired dataset directory (regression: its persisted demand).")
-    parser.add_argument("--uzw-grids-dir", type=Path, default=None, help="Frozen ÜZW delivery (ÜZW bundle input).")
+    parser.add_argument("--dso-b-grids-dir", type=Path, default=None, help="Frozen DSO B delivery (DSO B bundle input).")
+    parser.add_argument("--bundle-name", default=None,
+                        help="Provider name inside the alignment bundle (default: --provider).")
     parser.add_argument("--scenario-config", type=Path, default=None, help="Scenario YAML whose ghd: block applies (bundle input).")
     parser.add_argument("--db-env-prefix", default="DB_", help="Environment prefix of the InfDB connection (default DB_).")
     parser.add_argument("--basedata-schema", default="basedata")
@@ -506,7 +510,7 @@ def main(argv: list[str] | None = None) -> int:
 
         scenario, scenario_hash = load_scenario_config(args.scenario_config)
         engine = read_only_engine(args.db_env_prefix)
-        mapping = bundle_buildings(args.provider, args.alignment_dir, args.uzw_grids_dir)
+        mapping = bundle_buildings(args.provider, args.alignment_dir, args.dso_b_grids_dir, args.bundle_name)
         objectids = sorted(mapping["building_objectid"].astype(str).unique())
         buildings = pylovo_equivalent_buildings(read_basedata(engine, objectids, args.basedata_schema))
         evidence = ghd.load_evidence(scenario.ghd, objectids, engine=engine)

@@ -47,13 +47,13 @@ from ...assets.pv.roof_catalog import (
     load_lod2_roof_catalog,
     roof_catalog_options,
 )
-from .swf_2045_building_match import (
+from .dso_a_building_match import (
     MatchConfig,
     _database_engine,
     _expected_ghd_kwh_per_m2_by_building_use,
     _read_pylovo_buildings,
     add_comparison_asset_class,
-    load_swf_2045_assets,
+    load_dso_a_2045_assets,
     match_assets_to_buildings,
 )
 
@@ -63,7 +63,7 @@ SCENARIO_UNIT_COLUMNS = [
     "source_allocation_bus",
     "building_objectid",
 ]
-PV_SOURCE_LOCATION_MODES = ("swf", "all_buildings")
+PV_SOURCE_LOCATION_MODES = ("dso_a", "all_buildings")
 
 
 def _register_synthetic_grid_cases(
@@ -168,14 +168,14 @@ def _register_synthetic_grid_cases(
 def _deduplicate_exact_wp_identities(
     assets: pd.DataFrame,
 ) -> tuple[pd.DataFrame, dict[str, int]]:
-    """Remove repeated SWF WP marker rows representing one identical asset."""
+    """Remove repeated DSO A WP marker rows representing one identical asset."""
     wp_mask = assets["asset_type"].eq("WP")
     wp = assets.loc[wp_mask].copy()
     identity_columns = [
         column for column in WP_IDENTITY_COLUMNS if column in wp.columns
     ]
     if not identity_columns:
-        raise ValueError("SWF WP deduplication requires at least one identity column.")
+        raise ValueError("DSO A WP deduplication requires at least one identity column.")
     duplicate_mask = wp.duplicated(identity_columns, keep="first")
     kept_wp = wp.loc[~duplicate_mask]
     result = pd.concat([assets.loc[~wp_mask], kept_wp], ignore_index=True, sort=False)
@@ -259,7 +259,7 @@ PAIRED_COMPONENT_COLUMNS = [
     "real_target_bus", "synthetic_target_grid_case_id", "synthetic_target_bus",
     "synthetic_bridge_filename", "included_in_lv", "mv_direct", "annual_energy_kwh",
     "profile_method", "profile_hash", "stable_seed", "profile_seed",
-    "source_asset_count", "matched_swf_asset_count", "source_asset_ids",
+    "source_asset_count", "matched_dso_asset_count", "source_asset_ids",
     "source_use_conflict", "suppression_reason",
 ]
 
@@ -287,7 +287,7 @@ def _paired_component_plan(
     *,
     profile_seed: int,
 ) -> pd.DataFrame:
-    """Reconcile matched SWF demand evidence with explicit PyLoVo components."""
+    """Reconcile matched DSO A demand evidence with explicit PyLoVo components."""
     real_units = real_plan[[
         "scenario_unit_id", "building_objectid", "source_lv_id",
         "source_allocation_bus", "target_grid_id", "allocation_bus",
@@ -324,8 +324,8 @@ def _paired_component_plan(
     ].copy()
     demand_assets["building_objectid"] = demand_assets["building_objectid"].astype(str)
     demand_assets["asset_id"] = demand_assets["asset_id"].astype(str)
-    demand_assets["swf_annual_demand_kwh"] = pd.to_numeric(
-        demand_assets["swf_annual_demand_kwh"], errors="coerce"
+    demand_assets["dso_a_annual_demand_kwh"] = pd.to_numeric(
+        demand_assets["dso_a_annual_demand_kwh"], errors="coerce"
     ).fillna(0.0)
 
     rows: list[dict[str, Any]] = []
@@ -338,15 +338,15 @@ def _paired_component_plan(
             & demand_assets["asset_type"].eq(asset_type)
         ]
         asset_ids = sorted(evidence["asset_id"].tolist())
-        annual = float(evidence["swf_annual_demand_kwh"].sum())
+        annual = float(evidence["dso_a_annual_demand_kwh"].sum())
         direct = bool(component["mv_direct"])
         if direct:
             included, suppression, method, annual = False, "outside_paired_lv_scope", "suppressed_mv_direct", 0.0
         elif evidence.empty or annual <= 0.0:
-            included, suppression, method = False, "no_matched_swf_evidence", "suppressed_no_swf_evidence"
+            included, suppression, method = False, "no_matched_dso_a_evidence", "suppressed_no_dso_a_evidence"
         else:
             included, suppression = True, None
-            method = "paired_swf_hh_profile_v2" if asset_type == "HH" else f"paired_swf_ghd_{category.lower()}_shape_v2"
+            method = "paired_dso_a_hh_profile_v2" if asset_type == "HH" else f"paired_dso_a_ghd_{category.lower()}_shape_v2"
         stable_profile_seed = stable_seed(
             int(profile_seed), object_id, category, "electricity", "paired"
         )
@@ -369,7 +369,7 @@ def _paired_component_plan(
             "annual_energy_kwh": annual, "profile_method": method,
             "profile_hash": _paired_profile_hash(component["component_id"], category, annual, method, stable_profile_seed, asset_ids),
             "stable_seed": int(stable_profile_seed), "profile_seed": int(profile_seed),
-            "source_asset_count": int(len(evidence)), "matched_swf_asset_count": int(len(evidence)),
+            "source_asset_count": int(len(evidence)), "matched_dso_asset_count": int(len(evidence)),
             "source_asset_ids": ",".join(asset_ids), "source_use_conflict": None,
             "suppression_reason": suppression,
         })
@@ -379,18 +379,18 @@ def _paired_component_plan(
             return
         physical_row = physical.loc[physical["objectid"].eq(object_id)].iloc[0]
         category = "Residential" if asset_type == "HH" else "Commercial"
-        component_id = f"{object_id}::swf_evidence_proxy::{asset_type.lower()}"
+        component_id = f"{object_id}::dso_a_evidence_proxy::{asset_type.lower()}"
         asset_ids = sorted(evidence["asset_id"].tolist())
-        annual = float(evidence["swf_annual_demand_kwh"].sum())
+        annual = float(evidence["dso_a_annual_demand_kwh"].sum())
         stable_profile_seed = stable_seed(
             int(profile_seed), object_id, category, "electricity", "paired_proxy"
         )
-        method = f"swf_evidence_proxy_{asset_type.lower()}_v2"
+        method = f"dso_a_evidence_proxy_{asset_type.lower()}_v2"
         real = real_units.loc[real_units["building_objectid"].eq(object_id)].iloc[0]
         synthetic = synthetic_units.loc[synthetic_units["building_objectid"].eq(object_id)].iloc[0]
         rows.append({
             "scenario_unit_id": int(real["scenario_unit_id"]), "building_objectid": object_id,
-            "component_id": component_id, "component_kind": "swf_evidence_proxy",
+            "component_id": component_id, "component_kind": "dso_a_evidence_proxy",
             "component_category": category, "source_component_category": "unmatched_upstream_category",
             "effective_floor_area_m2": 0.0,
             "gross_floor_area_m2": float(physical_row["floor_area"] * physical_row["floor_number"]),
@@ -410,9 +410,9 @@ def _paired_component_plan(
             "profile_method": method,
             "profile_hash": _paired_profile_hash(component_id, category, annual, method, stable_profile_seed, asset_ids),
             "stable_seed": int(stable_profile_seed), "profile_seed": int(profile_seed),
-            "source_asset_count": int(len(evidence)), "matched_swf_asset_count": int(len(evidence)),
+            "source_asset_count": int(len(evidence)), "matched_dso_asset_count": int(len(evidence)),
             "source_asset_ids": ",".join(asset_ids),
-            "source_use_conflict": "swf_evidence_on_nonmatching_upstream_category",
+            "source_use_conflict": "dso_a_evidence_on_nonmatching_upstream_category",
             "suppression_reason": None,
         })
 
@@ -426,7 +426,7 @@ def _paired_component_plan(
 
     plan = pd.DataFrame(rows)
     if plan.empty:
-        raise ValueError("Paired allocation produced no physical or SWF-evidence components.")
+        raise ValueError("Paired allocation produced no physical or DSO A evidence components.")
     plan = plan[PAIRED_COMPONENT_COLUMNS].sort_values(
         ["scenario_unit_id", "building_objectid", "component_id"]
     ).reset_index(drop=True)
@@ -461,7 +461,7 @@ def _refresh_paired_plan_demand(
 _BUILDING_CONNECTION_EXTENSIVE_COLUMNS = (
     "residential_equivalent_hh_rows",
     "residential_equivalent_hh_annual_kwh",
-    "swf_ghd_rows",
+    "dso_a_ghd_rows",
     "calibrated_annual_ghd_kwh",
     "residential_ev_charger_rows",
     "residential_ev_charger_kw",
@@ -493,7 +493,7 @@ _BUILDING_CONNECTION_EXTENSIVE_COLUMNS = (
 def _consolidate_building_connections(bus_plan: pd.DataFrame) -> pd.DataFrame:
     """Represent each physical building by its dominant real-grid connection.
 
-    SWF may contain several source connection records inside one LoD2 building.
+    DSO A may contain several source connection records inside one LoD2 building.
     The scenario model intentionally uses one central HEMS per physical building,
     so their inventories and annual demands are summed and assigned to the
     connection carrying the largest annual base demand. This preserves total
@@ -608,7 +608,7 @@ def _paired_plans(
             break
 
     _add_scenario_unit_ids(real, synthetic)
-    real["target_network"] = "real_swf"
+    real["target_network"] = "real_dso_a"
     real["target_grid_id"] = real["lv_id"].astype(int)
     synthetic["target_network"] = "synthetic"
     synthetic["target_grid_id"] = synthetic["synthetic_grid_case_id"].astype(int)
@@ -618,7 +618,7 @@ def _paired_plans(
 
     audit = pd.DataFrame(
         [
-            _plan_summary("real_swf", real),
+            _plan_summary("real_dso_a", real),
             _plan_summary("synthetic", synthetic),
             {
                 "target_network": "ambiguous_across_real_grids",
@@ -720,7 +720,7 @@ def _pv_scenario_unit_assignments(
         raise ValueError(f"internal PV source location must be one of {PV_SOURCE_LOCATION_MODES}.")
     candidates = real_plan.copy()
     candidates["building_objectid"] = candidates["building_objectid"].astype(str)
-    if location_mode == "swf":
+    if location_mode == "dso_a":
         pv = matches[
             matches["matched"].fillna(False) & matches["asset_type"].eq("Photovoltaik")
         ].copy()
@@ -728,18 +728,18 @@ def _pv_scenario_unit_assignments(
             pv.assign(building_objectid=pv["building_objectid"].astype(str))
             .groupby("building_objectid", observed=True)
             .size()
-            .rename("swf_pv_rows_at_building")
+            .rename("dso_a_pv_rows_at_building")
         )
-        candidates["swf_pv_rows_at_building"] = candidates[
+        candidates["dso_a_pv_rows_at_building"] = candidates[
             "building_objectid"
         ].map(counts)
         candidates = candidates[
-            candidates["swf_pv_rows_at_building"].fillna(0).gt(0)
+            candidates["dso_a_pv_rows_at_building"].fillna(0).gt(0)
         ].sort_values(
             ["building_objectid", "scenario_unit_id"],
             ascending=[True, True],
         )
-        method = "swf_cumulative_pv_building_consolidated_connection"
+        method = "dso_a_cumulative_pv_building_consolidated_connection"
     else:
         candidates["_base_annual_kwh"] = pd.to_numeric(
             candidates["residential_equivalent_hh_annual_kwh"], errors="coerce"
@@ -1004,11 +1004,11 @@ def build_paired_allocation(
         raise ValueError("build_paired_allocation needs scenario_config_path (no default scenario).")
     scenario, scenario_hash = load_scenario_config(scenario_config_path)
     pv_adoption_mode = scenario.electrification.pv_battery.adoption_mode
-    pv_location_mode = "swf" if pv_adoption_mode == "source_inventory" else "all_buildings"
+    pv_location_mode = "dso_a" if pv_adoption_mode == "source_inventory" else "all_buildings"
     grid_config.apply_scenario(scenario)
     output_dir = output_dir or (
         OUTPUT_DIR
-        / f"swf_2045_paired_v{pylovo_version_id}_{plz}"
+        / f"dso_a_2045_paired_v{pylovo_version_id}_{plz}"
     )
     grid_root = grid_data_path or Path(os.environ["GRID_DATA_PATH"])
     config = MatchConfig(
@@ -1025,7 +1025,7 @@ def build_paired_allocation(
     )
 
     buildings = _read_pylovo_buildings(config)
-    assets_raw = load_swf_2045_assets(
+    assets_raw = load_dso_a_2045_assets(
         grid_data_path=grid_root,
         config=config,
     )

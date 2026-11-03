@@ -1,6 +1,6 @@
-"""Audit SWF 2045 electrification assets against pylovo building geometries.
+"""Audit DSO A 2045 electrification assets against pylovo building geometries.
 
-The SWF real-grid model stores household loads, heat-pump markers, EV chargers,
+The DSO A real-grid model stores household loads, heat-pump markers, EV chargers,
 PV plants, batteries, and heat-storage markers on pandapower buses. For a fair
 post-electrification demand-allocation comparison we want to understand whether those electrical assets
 can be reallocated to the physical building layer used by pylovo, instead of
@@ -106,7 +106,7 @@ def _scenario_year_mask(df: pd.DataFrame, final_year: int) -> pd.Series:
     """Keep all assets present by final_year.
 
     Missing Baujahr values are retained and audited separately. In the current
-    SWF 2045 data this is expected to include all scenario assets while avoiding
+    DSO A 2045 data this is expected to include all scenario assets while avoiding
     silent loss of legacy rows with incomplete year metadata.
     """
     if "Baujahr" not in df.columns:
@@ -257,10 +257,10 @@ def summarize_base_demand_definitions(
 ) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
 
-    def _swf_row(label: str, group: pd.DataFrame) -> None:
+    def _dso_a_row(label: str, group: pd.DataFrame) -> None:
         rows.append(
             {
-                "system": "real_swf",
+                "system": "real_dso_a",
                 "scope": label,
                 "buildings_or_connection_points": int(
                     group["building_match_id"].nunique()
@@ -269,21 +269,21 @@ def summarize_base_demand_definitions(
                 "households": np.nan,
                 "floor_area_m2": np.nan,
                 "annual_electricity_kwh": float(
-                    pd.to_numeric(group["swf_annual_demand_kwh"], errors="coerce").sum()
+                    pd.to_numeric(group["dso_a_annual_demand_kwh"], errors="coerce").sum()
                 ),
-                "note": "Measured SWF annual demand parsed from load descriptions where available.",
+                "note": "Measured DSO A annual demand parsed from load descriptions where available.",
             }
         )
 
-    _swf_row(
+    _dso_a_row(
         "HH on residential buildings",
         matches[matches["comparison_asset_class"].eq("residential_hh")],
     )
-    _swf_row(
+    _dso_a_row(
         "HH mixed proxy",
         matches[matches["comparison_asset_class"].eq("mixed_residential_proxy")],
     )
-    _swf_row(
+    _dso_a_row(
         "HH residential-equivalent total",
         matches[
             matches["comparison_asset_class"].isin(
@@ -291,10 +291,10 @@ def summarize_base_demand_definitions(
             )
         ],
     )
-    _swf_row(
+    _dso_a_row(
         "GHD", matches[matches["comparison_asset_class"].eq("true_nonresidential")]
     )
-    _swf_row(
+    _dso_a_row(
         "unmatched load rows",
         matches[
             matches["comparison_asset_class"].eq("unmatched")
@@ -431,15 +431,15 @@ def _load_assets_from_grid(row: pd.Series, config: MatchConfig) -> pd.DataFrame:
         loads = loads[_scenario_year_mask(loads, config.final_year)].copy()
         loads["asset_table"] = "load"
         loads["asset_type"] = loads["type"].astype(str)
-        loads["swf_annual_demand_kwh"] = loads["description"].map(
+        loads["dso_a_annual_demand_kwh"] = loads["description"].map(
             _parse_annual_demand_kwh
         )
         hh_mask = (
             loads["asset_type"].eq("HH")
             & loads["name"].astype(str).str.contains(HH_NAME_PATTERN, na=False)
             & (
-                loads["swf_annual_demand_kwh"].isna()
-                | (loads["swf_annual_demand_kwh"] >= HH_MIN_ANNUAL_DEMAND_KWH)
+                loads["dso_a_annual_demand_kwh"].isna()
+                | (loads["dso_a_annual_demand_kwh"] >= HH_MIN_ANNUAL_DEMAND_KWH)
             )
         )
         asset_loads = loads[
@@ -454,7 +454,7 @@ def _load_assets_from_grid(row: pd.Series, config: MatchConfig) -> pd.DataFrame:
         sgens = sgens[_scenario_year_mask(sgens, config.final_year)].copy()
         sgens["asset_table"] = "sgen"
         sgens["asset_type"] = sgens["type"].astype(str)
-        sgens["swf_annual_demand_kwh"] = np.nan
+        sgens["dso_a_annual_demand_kwh"] = np.nan
         sgens = sgens[
             sgens["asset_type"].isin(["Photovoltaik", "Batterie", "Wärmespeicher"])
         ].copy()
@@ -480,7 +480,7 @@ def _load_assets_from_grid(row: pd.Series, config: MatchConfig) -> pd.DataFrame:
     return assets
 
 
-def load_swf_2045_assets(
+def load_dso_a_2045_assets(
     *,
     grid_data_path: Path,
     config: MatchConfig,
@@ -610,7 +610,7 @@ def match_assets_to_buildings(
 
 
 def add_comparison_asset_class(matches: pd.DataFrame) -> pd.DataFrame:
-    """Classify SWF assets for transparent real/synthetic scenario comparison."""
+    """Classify DSO A assets for transparent real/synthetic scenario comparison."""
     if matches.empty:
         return matches.copy()
 
@@ -655,7 +655,7 @@ def summarize_comparison_classes(matches: pd.DataFrame) -> pd.DataFrame:
             asset_rows=("asset_id", "count"),
             matched_buildings=("building_match_id", "nunique"),
             hh_annual_demand_kwh=(
-                "swf_annual_demand_kwh",
+                "dso_a_annual_demand_kwh",
                 lambda s: float(pd.to_numeric(s, errors="coerce").sum()),
             ),
             asset_capacity_kw=(
@@ -732,7 +732,7 @@ def summarize_matches(
             row[matched_col] = int(subset["matched"].sum()) if not subset.empty else 0
         row["hh_annual_demand_kwh"] = float(
             pd.to_numeric(
-                group.loc[group["asset_type"].eq("HH"), "swf_annual_demand_kwh"],
+                group.loc[group["asset_type"].eq("HH"), "dso_a_annual_demand_kwh"],
                 errors="coerce",
             ).sum()
         )
@@ -759,7 +759,7 @@ def summarize_matches(
     matched = matches[matches["matched"]].copy()
     matched["hh_annual_demand_kwh_sum"] = np.where(
         matched["asset_type"].eq("HH"),
-        pd.to_numeric(matched["swf_annual_demand_kwh"], errors="coerce").fillna(0.0),
+        pd.to_numeric(matched["dso_a_annual_demand_kwh"], errors="coerce").fillna(0.0),
         0.0,
     )
     matched["ev_charger_kw_sum"] = np.where(
@@ -846,7 +846,7 @@ def _scenario_intensity_row(label: str, group: pd.DataFrame) -> dict[str, Any]:
     hh_rows = int(group["asset_type"].eq("HH").sum())
     hh_kwh = float(
         pd.to_numeric(
-            group.loc[group["asset_type"].eq("HH"), "swf_annual_demand_kwh"],
+            group.loc[group["asset_type"].eq("HH"), "dso_a_annual_demand_kwh"],
             errors="coerce",
         ).sum()
     )
@@ -945,7 +945,7 @@ def run_audit(
     )
     buildings = _read_pylovo_buildings(config)
     building_summary = _read_pylovo_building_summary(config)
-    assets = load_swf_2045_assets(
+    assets = load_dso_a_2045_assets(
         grid_data_path=root, config=config, lv_ids=lv_ids, limit=limit
     )
     matches = match_assets_to_buildings(assets, buildings, config)
@@ -1003,7 +1003,7 @@ def run_audit(
         "residential_equivalent_recommended"
     )
     residential_fallback_zero_columns = [
-        "swf_ghd_rows",
+        "dso_a_ghd_rows",
         "calibrated_annual_ghd_kwh",
         "ghd_ev_charger_rows",
         "ghd_ev_charger_kw",
@@ -1019,27 +1019,27 @@ def run_audit(
             residential_equivalent_bus_plan[column] = 0.0
 
     outputs = {
-        "swf_2045_assets": assets,
-        "swf_2045_asset_building_matches": matches,
-        "swf_2045_match_grid_summary": grid_summary,
-        "swf_2045_building_allocations": building_allocations,
-        "swf_2045_street_allocations": street_allocations,
-        "swf_2045_comparison_class_summary": comparison_class_summary,
-        "swf_2045_base_demand_definitions": base_demand_definitions,
-        "swf_2045_synthetic_ghd_calibration": ghd_calibration,
-        "swf_2045_synthetic_ghd_calibration_summary": ghd_calibration_summary,
-        "swf_2045_grid_scope_summary": grid_scope_summary,
-        "swf_2045_grid_scope_filter_summary": grid_scope_filter_summary,
-        "swf_2045_sector_asset_calibration": sector_asset_calibration,
-        "swf_2045_sector_asset_calibration_summary": sector_asset_calibration_summary,
-        "swf_2045_sector_scope_filter_summary": sector_scope_filter_summary,
-        "swf_2045_bus_scenario_plan": bus_scenario_plan,
-        "swf_2045_full_local_demand_bus_allocation_plan": full_local_bus_plan,
-        "swf_2045_residential_equivalent_bus_allocation_plan": residential_equivalent_bus_plan,
-        "swf_2045_building_scenario_plan": building_scenario_plan,
-        "swf_2045_street_scenario_plan": street_scenario_plan,
-        "swf_2045_scenario_scope_totals": scenario_scope_totals,
-        "swf_2045_scenario_intensities": scenario_intensities,
+        "dso_a_2045_assets": assets,
+        "dso_a_2045_asset_building_matches": matches,
+        "dso_a_2045_match_grid_summary": grid_summary,
+        "dso_a_2045_building_allocations": building_allocations,
+        "dso_a_2045_street_allocations": street_allocations,
+        "dso_a_2045_comparison_class_summary": comparison_class_summary,
+        "dso_a_2045_base_demand_definitions": base_demand_definitions,
+        "dso_a_2045_synthetic_ghd_calibration": ghd_calibration,
+        "dso_a_2045_synthetic_ghd_calibration_summary": ghd_calibration_summary,
+        "dso_a_2045_grid_scope_summary": grid_scope_summary,
+        "dso_a_2045_grid_scope_filter_summary": grid_scope_filter_summary,
+        "dso_a_2045_sector_asset_calibration": sector_asset_calibration,
+        "dso_a_2045_sector_asset_calibration_summary": sector_asset_calibration_summary,
+        "dso_a_2045_sector_scope_filter_summary": sector_scope_filter_summary,
+        "dso_a_2045_bus_scenario_plan": bus_scenario_plan,
+        "dso_a_2045_full_local_demand_bus_allocation_plan": full_local_bus_plan,
+        "dso_a_2045_residential_equivalent_bus_allocation_plan": residential_equivalent_bus_plan,
+        "dso_a_2045_building_scenario_plan": building_scenario_plan,
+        "dso_a_2045_street_scenario_plan": street_scenario_plan,
+        "dso_a_2045_scenario_scope_totals": scenario_scope_totals,
+        "dso_a_2045_scenario_intensities": scenario_intensities,
     }
     for name, frame in outputs.items():
         frame.to_csv(output_dir / f"{name}.csv", index=False)
@@ -1055,7 +1055,7 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=OUTPUT_DIR
-        / "swf_2045_building_match",
+        / "dso_a_building_match",
     )
     parser.add_argument(
         "--lv-id",
@@ -1088,8 +1088,8 @@ def main() -> None:
         ghd_to_hh_warning_ratio=args.ghd_to_hh_warning_ratio,
         ghd_to_hh_extreme_ratio=args.ghd_to_hh_extreme_ratio,
     )
-    summary = outputs["swf_2045_match_grid_summary"]
-    print(f"Wrote SWF 2045 building-match audit to {args.output_dir}")
+    summary = outputs["dso_a_2045_match_grid_summary"]
+    print(f"Wrote DSO A 2045 building-match audit to {args.output_dir}")
     if not summary.empty:
         print(summary.describe(include="all").to_string())
 

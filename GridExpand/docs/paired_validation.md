@@ -6,12 +6,12 @@ evidence rules, publication criteria) is in [method.md](method.md#paired-validat
 
 | `run.pipeline` | real grids | example run YAML |
 |---|---|---|
-| `paired_validation` | SWF (Stadtwerke Forchheim) station exports | `config/runs/forchheim_2045_paired_full_year.yaml` |
-| `paired_aligned` | SWF and ÜZW of a pylovo alignment bundle | `config/runs/joint_2045_v1_full_year.yaml` (smoke: `joint_2045_v1_smoke24.yaml`) |
+| `paired_validation` | DSO A station exports | `config/runs/dso_a_2045_paired_full_year.yaml` |
+| `paired_aligned` | DSO A and DSO B of a pylovo alignment bundle | `config/runs/joint_2045_v1_full_year.yaml` (smoke: `joint_2045_v1_smoke24.yaml`) |
 
-The real-grid data are confidential and not part of the repository: SWF exports below `GRID_DATA_PATH` of `.env`;
-for aligned runs the alignment bundle, the pylovo comparison JSON and the ÜZW delivery named in the run YAML
-(`resources.alignment_dir`, `population`, `uzw_grids_dir`).
+The real-grid data are confidential and not part of the repository: DSO A exports below `GRID_DATA_PATH` of `.env`;
+for aligned runs the alignment bundle, the pylovo comparison JSON and the DSO B delivery named in the run YAML
+(`resources.alignment_dir`, `population`, `dso_b_grids_dir`).
 
 ## Running
 
@@ -28,7 +28,7 @@ uv run gridexpand status joint_2045_v1_smoke24
 1. **prepare** (skipped with `execution.resume: true` or `--skip-prepare`, which validate the prepared datasets
    instead):
    - `paired_validation`: `allocation.scenario_calibration.allocation.paired_allocation` (registers every eligible
-     grid of the region and pylovo version, matches SWF rows to physical buildings, writes the paired plans),
+     grid of the region and pylovo version, matches DSO A rows to physical buildings, writes the paired plans),
      `profiles.paired_profile_readiness` (heat library coverage), `profiles.pv_profile_library`;
    - `paired_aligned`, per provider: `allocation.aligned_allocation`, `profiles.aligned_weather`,
      `profiles.paired_heat_profile_regeneration` (TEASER heat of every source grid, `execution.heat_workers`
@@ -45,11 +45,11 @@ uv run gridexpand status joint_2045_v1_smoke24
 | module | content |
 |---|---|
 | `gridexpand.paired.runner` | the paired runner: scenario-unit materialization, urbs, canonical temporal mapping, Step 4 per target; status keyed `<target>:<grid id>` for resume |
-| `gridexpand.paired.sources.{swf,uzw,synthetic}` | network adapters: allocation-plan discovery, HDF naming, Step 4 commands (real grids: `powerflow.run_real_swf_scenario_powerflow --provider`) |
+| `gridexpand.paired.sources.{dso_a,dso_b,synthetic}` | network adapters: allocation-plan discovery, HDF naming, Step 4 commands (real grids: `powerflow.run_real_scenario_powerflow --provider`) |
 | `gridexpand.paired.comparison` | network-independent equivalence checks |
 | `gridexpand.paired.datasets` | resolves and validates a prepared dataset from `paired_dataset_id` |
 | `gridexpand.paired.aligned` | grid subsets of aligned runs (`components`, `islands`) |
-| `gridexpand.allocation.scenario_calibration.allocation` | SWF building matching, GHD calibration, paired and aligned allocation plans |
+| `gridexpand.allocation.scenario_calibration.allocation` | DSO A building matching, GHD calibration, paired and aligned allocation plans |
 | `gridexpand.allocation.scenario_calibration.profiles` | shared electricity, PV, mobility and heat profiles, readiness, libraries, aligned weather |
 | `gridexpand.allocation.scenario_calibration.pipeline` | paired urbs-input materialization |
 
@@ -67,7 +67,7 @@ source adapter in `paired/sources/` registered in `paired/sources/__init__.py`, 
 | `work/allocation/results/<weather_source_hdf>` | weather source of the PV library |
 | `work/runs/<run.id>/[<provider>/]<group>[-grid<id>]/` | paired runner directories (`status.tsv`, logs, canonical temporal mapping) |
 
-Power-flow run names: `<run.id>_<target>_<case>` (paired, target `synthetic` or `real_swf`) and
+Power-flow run names: `<run.id>_<target>_<case>` (paired, target `synthetic` or `real_dso_a`) and
 `<run.id>_<provider>_<real_<provider>|synthetic>_<case>` (aligned). The `_pre` run holds the pre stage of a grid;
 the result-case runs hold only their post stage (Step 4 `--post-only`), since the pre stage is the same for every case. Analysis keys: see
 [Step 5](steps/5_postprocessing.md#expansion-materialization).
@@ -76,7 +76,7 @@ the result-case runs hold only their post stage (Step 4 `--post-only`), since th
 
 `gridexpand run` builds the runner command; direct use (`uv run python -m gridexpand.paired.runner --help`) is for
 diagnostics. Important options: `--paired-dataset-id`, `--pylovo-version-id` (must match the dataset),
-`--scenario-config`, `--target real_swf|real_uzw|synthetic|both` with `--provider swf|uzw`, `--model-case`
+`--scenario-config`, `--target real_dso_a|real_dso_b|synthetic|both` with `--provider dso_a|dso_b`, `--model-case`
 (materialized case) and `--result-cases`, `--skip-pre`, `--pre-only`, `--job-subset` (JSON `{target: [grid ids]}`),
 `--target-grid-id`, `--max-timesteps` (smoke tests, not for publication), `--resume`, `--run-dir`, and
 `--allow-diagnostic-heat-fallback` (area-scaled heat profiles; never for publication runs).

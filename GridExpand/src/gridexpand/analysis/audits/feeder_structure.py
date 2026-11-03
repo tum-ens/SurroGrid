@@ -762,7 +762,7 @@ def build_feeder_structure_comparison(
         grid_row, sections, control_lines = _analyze_grid(
             net,
             demand,
-            data_source="Real SWF",
+            data_source="Real DSO A",
             grid=f"LV_{lv_id:03d}",
         )
         grid_rows.append(grid_row)
@@ -789,7 +789,7 @@ def build_feeder_structure_comparison(
     real_cables = _cable_summaries(
         db,
         real_specs,
-        data_source="Real SWF",
+        data_source="Real DSO A",
         ags=ags,
         real_plz=real_plz,
         excluded_lv_ids=excluded,

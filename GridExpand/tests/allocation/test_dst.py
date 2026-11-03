@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from gridexpand.allocation.functions.dst import dst_shift_input, dst_shift_output
-from gridexpand.allocation.scenario_calibration.profiles.real_swf_electricity_profiles import (
+from gridexpand.allocation.scenario_calibration.profiles.dso_a_electricity_profiles import (
     add_output_data_daylight_saving_shift,
 )
 

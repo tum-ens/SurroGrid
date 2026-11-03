@@ -22,7 +22,7 @@ resources:
   excluded_real_lv_ids: []
   # UPDATE: unique prepared paired-artifact directory name.
   paired_dataset_id: CHANGE_ME_paired_dataset_id
-  target_network: both # both, real_swf, or synthetic
+  target_network: both # both, real_dso_a, or synthetic
   # Optional adapter-local diagnostic filter; null selects the complete set.
   target_grid_id: null
 

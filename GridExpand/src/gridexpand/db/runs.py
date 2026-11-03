@@ -407,7 +407,7 @@ def get_or_create_real_grid_case(engine: Engine, grid_ref: dict[str, Any]) -> in
         """
     )
     params = {
-        "source": str(grid_ref.get("source", "swf")),
+        "source": str(grid_ref.get("source", "dso_a")),
         "plz": grid_ref.get("plz"),
         "lv_id": str(grid_ref["lv_id"]),
         "variant": grid_ref.get("variant"),

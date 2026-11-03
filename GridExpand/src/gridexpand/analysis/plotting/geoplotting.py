@@ -163,7 +163,7 @@ def load_synthetic_grid_points(
     """Load synthetic building/bus points from the SurroGrid database.
 
     Synthetic centroids are stored in EPSG:4326. They are transformed in PostGIS
-    to ``target_epsg`` so that they can be plotted together with SWF Excel
+    to ``target_epsg`` so that they can be plotted together with DSO A Excel
     coordinates, which are stored in projected metre coordinates. With
     ``synthetic_run_name=None`` every grid case of the postcode is included.
     """
@@ -223,7 +223,7 @@ def load_real_grid_points(
     category: str = "regular",
     load_status: str = "lvload",
 ) -> pd.DataFrame:
-    """Load real SWF load-bus points from radialized split-grid Excel files."""
+    """Load real DSO A load-bus points from radialized split-grid Excel files."""
 
     root = Path(real_grid_data_path)
     legacy_manifest = root / "split_manifest.csv"
@@ -609,9 +609,9 @@ def load_real_expansion_grid_costs(*, analysis_key: str) -> pd.DataFrame:
             f"No real expansion grid costs found for analysis_key={analysis_key!r}."
         )
     sources = set(metrics["data_source"].dropna().astype(str))
-    if sources != {"Real SWF"}:
+    if sources != {"Real DSO A"}:
         raise ValueError(
-            f"Expected a Real SWF expansion analysis for {analysis_key!r}; "
+            f"Expected a Real DSO A expansion analysis for {analysis_key!r}; "
             f"found data_source values {sorted(sources)!r}."
         )
 
@@ -704,7 +704,7 @@ def _real_expansion_envelope_layers(
     value_column: str,
     value_scale: float,
 ) -> dict[str, object]:
-    envelopes = _make_envelopes(points, "Real SWF", "lv_id")
+    envelopes = _make_envelopes(points, "Real DSO A", "lv_id")
     metrics = _grid_metrics_from_points(points, grid_id_column="lv_id")
     values_by_grid = metrics.set_index("lv_id")[value_column].astype(float).to_dict()
 
@@ -966,7 +966,7 @@ def plot_synthetic_expansion_envelope_panels(
                     {"analysis_key": analysis_key, "label": label, "layers": layers}
                 )
         elif not real_points.empty:
-            real_envelopes = _make_envelopes(real_points, "Real SWF", "lv_id")
+            real_envelopes = _make_envelopes(real_points, "Real DSO A", "lv_id")
 
     value_datasets = datasets + real_datasets
     all_values = pd.concat(
@@ -1091,7 +1091,7 @@ def plot_synthetic_expansion_envelope_panels(
                 )
                 metric_count = len(dataset["layers"]["grid_metrics"])
                 title = (
-                    f"Real SWF - {dataset['label']} "
+                    f"Real DSO A - {dataset['label']} "
                     f"({metric_count} cost-complete grids)"
                 )
             else:
@@ -1106,7 +1106,7 @@ def plot_synthetic_expansion_envelope_panels(
                     show_points=show_points,
                 )
                 title = (
-                    f"Real SWF geometry reference - {dataset['label']} "
+                    f"Real DSO A geometry reference - {dataset['label']} "
                     f"({len(real_envelopes)} grids)"
                 )
             ax.set_xlim(xlim)
@@ -1150,7 +1150,7 @@ def plot_synthetic_expansion_envelope_panels(
     if real_datasets:
         result.update(
             {
-                f"Real SWF - {dataset['label']}": {
+                f"Real DSO A - {dataset['label']}": {
                     "points": dataset["layers"]["points"],
                     "grid_metrics": dataset["layers"]["grid_metrics"]
                     .sort_values(value_column, ascending=False)
@@ -1162,7 +1162,7 @@ def plot_synthetic_expansion_envelope_panels(
     elif has_real_row:
         result.update(
             {
-                "Real SWF": {
+                "Real DSO A": {
                     "points": real_points,
                     "grid_metrics": pd.DataFrame(
                         {

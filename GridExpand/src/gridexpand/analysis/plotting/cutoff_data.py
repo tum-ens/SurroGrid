@@ -22,9 +22,9 @@ Y_TITLES = {
 }
 DEFAULT_COLORS = {
     "Synthetic": "#335C81",
-    "Real SWF": "#D95D39",
+    "Real DSO A": "#D95D39",
     "synthetic": "#335C81",
-    "real_swf": "#D95D39",
+    "real_dso_a": "#D95D39",
 }
 FALLBACK_PALETTE = ["#335C81", "#D95D39", "#2A9D8F", "#6D597A", "#7A8450"]
 

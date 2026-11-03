@@ -56,7 +56,7 @@ def test_a_missing_transformer_rating_skips_only_the_transformer_check():
 
 
 def test_a_grid_without_lv_demand_passes():
-    job = {"row": {"provider": "swf", "real_grid_id": "LV_154", "real_grid_number": 154, "buildings": 9},
+    job = {"row": {"provider": "dso_a", "real_grid_id": "LV_154", "real_grid_number": 154, "buildings": 9},
            "plan": pd.DataFrame(columns=status_quo.PLAN_COLUMNS), "grid_file": "unused.xlsx", "profile_seed": 1,
            "peak_hours": 60, "all_hours": False}
     row = status_quo._evaluate_job(job)
@@ -75,13 +75,13 @@ def test_peak_hours_are_the_largest_total_household_and_ghd_hours():
 
 def test_exclusion_list_and_grid_ids():
     grids = pd.DataFrame({
-        "provider": ["swf", "swf", "uzw"], "real_grid_id": ["LV_059", "LV_060", "7"],
+        "provider": ["dso_a", "dso_a", "dso_b"], "real_grid_id": ["LV_059", "LV_060", "7"],
         "flagged": [True, False, True], "reason": ["transformer_overload;undervoltage", "", "nonconvergence"],
     })
     exclusions = status_quo.exclusion_list(grids)
     assert list(exclusions.columns) == ["provider", "real_grid_id", "reason"]
     assert exclusions["real_grid_id"].tolist() == ["LV_059", "7"]
-    assert status_quo.bundle_grid_id("swf", 59) == "LV_059" and status_quo.bundle_grid_id("uzw", 7) == "7"
+    assert status_quo.bundle_grid_id("dso_a", 59) == "LV_059" and status_quo.bundle_grid_id("dso_b", 7) == "7"
 
 
 def _basedata_rows():
@@ -151,14 +151,14 @@ def test_jobs_from_a_prepared_dataset(tmp_path):
         "profile_seed": [481527] * 3, "real_target_grid_id": [59, 59, 60], "real_target_bus": [10, 11, 20],
     }).to_csv(tmp_path / "paired_component_scenario_plan.csv", index=False)
     pd.DataFrame({
-        "provider": ["swf"] * 3, "building_objectid": ["A", "B", "C"], "real_grid_id": [59, 59, 60],
+        "provider": ["dso_a"] * 3, "building_objectid": ["A", "B", "C"], "real_grid_id": [59, 59, 60],
         "real_grid_file": ["/grids/LV_059.xlsx", "/grids/LV_059.xlsx", "/grids/LV_060.xlsx"],
     }).to_csv(tmp_path / "paired_real_bus_allocation_plan.csv", index=False)
-    jobs = status_quo.jobs_from_dataset(tmp_path, "swf", profile_seed=481527, peak_hours_count=60, all_hours=False)
+    jobs = status_quo.jobs_from_dataset(tmp_path, "dso_a", profile_seed=481527, peak_hours_count=60, all_hours=False)
     assert [job["row"]["real_grid_id"] for job in jobs] == ["LV_059", "LV_060"]
     assert jobs[0]["plan"]["target_bus"].tolist() == [10, 11] and jobs[0]["grid_file"] == "/grids/LV_059.xlsx"
     with pytest.raises(ValueError, match="profile seed"):
-        status_quo.jobs_from_dataset(tmp_path, "swf", profile_seed=1, peak_hours_count=60, all_hours=False)
+        status_quo.jobs_from_dataset(tmp_path, "dso_a", profile_seed=1, peak_hours_count=60, all_hours=False)
 
 
 def test_households_only_drops_the_ghd_components():

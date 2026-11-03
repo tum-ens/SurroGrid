@@ -431,7 +431,7 @@ def read_buildings(engine: Engine, grid_ref: dict[str, Any]) -> pd.DataFrame:
     if "connection_point" in df_buildings.columns:
         df_buildings["bus"] = df_buildings["bus"].fillna(df_buildings["connection_point"])
 
-    # pylovo fills missing households but not occupants (58 ÜZW buildings in v1).
+    # pylovo fills missing households but not occupants (some real buildings).
     missing_occupants = (
         pd.to_numeric(df_buildings["residential_floor_area"], errors="coerce").gt(0)
         & pd.to_numeric(df_buildings["households"], errors="coerce").gt(0)

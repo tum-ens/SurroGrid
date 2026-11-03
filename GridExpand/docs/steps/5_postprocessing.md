@@ -18,7 +18,7 @@ Code: `src/gridexpand/analysis/`
 | `expansion/results.py` | row fields: route decisions, station-level cost breakdown, `expansion_grid_result` rows |
 | `expansion/synthetic_materialization.py` | synthetic grids: rules in Python; decisions in temp tables for the SQL inserts |
 | `expansion/sql/*.sql` | synthetic scope and mapping: selected runs, component loading, transformer peaks, line and transformer inserts |
-| `expansion/real_materialization.py` | real SWF / ÜZW grids: cable corridors, grid status |
+| `expansion/real_materialization.py` | real DSO A / DSO B grids: cable corridors, grid status |
 | `expansion/aligned_expansion.py` | all provider groups of an aligned run in one command |
 | `expansion/cases.py` | model case → stage and analysis-key suffix |
 | `expansion/overview.py`, `expansion/notebook_workflow.py` | read-only loaders for the notebooks |
@@ -34,7 +34,7 @@ and refreshing the QGIS views once per batch. Manual use:
 ```bash
 uv run gridexpand expansion --run-name <power-flow run name> --stage post --ags 9184137 \
   --analysis-key <key> --replace
-uv run gridexpand expansion --data-source real_swf --run-name <real run name> --stage post --plz 91301 \
+uv run gridexpand expansion --data-source real_dso_a --run-name <real run name> --stage post --plz 99999 \
   --exclude-real-lv-id 113 --analysis-key <key> --replace
 uv run gridexpand expansion --refresh-only        # refresh the QGIS materialized views
 ```
@@ -43,7 +43,7 @@ uv run gridexpand expansion --refresh-only        # refresh the QGIS materialize
 |---|---|---|
 | `--run-name` | required (except `--schema-only`, `--refresh-only`) | power-flow run whose compact summaries are materialized |
 | `--stage` | `post` | `pre` or `post` |
-| `--data-source` | `synthetic` | `synthetic`, `real_swf`, `real_uzw` |
+| `--data-source` | `synthetic` | `synthetic`, `real_dso_a`, `real_dso_b` |
 | `--ags`, `--plz` | none | filters (repeatable); synthetic AGS or grid PLZ, real majority PLZ |
 | `--scenario-id` | the single scenario of the selected runs | scenario recorded with the analysis |
 | `--pylovo-version-id` | run assumptions | synthetic grid-case filter; real-grid settlement type |
@@ -64,11 +64,11 @@ Analysis keys written by the pipelines:
 | paired_validation | `<run.id>[_real]_<pre\|post_inflex\|post\|post_hems_optimized>` |
 | paired_aligned | `<run.id>_<provider>_<real\|synthetic>_<pre\|post_inflex\|post\|post_hems_optimized>` |
 
-Aligned runs (all four groups SWF real/synthetic, ÜZW real/synthetic, or a subset):
+Aligned runs (all four groups DSO A real/synthetic, DSO B real/synthetic, or a subset):
 
 ```bash
 uv run python -m gridexpand.analysis.expansion.aligned_expansion --run-id joint_2045_v1_smoke24 \
-  --providers swf uzw --cases pre post-inflex-heuristic post-hems-heuristic [--dry-run]
+  --providers dso_a dso_b --cases pre post-inflex-heuristic post-hems-heuristic [--dry-run]
 ```
 
 (`--pylovo-version-id`, `--exclude-real-grid PROVIDER:ID` repeatable; power-flow run names
@@ -120,7 +120,7 @@ uv run jupyter lab notebooks/analysis
   `expansion_cost_overview`, cable and voltage diagnostics);
 - `joint_setup.py`: the setup both notebooks import (`RUN_ID`, the run to analyse; providers, case colors and
   labels, exclusion threshold, `CURVE_Y_LIMITS`: the fixed top-row scale shared by both figures).
-  `prepare_joint_analysis()` calls `prepare_expansion_analysis(providers=("swf", "uzw"))` (in
+  `prepare_joint_analysis()` calls `prepare_expansion_analysis(providers=("dso_a", "dso_b"))` (in
   `expansion.notebook_workflow`), which prepares the four groups and enforces consistent provenance, and adds
   `nonconverged_grids` and their `excluded_grids`: a grid with non-converged power-flow hours in at least 1 % of
   the hours of any case is left out of every case of its own group. The loaders take `excluded_grids`
@@ -136,7 +136,7 @@ of your database.
 ## Audits
 
 ```bash
-uv run python -m gridexpand.analysis.audits.topology_bottleneck --real-run-name <real run> --plz 91301
+uv run python -m gridexpand.analysis.audits.topology_bottleneck --real-run-name <real run> --plz 99999
 ```
 
 (`--stage` default `pre`, `--voltage-threshold` default 0.90, `--output-dir` default

@@ -31,7 +31,7 @@ def optional_ags(value: str | int | None) -> int | None:
 
 
 def canonical_real_grid_id(value: Any) -> str:
-    """A real grid id (SWF LV or ÜZW area) as text without prefix or zero padding.
+    """A real grid id (DSO A LV or DSO B area) as text without prefix or zero padding.
 
     ``"LV_007"``, ``"007"``, ``7`` and ``7.0`` give ``"7"``; ``"area-12"`` gives
     ``"12"``; other text ids are returned stripped.
@@ -54,8 +54,8 @@ def synthetic_grid_label(row: Mapping[str, Any]) -> str:
 
 
 def real_grid_label(source: str, lv_id: Any) -> str:
-    """``ÜZW area-0012`` or ``SWF LV_007`` of a real grid."""
+    """``DSO B area-0012`` or ``DSO A LV_007`` of a real grid."""
     number = int(canonical_real_grid_id(lv_id))
-    if source == "uzw":
-        return f"ÜZW area-{number:04d}"
-    return f"{str(source).upper()} LV_{number:03d}"
+    if source == "dso_b":
+        return f"DSO B area-{number:04d}"
+    return f"{str(source).upper().replace('_', ' ')} LV_{number:03d}"

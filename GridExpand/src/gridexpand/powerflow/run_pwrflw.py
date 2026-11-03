@@ -38,7 +38,7 @@ from gridexpand.powerflow.io import (
 
 OUTPUTS = ("raw", "summary")
 INFLEX_ASSUMPTION = (
-    "fixed heat and EV profiles; optimized post-flex PV capacity; fixed SWF battery "
+    "fixed heat and EV profiles; optimized post-flex PV capacity; fixed DSO A battery "
     "inventory with causal local PV self-consumption control, no grid charging, and "
     "no battery export; heat split uses the fixed input heatpump_air and "
     "heatpump_booster capacities (inst-cap)"
@@ -143,7 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help=(
             "Optional multiplier for HH-only pre-expansion electricity and reactive demand. "
-            "This is intended for aggregate SWF annual-demand sensitivity checks and requires --hh-only --pre-only."
+            "This is intended for aggregate DSO A annual-demand sensitivity checks and requires --hh-only --pre-only."
         ),
     )
     parser.add_argument(

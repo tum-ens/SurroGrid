@@ -30,7 +30,7 @@ STORAGE_FIELDS = (
 )
 
 
-@pytest.fixture(scope="module", params=["forchheim_2045_synthetic.yaml", "schweinfurt_2045.yaml"])
+@pytest.fixture(scope="module", params=["ro_heat_2045_synthetic.yaml", "schweinfurt_2045.yaml"])
 def technologies(request):
     scenario, _ = load_scenario_config(SCENARIO_CONFIG_DIR / request.param)
     return scenario.technologies

@@ -107,7 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Run only this model case of the YAML (repeatable).")
     parser.add_argument("--skip-prepare", action="store_true",
                         help="Paired pipelines: use the prepared datasets as they are (validated).")
-    parser.add_argument("--provider", choices=("swf", "uzw"), help="paired_aligned: one provider only.")
+    parser.add_argument("--provider", choices=("dso_a", "dso_b"), help="paired_aligned: one provider only.")
     parser.add_argument("--target-grid-id", type=int,
                         help="Paired pipelines: diagnostic single-grid filter (own run sub-directory).")
     parser.add_argument("--pre-only", action="store_true",
@@ -307,7 +307,7 @@ def run_synthetic(ctx: RunContext) -> int:
     return EXIT_JOB_FAILURES if any(code == 2 for code in codes.values()) else EXIT_OK
 
 
-# Paired (SWF) -----------------------------------------------------------------------------
+# Paired (DSO A) -----------------------------------------------------------------------------
 
 
 def _group_dir(base: Path, group: str, target_grid_id: int | None) -> Path:
@@ -350,7 +350,7 @@ def paired_expansion_commands(run: PairedRun, target_grid_id: int | None = None)
     """Expansion analyses ``<run_id>[_real]_<analysis suffix>`` of a paired run (full grid set only)."""
     if not run.materialize_expansion or run.target_grid_id is not None or target_grid_id is not None:
         return []
-    targets = {"synthetic": ("synthetic",), "real_swf": ("real_swf",)}.get(run.target_network, ("synthetic", "real_swf"))
+    targets = {"synthetic": ("synthetic",), "real_dso_a": ("real_dso_a",)}.get(run.target_network, ("synthetic", "real_dso_a"))
     argvs = []
     for target in targets:
         source_suffix = "" if target == "synthetic" else "_real"
@@ -452,7 +452,7 @@ def run_paired(ctx: RunContext) -> int:
     return EXIT_OK
 
 
-# Paired aligned (SWF + ÜZW) ------------------------------------------------------------------
+# Paired aligned (DSO A + DSO B) ------------------------------------------------------------------
 
 
 def aligned_providers(ctx: RunContext) -> list[ProviderResources]:
@@ -463,8 +463,9 @@ def aligned_providers(ctx: RunContext) -> list[ProviderResources]:
 def aligned_preparation(ctx: RunContext, provider: ProviderResources) -> list[tuple[str, list[str]]]:
     run: AlignedRun = ctx.run  # type: ignore[assignment]
     return commands.aligned_preparation_commands(
-        provider=provider.provider, alignment_dir=run.alignment_dir, population=run.population,
-        uzw_grids_dir=run.uzw_grids_dir, pylovo_version_id=run.pylovo_version_id,
+        provider=provider.provider, bundle_name=provider.bundle_key, alignment_dir=run.alignment_dir,
+        population=run.population,
+        dso_b_grids_dir=run.dso_b_grids_dir, pylovo_version_id=run.pylovo_version_id,
         scenario_config=run.scenario_path, profile_seed=run.profile_seed, paired_dir=provider.paired_dir,
         weather_hdf=provider.weather_hdf, heat_sources=provider.heat_sources, heat_library=provider.heat_library,
         heat_profile_set_id=provider.heat_profile_set_id, heat_workers=run.heat_workers,
@@ -535,7 +536,8 @@ def run_aligned(ctx: RunContext) -> int:
                 # After preparation (review-orch B3): the subset needs the registered grids.
                 subset_path = ctx.run_dir / provider.provider / "grid_subset.json"
                 write_json_atomic(subset_path, select_grid_subset(
-                    population=run.population, provider=provider.provider, paired_dir=provider.paired_dir,
+                    population=run.population, provider=provider.provider, bundle_name=provider.bundle_key,
+                    paired_dir=provider.paired_dir,
                     grid_subset=run.grid_subset,
                 ))
             jobs[provider.provider] = aligned_jobs(ctx, provider, subset_path)

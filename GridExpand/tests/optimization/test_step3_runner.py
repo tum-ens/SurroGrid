@@ -23,7 +23,7 @@ from gridexpand.scenario.config_loader import load_scenario_config, scenario_ide
 
 @pytest.fixture(scope="module")
 def scenario():
-    return load_scenario_config(SCENARIO_CONFIG_DIR / "forchheim_2045_synthetic.yaml")
+    return load_scenario_config(SCENARIO_CONFIG_DIR / "ro_heat_2045_synthetic.yaml")
 
 
 def _pre_metadata(scenario_config, config_hash, overrides=None):

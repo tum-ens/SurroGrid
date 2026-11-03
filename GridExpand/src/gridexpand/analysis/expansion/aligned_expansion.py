@@ -3,13 +3,13 @@
 An aligned run (``gridexpand run-aligned``) writes power-flow
 summaries named ``{run_id}_{provider}_{network}_{case}`` with network
 ``real_<provider>`` or ``synthetic``. This entry point materializes the four
-groups (SWF real, SWF synthetic, ÜZW real, ÜZW synthetic) under the analysis
+groups (DSO A real, DSO A synthetic, DSO B real, DSO B synthetic) under the analysis
 keys ``{run_id}_{provider}_{real|synthetic}_{pre|post_inflex|post}``.
 
 Example::
 
     uv run python -m gridexpand.analysis.expansion.aligned_expansion \\
-        --run-id joint_2045_v1_smoke24 --providers swf uzw \\
+        --run-id joint_2045_v1_smoke24 --providers dso_a dso_b \\
         --cases pre post-inflex-heuristic post-hems-heuristic
 
 All groups are materialized (one transaction each) and the QGIS views are
@@ -30,7 +30,7 @@ from . import grid_expansion
 from .cases import CASE_STAGES
 
 # DSO providers of an aligned run.
-PROVIDERS = ("swf", "uzw")
+PROVIDERS = ("dso_a", "dso_b")
 DEFAULT_CASES = ("pre", "post-inflex-heuristic", "post-hems-heuristic")
 
 

@@ -1,4 +1,4 @@
-"""Shared calibrated electricity profile generation for real SWF scenario plans."""
+"""Shared calibrated electricity profile generation for real DSO A scenario plans."""
 
 from __future__ import annotations
 

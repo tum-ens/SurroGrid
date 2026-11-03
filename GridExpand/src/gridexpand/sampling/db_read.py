@@ -38,7 +38,7 @@ def impute_missing_occupants(df_buildings: pd.DataFrame, mean_household_size: fl
     """Occupants of residential buildings with households but none recorded (flag ``occupants_imputed``).
 
     Same rule as ``gridexpand.db.grids.read_buildings`` (pylovo fills households but
-    not occupants, 58 ÜZW buildings in v1).
+    not occupants, 58 DSO B buildings in v1).
     """
     missing = (
         pd.to_numeric(df_buildings["residential_floor_area"], errors="coerce").gt(0)

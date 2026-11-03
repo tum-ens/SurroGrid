@@ -31,6 +31,9 @@ GridExpand is now one Python package (`gridexpand`) with one `uv` environment an
 - Step 4 solves every timestep on one pandapower net, sets the LV busbar to 0.96 p.u. and rates transformers by
   the station rating of the pylovo grid.
 - Building profiles are seeded per building, so model cases and paired runs share one stochastic realization.
+- The real-grid providers are `dso_a` (station workbooks) and `dso_b` (area deliveries) in code, configs, labels
+  and the database (migration 0008); `resources.providers.<p>.bundle_name` maps them to the names of a pylovo
+  alignment bundle.
 - Documentation rewritten: README, configuration reference, method, one document per step
   ([index](GridExpand/docs/README.md)).
 

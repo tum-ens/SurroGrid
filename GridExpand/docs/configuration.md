@@ -141,8 +141,8 @@ ghd:
 
 The PostGIS source reads with the pipeline's database connection (`DB_*`, the status-quo test's `--db-env-prefix`).
 
-Repository scenarios: `forchheim_2045_synthetic.yaml` and `schweinfurt_2045.yaml` (synthetic runs),
-`forchheim_2045_full_year.yaml` (paired SWF runs), `joint_2045_full_year.yaml` (aligned SWF + ÜZW runs),
+Repository scenarios: `ro_heat_2045_synthetic.yaml` and `schweinfurt_2045.yaml` (synthetic runs),
+`dso_a_2045_full_year.yaml` (paired DSO A runs), `joint_2045_full_year.yaml` (aligned DSO A + DSO B runs),
 `00_scenario_template.yaml`; their differences are tabulated at the top of [method.md](method.md).
 
 ## Run YAML
@@ -203,7 +203,7 @@ batch per execution group (see [method.md](method.md#model-cases)). Outputs are 
 
 ### `pipeline: paired_validation`
 
-SWF real grids versus the synthetic grids of one prepared paired dataset ([paired_validation.md](paired_validation.md)).
+DSO A real grids versus the synthetic grids of one prepared paired dataset ([paired_validation.md](paired_validation.md)).
 
 | key | default | meaning |
 |---|---|---|
@@ -214,7 +214,7 @@ SWF real grids versus the synthetic grids of one prepared paired dataset ([paire
 | `resources.heat_profile_set_id` | required | heat library `…/scenario_calibration/profile_libraries/<id>.h5` |
 | `resources.weather_source_hdf` | required | weather file name in `work/allocation/results/` |
 | `resources.excluded_real_lv_ids` | empty | real grids kept in coverage but excluded from costing |
-| `resources.target_network` | `both` | `both`, `real_swf` or `synthetic` |
+| `resources.target_network` | `both` | `both`, `real_dso_a` or `synthetic` |
 | `resources.target_grid_id` | null | diagnostic single-grid filter |
 | `execution.model_cases` | required | post cases only (`pre` is added to the first group) |
 | `execution.workers`, `step3_cpus`, `step4_cpus` | 1 each | resources |
@@ -223,21 +223,22 @@ SWF real grids versus the synthetic grids of one prepared paired dataset ([paire
 | `execution.materialize_expansion` | true | expansion analyses `<run.id>[_real]_<case suffix>` after success |
 | `execution.optimizer` | null | Step 3 optimizer `urbs` or `pypsa` for all jobs of the run (null: `$GRIDEXPAND_OPTIMIZER`, else `urbs`) |
 
-The SWF export root is the `.env` variable `GRID_DATA_PATH` (a deployment setting, not a run choice); a station
+The DSO A export root is the `.env` variable `GRID_DATA_PATH` (a deployment setting, not a run choice); a station
 dataset must contain `station_split_manifest.csv` and `station_radialization_manifest.csv`.
 
 ### `pipeline: paired_aligned`
 
-Every provider (SWF, ÜZW) of a pylovo alignment bundle, each against its synthetic counterpart.
+Every provider (DSO A, DSO B) of a pylovo alignment bundle, each against its synthetic counterpart.
 
 | key | default | meaning |
 |---|---|---|
 | `resources.pylovo_version_id` | required | pylovo version of the alignment bundle |
 | `resources.alignment_dir` | required | pylovo alignment bundle |
 | `resources.population` | required | pylovo comparison JSON (metric cohort) |
-| `resources.uzw_grids_dir` | required with `uzw` | ÜZW grid delivery (fingerprint checked against the bundle) |
-| `resources.providers.<swf\|uzw>.paired_dataset_id` | required | dataset directory per provider |
+| `resources.dso_b_grids_dir` | required with `dso_b` | DSO B grid delivery (fingerprint checked against the bundle) |
+| `resources.providers.<dso_a\|dso_b>.paired_dataset_id` | required | dataset directory per provider |
 | `resources.providers.<…>.weather_source_hdf` | required | weather file name in `work/allocation/results/` |
+| `resources.providers.<…>.bundle_name` | the key | the provider's name inside the alignment bundle (`<alignment_dir>/<name>/`) and the comparison JSON |
 | `resources.weather_year` | null | null: PVGIS TMY per provider; a year (2005–2023): that real year for every provider ([method](method.md#time-axis)) |
 | `resources.providers.<…>.workers` | `execution.workers` | grids in parallel for this provider |
 | `resources.target_network` | `both` | `both`, `real` or `synthetic` |
@@ -261,19 +262,20 @@ The heat library of a provider is derived: `<paired_dataset_id>_teaser_heat_<sce
 generation (method in [method.md](method.md#status-quo-test)); read-only on the database.
 
 ```bash
-uv run gridexpand status-quo-test --provider swf --alignment-dir <bundle root> \
+uv run gridexpand status-quo-test --provider dso_a --alignment-dir <bundle root> \
     --scenario-config config/scenarios/joint_2045_full_year.yaml --output-dir <dir> --jobs 4
-uv run gridexpand status-quo-test --provider uzw --alignment-dir <bundle root> --uzw-grids-dir <delivery> \
+uv run gridexpand status-quo-test --provider dso_b --alignment-dir <bundle root> --dso-b-grids-dir <delivery> \
     --scenario-config <scenario.yaml> --db-env-prefix INFDB_ --output-dir <dir>
-uv run gridexpand status-quo-test --provider swf --dataset work/allocation/outputs/scenario_calibration/<dataset> \
+uv run gridexpand status-quo-test --provider dso_a --dataset work/allocation/outputs/scenario_calibration/<dataset> \
     --output-dir <dir>                                        # regression: demand of a prepared paired dataset
 ```
 
 | option | default | meaning |
 |---|---|---|
-| `--provider` | required | `swf` or `uzw` |
+| `--provider` | required | `dso_a` or `dso_b` |
 | `--alignment-dir` / `--dataset` | one required | bundle root (`<dir>/<provider>/building-mapping.json`) or a prepared paired dataset |
-| `--uzw-grids-dir` | – | frozen ÜZW delivery (bundle input) |
+| `--dso-b-grids-dir` | – | frozen DSO B delivery (bundle input) |
+| `--bundle-name` | `--provider` | the provider's name inside the alignment bundle |
 | `--scenario-config` | required with `--alignment-dir` | its `ghd:` block applies |
 | `--db-env-prefix` | `DB_` | InfDB connection from `<prefix>HOST`, `PORT`, `NAME`, `USER`, `PASSWORD` (read-only session) |
 | `--basedata-schema` | `basedata` | schema of `buildings` and `classify_building_use` |
@@ -282,8 +284,8 @@ uv run gridexpand status-quo-test --provider swf --dataset work/allocation/outpu
 | `--grids` | all | comma-separated real grid numbers |
 | `--jobs` | 1 | grids in parallel |
 
-The exclusion list `status_quo_<provider>_exclusions.csv` has exactly the columns `provider` (`swf`, `uzw`),
-`real_grid_id` (the bundle's id: SWF `station_id`, e.g. `LV_059`; ÜZW `area_id`, e.g. `113`) and `reason`
+The exclusion list `status_quo_<provider>_exclusions.csv` has exactly the columns `provider` (`dso_a`, `dso_b`),
+`real_grid_id` (the bundle's id: DSO A `station_id`, e.g. `LV_059`; DSO B `area_id`, e.g. `113`) and `reason`
 (`transformer_overload`, `cable_overload`, `undervoltage`, `nonconvergence`, joined by `;`), one row per excluded
 grid; a pylovo alignment option consumes it to drop these grids and their buildings.
 
@@ -315,7 +317,7 @@ uv run gridexpand run config/runs/<run>.yaml --resume                # skip jobs
 `--until prepare|execute|postprocess` (`--prepare-only` = `--until prepare`) stops early, `--model-case` (repeatable)
 runs a subset of the YAML's cases, and `--run-dir` overrides the run directory. Paired pipelines add
 `--skip-prepare` (use the prepared datasets as they are, validated) and `--target-grid-id` (diagnostic single
-grid, own sub-directory); aligned runs add `--provider swf|uzw` and `--pre-only`. `gridexpand run-aligned` is the
+grid, own sub-directory); aligned runs add `--provider dso_a|dso_b` and `--pre-only`. `gridexpand run-aligned` is the
 older name of the same command. Exit codes: 0 done, 1 failed, 2 finished with failed jobs, 3 invalid
 configuration, 143 cancelled (SIGTERM or Ctrl-C stops the running steps and marks their jobs cancelled).
 
@@ -330,7 +332,7 @@ and `summary.json`.
 ## Environment and `.env`
 
 `GridExpand/.env` (template `.env.example`) holds `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, and
-optionally `GRID_DATA_PATH` (SWF exports), `PYLOVO_VERSION_ID` (only for the Step 1 notebooks and single-step
+optionally `GRID_DATA_PATH` (DSO A exports), `PYLOVO_VERSION_ID` (only for the Step 1 notebooks and single-step
 commands without `--pylovo-version-id`; run YAMLs never read it), `GUROBI_HOME` and `GRB_LICENSE_FILE`. The file
 is loaded with override: its values win over variables of the same name in the process environment.
 

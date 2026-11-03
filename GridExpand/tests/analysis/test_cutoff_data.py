@@ -26,7 +26,7 @@ def test_normalizers():
         cd.normalize_quantiles((0,), "q")
     with pytest.raises(ValueError):
         cd.select_metrics(("power",))
-    assert cd.color_defaults({"Real ÜZW": "#000000"})["Real ÜZW"] == "#000000"
+    assert cd.color_defaults({"Real DSO B": "#000000"})["Real DSO B"] == "#000000"
 
 
 def test_asset_and_grid_cutoffs():

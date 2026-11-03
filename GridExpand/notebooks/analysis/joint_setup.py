@@ -1,4 +1,4 @@
-"""Shared setup of the joint SWF + ÜZW analysis notebooks (``analysis_powerflow``, ``analysis_expansion``).
+"""Shared setup of the joint DSO A + DSO B analysis notebooks (``analysis_powerflow``, ``analysis_expansion``).
 
 One run and two exclusion rules for both notebooks, applied to every case:
 - a grid whose power flow did not converge in at least ``MIN_FAILED_SHARE`` of the
@@ -26,8 +26,8 @@ from gridexpand.analysis.expansion.notebook_workflow import (
 from gridexpand.paths import ANALYSIS_OUTPUT_DIR, RUN_CONFIG_DIR, SCENARIO_CALIBRATION_OUTPUT_DIR
 
 RUN_ID = "joint_2045_v1_full_year"  # the aligned run to analyse: config/runs/<RUN_ID>.yaml
-PROVIDERS = ("swf", "uzw")
-EXPECTED_GRID_COUNTS = None  # optional, e.g. {"Real SWF": 10, "Synthetic SWF": 12}: fail on another count
+PROVIDERS = ("dso_a", "dso_b")
+EXPECTED_GRID_COUNTS = None  # optional, e.g. {"Real DSO A": 10, "Synthetic DSO A": 12}: fail on another count
 MIN_FAILED_SHARE = 0.01  # 1 % of the hours of one case (88 h of 8,760)
 MIN_SYNTHETIC_BUILDINGS = 5  # smaller synthetic grids (clustering fragments) are left out, as in the reference
 

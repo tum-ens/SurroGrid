@@ -1,16 +1,16 @@
 # Execution and resource selection for one ordinary synthetic run (one exact grid).
-# Launch with `uv run gridexpand run config/runs/forchheim_2045_synthetic.yaml`.
+# Launch with `uv run gridexpand run config/runs/ro_heat_2045_synthetic.yaml`.
 run:
-  id: forchheim_2045_synthetic
-  scenario: ../scenarios/forchheim_2045_synthetic.yaml
+  id: ro_heat_2045_synthetic
+  scenario: ../scenarios/ro_heat_2045_synthetic.yaml
   pipeline: synthetic
 
 resources:
   # Exact pylovo topology version; never inferred from the environment.
   pylovo_version_id: 1
   # Region and exact-grid filters; see config/README.md.
-  ags: 9474126
-  plz: 91301
+  ags: 9662000
+  plz: 97422
   kcid: 1
   bcid: 2
   storage: db

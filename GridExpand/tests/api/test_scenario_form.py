@@ -14,7 +14,7 @@ from gridexpand.api import scenario_form as sf
 
 SHIPPED = sorted(SCENARIO_CONFIG_DIR.glob("*.yaml"))
 SCHWEINFURT = SCENARIO_CONFIG_DIR / "schweinfurt_2045.yaml"
-INVENTORY = SCENARIO_CONFIG_DIR / "forchheim_2045_full_year.yaml"  # source_inventory, TSAM off
+INVENTORY = SCENARIO_CONFIG_DIR / "dso_a_2045_full_year.yaml"  # source_inventory, TSAM off
 
 
 def text_of(path: Path) -> str:
@@ -26,8 +26,8 @@ def comments(text: str) -> list[str]:
 
 
 def test_shipped_scenarios_exist():
-    assert {p.name for p in SHIPPED} >= {"schweinfurt_2045.yaml", "forchheim_2045_synthetic.yaml",
-                                         "forchheim_2045_full_year.yaml", "joint_2045_full_year.yaml"}
+    assert {p.name for p in SHIPPED} >= {"schweinfurt_2045.yaml", "ro_heat_2045_synthetic.yaml",
+                                         "dso_a_2045_full_year.yaml", "joint_2045_full_year.yaml"}
 
 
 @pytest.mark.parametrize("path", SHIPPED, ids=lambda p: p.name)

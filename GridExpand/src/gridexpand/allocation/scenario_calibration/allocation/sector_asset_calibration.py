@@ -1,4 +1,4 @@
-"""Sector-coupling asset calibration helpers for SWF scenario audits."""
+"""Sector-coupling asset calibration helpers for DSO A scenario audits."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def build_sector_asset_calibration(
 
     calibrated_ghd_building_ids = set(
         ghd_calibration.loc[
-            pd.to_numeric(ghd_calibration["swf_ghd_rows"], errors="coerce")
+            pd.to_numeric(ghd_calibration["dso_a_ghd_rows"], errors="coerce")
             .fillna(0.0)
             .gt(0),
             "building_match_id",

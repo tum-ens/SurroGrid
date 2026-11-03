@@ -65,28 +65,28 @@ def test_expansion_commands():
     assert argv == [PY, "-m", "gridexpand.analysis.expansion.grid_expansion", "--run-name", "run_s", "--stage", "pre",
                     "--ags", "9184137", "--analysis-key", "k_pre", "--note", "n.", "--replace",
                     "--no-refresh"]
-    real = commands.expansion_command("run_r", stage="post", data_source="real_swf", plz=91301,
+    real = commands.expansion_command("run_r", stage="post", data_source="real_dso_a", plz=99999,
                                       exclude_real_lv_ids=(113,), analysis_key="k", python=PY)
-    assert real[real.index("--data-source") + 1] == "real_swf" and real[real.index("--plz") + 1] == "91301"
+    assert real[real.index("--data-source") + 1] == "real_dso_a" and real[real.index("--plz") + 1] == "99999"
     assert real[real.index("--exclude-real-lv-id") + 1] == "113" and "--ags" not in real
-    aligned = commands.aligned_expansion_command("run", providers=["swf", "uzw"], cases=("pre", "post-hems-heuristic"),
+    aligned = commands.aligned_expansion_command("run", providers=["dso_a", "dso_b"], cases=("pre", "post-hems-heuristic"),
                                                  pylovo_version_id="1", python=PY)
-    assert aligned[3:] == ["--run-id", "run", "--providers", "swf", "uzw", "--cases", "pre", "post-hems-heuristic",
+    assert aligned[3:] == ["--run-id", "run", "--providers", "dso_a", "dso_b", "--cases", "pre", "post-hems-heuristic",
                            "--pylovo-version-id", "1"]
 
 
 def test_real_powerflow_command():
     argv = commands.real_powerflow_command(
-        plz=91301, lv_id=80, provider="swf", profile_seed=1, urbs_result_hdf=Path("/r.h5"), summary_grid_scope="full",
-        post_demand_mode="pre-only", run_name="p_real_swf_pre", scenario_label="Paired 2045 real_swf pre",
+        plz=99999, lv_id=80, provider="dso_a", profile_seed=1, urbs_result_hdf=Path("/r.h5"), summary_grid_scope="full",
+        post_demand_mode="pre-only", run_name="p_real_dso_a_pre", scenario_label="Paired 2045 real_dso_a pre",
         grid_file="LV_080.json", grid_data_path=Path("/grids"), python=PY,
     )
     assert "--grid-file" in argv and "--grid-data-path" not in argv  # an explicit grid file wins
-    assert argv[argv.index("--scenario-key") + 1] == "p_real_swf_pre"
+    assert argv[argv.index("--scenario-key") + 1] == "p_real_dso_a_pre"
     assert "--post-only" not in argv
     post = commands.real_powerflow_command(
-        plz=91301, lv_id=80, provider="swf", profile_seed=1, urbs_result_hdf=Path("/r.h5"), summary_grid_scope="full",
-        post_demand_mode="flexible", run_name="p_real_swf_post", scenario_label="Paired 2045 real_swf HEMS",
+        plz=99999, lv_id=80, provider="dso_a", profile_seed=1, urbs_result_hdf=Path("/r.h5"), summary_grid_scope="full",
+        post_demand_mode="flexible", run_name="p_real_dso_a_post", scenario_label="Paired 2045 real_dso_a HEMS",
         post_only=True, python=PY,
     )
     assert post[-1] == "--post-only"
@@ -106,7 +106,7 @@ def test_paired_runner_command():
     assert argv[argv.index("--result-cases") + 1:argv.index("--result-cases") + 3] == [
         "post-inflex-heuristic", "post-hems-heuristic"]
     assert "--resume" in argv and "--skip-pre" not in argv and argv[-2:] == ["--run-dir", "/w/runs/run/heuristic-assets"]
-    pre_only = commands.paired_runner_command(**common, pre_only=True, provider="uzw", max_timesteps=24)
+    pre_only = commands.paired_runner_command(**common, pre_only=True, provider="dso_b", max_timesteps=24)
     assert "--pre-only" in pre_only and "--model-case" not in pre_only and "--provider" in pre_only
     with pytest.raises(ValueError):
         commands.paired_runner_command(**common)
@@ -117,21 +117,21 @@ def test_paired_runner_command():
 
 def test_preparation_commands():
     paired = commands.paired_preparation_commands(
-        ags=9474126, plz=91301, milestone_year=2045, pylovo_version_id="11", min_buildings=5, scenario_config=SC,
+        ags=9999999, plz=99999, milestone_year=2045, pylovo_version_id="11", min_buildings=5, scenario_config=SC,
         profile_seed=481527, paired_dir=Path("/d"), heat_library=Path("/h.h5"), weather_hdf=Path("/w.h5"),
         reference_year=2009, python=PY,
     )
     assert [stage for stage, _ in paired] == ["prepare_allocation", "prepare_heat_profiles", "prepare_pv_profiles"]
     assert paired[2][1][-2:] == ["--reference-year", "2009"]
     aligned = commands.aligned_preparation_commands(
-        provider="uzw", alignment_dir=Path("/a"), population=Path("/p.json"), uzw_grids_dir=Path("/u"),
+        provider="dso_b", alignment_dir=Path("/a"), population=Path("/p.json"), dso_b_grids_dir=Path("/u"),
         pylovo_version_id="1", scenario_config=SC, profile_seed=1, paired_dir=Path("/d"), weather_hdf=Path("/w.h5"),
         heat_sources=Path("/d/heat_sources/tag"), heat_library=Path("/h.h5"), heat_profile_set_id="set",
         heat_workers=6, reference_year=2009, python=PY,
     )
     assert [stage for stage, _ in aligned] == ["allocation", "weather", "heat_regeneration", "heat_readiness_sources",
                                               "heat_library", "heat_readiness_library", "pv_library"]
-    assert aligned[0][1][-2:] == ["--uzw-grids-dir", "/u"]
+    assert aligned[0][1][-2:] == ["--dso-b-grids-dir", "/u"]
     heat = aligned[2][1]
     assert heat[heat.index("--scenario-config") + 1] == str(SC) and heat[heat.index("--workers") + 1] == "6"
     # One weather series per provider: the heat runs use the weather file the PV library and sizing use.
@@ -139,7 +139,7 @@ def test_preparation_commands():
     assert aligned[6][1][aligned[6][1].index("--weather-source-hdf") + 1] == "/w.h5"
     assert "--weather-year" not in aligned[1][1]  # PVGIS TMY
     year = commands.aligned_preparation_commands(
-        provider="swf", alignment_dir=Path("/a"), population=Path("/p.json"), uzw_grids_dir=None,
+        provider="dso_a", alignment_dir=Path("/a"), population=Path("/p.json"), dso_b_grids_dir=None,
         pylovo_version_id="1", scenario_config=SC, profile_seed=1, paired_dir=Path("/d"), weather_hdf=Path("/w.h5"),
         heat_sources=Path("/d/heat_sources/tag"), heat_library=Path("/h.h5"), heat_profile_set_id="set",
         heat_workers=6, reference_year=2009, weather_year=2016, python=PY,

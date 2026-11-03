@@ -1,4 +1,4 @@
-"""Expansion-cost rows for the real SWF and ÜZW grids.
+"""Expansion-cost rows for the real DSO A and DSO B grids.
 
 The rules are those of ``staged`` (rule set ``staged_2026``), with the grid topology of ``topology``
 and the bus voltages of Step 4.
@@ -42,7 +42,7 @@ CORRIDOR_LENGTH_RELATIVE_TOLERANCE = 0.05
 # Below this share of failed power-flow timesteps a real grid is costed from its converged
 # timesteps (lower bound); the analysis notebooks exclude grids at the same share.
 MAX_FAILED_SHARE = 0.01
-REAL_GRID_SOURCES = {"real_swf": "swf", "real_uzw": "uzw"}
+REAL_GRID_SOURCES = {"real_dso_a": "dso_a", "real_dso_b": "dso_b"}
 
 
 def _finite(value: Any, default: float | None = None) -> float | None:
@@ -106,7 +106,7 @@ def _cached_real_net(path: str, mtime_ns: int) -> pp.pandapowerNet:
 
 
 def load_real_net(source_file: Path) -> pp.pandapowerNet:
-    """The stored real grid (SWF Excel workbook or ÜZW pandapower JSON), cached per file version.
+    """The stored real grid (DSO A Excel workbook or DSO B pandapower JSON), cached per file version.
 
     The returned network is shared between callers and must not be modified.
     """
@@ -437,19 +437,19 @@ def _corridor_row(
 
 
 def _station_rating(run: dict[str, Any], lv_id: str) -> tuple[float, float] | None:
-    """Rated kVA and P100 loading of one real grid, or None for the ÜZW area without a rating.
+    """Rated kVA and P100 loading of one real grid, or None for the DSO B area without a rating.
 
     Raises:
-        ValueError: a grid other than an unrated ÜZW area lacks its rating or P100 loading.
+        ValueError: a grid other than an unrated DSO B area lacks its rating or P100 loading.
     """
     rated_kva = (_finite(run["transformer_s_rated_mva"]) or 0.0) * 1000.0
     loading_percent = _finite(run["trafo_loading_max_time_percent"])
     if rated_kva <= 0 or loading_percent is None:
-        if run["source"] == "uzw" and rated_kva <= 0:
-            # One ÜZW station (area 113) is delivered without a rating: its
+        if run["source"] == "dso_b" and rated_kva <= 0:
+            # A real area may be delivered without a rating: its
             # cables are costed, its transformer is not.
             print(
-                f"Warning: real uzw grid {lv_id} has no transformer rating; "
+                f"Warning: real dso_b grid {lv_id} has no transformer rating; "
                 "transformer loading and cost are omitted."
             )
             return None
@@ -525,8 +525,8 @@ def _pylovo_version(args, runs: pd.DataFrame) -> str | None:
 
 
 def _real_grid_label(run: dict[str, Any], lv_id: str) -> str:
-    if run["source"] == "uzw":
-        return f"ÜZW area-{str(lv_id).zfill(4)}"
+    if run["source"] == "dso_b":
+        return f"DSO B area-{str(lv_id).zfill(4)}"
     return f"{str(run['source']).upper()} LV_{str(lv_id).zfill(3)}"
 
 

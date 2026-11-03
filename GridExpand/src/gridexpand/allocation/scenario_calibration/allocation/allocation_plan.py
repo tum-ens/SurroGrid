@@ -1,4 +1,4 @@
-"""Scenario allocation plan outputs for SWF 2045 calibration audits."""
+"""Scenario allocation plan outputs for DSO A 2045 calibration audits."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ def _build_bus_plan(
 ) -> pd.DataFrame:
     """Create the electrical-bus handover table for real-grid scenario allocation.
 
-    The building and street tables are useful for audits, but the real SWF
+    The building and street tables are useful for audits, but the real DSO A
     pandapower model needs loads at electrical buses. This table keeps the
-    calibrated scenario quantities at the original SWF bus while retaining the
+    calibrated scenario quantities at the original DSO A bus while retaining the
     matched physical building id for transparent comparison.
     """
     matched = (
@@ -70,7 +70,7 @@ def _build_bus_plan(
     ].copy()
     if not hh.empty:
         hh["hh_kwh_num"] = pd.to_numeric(
-            hh["swf_annual_demand_kwh"], errors="coerce"
+            hh["dso_a_annual_demand_kwh"], errors="coerce"
         ).fillna(0.0)
         hh_summary = (
             hh.groupby(["lv_id", "bus", "building_match_id"], dropna=False)
@@ -89,12 +89,12 @@ def _build_bus_plan(
     ghd = demand_assets[demand_assets["asset_type"].eq("GHD")].copy()
     if not ghd.empty:
         ghd["ghd_kwh_num"] = pd.to_numeric(
-            ghd["swf_annual_demand_kwh"], errors="coerce"
+            ghd["dso_a_annual_demand_kwh"], errors="coerce"
         ).fillna(0.0)
         ghd_summary = (
             ghd.groupby(["lv_id", "bus", "building_match_id"], dropna=False)
             .agg(
-                swf_ghd_rows=("asset_id", "count"),
+                dso_a_ghd_rows=("asset_id", "count"),
                 calibrated_annual_ghd_kwh=("ghd_kwh_num", "sum"),
             )
             .reset_index()
@@ -237,7 +237,7 @@ def _build_building_plan(
     ].copy()
     if not hh.empty:
         hh["hh_kwh_num"] = pd.to_numeric(
-            hh["swf_annual_demand_kwh"], errors="coerce"
+            hh["dso_a_annual_demand_kwh"], errors="coerce"
         ).fillna(0.0)
         hh_summary = (
             hh.groupby(["lv_id", "building_match_id"], dropna=False)
@@ -316,21 +316,21 @@ def _building_ghd_summary(
 
     matched = matches[matches["matched"]].dropna(subset=["building_match_id"]).copy()
     ghd = matched[matched["asset_type"].eq("GHD")].copy()
-    ghd["swf_ghd_annual_kwh_num"] = pd.to_numeric(
-        ghd["swf_annual_demand_kwh"], errors="coerce"
+    ghd["dso_a_ghd_annual_kwh_num"] = pd.to_numeric(
+        ghd["dso_a_annual_demand_kwh"], errors="coerce"
     ).fillna(0.0)
     if not ghd.empty:
         ghd_by_building = (
             ghd.groupby(["lv_id", "building_match_id"], dropna=False)
             .agg(
-                swf_ghd_rows=("asset_id", "count"),
-                swf_ghd_annual_kwh=("swf_ghd_annual_kwh_num", "sum"),
+                dso_a_ghd_rows=("asset_id", "count"),
+                dso_a_ghd_annual_kwh=("dso_a_ghd_annual_kwh_num", "sum"),
             )
             .reset_index()
         )
     else:
         ghd_by_building = pd.DataFrame(
-            columns=["lv_id", "building_match_id", "swf_ghd_rows", "swf_ghd_annual_kwh"]
+            columns=["lv_id", "building_match_id", "dso_a_ghd_rows", "dso_a_ghd_annual_kwh"]
         )
 
     direct_building_lv = (
@@ -363,14 +363,14 @@ def _building_ghd_summary(
         suffixes=("_calibration", "_direct"),
     )
 
-    for column in ["swf_ghd_rows", "swf_ghd_annual_kwh"]:
+    for column in ["dso_a_ghd_rows", "dso_a_ghd_annual_kwh"]:
         direct_column = f"{column}_direct"
         calibration[column] = pd.to_numeric(
             calibration.get(direct_column), errors="coerce"
         ).fillna(0.0)
 
-    calibration["calibrated_annual_ghd_kwh"] = calibration["swf_ghd_annual_kwh"]
-    direct_mask = calibration["swf_ghd_rows"].gt(0)
+    calibration["calibrated_annual_ghd_kwh"] = calibration["dso_a_ghd_annual_kwh"]
+    direct_mask = calibration["dso_a_ghd_rows"].gt(0)
     calibration["excluded_default_annual_ghd_kwh"] = np.where(
         direct_mask,
         0.0,
@@ -384,8 +384,8 @@ def _building_ghd_summary(
             "lv_id",
             "building_match_id",
             "ghd_calibration_class",
-            "swf_ghd_rows",
-            "swf_ghd_annual_kwh",
+            "dso_a_ghd_rows",
+            "dso_a_ghd_annual_kwh",
             "synthetic_default_annual_ghd_kwh",
             "calibrated_annual_ghd_kwh",
             "excluded_default_annual_ghd_kwh",

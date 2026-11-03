@@ -1,4 +1,4 @@
-"""Grid subsets of aligned (SWF + ÜZW) paired runs."""
+"""Grid subsets of aligned (DSO A + DSO B) paired runs."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ import pandas as pd
 
 
 def real_grid_number(provider: str, name: str) -> int:
-    """Real grid id of a pylovo cohort name (ÜZW ``…:area-12``, SWF ``LV_12__…``)."""
-    number = name.split(":")[-1] if provider == "uzw" else name.split("__")[0]
+    """Real grid id of a pylovo cohort name (DSO B ``…:area-12``, DSO A ``LV_12__…``)."""
+    number = name.split(":")[-1] if provider == "dso_b" else name.split("__")[0]
     return int(number.removeprefix("area-").removeprefix("LV_"))
 
 
@@ -22,6 +22,7 @@ def select_grid_subset(
     provider: str,
     paired_dir: Path,
     grid_subset: dict[str, Any],
+    bundle_name: str | None = None,
 ) -> dict[str, Any]:
     """Pick whole overlap components so real and synthetic keep the same buildings.
 
@@ -30,14 +31,15 @@ def select_grid_subset(
     provider's real-grid count stays at or below the requested number;
     ``islands`` keeps only one-real-one-synthetic components (identical building
     sets, directly comparable grid by grid), all of them unless a number is set.
-    Needs the prepared dataset (``paired_registered_synthetic_grids.csv``).
+    Needs the prepared dataset (``paired_registered_synthetic_grids.csv``). ``bundle_name``
+    is the provider's name inside the comparison JSON (default: ``provider``).
 
     Returns:
         ``{seed, method, components, real_<provider>: [...], synthetic: [...]}``;
         the grid lists are the paired runner's ``--job-subset``.
     """
     document = json.loads(Path(population).read_text(encoding="utf-8"))
-    components = list(document["metric_cohort"][provider]["successful_components"])
+    components = list(document["metric_cohort"][bundle_name or provider]["successful_components"])
     if grid_subset["method"] == "islands":
         components = [c for c in components if len(c["real"]) == 1 and len(c["synthetic"]) == 1]
     random.Random(grid_subset["seed"]).shuffle(components)

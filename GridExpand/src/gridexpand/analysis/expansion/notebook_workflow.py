@@ -24,13 +24,13 @@ from gridexpand.analysis.powerflow.comparison_data import (
 from gridexpand.analysis.powerflow.raw import transformer_import_distribution_db, voltage_deviation_summary_db
 
 
-PROVIDER_LABELS = {"swf": "SWF", "uzw": "ÜZW"}
-REAL_GROUP_SOURCES = {"Real SWF": "swf", "Real ÜZW": "uzw"}
+PROVIDER_LABELS = {"dso_a": "DSO A", "dso_b": "DSO B"}
+REAL_GROUP_SOURCES = {"Real DSO A": "dso_a", "Real DSO B": "dso_b"}
 NETWORK_ORDER = ("Synthetic", "Real")
 
 
 def provider_group_label(provider: str, network: str) -> str:
-    """Return the four-group label, e.g. ``Real ÜZW`` or ``Synthetic SWF``."""
+    """Return the four-group label, e.g. ``Real DSO B`` or ``Synthetic DSO A``."""
     kind = "Real" if network == "real" else "Synthetic"
     return f"{kind} {PROVIDER_LABELS[provider]}"
 
@@ -45,7 +45,7 @@ def group_network(group: str) -> str:
 
 
 def group_provider(group: str) -> str | None:
-    """Provider label of a group (``SWF``/``ÜZW``); None for the SWF-only label ``Synthetic``."""
+    """Provider label of a group (``DSO A``/``DSO B``); None for the DSO A-only label ``Synthetic``."""
     parts = str(group).split(" ", 1)
     return parts[1] if len(parts) == 2 else None
 
@@ -62,7 +62,7 @@ def _default_specs_by_source(
 ) -> Mapping[str, Mapping[str, Mapping[str, object]]]:
     if specs_by_source is not None:
         return specs_by_source
-    return {"Synthetic": synthetic_specs or {}, "Real SWF": real_specs or {}}
+    return {"Synthetic": synthetic_specs or {}, "Real DSO A": real_specs or {}}
 
 
 def synthetic_grid_keys(frame: pd.DataFrame) -> pd.Series:
@@ -405,7 +405,7 @@ _SYNTHETIC_FAILED_QUERY = text(
 )
 _REAL_FAILED_QUERY = text(
     """
-    SELECT CASE WHEN rgc.source = 'uzw' THEN CONCAT('ÜZW area-', LPAD(rgc.lv_id, 4, '0'))
+    SELECT CASE WHEN rgc.source = 'dso_b' THEN CONCAT('DSO B area-', LPAD(rgc.lv_id, 4, '0'))
                 ELSE CONCAT(UPPER(rgc.source), ' LV_', LPAD(rgc.lv_id, 3, '0'))
            END AS grid,
            rgc.lv_id AS grid_key,
@@ -700,15 +700,15 @@ def scenario_powerflow_specs(
 ) -> dict[str, dict[str, dict[str, str]]]:
     """Derive all compact-summary run names from one scenario prefix.
 
-    Without ``providers`` this returns the SWF-only groups ``Synthetic`` and
-    ``Real SWF``. With providers it returns ``Real <P>``/``Synthetic <P>`` per
+    Without ``providers`` this returns the DSO A-only groups ``Synthetic`` and
+    ``Real DSO A``. With providers it returns ``Real <P>``/``Synthetic <P>`` per
     provider for aligned run names ``{run_id}_{provider}_{network}_{case}``.
     """
     labels = dict(stage_labels or DEFAULT_STAGE_LABELS)
     if providers is None:
         return {
             "Synthetic": _case_specs(f"{scenario_prefix}_synthetic", labels),
-            "Real SWF": _case_specs(f"{scenario_prefix}_real_swf", labels),
+            "Real DSO A": _case_specs(f"{scenario_prefix}_real_dso_a", labels),
         }
     specs = {}
     for provider in providers:
@@ -994,10 +994,10 @@ def prepare_expansion_analysis(
     than left to a helper a reader must remember to invoke. Pass
     ``enforce_provenance=False`` only to inspect a knowingly mixed selection.
 
-    Without ``providers`` the SWF-only groups ``Synthetic``/``Real SWF`` of
-    ``ags`` are prepared. With ``providers=("swf", "uzw")`` an aligned run is
-    prepared as four groups (``Real SWF``, ``Synthetic SWF``, ``Real ÜZW``,
-    ``Synthetic ÜZW``); provider scope then comes from the run names, and
+    Without ``providers`` the DSO A-only groups ``Synthetic``/``Real DSO A`` of
+    ``ags`` are prepared. With ``providers=("dso_a", "dso_b")`` an aligned run is
+    prepared as four groups (``Real DSO A``, ``Synthetic DSO A``, ``Real DSO B``,
+    ``Synthetic DSO B``); provider scope then comes from the run names, and
     ``ags``/``real_plz`` are optional extra filters. Pass
     ``specs_by_source=context["specs_by_source"]`` to the loaders.
     """
@@ -1079,7 +1079,7 @@ def prepare_expansion_analysis(
         "analysis_keys_by_source": analysis_keys_by_source,
         "specs_by_source": specs_by_source,
         "synthetic_specs": specs_by_source.get("Synthetic"),
-        "real_specs": specs_by_source.get("Real SWF"),
+        "real_specs": specs_by_source.get("Real DSO A"),
         "real_plz": real_plz,
         "powerflow_status": powerflow_status,
         "publication_gate": publication_gate,
@@ -1131,7 +1131,7 @@ def load_cable_loading_decomposition(
     )
     real_query = text(
         """
-        SELECT CASE WHEN rgc.source = 'uzw' THEN CONCAT('ÜZW area-', LPAD(rgc.lv_id, 4, '0'))
+        SELECT CASE WHEN rgc.source = 'dso_b' THEN CONCAT('DSO B area-', LPAD(rgc.lv_id, 4, '0'))
                     ELSE CONCAT(UPPER(rgc.source), ' LV_', LPAD(rgc.lv_id, 3, '0'))
                END AS grid,
                rgc.lv_id,

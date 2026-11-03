@@ -1,4 +1,4 @@
-"""Run compact pre-expansion power-flow summaries for real SWF LV grids.
+"""Run compact pre-expansion power-flow summaries for real DSO A LV grids.
 
 The demand allocation intentionally mirrors the synthetic electric-only baseline:
 one real DSO load row is treated as one residential household, assigned a
@@ -25,7 +25,7 @@ import pandapower as pp
 import pandapower.topology as pp_top
 from dotenv import load_dotenv
 
-from gridexpand.allocation.scenario_calibration.profiles.real_swf_electricity_profiles import (
+from gridexpand.allocation.scenario_calibration.profiles.dso_a_electricity_profiles import (
     DEFAULT_MEASURED_PROFILE_BAND_PCT,
     DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES,
     MEASURED_PROFILE_SELECTION_CHOICES,
@@ -49,7 +49,7 @@ ANNUAL_DEMAND_MODE_MEASURED = "measured"
 ANNUAL_DEMAND_MODE_CHOICES = (ANNUAL_DEMAND_MODE_SYNTHETIC, ANNUAL_DEMAND_MODE_MEASURED)
 MIN_HH_ANNUAL_DEMAND_KWH = 500.0
 ASSUMPTION_TEXT = (
-    "Real SWF load rows are filtered to active low-voltage household loads "
+    "Real DSO A load rows are filtered to active low-voltage household loads "
     "with type=HH, names matching NS_Last or NS_ErLast, and parsed annual demand "
     f"of at least {MIN_HH_ANNUAL_DEMAND_KWH:.0f} kWh/a where annual demand metadata "
     "is available. HH rows on buses that pandapower marks as unsupplied are "
@@ -149,7 +149,7 @@ def _add_output_data_daylight_saving_shift(df_ts: pd.DataFrame) -> pd.DataFrame:
 
 
 def _parse_annual_demand_kwh(load: pd.DataFrame) -> pd.Series:
-    """Parse yearly measured HH demand from SWF load descriptions."""
+    """Parse yearly measured HH demand from DSO A load descriptions."""
     if "description" not in load.columns:
         return pd.Series(np.nan, index=load.index, dtype=float)
     values = []
@@ -200,7 +200,7 @@ def _sum_demand_list(value: Any) -> float:
 
 
 def _apply_measured_annual_demands(pseudo_buildings: pd.DataFrame) -> pd.Series:
-    measured = pd.to_numeric(pseudo_buildings["swf_annual_demand_kwh"], errors="coerce")
+    measured = pd.to_numeric(pseudo_buildings["dso_a_annual_demand_kwh"], errors="coerce")
     has_measured = measured.notna()
     pseudo_buildings.loc[has_measured, "demand_tot_list"] = measured.loc[has_measured].map(lambda value: [float(value)])
     return has_measured
@@ -287,7 +287,7 @@ def _build_real_electric_demand(
     pseudo_buildings = pd.DataFrame(
         {
             "bus": profile_ids,
-            "objectid": [f"swf_profile_{int(profile_id)}" for profile_id in profile_ids],
+            "objectid": [f"dso_a_profile_{int(profile_id)}" for profile_id in profile_ids],
             "real_bus": real_buses,
             "source_load_index": load.index.to_numpy(),
             "households": 1,
@@ -298,10 +298,10 @@ def _build_real_electric_demand(
             "source_building_type": "SFH",
             "floor_area": np.nan,
             "effective_floor_area_m2": 1.0,
-            "component_id": [f"swf_profile_{int(profile_id)}::residential" for profile_id in profile_ids],
+            "component_id": [f"dso_a_profile_{int(profile_id)}::residential" for profile_id in profile_ids],
             "component_category": "Residential",
             "included_in_lv": True,
-            "swf_annual_demand_kwh": pd.to_numeric(load["annual_demand_kwh"], errors="coerce").to_numpy(),
+            "dso_a_annual_demand_kwh": pd.to_numeric(load["annual_demand_kwh"], errors="coerce").to_numpy(),
         }
     )
 
@@ -342,11 +342,11 @@ def _build_real_electric_demand(
             "real_bus": real_buses,
             "source_load_index": pseudo_buildings["source_load_index"].to_numpy(),
             "occupants": pseudo_buildings["occupants"].to_numpy(),
-            "swf_annual_demand_kwh": pseudo_buildings["swf_annual_demand_kwh"].to_numpy(),
+            "dso_a_annual_demand_kwh": pseudo_buildings["dso_a_annual_demand_kwh"].to_numpy(),
             "synthetic_sampled_annual_kwh": synthetic_profile_annual_kwh.to_numpy(),
             "profile_annual_demand_kwh": pseudo_buildings["demand_tot_list"].map(_sum_demand_list).to_numpy(),
             "generated_profile_energy_kwh": [generated_energy_by_profile.get(int(profile_id), float("nan")) for profile_id in profile_ids],
-            "annual_demand_source": np.where(measured_mask.to_numpy(), "swf_annual_kwh", "synthetic_sample"),
+            "annual_demand_source": np.where(measured_mask.to_numpy(), "dso_a_annual_kwh", "synthetic_sample"),
         }
     )
     if not selection_audit.empty:
@@ -454,7 +454,7 @@ def _prepare_real_grid(
 
 def _grid_ref(row: dict[str, Any]) -> dict[str, Any]:
     return {
-        "source": str(row.get("source", "swf")),
+        "source": str(row.get("source", "dso_a")),
         "plz": int(row["plz"]),
         "lv_id": str(row["lv_id"]),
         "variant": row.get("variant"),
@@ -510,11 +510,11 @@ def run_one(
     profile_selection_summary = _profile_selection_summary(demand_audit)
     demand_audit_totals = {
         "annual_demand_mode": annual_demand_mode,
-        "swf_measured_annual_kwh": float(pd.to_numeric(demand_audit["swf_annual_demand_kwh"], errors="coerce").sum()),
+        "dso_a_measured_annual_kwh": float(pd.to_numeric(demand_audit["dso_a_annual_demand_kwh"], errors="coerce").sum()),
         "synthetic_sampled_annual_kwh": float(pd.to_numeric(demand_audit["synthetic_sampled_annual_kwh"], errors="coerce").sum()),
         "profile_annual_demand_kwh": float(pd.to_numeric(demand_audit["profile_annual_demand_kwh"], errors="coerce").sum()),
         "generated_profile_energy_kwh": float(pd.to_numeric(demand_audit["generated_profile_energy_kwh"], errors="coerce").sum()),
-        "swf_annual_demand_rows": int(pd.to_numeric(demand_audit["swf_annual_demand_kwh"], errors="coerce").notna().sum()),
+        "dso_a_annual_demand_rows": int(pd.to_numeric(demand_audit["dso_a_annual_demand_kwh"], errors="coerce").notna().sum()),
         "measured_profile_selection": measured_profile_selection,
         "measured_profile_band_pct": float(measured_profile_band_pct),
         "measured_profile_min_candidates": int(measured_profile_min_candidates),
@@ -575,7 +575,7 @@ def run_one(
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Run compact SWF real-grid power-flow summaries.")
+    parser = argparse.ArgumentParser(description="Run compact DSO A real-grid power-flow summaries.")
     parser.add_argument("--plz", type=int, required=True)
     parser.add_argument("--grid-data-path", type=Path, default=None)
     parser.add_argument("--limit", type=int, default=None)
@@ -595,7 +595,7 @@ def main(argv: list[str] | None = None) -> None:
         default=ANNUAL_DEMAND_MODE_SYNTHETIC,
         help=(
             "How to set annual HH profile energy. 'synthetic' samples annual demand from the synthetic "
-            "household-size distribution. 'measured' uses parsed SWF 2022 kWh values where available "
+            "household-size distribution. 'measured' uses parsed DSO A 2022 kWh values where available "
             "and falls back to the synthetic sample for rows without annual metadata."
         ),
     )
@@ -647,10 +647,10 @@ def main(argv: list[str] | None = None) -> None:
         rows = [row for row in rows if str(row["source_file"]) not in existing]
         print(f"Skipping {before - len(rows)} existing real-grid summary job(s).", flush=True)
     if not rows:
-        raise ValueError("No SWF real-grid rows matched the requested selection or all selected grids already exist.")
+        raise ValueError("No DSO A real-grid rows matched the requested selection or all selected grids already exist.")
 
     print(
-        f"Running {len(rows)} SWF real-grid powerflow summary job(s) "
+        f"Running {len(rows)} DSO A real-grid powerflow summary job(s) "
         f"from {root} with {args.workers} worker(s).",
         flush=True,
     )

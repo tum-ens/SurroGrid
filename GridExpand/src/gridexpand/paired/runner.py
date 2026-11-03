@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the publication-oriented paired SWF scenario on both grid models.
+"""Run the publication-oriented paired DSO A scenario on both grid models.
 
 The runner uses one stable scenario-unit profile contract for real and
 synthetic targets. TSAM methodology comes from the scenario YAML. A canonical
@@ -98,7 +98,7 @@ def _load_jobs(
     paired_dir: Path,
     target: str,
     target_grid_id: int | None,
-    provider: str = "swf",
+    provider: str = "dso_a",
 ) -> list[dict[str, Any]]:
     jobs: list[dict[str, Any]] = []
     for adapter in adapters_for_scope(target, provider):
@@ -496,8 +496,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--target", choices=TARGET_CHOICES, default="both")
     parser.add_argument(
         "--provider",
-        choices=("swf", "uzw"),
-        default="swf",
+        choices=("dso_a", "dso_b"),
+        default="dso_a",
         help="DSO whose real grids 'both' pairs with the synthetic grids.",
     )
     parser.add_argument(
@@ -535,7 +535,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Materialize paired demand and run only pre power flow; skip URBS and all post cases.",
     )
-    parser.add_argument("--run-name-prefix", default="paired_swf_2045_full_local")
+    parser.add_argument("--run-name-prefix", default="paired_dso_a_2045_full_local")
     parser.add_argument(
         "--profile-seed",
         type=int,

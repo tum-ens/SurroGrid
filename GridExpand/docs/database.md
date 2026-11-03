@@ -31,6 +31,7 @@ in order and recorded in `surrogrid.schema_migration`, plus the re-runnable
 | `0005_powerflow_asset.sql` | adds `powerflow_asset` (building assets simulated by a power-flow run) |
 | `0006_station_voltage.sql` | adds `lv_busbar_vm_pu` and `tap_steps` (station voltage of Step 4) to `powerflow_summary` and `real_powerflow_summary`; older rows stay NULL |
 | `0007_staged_expansion.sql` | staged expansion rules: `rule_set`, the `staged_2026` parameters and `parameter_provenance` in `expansion_cost_assumption` (rows `de_lv_staged_2026` and five sensitivities); measure and cost-breakdown columns of the line and transformer results; table `expansion_grid_result` |
+| `0008_provider_names.sql` | anonymised provider names: `real_grid_case.source` `dso_a`/`dso_b`, `expansion_analysis_run.data_source` `Real DSO A`/`Real DSO B`, `demand_component_audit.matched_dso_asset_count` |
 | `views.sql` | `grid_building_bus`, `grid_building_component`, the two QGIS materialized views |
 
 0002–0004 only change databases created by the pre-migration code; on a
@@ -215,7 +216,7 @@ and the expansion `critical_ts` columns.
   and `de_lv_heuristic_2026` of the retired rule set, kept for the analyses written with it. See
   [expansion_costs.md](expansion_costs.md).
 - `expansion_analysis_run`: one materialization (`analysis_key` unique,
-  `run_name`, `stage`, `data_source` Synthetic / Real SWF / Real ÜZW).
+  `run_name`, `stage`, `data_source` Synthetic / Real DSO A / Real DSO B).
 - `expansion_line_result`, `expansion_transformer_result`: per visible pylovo
   line / transformer of each synthetic power-flow run: peak loading, required
   parallel cables or transformer size, estimated cost, critical time step.
