@@ -15,6 +15,6 @@ authors:
     affiliation: "Technical University of Munich"
 title: "SurroGrid"
 type: software
-version: 1.0.0
-date-released: 2025-12-15
-url: "https://gitlab.lrz.de/tum-ens/SurroGrid"
+version: 2.0.0
+date-released: 2026-11-03
+url: "https://github.com/tum-ens/SurroGrid"

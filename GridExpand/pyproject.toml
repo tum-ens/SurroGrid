@@ -1,6 +1,6 @@
 [project]
 name = "gridexpand"
-version = "0.1.0"
+version = "2.0.0"
 description = "GridExpand: LV grid sampling, demand allocation, urbs optimization, power flow and grid-expansion analysis."
 readme = "README.md"
 license = { file = "LICENSE" }
