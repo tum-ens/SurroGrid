@@ -1,0 +1,46 @@
+# Tailored synthetic grids of the larger reference dataset (ÜZW only) in the internal paired study, weather year 2016.
+# pylovo v063 = the tailored configuration of the paper's Table 5: real station positions and ratings, cabinet house
+# connections every 75 m with shared house cables for neighbours within 25 m, standard NAYY 4x150 laid in parallel,
+# cable utilization 0.32, split 0.09 kA, prefix 50 m (AI/pylovo/uzw_tailoring_2026-10-12, README "Update 4").
+# Synthetic side only: the reference side equals run joint_2045_internal_2k_a5 (same buildings, same electrification
+# assignment and profiles, which do not depend on the pylovo version; checked after preparation). Expansion
+# materialization is off in the run (its postprocess always expects both networks); the synthetic groups are
+# materialized afterwards with AI/SurroGrid/GridExpand/paired-rerun-2026-10-13/scripts/materialize_synthetic.py.
+# Plan and estimate: AI/SurroGrid/GridExpand/paired-rerun-2026-10-13/TAILORED_ESTIMATE.md.
+run:
+  id: joint_2045_internal_2k_tailored_v063
+  scenario: ../scenarios/joint_2045_internal_2k.yaml
+  pipeline: paired_aligned
+
+resources:
+  pylovo_version_id: v063
+  alignment_dir: ~/data/alignment
+  # Frozen copy of pylovo validations_new/metrics/vv063/comparison.json (larger dataset only)
+  # SHA-256: 1a912358bbeaf03daafcc425253078616ba3a5bb4f83d1ee3e99eab68260b5aa
+  population: ~/data/joint_paired_v063/pylovo-v063-comparison.json
+  uzw_grids_dir: ~/data/uzw-grids-87c5e86c
+  weather_year: 2016
+  providers:
+    uzw:
+      paired_dataset_id: joint_2045_internal_2k_tailored_v063_uzw
+      weather_source_hdf: weather_joint_internal_uzw_tailored_v063_2016.h5
+      workers: 6 # one provider only: 6 jobs as in the a5 run in total (about 11 GB RAM free)
+  target_network: synthetic
+
+execution:
+  optimizer: pypsa
+  powerflow_grid_scope: full
+  model_cases:
+    - post-inflex-heuristic
+    - post-hems-heuristic
+  workers: 2
+  step3_cpus: 40
+  step3_cluster_concurrency: 1
+  step4_cpus: 2
+  heat_workers: 8
+  powerflow_max_timesteps: null
+  profile_seed: 481527
+  cleanup_intermediates: true
+  resume: false
+  parallel_providers: false
+  materialize_expansion: false
