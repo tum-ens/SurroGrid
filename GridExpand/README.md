@@ -138,7 +138,7 @@ GridExpand/
                             sampling/, allocation/, optimization/, powerflow/, analysis/, scenario/, paired/, api/
   config/                   scenarios/ and runs/ YAMLs
   data/                     static inputs: sampling/, statistics/
-  notebooks/                sampling/, analysis/, archive/ (historical)
+  notebooks/                sampling/, analysis/
   docs/                     documentation (index: docs/README.md)
   docker/                   Dockerfile and compose.yaml of the image (CLI + API)
   scripts/                  hpc/ Slurm templates, migrate_local_layout.py
@@ -193,7 +193,6 @@ tests/analysis` (SQL parity), `GRIDEXPAND_API_TEST_DATABASE=<sandbox db> uv run 
 | [docs/database.md](docs/database.md) | `surrogrid` schema, migrations, maintenance |
 | [docs/expansion_costs.md](docs/expansion_costs.md) | reinforcement rules and cost assumptions |
 | [docs/api.md](docs/api.md) | HTTP API, its contract, container |
-| [docs/research/](docs/research/) | historical run notes and audits |
 
 ## Licences
 

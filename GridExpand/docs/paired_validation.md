@@ -82,5 +82,4 @@ diagnostics. Important options: `--paired-dataset-id`, `--pylovo-version-id` (mu
 `--allow-diagnostic-heat-fallback` (area-scaled heat profiles; never for publication runs).
 
 A single real grid for diagnosis: `uv run gridexpand run <run.yaml> --target-grid-id <id>` (own run
-sub-directory, no expansion analyses). Earlier regional audits and forensic notes of the Forchheim runs are in
-[research/](research/).
+sub-directory, no expansion analyses).
