@@ -1,14 +1,9 @@
-thesis.md
-swf_usage.md
-pylovo_paper.tex
-paper_draft_pylovo-validation/*
 __pycache__/
 *.py[cod]
 *.png
 !GridExpand/docs/img/*.png
 *.pdf
 *.svg
-paper
 
 # Folders of the pre-restructure GridExpand layout: runtime artifacts only, nothing tracked.
 # The package writes to GridExpand/work/ (ignored in GridExpand/.gitignore);

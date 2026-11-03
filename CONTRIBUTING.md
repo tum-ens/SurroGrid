@@ -15,12 +15,12 @@ SurroGrid is developed on GitHub: <https://github.com/tum-ens/SurroGrid>. This r
 ## Workflow
 
 1. Open (or pick) a GitHub issue that describes the problem.
-2. Branch from `develop` (`main` holds the released version): `feature-<issue>-<short-description>` or
+2. Branch from `dev` (`main` holds the released version): `feature-<issue>-<short-description>` or
    `hotfix-<issue>-<short-description>`.
 3. Commit small logical changes with imperative commit messages that reference the issue (`#42`).
 4. Run the tests and the linter (below), update the documentation, and record user-visible changes in
    [CHANGELOG.md](CHANGELOG.md).
-5. Open a pull request against `develop` (`Closes #<issue>` in the description) and ask for a review.
+5. Open a pull request against `dev` (`Closes #<issue>` in the description) and ask for a review.
 
 ## Development setup and checks (GridExpand)
 
