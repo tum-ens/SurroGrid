@@ -8,6 +8,7 @@ Entry point: `gridexpand powerflow` = `src/gridexpand/powerflow/run_pwrflw.py` (
 | module | content |
 |---|---|
 | `demands.py` | `reconstruct_demands`: pre, flexible and INFLEX post demand with reactive power |
+| `section14a.py` | Section 14a EnWG control of the INFLEX heat-pump and EV charging profiles (`--p14a`) |
 | `network.py` | load-bus normalization, relaxed limits, transformer handling, evaluation scopes (`full`, `backbone`) |
 | `engine.py` | `run_timeseries` (chunked, parallel), raw tables, `summarize_powerflow_matrices` |
 | `io.py` | `HDF_KEYS`, `ScenarioResultReader`, database and HDF5 sinks |
@@ -50,6 +51,7 @@ uv run gridexpand powerflow <inputfile_id> --storage db --pre-only --outputs sum
 | `--post-only` | off | only the post stage, summary output only; the pre stage comes from a separate `--pre-only` run (paired runs; the real-grid runner has the same flag) |
 | `--post-demand-mode` | `flexible` | `flexible` (optimized urbs import) or `inflex` (fixed heat, PV and EV charging; needs EV sessions, i.e. paired inputs) |
 | `--inflex-ev-charger-kw` | none | INFLEX only: cross-check of the charger rating of every vehicle |
+| `--p14a` | off | INFLEX only: Section 14a EnWG control of heat pumps and charge points (see below) |
 | `--expect-temporal-method` | none | reject a Step 3 result that does not record `full_year_no_tsam` / `shared_weather_tsam` |
 | `--summary-grid-scope` | `full` | `full` or `backbone` (terminal service lines removed, terminal voltages mapped one bus upstream) |
 | `--summary-nonconvergence` | `auto` | summary runs: `nan`/`auto` record failed timesteps and continue, `raise` aborts; raw runs always raise |
@@ -87,6 +89,18 @@ also write a battery-state audit `work/powerflow/output/<file stem>[.<run name>]
 (heat pump up to its fixed electric capacity times COP, residual on the auxiliary heater), fixed PV and EV charging
 from the session table, and the fixed battery under causal self-consumption control. After TSAM the initialization
 row is dropped (6 × 168 = 1,008 simulated hours); paired inputs are projected from scenario units onto buses.
+
+**Section 14a (`--p14a`, INFLEX only).** Rule-based grid-oriented control following BNetzA BK6-22-300, applied to the
+INFLEX heat and EV profiles before the battery control (Lee, 2026). Hours in which the uncontrolled load at the
+transformer (pre electricity + heat + EV − PV, converted with `PF_ELC` and `PF_HP`) exceeds the rating of the grid
+transformer are congested. Controllable devices are heat-pump systems of a bus (heat pump + auxiliary heater) and
+charge points above 4.2 kW; stationary batteries are not controlled, since they charge only from PV under INFLEX. In a
+congested hour every device gets the setpoint `cap − ratio · (cap − p_min)` with one common ratio, the smallest that
+clears the overload; `p_min` is 4.2 kW, or 0.4 × connection power for heat-pump systems above 11 kW. Outside congested
+hours the deferred energy is returned within the headroom below the rating, in proportion to the backlog. Deferred
+heat is carried as a heat backlog (with the internal thermal model this does not lower the room temperature); EV
+energy can only be returned within its session. What remains at the end of a session or of the horizon is printed
+as unserved energy.
 
 **Network.** Static pylovo loads are replaced by one zeroed load row per demand bus (duplicate demand buses are
 rejected); static generators, generators and storages are switched off; line, load and voltage limits are relaxed
