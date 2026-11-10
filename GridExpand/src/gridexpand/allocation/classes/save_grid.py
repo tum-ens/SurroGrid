@@ -93,6 +93,20 @@ class SaveFile:
             df_weather = None
         return df_buildings, df_region, df_weather
 
+    def get_building_surfaces(self) -> pd.DataFrame | None:
+        """Return the optional LoD2 surface sums per building (``raw_data/building_surfaces``) or None.
+
+        Columns: ``objectid``, ``wall_surface_area_m2``, ``roof_surface_area_m2`` and ``shared_wall_area_m2``
+        (WallSurface area on a heated neighbour's footprint). The TEASER LoD2 envelope reads them; a grid
+        without the key keeps the TABULA envelope. Written by ``scripts/lod2_building_surfaces.py``.
+        """
+        if self.storage == "db":
+            return None
+        try:
+            return pd.read_hdf(self.input_path, key="raw_data/building_surfaces")
+        except (FileNotFoundError, KeyError):
+            return None
+
     def get_building_components(self) -> pd.DataFrame:
         """Return the required mixed-capable component manifest."""
         if self.storage == "db":

@@ -683,6 +683,8 @@ class Grid:
                 residential, base_seed=self.profile_seed
             )
         elif self.settings["parallel"]:
+            teaser = self.settings["scenario_config"].heat.teaser
+            residential = self._with_building_surfaces(residential, teaser)
             print(
                 f"Generating heat demands for {len(residential)} building(s) "
                 f"with {sum(residential["households"])} flat(s)..."
@@ -698,9 +700,10 @@ class Grid:
                 (
                     subset.reset_index(drop=True),
                     df_elec_input.reindex(columns=column_subsets[index], fill_value=0.0),
-                    [np.array(df_wth_input[column]) for column in ("dni", "dhi", "temp_air")],
+                    heat.teaser_weather_arrays(df_wth_input, teaser),
                     self.plz,
                     self.profile_seed,
+                    teaser,
                 )
                 for index, subset in enumerate(building_subsets)
             ]
@@ -713,13 +716,16 @@ class Grid:
                 [result[1] for result in results], axis=1
             ).sort_index(axis=1, level=[0])
         else:
+            teaser = self.settings["scenario_config"].heat.teaser
+            residential = self._with_building_surfaces(residential, teaser)
             columns = [(bus, "electricity") for bus in residential["bus"].values]
             self.df_demand_heat_space, self.df_demand_heat_water = heat.generate_heat_demands(
                 residential,
                 df_elec_input.reindex(columns=columns, fill_value=0.0),
-                [np.array(df_wth_input[column]) for column in ("dni", "dhi", "temp_air")],
+                heat.teaser_weather_arrays(df_wth_input, teaser),
                 self.plz,
                 self.profile_seed,
+                teaser,
             )
         heat.require_heat_profiles(
             residential["bus"], self.df_demand_heat_space, self.df_demand_heat_water
@@ -799,6 +805,22 @@ class Grid:
         self.settings["scenario_assumptions"]["heat_scope"] = "residential_buildings"
         self.SF.update_timeframe_metadata(self.settings["scenario_assumptions"])
         print("Finished generating heat demands and building heat asset plan!")
+
+    def _with_building_surfaces(self, residential, teaser):
+        """Attach the stored LoD2 surface sums (``raw_data/building_surfaces``) for the TEASER LoD2 envelope."""
+        if teaser.envelope_source != "lod2":
+            return residential
+        surfaces = self.SF.get_building_surfaces()
+        if surfaces is None or surfaces.empty:
+            print("No LoD2 building surfaces stored; TEASER uses the TABULA envelope for every building.")
+            return residential
+        table = surfaces.assign(objectid=surfaces["objectid"].astype(str)).set_index("objectid")
+        keys = residential["objectid"].astype(str)
+        residential = residential.copy()
+        for column in heat.BUILDING_SURFACE_COLUMNS:
+            if column in table.columns:
+                residential[column] = keys.map(table[column]).to_numpy()
+        return residential
 
     def generate_mobility(self):
         mobility_source = self.settings.get("mobility_source", "emobpy")

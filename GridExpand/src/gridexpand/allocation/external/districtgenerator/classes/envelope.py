@@ -32,14 +32,20 @@ class Envelope:
         SFH: single family house; TH: terraced house; MFH: multifamily house; AP: apartment block.
     """
 
-    def __init__(self, prj, building_params, construction_type, physics, design_building_data, file_path):
+    def __init__(self, prj, building_params, construction_type, physics, design_building_data, file_path,
+                 options=None, usage_short=None):
         """
         Constructor of Envelope class.
+
+        GridExpand: ``options`` is a ``TeaserHeatConfig``; None keeps the upstream (legacy) behaviour.
+        ``usage_short`` overrides the TABULA type used for the element data (apartment blocks after 1978
+        use the MFH archetype).
 
         Returns
         -------
         None.
         """
+        self.options = options
 
         self.U = {}
         self.d = {}
@@ -60,11 +66,19 @@ class Envelope:
         self.physics = physics
         self.design_building_data = design_building_data
         self.retrofit = building_params["retrofit"]
-        self.usage_short = building_params["building"]
+        self.usage_short = usage_short or building_params["building"]
         self.file_path = file_path
+        self.building_params = building_params
         self.loadParams()
         self.loadComponentProperties(prj)
         self.loadAreas(prj)
+        # GridExpand: heating break of the 5R1C (heating_profile_5R1C.calc).
+        if options is None:
+            self.heating_off_days = (135, 259)
+            self.heating_limit_c = None
+        else:
+            self.heating_off_days = options.fixed_heating_off_days
+            self.heating_limit_c = options.heating_limit_c
 
     def loadParams(self):
         """
@@ -87,6 +101,8 @@ class Envelope:
         self.T_set_max = self.design_building_data["T_set_max"]
         self.T_set_max_night = self.design_building_data["T_set_max_night"]
         self.ventilationRate = self.design_building_data["ventilation_rate"]
+        if self.options is not None:
+            self.ventilationRate = self.options.air_change_per_h
         # self.T_bivalent = self.design_building_data["T_bivalent"]
         # self.T_heatlimit = self.design_building_data["T_heatlimit"]
 
@@ -420,6 +436,9 @@ class Envelope:
 
         self.A = {}  # in m2
         self.A["f"] = prj.buildings[self.id].net_leased_area
+        # GridExpand S6: ventilated volume = heated area x clear room height (TABULA 2.5 m).
+        if self.options is not None and self.options.ventilation_height_m is not None:
+            self.V = self.A["f"] * self.options.ventilation_height_m
 
         drct = ("south", "west", "north", "east")
         self.A["opaque"] = {}
@@ -463,6 +482,58 @@ class Envelope:
         self.A["window"]["floor"] = 0.0
 
         self.A["window"]["sum"] = sum(self.A["window"][d] for d in drct)
+
+        self.envelope_source = "tabula"
+        if self.options is not None and self.options.sfh_roof_fix:
+            self._fixTiltedRoof(prj.buildings[self.id], drct)
+        if self.options is not None and self.options.envelope_source == "lod2":
+            self._applyLod2Surfaces(drct)
+
+    def _fixTiltedRoof(self, bldg, drct):
+        """GridExpand S2: TEASER files tilted roofs (SFH) under their orientation in ``outer_area``.
+
+        Walls are the outer area of an orientation minus the rooftops of that orientation; the roof is the
+        sum of all rooftops. Flat roofs (orientation -1) leave the walls unchanged.
+        """
+        roofs = [element for zone in bldg.thermal_zones for element in zone.rooftops]
+        angle = {"south": 0.0, "west": 90.0, "north": 180.0, "east": 270.0}
+        for d in drct:
+            tilted = sum(r.area for r in roofs if r.orientation == angle[d])
+            self.A["opaque"][d] = self.A["opaque"][d] - tilted
+        self.A["opaque"]["roof"] = sum(r.area for r in roofs)
+        self.A["opaque"]["wall"] = sum(self.A["opaque"][d] for d in drct)
+        self.A["opaque"]["intWall"] = 1.5 * self.A["opaque"]["wall"]
+
+    def _applyLod2Surfaces(self, drct):
+        """GridExpand: replace the TABULA element areas by the building's LoD2 surfaces.
+
+        Inputs per building (already scaled to the residential share of a mixed building):
+        ``lod2_wall_m2`` (sum of WallSurface, shared walls removed if configured), ``lod2_roof_m2`` (sum of
+        RoofSurface) and ``lod2_ground_m2`` (footprint). Windows keep TEASER's TABULA ratio on the heated area,
+        or ``lod2_window_ratio`` x heated area; the opaque walls are the LoD2 walls minus the windows, split by
+        TEASER's wall orientation shares. Buildings without surfaces keep the TABULA envelope.
+        """
+        p = self.building_params
+        wall, roof, ground = (p.get(k) for k in ("lod2_wall_m2", "lod2_roof_m2", "lod2_ground_m2"))
+        if not all(v is not None and np.isfinite(v) and v > 0 for v in (wall, roof, ground)):
+            return
+        if self.options.lod2_window_ratio is not None:
+            target = self.options.lod2_window_ratio * self.A["f"]
+            scale = target / self.A["window"]["sum"] if self.A["window"]["sum"] > 0 else 0.0
+            for d in drct:
+                self.A["window"][d] = self.A["window"][d] * scale
+            self.A["window"]["sum"] = sum(self.A["window"][d] for d in drct)
+        opaque = max(float(wall) - self.A["window"]["sum"], 0.0)
+        teaser_walls = sum(self.A["opaque"][d] for d in drct)
+        for d in drct:
+            share = self.A["opaque"][d] / teaser_walls if teaser_walls > 0 else 0.25
+            self.A["opaque"][d] = opaque * share
+        self.A["opaque"]["wall"] = sum(self.A["opaque"][d] for d in drct)
+        self.A["opaque"]["roof"] = float(roof)
+        self.A["opaque"]["floor"] = float(ground)
+        self.A["opaque"]["ceiling"] = self.A["opaque"]["floor"]
+        self.A["opaque"]["intWall"] = 1.5 * self.A["opaque"]["wall"]
+        self.envelope_source = "lod2"
 
     def calcHeatLoad(self, site, method="design"):
         """
@@ -584,6 +655,12 @@ class Envelope:
         # ratio of window-frame
         # (DIN EN ISO 13790, section 11.4.5, page 73)
         self.F_F = 0
+        limit_shut_blinds = 100  # W/m²
+        if self.options is not None:
+            # GridExpand S3: TABULA shading (0.6) and frame share (0.3); blinds only if a threshold is set.
+            self.F_sh_gl = self.options.window_shading_factor
+            self.F_F = self.options.window_frame_fraction
+            limit_shut_blinds = self.options.blind_threshold_w_per_m2
 
         # thermal radiation transfer
         # [kW/(m²*K)] DIN EN ISO 13790, section 11.4.6, page 73
@@ -612,6 +689,9 @@ class Envelope:
         # ground p.44 ISO 13790
         # Heating period from October until May (important for T_i_appr)
         self.b_floor = (T_i_year - T_e_year) / (T_i_appr - T_e_mon)
+        if self.options is not None:
+            # GridExpand S4: temperature reduction factor of the ground floor (DIN V 4108-6, TABULA ~0.5).
+            self.b_floor = self.options.ground_floor_b
 
         self.b_tr = {"wall": np.ones(len(SunRad[0])),
                      "roof": np.ones(len(SunRad[0])),
@@ -633,8 +713,7 @@ class Envelope:
         self.I_sol["floor"] = np.zeros_like(self.I_sol["roof"])
         self.I_sol["window", "floor"] = np.zeros_like(self.I_sol["roof"])
 
-        limit_shut_blinds = 100  # W/m²
-        for t in range(len(SunRad[0])):
+        for t in range(len(SunRad[0]) if limit_shut_blinds is not None else 0):
             for drct3 in range(len(directions)):  # for all directions
                 if SunRad[drct3, t] > limit_shut_blinds:
                     self.I_sol["window", directions[drct3]][t] = 0.15 * SunRad[drct3, t].copy()

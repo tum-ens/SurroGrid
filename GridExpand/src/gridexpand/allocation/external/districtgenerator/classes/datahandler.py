@@ -36,11 +36,12 @@ class Datahandler:
         File path.
     """
 
-    def __init__(self, scenario, scenario_name = "example", zip_code="80939"): 
+    def __init__(self, scenario, scenario_name = "example", zip_code="80939", options=None):
         """
         Constructor of Datahandler class.
         - zip_code: zip code of buildings' location
         - scenario: data of every buildings in district as df
+        - options: GridExpand ``TeaserHeatConfig``; None keeps the upstream (legacy) behaviour
         Returns
         -------
         None.
@@ -52,6 +53,7 @@ class Datahandler:
         self.scenario = None
         self.design_building_data = {}
         self.physics = {}
+        self.options = options
 
         self.dataPath = config.DISTGEN_DATA_PATH
 
@@ -215,12 +217,19 @@ class Datahandler:
             with warnings.catch_warnings():
                 warnings.simplefilter(action='ignore', category=pd.errors.SettingWithCopyWarning)
                 if building["buildingFeatures"]["building"] not in ["SFH", "MFH", "TH", "AB"]: building["buildingFeatures"]["building"]="AB"
-                if building["buildingFeatures"]["building"] == "AB" and building["buildingFeatures"]["year"]>1978: building["buildingFeatures"]["year"]=1978
+                # TEASER has no apartment block after 1978. Upstream simulates such a block as a 1978
+                # block; GridExpand S5 uses the MFH archetype of its own class instead.
+                tabula_type = building["buildingFeatures"]["building"]
+                after_1978 = building["buildingFeatures"]["building"] == "AB" and building["buildingFeatures"]["year"]>1978
+                if after_1978 and self.options is not None and self.options.apartment_block_after_1978 == "multi_family_house":
+                    tabula_type = "MFH"
+                elif after_1978:
+                    building["buildingFeatures"]["year"]=1978
 
 
             # convert short names into designation needed for TEASER
             building_type = \
-                bldgs["buildings_long"][bldgs["buildings_short"].index(building["buildingFeatures"]["building"])]
+                bldgs["buildings_long"][bldgs["buildings_short"].index(tabula_type)]
             retrofit_level = \
                 bldgs["retrofit_long"][bldgs["retrofit_short"].index(building["buildingFeatures"]["retrofit"])]
 
@@ -245,7 +254,9 @@ class Datahandler:
                                             construction_type=retrofit_level,
                                             physics=self.physics,
                                             design_building_data=self.design_building_data,
-                                            file_path=self.dataPath)
+                                            file_path=self.dataPath,
+                                            options=self.options,
+                                            usage_short=tabula_type)
 
             # %% create user object
             # containing number occupants, electricity demand,...

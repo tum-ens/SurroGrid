@@ -259,6 +259,144 @@ class InternalHeatConfig:
         return cls(**values)
 
 
+_TEASER_LEGACY = {
+    "heated_area_ratio": 1.0,
+    "envelope_source": "tabula",
+    "subtract_shared_walls": False,
+    "lod2_window_ratio": None,
+    "sfh_roof_fix": False,
+    "solar_beam": "normal",
+    "window_shading_factor": 1.0,
+    "window_frame_fraction": 0.0,
+    "blind_threshold_w_per_m2": 100.0,
+    "ground_floor_b": 1.0,
+    "age_mapping": "band_end",
+    "apartment_block_after_1978": "cap_1978",
+    "air_change_per_h": 0.5,
+    "ventilation_height_m": None,
+    "heating_limit_c": None,
+    "fixed_heating_off_days": (135, 259),
+    "retrofit_share_before_1979": 0.0,
+    "retrofit_share_1979_1994": 0.0,
+    "consumption_factor": "none",
+}
+
+
+@dataclass(frozen=True)
+class TeaserHeatConfig:
+    """Assumptions of the TEASER/DistrictGenerator space-heat path (``space_heat_source: teaser``).
+
+    ``preset: corrected`` (the default) fixes the defects found in the 2026-11-10 review. ``preset: legacy``
+    reproduces the TEASER profiles of SurroGrid 2.0.0 (dev 1c671ac) bit for bit. Single options can be set on top
+    of either preset. The internal 1R1C model (``space_heat_source: internal``) does not read this block.
+
+    S1 ``heated_area_ratio`` (legacy 1.0): TEASER's ``net_leased_area`` = ratio x the residential gross floor
+    area of InfDB (footprint x ``floor_number``). TEASER builds every TABULA element area, the air volume and the
+    internal-mass areas from ``net_leased_area``, and TABULA's reference area A_C,ref is the conditioned net floor
+    area, about 1.0-1.1 x the living area (IWU 2015, App. B), so the ratio maps the InfDB gross area to the
+    heated living area. Default 0.55 = heated (occupied) living area / InfDB gross area, Bavaria-wide:
+    - InfDB gross residential area (pylovo.buildings_result v1, all of Bavaria): 1,152 Mio m2 for 6.39 M
+      households;
+    - living area 31.12.2022: 650.5 Mio m2 in residential buildings, 665.6 Mio m2 in all buildings
+      (Bayerisches Landesamt fuer Statistik 2023, Statistischer Bericht F2400C 202200, Tab. 3 and 4; StMWi
+      Bayern, Daten zur Raumbeobachtung, Tab. 5.5: 97.8 m2 per dwelling), i.e. 0.56-0.58 of the InfDB gross area;
+    - minus just over 4 % vacant dwellings (Zensus 2022) gives about 0.55.
+    A check on the 43,193 Bavarian buildings inside the Zensus 2022 100 m cells loaded in infdb-pylovo
+    (cell mean living area per dwelling x households) gives 0.58 (SFH 0.55, TH 0.55, MFH 0.62, AB 0.57).
+    Caveats: a Bavarian average, not per type; the 2022 stock is a Zensus 2011-based update; the two Bavarian
+    publications differ by about 2 % (97.8 vs 99.9 m2 per dwelling). The ratio is below the usual living /
+    gross floor area ratio of 0.7-0.8 (DIN 277) because InfDB counts floors from the full LoD2 height up to the
+    ridge at about 4 m per floor, so attics count as full storeys. An InfDB version with eaves-based floors
+    (``floor_source: eaves``) gives 0.75 x this gross area on 275 common buildings; for such a version the
+    ratio is about 0.73 and must be set explicitly.
+
+    LoD2 envelope (``envelope_source: lod2``, legacy ``tabula``): outer walls = sum of LoD2 WallSurface areas
+    (minus shared walls if ``subtract_shared_walls``) minus the window area, split by TEASER's orientation shares;
+    roof = sum of LoD2 RoofSurface areas; ground floor = footprint. Windows keep TEASER's TABULA window ratio on
+    the heated area, or ``lod2_window_ratio`` x heated area. Buildings without surfaces keep the TABULA envelope.
+
+    S2 ``sfh_roof_fix``: TEASER stores the tilted SFH roof under orientations 0/90; the legacy loader counted it as
+    wall and added a second roof of 1.2 x the ground floor. S3 ``solar_beam: horizontal`` passes GHI - DHI as the
+    beam irradiance on the horizontal that the Perez/Duffie-Beckman code expects (legacy: DNI); window shading
+    follows TABULA (shading 0.6, frame 0.3) instead of blinds closing above 100 W/m2 all year. S4
+    ``ground_floor_b``: temperature reduction factor of the ground floor. S5 ``age_mapping: stock_share`` draws the
+    TABULA class within the Zensus band by the IWU 2011 building counts (legacy: last year of the band) and
+    apartment blocks after 1978 use the MFH archetype of their class (TEASER has no AB after 1978; legacy: AB 1978).
+    S6 TABULA ventilation 0.4 1/h on the heated area x 2.5 m and a heating limit on the daily mean outdoor
+    temperature (12 degC, TABULA) instead of the fixed heating break on days 135-258. S7 ``retrofit_share_*`` and S8
+    ``consumption_factor: iwu`` are options, off by default.
+    """
+
+    preset: str = "corrected"
+    heated_area_ratio: float = 0.55
+    envelope_source: str = "lod2"
+    subtract_shared_walls: bool = True
+    lod2_window_ratio: float | None = None
+    sfh_roof_fix: bool = True
+    solar_beam: str = "horizontal"
+    window_shading_factor: float = 0.6
+    window_frame_fraction: float = 0.3
+    blind_threshold_w_per_m2: float | None = None
+    ground_floor_b: float = 0.5
+    age_mapping: str = "stock_share"
+    apartment_block_after_1978: str = "multi_family_house"
+    air_change_per_h: float = 0.4
+    ventilation_height_m: float | None = 2.5
+    heating_limit_c: float | None = 12.0
+    fixed_heating_off_days: tuple[int, int] | None = None
+    retrofit_share_before_1979: float = 0.0
+    retrofit_share_1979_1994: float = 0.0
+    consumption_factor: str = "none"
+
+    @classmethod
+    def legacy(cls) -> "TeaserHeatConfig":
+        return cls(preset="legacy", **_TEASER_LEGACY)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "TeaserHeatConfig":
+        raw = dict(_mapping(raw or {}, "asset_sizing.heat.teaser"))
+        fields = cls.__dataclass_fields__
+        _only(raw, set(fields), "asset_sizing.heat.teaser")
+        preset = str(raw.pop("preset", "corrected"))
+        if preset not in {"corrected", "legacy"}:
+            raise ValueError("asset_sizing.heat.teaser.preset must be corrected or legacy.")
+        base = cls.legacy() if preset == "legacy" else cls()
+        values = {**asdict(base), **raw, "preset": preset}
+        label = "asset_sizing.heat.teaser"
+        choices = {
+            "envelope_source": {"tabula", "lod2"},
+            "solar_beam": {"normal", "horizontal"},
+            "age_mapping": {"band_end", "stock_share"},
+            "apartment_block_after_1978": {"cap_1978", "multi_family_house"},
+            "consumption_factor": {"none", "iwu"},
+        }
+        for name, allowed in choices.items():
+            values[name] = str(values[name])
+            if values[name] not in allowed:
+                raise ValueError(f"{label}.{name} must be one of {sorted(allowed)}.")
+        for name in ("subtract_shared_walls", "sfh_roof_fix"):
+            if not isinstance(values[name], bool):
+                raise ValueError(f"{label}.{name} must be true or false.")
+        values["heated_area_ratio"] = _positive(values["heated_area_ratio"], f"{label}.heated_area_ratio")
+        if values["heated_area_ratio"] > 1:
+            raise ValueError(f"{label}.heated_area_ratio must be <= 1.")
+        for name in ("window_shading_factor", "window_frame_fraction", "ground_floor_b",
+                     "retrofit_share_before_1979", "retrofit_share_1979_1994"):
+            values[name] = _share(values[name], f"{label}.{name}")
+        values["air_change_per_h"] = _positive(values["air_change_per_h"], f"{label}.air_change_per_h", allow_zero=True)
+        for name in ("lod2_window_ratio", "blind_threshold_w_per_m2", "ventilation_height_m"):
+            if values[name] is not None:
+                values[name] = _positive(values[name], f"{label}.{name}")
+        if values["heating_limit_c"] is not None:
+            values["heating_limit_c"] = float(_number_or_none(values["heating_limit_c"], f"{label}.heating_limit_c"))
+        days = values["fixed_heating_off_days"]
+        if days is not None:
+            if not isinstance(days, (list, tuple)) or len(days) != 2 or not all(isinstance(d, int) for d in days):
+                raise ValueError(f"{label}.fixed_heating_off_days must be null or [first_day, end_day).")
+            values["fixed_heating_off_days"] = (int(days[0]), int(days[1]))
+        return cls(**values)
+
+
 @dataclass(frozen=True)
 class HeatSizingConfig:
     space_heat_source: str
@@ -278,6 +416,8 @@ class HeatSizingConfig:
     buffer_charge_efficiency_method: str = "technology"
     heated_area_fraction: float = 0.8
     internal: InternalHeatConfig | None = None
+    # TEASER path assumptions, see TeaserHeatConfig (corrected unless the block says preset: legacy).
+    teaser: TeaserHeatConfig = field(default_factory=TeaserHeatConfig)
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "HeatSizingConfig":
@@ -290,7 +430,7 @@ class HeatSizingConfig:
         }
         optional = {
             "teaser_retrofit_level", "degree_day_base_temperature_c",
-            "buffer_charge_efficiency_method", "heated_area_fraction", "internal",
+            "buffer_charge_efficiency_method", "heated_area_fraction", "internal", "teaser",
         }
         _only(raw, required | optional, "asset_sizing.heat")
         if not required <= set(raw):
@@ -309,6 +449,9 @@ class HeatSizingConfig:
         internal = InternalHeatConfig.from_dict(raw.get("internal", {})) if source == "internal" else None
         if source != "internal" and raw.get("internal") is not None:
             raise ValueError("The internal heat block requires space_heat_source=internal.")
+        if source != "teaser" and raw.get("teaser") is not None:
+            raise ValueError("The teaser heat block requires space_heat_source=teaser.")
+        teaser = TeaserHeatConfig.from_dict(raw.get("teaser"))
         inside = _positive(raw["indoor_design_temperature_c"], "asset_sizing.heat.indoor_design_temperature_c")
         limit = _positive(raw["heating_limit_temperature_c"], "asset_sizing.heat.heating_limit_temperature_c")
         if limit >= inside:
@@ -347,6 +490,7 @@ class HeatSizingConfig:
             buffer_charge_efficiency_method=method,
             heated_area_fraction=fraction,
             internal=internal,
+            teaser=teaser,
         )
 
     def sizing_kwargs(self) -> dict[str, Any]:

@@ -214,6 +214,20 @@ def calc(zoneParameters, T_e, holidays, dt, building_type):
 
     timesteps_per_day = numberTimesteps / 365  # Calculate timesteps per day
 
+    # GridExpand: heating break. Upstream switches heating off on days 135-258;
+    # ``heating_off_days`` None removes that break and ``heating_limit_c`` allows
+    # heating only on days whose mean outdoor temperature is below the limit.
+    off_days = getattr(zoneParameters, "heating_off_days", (135, 259))
+    off_range = range(*off_days) if off_days is not None else range(0)
+    heating_limit = getattr(zoneParameters, "heating_limit_c", None)
+    if heating_limit is not None:
+        steps = int(timesteps_per_day)
+        n_days = int(numberTimesteps // steps)
+        daily_mean = np.asarray(T_e[: n_days * steps], float).reshape(n_days, steps).mean(axis=1)
+        cold_day = daily_mean < heating_limit
+    else:
+        cold_day = None
+
     for t in range(numberTimesteps):
 
         if t == 0:
@@ -232,7 +246,7 @@ def calc(zoneParameters, T_e, holidays, dt, building_type):
                                                  timestep=t)
 
         if building_type in {"SFH", "TH", "MFH", "AB"}:
-            if t_op < T_set and day not in range(135, 259):
+            if t_op < T_set and day not in off_range and (cold_day is None or cold_day[int(day)]):
                 # Compute heat demand
                 (q_hc, t_op, t_m, t_i, t_s) = _calculateHeat(zoneParameters,
                                                              T_e,
@@ -254,7 +268,7 @@ def calc(zoneParameters, T_e, holidays, dt, building_type):
 
         else:
             if (t_op < T_set and
-                    day not in range(135, 259) and
+                    day not in off_range and (cold_day is None or cold_day[int(day)]) and
                     (day % 7 not in (0, 6) and
                      day not in holidays)):
                 # Compute heat demand
