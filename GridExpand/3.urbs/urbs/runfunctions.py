@@ -176,6 +176,35 @@ def run_lvds_opt(input_path,        # path to input file
     if global_settings["HP_electr"] < 100: data = remove_heat_in_random(data, global_settings["HP_electr"])
     if global_settings["EV_electr"] < 100: data = remove_mobility_in_random(data, global_settings["EV_electr"])
 
+    ##### Inflexible case and section 14a EnWG control (Lee 2026): #####
+    # inflex: no battery and heat storage, vehicles charge at full power when plugged in
+    if global_settings.get("inflex", False):
+        data = remove_battery(data)
+        data = remove_heat_storage(data)
+        data = bev_uncontrolled_charging(data)
+        print("Inflexible case: battery, heat storage and mobility flexibility removed", flush=True)
+    # p14a: inflexible case with rule-based control, applied to the demand before the optimisation.
+    # p14a_ref = result of the same inflexible run without control (capacities of heat pumps and PV)
+    if global_settings.get("p14a", False):
+        data = remove_battery(data)
+        data = remove_heat_storage(data)
+        cap_table, pv_table = (capacities_from_result(global_settings["p14a_ref"])
+                               if global_settings.get("p14a_ref") else (None, None))
+        data = inflex_14a(data, rated_kva=transformer_rating(input_path), cap_table=cap_table, pv_table=pv_table)
+    # p14a_flex: flexible case with control, setpoints through the availability feature.
+    # p14a_ref = result of the same flexible run without control (required)
+    if global_settings.get("p14a_flex", False):
+        import numpy as np
+        if not global_settings.get("p14a_ref"):
+            raise ValueError("--p14a-flex requires --p14a-ref, the result of the same flexible run without control")
+        lam_in, lam_out = global_settings.get("p14a_lam_in"), global_settings.get("p14a_lam_out")
+        prev_lam = np.load(lam_in) if lam_in and os.path.exists(lam_in) else None
+        data = flex_14a(data, rated_kva=transformer_rating(input_path), ref_h5=global_settings["p14a_ref"],
+                        prev_lam=prev_lam)
+        if lam_out:
+            from .features.lvdshelper import P14A_LAST_DIAG
+            np.save(lam_out, P14A_LAST_DIAG['lam'])
+
     ##### Variable Tariff: #####
     if global_settings["vartariff"]!=0: raise NotImplementedError("Variable Tariff: Any values different from 0 are currently not safely implemented!") 
 

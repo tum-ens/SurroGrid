@@ -24,6 +24,21 @@ if __name__ == '__main__':
         parser = argparse.ArgumentParser(description="Low voltage grid DER allocation.")
         parser.add_argument("inputfile_id", help="Input file name (no path)")
         parser.add_argument("--n_cpu", default=1, help="Number of CPUs available for parallel generation")
+        parser.add_argument("--pv", default=100, type=int, help="PV electrification %% (0-100)")
+        parser.add_argument("--hp", default=100, type=int, help="HP electrification %% (0-100)")
+        parser.add_argument("--ev", default=100, type=int, help="EV electrification %% (0-100)")
+        parser.add_argument("--inflex", action="store_true",
+                            help="inflexible case: no battery and heat storage, uncontrolled charging")
+        parser.add_argument("--p14a", action="store_true",
+                            help="section 14a control on the inflexible case (rule-based, applied to the demand)")
+        parser.add_argument("--p14a-flex", action="store_true", dest="p14a_flex",
+                            help="section 14a control on the flexible case (setpoints through availability)")
+        parser.add_argument("--p14a-ref", dest="p14a_ref", default=None,
+                            help="result h5 of the same run without control (capacities, first-pass load)")
+        parser.add_argument("--p14a-lam-in", dest="p14a_lam_in", default=None,
+                            help="npy with the ratios of the previous pass, taken as a floor (--p14a-flex)")
+        parser.add_argument("--p14a-lam-out", dest="p14a_lam_out", default=None,
+                            help="npy to write the ratios of this pass to (--p14a-flex)")
         args = parser.parse_args()
 
         ### Obtain relevant input_files
@@ -46,9 +61,15 @@ if __name__ == '__main__':
             "hoursPerPeriod": 168,                  # tsam: length of typical period (int)
 
             # Electrification
-            "PV_electr": 100,       # 100           # % of building nodes adopting PV (0-100)
-            "HP_electr": 100,       # 100           # % of building nodes adopting HP (0-100)
-            "EV_electr": 100,       # 100           # % of building nodes adopting EV (0-100)
+            "PV_electr": int(args.pv),       # % of building nodes adopting PV (0-100)
+            "HP_electr": int(args.hp),       # % of building nodes adopting HP (0-100)
+            "EV_electr": int(args.ev),       # % of building nodes adopting EV (0-100)
+            "inflex": bool(args.inflex),   # inflex scenario flag
+            "p14a": bool(args.p14a),
+            "p14a_flex": bool(args.p14a_flex),
+            "p14a_ref": args.p14a_ref,
+            "p14a_lam_in": args.p14a_lam_in,
+            "p14a_lam_out": args.p14a_lam_out,
 
             # CPUs
             "n_cpu": int(args.n_cpu)
@@ -56,7 +77,7 @@ if __name__ == '__main__':
 
         print("Following global settings are applied:")
         for key, value in global_settings.items():
-            print(f"{key:<16} {value:>1}")
+            print(f"{key:<16} {value!s:>1}")
         print("\n")
 
 

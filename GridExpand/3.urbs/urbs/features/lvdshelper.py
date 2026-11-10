@@ -6,7 +6,11 @@ import random
 import re
 
 def remove_battery(data):
-    # de-flexiblise electricity demand by disallowing battery investment
+    # de-flexiblise electricity demand by disallowing battery investment.
+    # Thinning electrification can leave a grid with no battery rows at all,
+    # in which case there is nothing to disallow and .loc raises on the key.
+    if 'battery_private' not in data['storage'].index.get_level_values(2):
+        return data
     data['storage'].loc[pd.IndexSlice[:, :, 'battery_private', :], ['inst-cap-p']] = 0
     data['storage'].loc[pd.IndexSlice[:, :, 'battery_private', :], ['inst-cap-c']] = 0
     data['storage'].loc[pd.IndexSlice[:, :, 'battery_private', :], ['cap-up-p']] = 0
@@ -14,7 +18,10 @@ def remove_battery(data):
     return data
 
 def remove_heat_storage(data):
-    # de-flexiblise electricity demand by disallowing battery investment
+    # de-flexiblise heat demand by disallowing heat-storage investment; as above,
+    # a grid can end up with no heat-storage rows once electrification is thinned
+    if 'heat_storage' not in data['storage'].index.get_level_values(2):
+        return data
     data['storage'].loc[pd.IndexSlice[:, :, 'heat_storage', :], ['cap-up-p']] = 0
     data['storage'].loc[pd.IndexSlice[:, :, 'heat_storage', :], ['cap-up-c']] = 0
     data['storage'].loc[pd.IndexSlice[:, :, 'heat_storage', :], ['inst-cap-p']] = 0
@@ -802,3 +809,736 @@ def limit_bev_for_hoods_bui_react(data_hp_react, data, building, prob_cluster, p
     return data_hp_react
 
 ################################## END LVDS ##################################
+def bev_uncontrolled_charging(data):
+    """Inflexible case: each vehicle charges at full power as soon as it is plugged in, and this profile is added
+    to the electricity demand. The mobility demand, mobility storage and charging station are then set to zero."""
+    dem = data['demand']; eff = data['eff_factor']
+    sto = data['storage']; pro = data['process']
+    mob_cols = [c for c in dem.columns if str(c[1]).startswith('mobility')]
+    n_conv = 0
+    for (site, mname) in mob_cols:
+        n = mname.replace('mobility', '')
+        cs = f'charging_station{n}'
+        # params
+        try:
+            cap = float(sto.loc[(slice(None), site, f'mobility_storage{n}', slice(None)), 'inst-cap-c'].iloc[0])
+            pmax = float(pro.loc[(slice(None), site, cs), 'inst-cap'].iloc[0])
+        except Exception:
+            continue
+        d = dem[(site, mname)].to_numpy(dtype=float)
+        a = eff[(site, cs)].to_numpy(dtype=float) if (site, cs) in eff.columns else np.ones_like(d)
+        T = len(d); ch = np.zeros(T); soc = cap
+        for t in range(T):
+            soc = max(0.0, soc - d[t])          # drive consumption first
+            if a[t] > 0 and soc < cap:
+                c = min(pmax, cap - soc)        # charge asap at full power
+                ch[t] = c; soc += c
+        dem[(site, 'electricity')] = dem[(site, 'electricity')].to_numpy(dtype=float) + ch
+        dem[(site, mname)] = 0.0                # disable mobility demand
+        sto.loc[(slice(None), site, f'mobility_storage{n}', slice(None)),
+                ['inst-cap-c','cap-up-c','inst-cap-p','cap-up-p']] = 0
+        pro.loc[(slice(None), site, cs), ['inst-cap','cap-up']] = 0
+        n_conv += 1
+    print(f"INFLEX-BEV: {n_conv} vehicles converted to uncontrolled charging", flush=True)
+    return data
+
+
+def transformer_rating(input_path):
+    """Rated power of the transformer in kVA, from the pandapower grid stored in the input file (raw_data/net)."""
+    import io
+    import json
+    import h5py
+    with h5py.File(input_path, 'r') as f:
+        raw = f['raw_data/net'][()]
+    if isinstance(raw, np.ndarray):
+        raw = raw.item() if raw.shape == () else raw[0]
+    if isinstance(raw, bytes):
+        raw = raw.decode()
+    trafo = json.loads(raw)['_object']['trafo']
+    df = pd.read_json(io.StringIO(trafo['_object']), orient=trafo.get('orient', 'split'))
+    return float(df['sn_mva'].sum() * 1000)
+
+
+def capacities_from_result(ref_h5):
+    """Heat pump, auxiliary heater and rooftop PV capacities from the result of the same run without control.
+    Returns {site: (heat pump kW, auxiliary heater kW)} and {(site, PV process): kW}."""
+    cap = pd.read_hdf(ref_h5, '/urbs_out/MILP/cap_pro')
+    cap_table, pv_table = {}, {}
+    for (stf, sit, pro), val in cap.items():
+        hp, bo = cap_table.get(sit, (0.0, 0.0))
+        if pro == 'heatpump_air':
+            cap_table[sit] = (float(val), bo)
+        elif pro == 'heatpump_booster':
+            cap_table[sit] = (hp, float(val))
+        elif str(pro).startswith('Rooftop'):
+            pv_table[(sit, pro)] = float(val)
+    return cap_table, pv_table
+
+
+# diagnostics of the last call of inflex_14a / flex_14a (the ratios of flex_14a are written with --p14a-lam-out)
+P14A_LAST_DIAG = {}
+
+
+def _heat_to_el(h, cop, cap_hp):
+    """Electricity a heat pump system draws to deliver heat h.
+
+    The pump covers what it can at its coefficient of performance; anything
+    beyond that falls to the resistive auxiliary heater, which has no eff_factor
+    in the model and therefore runs at a coefficient of one. Ziffer 2.4.1.b
+    counts that heater as part of the same system, so the connection power spans
+    both and the conversion has to span both as well."""
+    hp_heat = np.minimum(h, cap_hp * cop)
+    return hp_heat / cop + np.maximum(h - hp_heat, 0.0)
+
+
+def _el_to_heat(el, cop, cap_hp):
+    """Heat the same system delivers when it draws el."""
+    hp_el = np.minimum(el, cap_hp)
+    return hp_el * cop + np.maximum(el - hp_el, 0.0)
+
+
+def inflex_14a(data, rated_kva, cap_table=None, pv_table=None,
+               p14a_kw=4.2, threshold=1.0, staged=True, pf_elc=0.959, pf_hp=0.959):
+    """Section 14a EnWG control on the inflexible case, applied to the demand before the optimisation.
+
+    Congested hours are those where the uncontrolled aggregate load exceeds the
+    transformer rating. In those hours every controllable device is held at the
+    minimum power the regulation guarantees it (BK6-22-300 Ziffer 4.5.1): 4.2 kW
+    for a charge point, and for a heat pump either 4.2 kW or, above 11 kW of
+    connection power, 0.4 times that power. Deferred charging carries over in the
+    vehicle state of charge and deferred heat carries over as a backlog.
+
+    Ziffer 4.3 additionally requires the return to normal operation to be staged
+    so that it does not create a fresh overload. With staged=True the backlog is
+    therefore worked off only within the headroom left below the rating once every
+    device has been guaranteed what it would have drawn without any control at
+    all, and that headroom is shared across devices in proportion to their
+    backlog, which is the non-discriminatory allocation the same provision calls
+    for. Because the headroom is measured against the uncontrolled profile it is
+    non-negative in any hour that was not congested, so no device ends up worse
+    off than without control and the aggregate stays within the rating.
+
+    With staged=False each device works off its backlog at its own rate without
+    regard to the aggregate. That reproduces the earlier behaviour and is kept
+    for comparison; it can drive the peak above the uncontrolled one.
+
+    cap_table and pv_table come from capacities_from_result (the same inflexible run without control). Without
+    cap_table the connection power is estimated from the peak heat demand; without pv_table PV is not netted off.
+
+    Assumes demand/process units of kW; call AFTER remove_battery and
+    remove_heat_storage."""
+    dem = data['demand']; eff = data['eff_factor']
+    sto = data['storage']; pro = data['process']
+
+    sites = sorted(set(c[0] for c in dem.columns if c[1] == 'electricity'))
+    T = len(dem)
+    base = np.zeros(T)
+    for st in sites:
+        base += dem[(st, 'electricity')].to_numpy(dtype=float)
+
+    # ---- BEV pass 1: uncontrolled profiles per vehicle ----
+    mob_cols = [c for c in dem.columns if str(c[1]).startswith('mobility')]
+    veh = []
+    ch1_total = np.zeros(T)
+    for (site, mname) in mob_cols:
+        n = mname.replace('mobility', '')
+        cs = f'charging_station{n}'
+        try:
+            cap = float(sto.loc[(slice(None), site, f'mobility_storage{n}', slice(None)), 'inst-cap-c'].iloc[0])
+            pmax = float(pro.loc[(slice(None), site, cs), 'inst-cap'].iloc[0])
+        except Exception:
+            continue
+        d = dem[(site, mname)].to_numpy(dtype=float)
+        a = eff[(site, cs)].to_numpy(dtype=float) if (site, cs) in eff.columns else np.ones(T)
+        ch = np.zeros(T); soc = cap
+        for t in range(T):
+            soc = max(0.0, soc - d[t])
+            if a[t] > 0 and soc < cap:
+                c = min(pmax, cap - soc); ch[t] = c; soc += c
+        ch1_total += ch
+        veh.append(dict(site=site, mname=mname, cs=cs, n=n, cap=cap, pmax=pmax,
+                        d=d, a=a, ch1=ch, ch2=np.zeros(T), soc=cap))
+
+    # ---- HP electricity estimate: heat demand / COP where HP allowed ----
+    # devices per site = number of primary heat pumps (heatpump_air) at the site.
+    # 14a dimming is per controllable device; the urbs model represents each
+    # building/bus with one heatpump_air process (heatpump_booster is an electric
+    # backup heater, not separately dimmed). Read from the model, not assumed.
+    dw = {}
+    for st in sites:
+        try:
+            n = int((pro.loc[(slice(None), st, slice(None)), :].index
+                     .get_level_values(2) == 'heatpump_air').sum())
+        except Exception:
+            n = 1
+        dw[st] = max(1, n)
+    hp_est = np.zeros(T); hp_sites = []
+    # heat pumps that do not qualify as controllable devices keep their demand
+    # unchanged, so their draw has to be counted when the headroom is measured
+    hp_fixed = np.zeros(T)
+    for st in sites:
+        try:
+            capup = float(pro.loc[(slice(None), st, 'heatpump_air'), 'cap-up'].iloc[0])
+        except Exception:
+            capup = 0.0
+        if capup <= 0: continue
+        cop = eff[(st, 'heatpump_air')].to_numpy(dtype=float) if (st, 'heatpump_air') in eff.columns else np.full(T, 3.0)
+        cop = np.where(cop > 0.1, cop, 3.0)
+        hcols = [c for c in dem.columns if c[0] == st and ('heat' in str(c[1]).lower() or 'water' in str(c[1]).lower())]
+        h = np.zeros(T)
+        for hc in hcols:
+            h += dem[hc].to_numpy(dtype=float)
+        # BNetzA BK6-22-300 Ziffer 4.5.1: minimum power is 4.2 kW per device,
+        # except heat pumps whose grid-connection power exceeds 11 kW, where it
+        # is 0.4 x connection power.
+        # Ziffer 4.5.1 measures the minimum power against the grid connection
+        # power, which is the rating of the installed equipment. That is what the
+        # uncontrolled run actually builds, so it is read from cap_table rather
+        # than inferred from demand: the heat pump plus its auxiliary heater,
+        # which Ziffer 2.4.1.b counts as one system and 2.4.2 aggregates behind
+        # one connection. Sizing from peak demand instead assumes the pump alone
+        # covers the design hour with no store and no booster, which overstates
+        # the connection power by roughly half.
+        if cap_table is not None:
+            cap_hp, cap_bo = cap_table.get(st, (0.0, 0.0))
+            p_conn = float(cap_hp) + float(cap_bo)
+        else:
+            # without capacities: the electrical peak the heat pump must cover, max_t(Q_heat(t) / COP(t))
+            p_conn = float(np.max(h / cop)) if h.max() > 0 else 0.0
+            cap_hp = p_conn
+        # with no pump capacity on record the split cannot be made, so the whole
+        # demand is charged at the pump's coefficient as before
+        cap_hp_eff = float(cap_hp) if cap_hp > 1e-9 else float('inf')
+        el = _heat_to_el(h, cop, cap_hp_eff)
+        hp_est += el
+        # BK6-22-300 Ziffer 2.4.1: only devices with a grid-connection power
+        # ABOVE 4.2 kW qualify as steuerbare Verbrauchseinrichtungen. Smaller
+        # heat pumps fall outside the regime and must not be curtailed.
+        if p_conn <= p14a_kw or not hcols:
+            hp_fixed += el
+            continue
+        # Ziffer 2.4.2 aggregates the heat pumps behind one grid connection into
+        # a single controllable device, and p_conn above is already that combined
+        # figure, so the minimum power is one floor for the site, not one per unit
+        p_min = 0.4 * p_conn if p_conn > 11.0 else p14a_kw
+        # The setpoint is measured against the equipment the household has, so the
+        # run must keep that equipment: curtailment thins the heat profile, and a
+        # free capacity would let the optimisation rebuild a smaller pump than the
+        # one the setpoint was written for.
+        if cap_table is not None and cap_hp > 1e-9:
+            for _c in ('inst-cap', 'cap-up'):
+                if pro[_c].dtype.kind in 'iu':
+                    pro[_c] = pro[_c].astype(float)
+            pro.loc[(slice(None), st, 'heatpump_air'), ['inst-cap', 'cap-up']] = cap_hp
+            try:
+                pro.loc[(slice(None), st, 'heatpump_booster'), ['inst-cap', 'cap-up']] = cap_bo
+            except Exception:
+                pass          # the site may have no booster row at all
+        hp_sites.append(dict(st=st, cop=cop, p_min=p_min, cap_hp=cap_hp_eff,
+                             p_conn=p_conn, hcols=hcols, h=h, el=el, carry=0.0,
+                             hmax=float(h.max()), h_new=np.zeros(T)))
+
+    # ---- congestion mask, from the uncontrolled profile ----
+    # The rating is an apparent power, so active power is converted with the same
+    # power factor the load flow applies, 0.959 for every electricity withdrawal
+    # including heat pumps and charging.
+    # Ziffer 4.2 has the operator act on a state determination, and what it
+    # measures at the transformer is the net withdrawal, after rooftop generation
+    # has covered what it can. Photovoltaic output is therefore netted off here
+    # as it already is on the flexible baseline, where the trigger reads the
+    # import process. Capacities come from the uncontrolled run, since they are
+    # decided by the optimisation and are not known from the demand data alone.
+    pv_out = np.zeros(T)
+    if pv_table is not None and 'supim' in data:
+        sup = data['supim']
+        # the supim column is keyed by the commodity a process consumes, and a
+        # rooftop unit named "Rooftop PV_22_98" draws "solar_22_98", so the link
+        # is read from process_commodity rather than assumed from the name
+        pc = data['process_commodity']
+        feed = {}
+        for key in pc.index:
+            prc_name, com_name, direction = key[-3], key[-2], key[-1]
+            if direction == 'In' and str(prc_name).startswith('Rooftop'):
+                feed[str(prc_name)] = com_name
+        for (st, prc), cap in pv_table.items():
+            col = (st, feed.get(str(prc), prc))
+            if col in sup.columns:
+                pv_out += float(cap) * sup[col].to_numpy(dtype=float)
+        print(f"P14A: rooftop generation netted off, peak {pv_out.max():.1f} kW", flush=True)
+    total = (base + ch1_total - pv_out) / pf_elc + hp_est / pf_hp
+    total = np.maximum(total, 0.0)
+    congested = total > (rated_kva * threshold)
+    n_cong = int(congested.sum())
+    limit = rated_kva * threshold
+
+    # ---- joint time loop over both device classes ----
+    n_blocked = 0
+    n_insufficient = 0
+    lam = np.zeros(T)
+    for t in range(T):
+        # 1) what each device is guaranteed this hour
+        for v in veh:
+            v['soc'] = max(0.0, v['soc'] - v['d'][t])
+            want = min(v['pmax'], v['cap'] - v['soc']) if (v['a'][t] > 0 and v['soc'] < v['cap']) else 0.0
+            v['want'] = want
+
+        if congested[t]:
+            # Ziffer 4.2 asks that the reduction be objectively necessary and
+            # Ziffer 4.3 that all participating devices be drawn upon without
+            # discrimination, every device counting as equally relieving. One
+            # common ratio, set to the smallest value that clears the overload,
+            # satisfies both. Because the ratio never exceeds one, the minimum
+            # power of Ziffer 4.5.1 is preserved.
+            # the overload is an apparent power, so the curtailable room is
+            # converted with the same power factors before the ratio is formed
+            # Ziffer 4.4.a: under direct control the operator receives a setpoint
+            # and reduces the device to that value, so the ratio applies to the
+            # device's connection power, not to what it happens to draw, and a
+            # device already below its setpoint is untouched. The reduction that
+            # a given ratio actually delivers is therefore piecewise linear in
+            # the ratio: device i starts contributing once the setpoint falls to
+            # its current draw, at ratio (cap - draw) / (cap - p_min), and from
+            # there contributes (cap - p_min) per unit of ratio. Sorting those
+            # breakpoints gives the smallest ratio that clears the overload,
+            # which is what Ziffer 4.3 sentence 1 asks for.
+            over = total[t] - limit
+            seg = []                      # (breakpoint ratio, slope in kVA)
+            for v in veh:
+                cap_i, draw = v['pmax'], min(v['want'], v['ch1'][t])
+                span = cap_i - p14a_kw
+                if span <= 1e-9 or draw <= p14a_kw:
+                    continue
+                seg.append(((cap_i - draw) / span, span / pf_elc))
+            for d_ in hp_sites:
+                cap_i = d_['p_conn']; pmin = d_['p_min']
+                draw = d_['el'][t]
+                span = cap_i - pmin
+                if span <= 1e-9 or draw <= pmin:
+                    continue
+                seg.append(((cap_i - draw) / span, span / pf_hp))
+            seg.sort(key=lambda x: x[0])
+
+            lam[t] = 1.0 if seg else 0.0
+            slope_sum = offset = 0.0
+            cleared = False
+            for k, (bp, sl) in enumerate(seg):
+                nxt = seg[k + 1][0] if k + 1 < len(seg) else 1.0
+                slope_sum += sl
+                offset += sl * bp
+                if slope_sum * nxt - offset >= over - 1e-9:
+                    lam[t] = min(1.0, max(bp, (over + offset) / slope_sum))
+                    cleared = True
+                    break
+            if not cleared:
+                n_insufficient += 1     # even at ratio one the overload remains
+
+            for v in veh:
+                sp = v['pmax'] - lam[t] * (v['pmax'] - p14a_kw)
+                v['ch2'][t] = min(min(v['want'], v['ch1'][t]), max(p14a_kw, sp))
+            for d_ in hp_sites:
+                pmin = d_['p_min']
+                sp = max(pmin, d_['p_conn'] - lam[t] * (d_['p_conn'] - pmin))
+                # a setpoint above the current demand leaves the device untouched,
+                # but it must not be used to work off the backlog while the control
+                # event is running: Ziffer 4.3 sentence 3 puts recovery after it
+                d_['h_new'][t] = min(d_['h'][t],
+                                     _el_to_heat(sp, d_['cop'][t], d_['cap_hp']))
+        else:
+            for v in veh:
+                # never more than the uncontrolled draw before the backlog is shared out
+                v['ch2'][t] = min(v['want'], v['ch1'][t]) if staged else v['want']
+            for d_ in hp_sites:
+                d_['h_new'][t] = d_['h'][t]
+
+        # 2) share out the remaining headroom among devices still behind
+        if not congested[t]:
+            if staged:
+                # headroom is measured against an apparent-power rating, so the
+                # guaranteed draw and the outstanding backlog are both converted
+                # with the same power factors before the share is worked out
+                guaranteed = ((base[t] + sum(v['ch2'][t] for v in veh)) / pf_elc
+                              + (hp_fixed[t]
+                                 + sum(_heat_to_el(d_['h_new'][t], d_['cop'][t], d_['cap_hp'])
+                                       for d_ in hp_sites)) / pf_hp)
+                head = limit - guaranteed
+                need_v = [max(0.0, v['want'] - v['ch2'][t]) / pf_elc for v in veh]
+                need_h = [(_heat_to_el(d_['h_new'][t] + d_['carry'], d_['cop'][t], d_['cap_hp'])
+                           - _heat_to_el(d_['h_new'][t], d_['cop'][t], d_['cap_hp'])) / pf_hp
+                          for d_ in hp_sites]
+                tot = sum(need_v) + sum(need_h)
+                if tot > 1e-9:
+                    if head <= 1e-9:
+                        n_blocked += 1
+                    else:
+                        f = min(1.0, head / tot)
+                        for v, nd in zip(veh, need_v):
+                            v['ch2'][t] += f * nd * pf_elc      # back to active power
+                        for d_, nd in zip(hp_sites, need_h):
+                            grant = f * nd * pf_hp              # back to active power
+                            el_now = _heat_to_el(d_['h_new'][t], d_['cop'][t], d_['cap_hp'])
+                            phys = max(0.0, d_['p_conn'] - el_now)
+                            # The connection power was sized on the design hour, when
+                            # the coefficient of performance is at its lowest. In a
+                            # milder hour the same power yields more heat, which would
+                            # let the recovery push thermal output past anything the
+                            # installation was built to deliver, so it is also held to
+                            # the largest heat demand the site ever has.
+                            room = max(0.0, d_['hmax'] - d_['h_new'][t])
+                            reachable = _el_to_heat(el_now + min(grant, phys),
+                                                    d_['cop'][t], d_['cap_hp']) - d_['h_new'][t]
+                            d_['h_new'][t] += min(d_['carry'], max(0.0, reachable), room)
+            else:
+                for d_ in hp_sites:
+                    d_['h_new'][t] += min(d_['carry'], d_['p_min'] * d_['cop'][t])
+
+        # 3) advance the state
+        for v in veh:
+            v['soc'] += v['ch2'][t]
+        for d_ in hp_sites:
+            d_['carry'] = max(0.0, d_['h'][t] + d_['carry'] - d_['h_new'][t])
+
+    # ---- write the dimmed BEV profiles into electricity demand ----
+    n_conv = 0
+    for v in veh:
+        dem[(v['site'], 'electricity')] = dem[(v['site'], 'electricity')].to_numpy(dtype=float) + v['ch2']
+        dem[(v['site'], v['mname'])] = 0.0
+        sto.loc[(slice(None), v['site'], f"mobility_storage{v['n']}", slice(None)),
+                ['inst-cap-c','cap-up-c','inst-cap-p','cap-up-p']] = 0
+        pro.loc[(slice(None), v['site'], v['cs']), ['inst-cap','cap-up']] = 0
+        n_conv += 1
+
+    # ---- write the dimmed heat profiles ----
+    # The device is controlled as a whole, so the curtailment is decided on the
+    # summed heat demand, but the served amount has to be split back over the
+    # individual services in proportion to what each of them is actually owed,
+    # its own demand this hour plus its own backlog. Scaling every column by the
+    # same ratio instead moves energy between services, because congestion falls
+    # in winter hours where space heat dominates while recovery falls in hours
+    # where water heat does.
+    shifted_kwh = 0.0
+    for d_ in hp_sites:
+        h, h_new = d_['h'], d_['h_new']
+        shifted_kwh += float(np.maximum(h - h_new, 0).sum())
+        cols = {hc: dem[hc].to_numpy(dtype=float).copy() for hc in d_['hcols']}
+        owed = {hc: 0.0 for hc in d_['hcols']}
+        out = {hc: np.zeros(T) for hc in d_['hcols']}
+        for t in range(T):
+            want = {hc: cols[hc][t] + owed[hc] for hc in d_['hcols']}
+            tot = sum(want.values())
+            if tot > 1e-9:
+                f = min(1.0, h_new[t] / tot)
+                for hc in d_['hcols']:
+                    out[hc][t] = want[hc] * f
+                    owed[hc] = want[hc] - out[hc][t]
+        for hc in d_['hcols']:
+            dem[hc] = out[hc]
+        if d_['carry'] > 1e-6:
+            print(f"P14A WARNING: site {d_['st']} unserved heat at year end: {d_['carry']:.1f} kWh", flush=True)
+
+    n_large = sum(1 for d_ in hp_sites if d_['p_min'] > p14a_kw)
+    bev_deferred = float(sum(np.maximum(v['ch1'] - v['ch2'], 0).sum() for v in veh))
+    # exposed so the control adequacy limit can be swept without solving.
+    # kept in a module attribute rather than in data, because everything in data
+    # is written to HDF5 on save and a dict cannot be stored there
+    global P14A_LAST_DIAG
+    P14A_LAST_DIAG = dict(
+        n_cong=n_cong, n_insufficient=n_insufficient, n_blocked=n_blocked,
+        lam_mean=float(lam[congested].mean()) if n_cong else 0.0,
+        n_hp=len(hp_sites), n_bev=len(veh), n_large=n_large,
+        peak_uncontrolled=float(total.max()), limit=float(limit),
+        shifted_kwh=float(shifted_kwh), bev_deferred=bev_deferred)
+    print(f"P14A-14a4.5.1: {n_large}/{len(hp_sites)} HP sites above 11 kW "
+          f"(floor 0.4 x P_conn instead of {p14a_kw} kW)", flush=True)
+    print(f"P14A-14a4.3: staged release {'ON' if staged else 'OFF'} | "
+          f"hours with backlog but no headroom: {n_blocked}", flush=True)
+    print(f"P14A-14a4.2: mean reduction ratio in congested hours "
+          f"{(lam[congested].mean() if n_cong else 0):.3f} | "
+          f"hours where full curtailment still leaves an overload: {n_insufficient}",
+          flush=True)
+    print(f"P14A-DIAG: base_max {base.max():.0f} | ch1_max {ch1_total.max():.0f} | hp_est_max {hp_est.max():.0f} | hp_sites {len(hp_sites)} | total_max {total.max():.0f}", flush=True)
+    print(f"P14A: {n_conv} BEV dimmed-uncontrolled | congested {n_cong}/{T} h "
+          f"(rated {rated_kva:.0f} kVA x {threshold}) | HP heat shifted {shifted_kwh:.0f} kWh "
+          f"| BEV energy deferred {bev_deferred:.0f} kWh", flush=True)
+    return data
+
+
+DEFICIT_PRICE = 1000.0   # EUR/kWh, far above any real heat source
+
+
+def flex_14a(data, rated_kva, ref_h5, prev_lam=None,
+             p14a_kw=4.2, threshold=1.0, pf_elc=0.959):
+    """Section 14a EnWG control on the flexible case, through the availability feature.
+
+    On the inflexible baseline the controlled load is known before the run, so
+    the curtailment can be written into the demand series. On the flexible
+    baseline it is an outcome of the optimisation, so a first pass is needed:
+    ref_h5 is the result file of the same grid solved without control, giving
+    the transformer load, the capacities actually built, and what each device
+    drew hour by hour.
+
+    Ziffer 4.4.a describes direct control as a setpoint on the maximum grid
+    effective power of the device, which is what the availability constraint
+    expresses, tau <= cap * availability. One common ratio is applied to every
+    participating device, measured against its own curtailable range, and set to
+    the smallest value that clears the overload:
+
+        setpoint_i(t)    = cap_i - lambda(t) * (cap_i - p_min_i)
+        availability_i(t) = setpoint_i(t) / cap_i
+
+    Minimum power follows Ziffer 4.5.1: 4.2 kW per device, or 0.4 times the
+    connection power for a heat pump above 11 kW. Devices at or below 4.2 kW are
+    not controllable devices under Ziffer 2.4.1 and are left alone. Electricity
+    storage is included while charging, per Ziffer 2.4.1.d; heat storage is not,
+    since it does not draw from the grid.
+
+    Because the second pass may shift load into hours the first pass left clear,
+    the caller can pass the ratios from the previous pass in prev_lam; the new
+    ratios are taken as the element-wise maximum, so the sequence is monotone and
+    terminates. That mirrors Ziffer 4.2, where the operator acts on a state
+    determination and adjusts. prev_lam is read with --p14a-lam-in, the new ratios are written with --p14a-lam-out.
+
+    Heat-pump capacity is pinned to its first-pass value. The constraint limits
+    throughput to a share of capacity, so leaving capacity free would let the
+    optimisation enlarge the unit to undo the limit, and pinning it also matches
+    the assumption made on the inflexible baseline, that the household sized its
+    heat pump without anticipating control."""
+
+    pro, sto = data['process'], data['storage']
+    T = len(data['demand'])
+    stf = int(pro.index.get_level_values(0)[0])
+    limit = rated_kva * threshold
+    ts = np.arange(T)
+
+    with pd.HDFStore(ref_h5, 'r') as store:
+        cap_pro = store['/urbs_out/MILP/cap_pro']
+        e_in = store['/urbs_out/MILP/e_pro_in'].reset_index()
+        cap_sto = store['/urbs_out/MILP/cap_sto_p'] if '/urbs_out/MILP/cap_sto_p' in store else None
+        e_sto = store['/urbs_out/MILP/e_sto_in'].reset_index() if '/urbs_out/MILP/e_sto_in' in store else None
+    e_in.columns = ['t', 'stf', 'sit', 'pro', 'com', 'val']
+
+    def series(df, mask):
+        return df[mask].groupby('t').val.sum().reindex(ts, fill_value=0.0).to_numpy(dtype=float)
+
+    load = series(e_in, e_in.pro == 'import') / pf_elc
+    congested = load > limit
+    n_cong = int(congested.sum())
+
+    # m.sit is built from the commodity table, so a site absent from it never
+    # enters the model and a setpoint written for it would be rejected
+    model_sites = set(data['commodity'].index.get_level_values(1))
+
+    dev = []                      # controllable devices with their first-pass draw
+    deficit_sites = set()
+    mob_sites = set()
+    for (y, sit, prc) in pro.index:
+        if sit not in model_sites:
+            continue
+        try:
+            cap = float(cap_pro.loc[(slice(None), sit, prc)].iloc[0])
+        except Exception:
+            continue
+        if prc == 'heatpump_booster':
+            continue                      # carried with the heat pump below
+        if prc == 'heatpump_air':
+            # Ziffer 2.4.1.b counts an auxiliary or emergency heater as part of
+            # the heat pump system and Ziffer 2.4.2 aggregates what sits behind
+            # one connection, so the pair carries a single setpoint. Applying the
+            # same share to both keeps their sum at that setpoint. Without it the
+            # optimisation simply moves heat onto the resistive booster, which
+            # draws several times the power for the same heat.
+            units = [u for u in ('heatpump_air', 'heatpump_booster')
+                     if (y, sit, u) in pro.index]
+            caps = {}
+            for u in units:
+                try:
+                    caps[u] = float(cap_pro.loc[(slice(None), sit, u)].iloc[0])
+                except Exception:
+                    caps[u] = 0.0
+            cap = sum(caps.values())
+            if cap <= p14a_kw:
+                continue
+            p_min = 0.4 * cap if cap > 11.0 else p14a_kw
+            for _c in ('inst-cap', 'cap-up'):
+                if pro[_c].dtype.kind in 'iu':
+                    pro[_c] = pro[_c].astype(float)
+            # Both units are pinned. The availability limit is a share of cap_pro,
+            # so a device left free simply grows and takes its allowance with it:
+            # on one grid the booster was rebuilt twelve times larger to escape.
+            # The setpoint has to rest on the capacity the household actually has.
+            for u in units:
+                pro.loc[(y, sit, u), ['inst-cap', 'cap-up']] = caps[u]
+            deficit_sites.add(sit)
+            draw = series(e_in, (e_in.sit == sit) & (e_in.pro.isin(units))
+                          & (e_in.com == 'electricity'))
+            dev.append(dict(cols=[(sit, u) for u in units], kind='pro',
+                            cap=cap, p_min=p_min, draw=draw))
+            continue
+        if str(prc).startswith('charging_station'):
+            if cap <= p14a_kw:
+                continue
+            draw = series(e_in, (e_in.sit == sit) & (e_in.pro == prc) & (e_in.com == 'electricity'))
+            dev.append(dict(cols=[(sit, prc)], kind='pro', cap=cap,
+                            p_min=p14a_kw, draw=draw))
+            mob_sites.add((sit, str(prc)[len('charging_station'):]))
+        continue
+
+    if cap_sto is not None and e_sto is not None:
+        e_sto.columns = ['t', 'stf', 'sit', 'sto', 'com', 'val']
+        for (y, sit, stg, com) in cap_sto.index:
+            if stg != 'battery_private' or com != 'electricity':
+                continue
+            if sit not in model_sites:
+                continue
+            cap = float(cap_sto.loc[(y, sit, stg, com)])
+            if cap <= p14a_kw:            # Ziffer 2.4.1.d threshold
+                continue
+            draw = series(e_sto, (e_sto.sit == sit) & (e_sto.sto == stg) & (e_sto.com == com))
+            # availability is a share of the charging power, so a storage left free
+            # would simply be built larger and take its allowance with it
+            sto_tbl = data['storage']
+            for _c in ('inst-cap-p', 'cap-up-p'):
+                if _c in sto_tbl.columns and sto_tbl[_c].dtype.kind in 'iu':
+                    sto_tbl[_c] = sto_tbl[_c].astype(float)
+            try:
+                sto_tbl.loc[(slice(None), sit, stg, com), ['inst-cap-p', 'cap-up-p']] = cap
+            except Exception:
+                pass
+            dev.append(dict(cols=[(sit, stg)], kind='sto', cap=cap,
+                            p_min=p14a_kw, draw=draw))
+
+    lam = np.zeros(T)
+    n_insufficient = 0
+    for t in range(T):
+        if not congested[t]:
+            continue
+        over = load[t] - limit
+        seg = []
+        for d_ in dev:
+            span = d_['cap'] - d_['p_min']
+            if span <= 1e-9 or d_['draw'][t] <= d_['p_min']:
+                continue
+            seg.append(((d_['cap'] - d_['draw'][t]) / span, span / pf_elc))
+        seg.sort(key=lambda x: x[0])
+        if not seg:
+            n_insufficient += 1
+            continue
+        lam[t] = 1.0
+        slope_sum = offset = 0.0
+        cleared = False
+        for k, (bp, sl) in enumerate(seg):
+            nxt = seg[k + 1][0] if k + 1 < len(seg) else 1.0
+            slope_sum += sl
+            offset += sl * bp
+            if slope_sum * nxt - offset >= over - 1e-9:
+                lam[t] = min(1.0, max(bp, (over + offset) / slope_sum))
+                cleared = True
+                break
+        if not cleared:
+            n_insufficient += 1
+
+    if prev_lam is not None:
+        lam = np.maximum(lam, np.asarray(prev_lam, dtype=float))
+
+    idx = (data['eff_factor'].index if not data['eff_factor'].empty
+           else pd.MultiIndex.from_product([[stf], ts], names=['support_timeframe', 't']))
+    # Ziffer 4.3 sentence 3 requires the return to be staged so that it does not
+    # cause a fresh overload. Leaving the limit open outside congested hours lets
+    # every deferred device come back at once, and on the inflexible baseline that
+    # was enough to make control worse than doing nothing. Outside congested hours
+    # each device is therefore allowed its uncontrolled draw plus a share of what
+    # is still free below the rating, divided in proportion to the room each one
+    # has left. The uncontrolled draw is always granted: withholding it would be
+    # curtailment, not recovery.
+    spare = np.maximum(0.0, (limit - load) * pf_elc)      # active power headroom
+    room = np.zeros(T)
+    for d_ in dev:
+        room += np.maximum(0.0, d_['cap'] - d_['draw'])
+    frac = np.divide(spare, room, out=np.zeros(T), where=room > 1e-9)
+    frac = np.minimum(frac, 1.0)
+
+    ava_pro, ava_sto = {}, {}
+    for d_ in dev:
+        setpoint = d_['cap'] - lam * (d_['cap'] - d_['p_min'])
+        recovery = d_['draw'] + frac * np.maximum(0.0, d_['cap'] - d_['draw'])
+        allowed = np.where(congested, setpoint, np.minimum(recovery, d_['cap']))
+        share = np.clip(allowed / d_['cap'], 0.0, 1.0)
+        tbl = ava_sto if d_['kind'] == 'sto' else ava_pro
+        for col in d_['cols']:
+            tbl[col] = share
+    for name, tbl in (('availability', ava_pro), ('availability_sto', ava_sto)):
+        if tbl:
+            df = pd.DataFrame(tbl, index=idx)
+            df.columns = pd.MultiIndex.from_tuples(df.columns)
+            data[name] = df
+
+    # With both units held at their reference capacity a site can be short of
+    # heat in a cold hour, which the inflexible path reports as unserved heat but
+    # which the flexible model can only express as infeasibility. A last-resort
+    # source is therefore added, built like import: a Buy commodity feeding a
+    # process into common_heat. Its price is set far above any real alternative,
+    # so it is used only when nothing else can serve the demand; the quantity is
+    # the unserved heat and the cost is excluded from reported figures.
+    if deficit_sites:
+        com, bsp = data['commodity'], data['buy_sell_price']
+        prc_tbl, pc = data['process'], data['process_commodity']
+        for st in sorted(deficit_sites):
+            com.loc[(stf, st, 'heat_deficit', 'Buy'), 'price'] = 1.0
+            row = prc_tbl.loc[(stf, st, 'import')].copy()
+            row['inst-cap'] = 2000.0
+            row['cap-up'] = 2000.0
+            for c in ('inv-cost-fix', 'inv-cost', 'fix-cost', 'var-cost'):
+                if c in row.index:
+                    row[c] = 0.0
+            prc_tbl.loc[(stf, st, 'heat_backup')] = row
+        bsp['heat_deficit'] = DEFICIT_PRICE
+        pc.loc[(stf, 'heat_backup', 'heat_deficit', 'In'), 'ratio'] = 1.0
+        pc.loc[(stf, 'heat_backup', 'common_heat', 'Out'), 'ratio'] = 1.0
+        data['commodity'] = com.sort_index()
+        data['process'] = prc_tbl.sort_index()
+        data['process_commodity'] = pc.sort_index()
+        print(f"P14A-AVA: last-resort heat source added at {len(deficit_sites)} sites "
+              f"(price {DEFICIT_PRICE:.0f}, quantity reported as unserved heat)", flush=True)
+
+    # Driving demand is a Demand commodity and must be met, so holding a charge
+    # point at its minimum power can make the model infeasible outright. The
+    # inflexible path never hits this because charging there is written into the
+    # demand series and shortfall simply shows up as deferred energy. A
+    # last-resort charger is added for the same reason as the heat one, priced
+    # far above any alternative, and its throughput is the unserved mobility.
+    if mob_sites:
+        com, bsp = data['commodity'], data['buy_sell_price']
+        prc_tbl, pc = data['process'], data['process_commodity']
+        for st, num in sorted(mob_sites):
+            name = f'mobility_backup_{num}'
+            com.loc[(stf, st, 'mobility_deficit', 'Buy'), 'price'] = 1.0
+            row = prc_tbl.loc[(stf, st, 'import')].copy()
+            row['inst-cap'] = 2000.0
+            row['cap-up'] = 2000.0
+            for c in ('inv-cost-fix', 'inv-cost', 'fix-cost', 'var-cost'):
+                if c in row.index:
+                    row[c] = 0.0
+            prc_tbl.loc[(stf, st, name)] = row
+            pc.loc[(stf, name, 'mobility_deficit', 'In'), 'ratio'] = 1.0
+            pc.loc[(stf, name, f'mobility{num}', 'Out'), 'ratio'] = 1.0
+        bsp['mobility_deficit'] = DEFICIT_PRICE
+        data['commodity'] = com.sort_index()
+        data['process'] = prc_tbl.sort_index()
+        data['process_commodity'] = pc.sort_index()
+        print(f"P14A-AVA: last-resort charger added for {len(mob_sites)} charge points",
+              flush=True)
+
+    global P14A_LAST_DIAG
+    P14A_LAST_DIAG = dict(n_cong=n_cong, n_insufficient=n_insufficient,
+                          n_deficit_sites=len(deficit_sites),
+                          n_mob_backup=len(mob_sites),
+                          lam_mean=float(lam[congested].mean()) if n_cong else 0.0,
+                          n_hp=sum(1 for d_ in dev if d_['cols'][0][1] == 'heatpump_air'),
+                          n_bev=sum(1 for d_ in dev if str(d_['cols'][0][1]).startswith('charging')),
+                          n_sto=sum(1 for d_ in dev if d_['kind'] == 'sto'),
+                          peak_uncontrolled=float(load.max()), limit=float(limit), lam=lam)
+    print(f"P14A-AVA: {P14A_LAST_DIAG['n_hp']} heat pumps, "
+          f"{P14A_LAST_DIAG['n_bev']} charge points, {P14A_LAST_DIAG['n_sto']} batteries | "
+          f"congested {n_cong}/{T} h (rated {rated_kva:.0f} kVA x {threshold}) | "
+          f"mean ratio {P14A_LAST_DIAG['lam_mean']:.3f} | "
+          f"hours still over at ratio one: {n_insufficient}", flush=True)
+    return data
