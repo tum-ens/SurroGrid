@@ -173,6 +173,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional cross-check of the per-vehicle EV charger rating for --post-demand-mode inflex. Ratings come from the EV session table; a value that disagrees with any vehicle is rejected.",
     )
     parser.add_argument(
+        "--p14a",
+        action="store_true",
+        help=(
+            "Section 14a EnWG control (BK6-22-300) on the inflex heat-pump and EV charging profiles: "
+            "in hours where the uncontrolled load exceeds the transformer rating, controllable devices "
+            "are reduced towards 4.2 kW and the deferred energy is returned later. Requires "
+            "--post-demand-mode inflex."
+        ),
+    )
+    parser.add_argument(
         "--max-timesteps",
         type=int,
         default=None,
@@ -229,6 +239,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--post-demand-mode inflex requires a post-electrification run, not --pre-only.")
     if args.inflex_ev_charger_kw is not None and args.post_demand_mode != "inflex":
         parser.error("--inflex-ev-charger-kw requires --post-demand-mode inflex.")
+    if args.p14a and args.post_demand_mode != "inflex":
+        parser.error("--p14a requires --post-demand-mode inflex.")
     if args.summary_nonconvergence != "auto" and "summary" not in args.outputs:
         parser.error("--summary-nonconvergence only applies to runs with summary output.")
     if args.n_cpu < 1:
@@ -255,6 +267,7 @@ def build_assumptions(args, reader: ScenarioResultReader) -> dict:
             ),
             "ev_service_model": "dedicated_sessions",
             "inflex_capacity_source": INFLEX_CAPACITY_SOURCE,
+            "section_14a": bool(args.p14a),
         })
     if args.hh_only:
         assumptions.update({
@@ -340,7 +353,7 @@ def demand_buses(*demand_frames) -> set[int]:
     return buses
 
 
-def load_demands(args, reader, residential=None):
+def load_demands(args, reader, residential=None, rating_kva=None):
     """Pre and post demand frames after projection, HH filter, scaling and truncation.
 
     Returns:
@@ -351,7 +364,8 @@ def load_demands(args, reader, residential=None):
         pre, post, reactive, battery = dmnds.obtain_pre_demand(reader), None, None, None
     else:
         pre, post, reactive, battery = dmnds.reconstruct_demands(
-            reader, post_demand_mode=args.post_demand_mode, ev_charger_kw=args.inflex_ev_charger_kw
+            reader, post_demand_mode=args.post_demand_mode, ev_charger_kw=args.inflex_ev_charger_kw,
+            p14a_rating_kva=rating_kva if getattr(args, "p14a", False) else None,
         )
     if reader.metadata.get("optimization_space") == "scenario_unit":
         allocation = reader.get_allocation_plan()
@@ -488,8 +502,7 @@ def main(argv: list[str] | None = None) -> None:
         )
     residential = residential_buses(db, grid_ref) if args.hh_only else None
 
-    ##### Demand, grid ##### (a failure here registers no run)
-    pre, post, reactive, battery = load_demands(args, reader, residential)
+    ##### Grid, demand ##### (a failure here registers no run)
     if db is not None:
         grid = db.read_pandapower_grid(grid_ref)
     else:
@@ -499,6 +512,9 @@ def main(argv: list[str] | None = None) -> None:
 
             fallback = SurroGridDatabase()
             grid = fallback.read_pandapower_grid(fallback.resolve_grid_identifier(filename))
+    # the Section 14a control needs the transformer rating before the demand is reconstructed
+    rating_kva = network.transformer_rating_mva(grid) * 1000
+    pre, post, reactive, battery = load_demands(args, reader, residential, rating_kva)
     load_buses = sorted(demand_buses(pre, post))
     context = prepare_grid_context(grid, load_buses, args.summary_grid_scope)
 
