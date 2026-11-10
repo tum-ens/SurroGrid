@@ -266,19 +266,59 @@ The space-heat source is `asset_sizing.heat.space_heat_source`:
   use, region; it uses the LoD2 footprint as size proxy). Source building, match scope and scale are stored.
   These are approved pragmatic fallbacks, not exact simulations.
 - `teaser` (Schweinfurt and joint DSO A + DSO B scenarios): TEASER `tabula_de` archetypes with the component's
-  residential effective floor area (footprint × `floor_number`, residential share) as total net leased area;
-  the number of floors passed to TEASER does not change the result, and no blanket heated-area factor is
-  applied. The TEASER envelope design load is not used for sizing (see below). Occupancy (richardsonpy) and hot
+  heated reference area `heated_area_ratio` × the component's residential effective floor area (footprint ×
+  `floor_number`, residential share) as net leased area; the number of floors passed to TEASER does not change
+  the result. The TEASER envelope design load is not used for sizing (see below). Occupancy (richardsonpy) and hot
   water draw on seeded random states per building. Standalone synthetic runs simulate with a PVGIS TMY at the
   grid's transformer. Paired runs pass the provider weather file (`--weather-hdf`), so heat, COP, PV and sizing
   share one TMY; a TMY takes each month from a different year, so TMYs of two nearby locations are unrelated
-  hour by hour. The 5R1C model heats to a constant 20 °C and switches heating off on days 135–258; all
-  buildings restart together on 16 September, which can set the auxiliary-heater size.
+  hour by hour. The 5R1C model heats to a constant 20 °C. The envelope, area and solar assumptions are set by
+  `asset_sizing.heat.teaser` (see [TEASER envelope and assumptions](#teaser-envelope-and-assumptions)); with
+  `preset: legacy` the area is the full gross area and heating is off on days 135–258, so all buildings
+  restart together on 16 September, which can set the auxiliary-heater size.
 - `internal`: corrected ro-heat envelope coefficients,
   weather and gains feed a 1R1C temperature balance. HEMS determines space heating
   within comfort bounds; InFlex uses an independent forward thermostat reference.
   See [Internal space heat and building preheating](#internal-space-heat-and-building-preheating)
   for the effective heated zone, source provenance and boundaries.
+
+#### TEASER envelope and assumptions
+
+`asset_sizing.heat.teaser` (only with `space_heat_source: teaser`) sets the assumptions of the TEASER path.
+`preset: corrected` is the default; `preset: legacy` reproduces the TEASER profiles of SurroGrid 2.0.0 bit for
+bit (test `tests/allocation/test_teaser_heat.py`). Single keys can be set on top of either preset. The
+internal 1R1C model does not read this block.
+
+| Key | Corrected (default) | Legacy | Why |
+|---|---|---|---|
+| `heated_area_ratio` | 0.55 | 1.0 | TEASER scales every element, the air volume and the internal masses with `net_leased_area`, which is TABULA's conditioned reference area (≈ 1.0–1.1 × living area). InfDB's gross area counts floors from the ridge height (≈ 4 m per floor, attics as full storeys); Bavaria-wide the occupied living area is ≈ 0.55 × this gross area (below) |
+| `envelope_source` | `lod2` | `tabula` | walls = Σ LoD2 WallSurface − shared walls − windows (TEASER's orientation split), roof = Σ LoD2 RoofSurface, ground floor = footprint, as in InfDB ro_heat; buildings without stored surfaces keep the TABULA envelope |
+| `subtract_shared_walls` | true | – | LoD2 WallSurface includes party walls (Bavarian sample: 21–27 % of the wall area of every type) |
+| `lod2_window_ratio` | null (TEASER's TABULA ratio on the heated area) | – | a number sets windows = ratio × heated area (ro_heat: 0.2) |
+| `sfh_roof_fix` | true | false | TEASER files the tilted SFH roof under orientations 0/90; legacy counted it as wall and added a roof of 1.2 × ground floor |
+| `solar_beam` | `horizontal` (GHI − DHI) | `normal` (DNI) | the Perez/Duffie–Beckman code expects the beam irradiance on the horizontal |
+| `window_shading_factor`, `window_frame_fraction`, `blind_threshold_w_per_m2` | 0.6, 0.3, null | 1.0, 0.0, 100 | TABULA shading instead of blinds closing above 100 W/m² all year |
+| `ground_floor_b` | 0.5 | 1.0 | temperature reduction factor of the ground floor (DIN V 4108-6, TABULA) |
+| `age_mapping` | `stock_share` | `band_end` | the TABULA class is drawn within the Zensus band by the IWU 2011 building counts (Loga et al. 2015, Tab. 4) per type; legacy took the last year of the band, i.e. the youngest class |
+| `apartment_block_after_1978` | `multi_family_house` | `cap_1978` | TEASER has no AB after 1978; corrected uses the MFH archetype of the block's class, hot water stays AB |
+| `air_change_per_h`, `ventilation_height_m` | 0.4, 2.5 | 0.5, null (TEASER volume = area × 3.125 m) | TABULA hygienic air change on the heated area × 2.5 m clear height |
+| `heating_limit_c`, `fixed_heating_off_days` | 12, null | null, [135, 259] | TABULA heating limit on the daily mean outdoor temperature instead of a fixed heating break |
+| `retrofit_share_before_1979`, `retrofit_share_1979_1994` | 0, 0 | 0, 0 | option S7: seeded share of level-0 buildings simulated with the TABULA retrofit variant |
+| `consumption_factor` | `none` | `none` | option S8 `iwu`: IWU consumption calibration (Loga et al. 2015, App. C.3) on the annual energy of level-0 buildings, peak kept |
+
+Source of the 0.55: InfDB holds 1,152 Mio m² of gross residential area for 6.39 M households in Bavaria
+(`pylovo.buildings_result` v1). Bavaria had 650.5 Mio m² of living area in residential buildings and 665.6 Mio m²
+in all buildings on 31.12.2022 (Bayerisches Landesamt für Statistik 2023, Statistischer Bericht F2400C 202200,
+Tab. 3 and 4; 97.8 m² per dwelling in StMWi Bayern, Daten zur Raumbeobachtung, Tab. 5.5), i.e. 0.56–0.58 of the
+InfDB gross area, and just over 4 % of the dwellings were vacant (Zensus 2022), which gives ≈ 0.55. The ratio is
+a Bavarian average, not per type, on a Zensus 2011-based stock update; the two Bavarian publications differ by
+≈ 2 %. It is below the usual living/gross ratio of 0.7–0.8 (DIN 277) because of the ridge-based floor count. An
+InfDB version with eaves-based floors (`floor_source: eaves`) needs ≈ 0.73.
+
+LoD2 surfaces reach the grid inputs as the optional h5 table `raw_data/building_surfaces` (`objectid`,
+`wall_surface_area_m2`, `roof_surface_area_m2`, `shared_wall_area_m2`), written by
+`scripts/lod2_building_surfaces.py` from a read-only InfDB query. Database-backed grids have no such table yet and
+use the TABULA envelope.
 
 #### TEASER refurbishment level
 

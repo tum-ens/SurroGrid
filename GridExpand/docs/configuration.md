@@ -62,6 +62,7 @@ is optional (see [`ghd:` block](#ghd-block)).
 | `asset_sizing.heat.buffer_usable_temperature_spread_k` | > 0 | usable buffer spread |
 | `asset_sizing.heat.buffer_charge_efficiency_method` | optional, `technology` (default), `cop_curve` | buffer charge efficiency: storage value, or per building COP(lift + spread) / COP(lift) |
 | `asset_sizing.heat.teaser_retrofit_level` | optional, 0/1/2 (default 0) | TABULA variant of the `teaser` source |
+| `asset_sizing.heat.teaser` | optional mapping, `teaser` source only | TEASER envelope, area, solar, age and ventilation assumptions; `preset: corrected` (default) or `legacy`, keys in [method](method.md#teaser-envelope-and-assumptions) |
 | `electrification.<heat\|mobility\|pv_battery>.adoption_mode` | `deterministic_share`, `source_inventory` | selection rule per technology |
 | `electrification.<…>.building_share` | 0–1; required for `deterministic_share`, forbidden otherwise | selected share of eligible buildings |
 | `electrification.<…>.building_share_by_type` | optional mapping `SFH`/`TH`/`MFH`/`AB` → 0–1 (`deterministic_share`) | shares per building type; `building_share` applies to the types not listed |

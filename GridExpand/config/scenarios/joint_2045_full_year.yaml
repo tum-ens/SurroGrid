@@ -63,6 +63,11 @@ asset_sizing:
     # refurbishment; newer classes barely change (TABULA standard ≈ retrofit).
     # Rationale and literature: docs/method.md#teaser-refurbishment-level.
     teaser_retrofit_level: 1
+    # TEASER envelope, area and solar assumptions (docs/method.md#teaser-envelope-and-assumptions).
+    # corrected: heated area 0.55 x InfDB gross area, LoD2 walls and roof where stored, TABULA shading,
+    # ventilation and heating limit; legacy reproduces the TEASER profiles of SurroGrid 2.0.0.
+    teaser:
+      preset: corrected
     # Degree-day reference temperatures used to derive regional full-load hours.
     indoor_design_temperature_c: 20.0
     # DWD/VDI heating limit: days below it count as heating days.
