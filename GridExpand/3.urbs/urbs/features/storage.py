@@ -135,6 +135,23 @@ def add_storage(m):
         m.tm, m.sto_tuples,
         rule=res_storage_output_by_power_rule,
         doc='storage output <= storage power')
+
+    # BK6-22-300 Ziffer 2.4.1.d puts electricity storage above 4.2 kW of
+    # connection power under grid-oriented control while it is charging, so the
+    # setpoint has to reach the storage input as well as the process throughput.
+    # The limit is expressed as a share of the installed charging power, matching
+    # how the process availability works. Without an availability_sto table
+    # nothing is added and the model is unchanged.
+    if getattr(m, 'mode', {}).get('ava', False) and hasattr(m, 'availability_sto_dict'):
+        m.sto_availability_tuples = pyomo.Set(
+            within=m.stf * m.sit * m.sto * m.com,
+            initialize=[(stf, sit, sto, com) for (stf, sit, sto, com) in m.sto_tuples
+                        if (sit, sto) in m.availability_sto_dict],
+            doc='Storages whose charging power is limited by a setpoint')
+        m.res_storage_input_by_availability = pyomo.Constraint(
+            m.tm, m.sto_availability_tuples,
+            rule=res_storage_input_by_availability_rule,
+            doc='storage input <= available charging power')
     m.res_storage_state_by_capacity = pyomo.Constraint(
         m.t, m.sto_tuples,
         rule=res_storage_state_by_capacity_rule,
@@ -285,6 +302,13 @@ def def_new_cap_sto_p_rule(m, stf, sit, sto, com):
 def res_storage_input_by_power_rule(m, t, stf, sit, sto, com):
     return (m.e_sto_in[t, stf, sit, sto, com] <= m.dt *
             m.cap_sto_p[stf, sit, sto, com])
+
+
+# storage charging <= available charging power (LVDS, section 14a setpoint)
+def res_storage_input_by_availability_rule(m, t, stf, sit, sto, com):
+    return (m.e_sto_in[t, stf, sit, sto, com] <= m.dt *
+            m.cap_sto_p[stf, sit, sto, com] *
+            m.availability_sto_dict[(sit, sto)][stf, t])
 
 
 # storage output <= storage power

@@ -281,7 +281,7 @@ def pyomo_model_prep(data, timesteps):
     ###### Assign basic properties
     m.global_prop = data['global_prop']
     m.mode = identify_mode(data)
-    m.stf_list = m.global_prop.index.levels[0].tolist()  # create list with all support timeframe values
+    m.stf_list = sorted(data['demand'].index.get_level_values(0).unique().tolist())  # FIX: stf from demand, not stale global_prop
     m.timesteps = timesteps
 
     m.cost_type_list = ['Invest', 'Fixed', 'Variable'] 
@@ -329,15 +329,22 @@ def pyomo_model_prep(data, timesteps):
         m.buy_sell_price_dict = data["buy_sell_price"].dropna(axis=0, how='all').to_dict()
     if m.mode['tve']:
         m.eff_factor_dict = data["eff_factor"].dropna(axis=0, how='all').to_dict()
-    # if m.mode['ava']:
-    #     m.availability_dict = data["availability"].dropna(axis=0, how='all').to_dict()
+    if m.mode['ava']:
+        m.availability_dict = data["availability"].dropna(axis=0, how='all').to_dict()
+        if data.get('availability_sto') is not None and not data['availability_sto'].empty:
+            m.availability_sto_dict = data["availability_sto"].dropna(axis=0, how='all').to_dict()
     if m.mode['tdy']:
         m.typeperiod = data['type_period'].dropna(axis=0, how='all').to_dict()
     else:
         # if mode 'typeperiod' is not active, create a dict with ones
-        temp = pd.DataFrame(index=data['demand'].dropna(axis=0, how='all').index)
-        temp['weight_typeperiod']=1
-        m.typeperiod = temp.to_dict()
+        # FIX: ensure (support_timeframe, t) keys to match model.py m.typeperiod access
+        from datetime import date
+        _idx = data['demand'].dropna(axis=0, how='all').index
+        if isinstance(_idx, pd.MultiIndex):
+            m.typeperiod = {'weight_typeperiod': {tuple(k): 1 for k in _idx}}
+        else:
+            _stf = m.stf_list[0] if hasattr(m, 'stf_list') and len(m.stf_list) else date.today().year
+            m.typeperiod = {'weight_typeperiod': {(_stf, t): 1 for t in _idx}}
     # if m.mode['onoff']:
     #     # on/off option, only keep those entries whose values are 1
     #     onoff = data['process']['on-off']
@@ -756,8 +763,10 @@ def get_cluster_data(data, cluster):
     cluster_data['demand'] = cluster_data['demand'][[(sit, com) for (sit, com) in cluster_data['demand'].columns if sit in cluster]]
     cluster_data['supim'] = cluster_data['supim'][[(sit, com) for (sit, com) in cluster_data['supim'].columns if sit in cluster]]
     cluster_data['eff_factor'] = cluster_data['eff_factor'][[(sit, pro) for (sit, pro) in cluster_data['eff_factor'].columns if sit in cluster]]
-    # try: cluster_data['availability'] = cluster_data['availability'][[(sit, pro) for (sit, pro) in cluster_data['availability'].columns if sit in cluster]]
-    # except: pass
+    # section 14a setpoints (availability, availability_sto) only for the sites of this cluster
+    for tbl in ('availability', 'availability_sto'):
+        if cluster_data.get(tbl) is not None and not cluster_data[tbl].empty:
+            cluster_data[tbl] = cluster_data[tbl][[c for c in cluster_data[tbl].columns if c[0] in cluster]]
     return cluster_data
 
 def split_columns(columns, sep='.'):

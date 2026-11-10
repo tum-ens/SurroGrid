@@ -27,7 +27,7 @@ def identify_mode(data):
         # 'dsm': False,                   # demand site management
         'bsp': False,                   # buy sell price
         'tve': False,                   # time variable efficiency
-        # 'ava': False,
+        'ava': False,                   # process availability
         # 'dcpf': False,                  # dc power flow
         # 'acpf': False,                  # ac power flow
         'tdy': False,                   # type periods
@@ -65,8 +65,8 @@ def identify_mode(data):
         mode['bsp'] = True
     if not data['eff_factor'].empty:
         mode['tve'] = True
-    # if not data['availability'].empty:
-    #     mode['ava'] = True
+    if data.get('availability') is not None and not data['availability'].empty:
+        mode['ava'] = True
     # if 'resistance' in data['transmission'].keys():
     #     if any(data['transmission']['resistance'] > 0):
     #         mode['acpf'] = True

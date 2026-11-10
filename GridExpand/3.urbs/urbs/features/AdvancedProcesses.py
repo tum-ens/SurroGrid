@@ -23,22 +23,22 @@ def add_advanced_processes(m):
             within=m.stf * m.sit * m.pro * m.com,
             doc='Outputs of processes with time dependent efficiency')
 
-    # if m.mode['ava']: #LVDS: tuple definitions for the processes availability (similar to 'tve')
-    #     tve_stflist = set()
-    #     # get all support timeframes for which availability is enabled
-    #     for key in m.availability_dict[tuple(m.availability_dict.keys())[0]]:
-    #         tve_stflist.add(tuple(key)[0])
-    #     m.pro_availability_tuples = pyomo.Set(
-    #         within=m.stf * m.sit * m.pro,
-    #         initialize=[(stf, site, process)
-    #                     for stf in tve_stflist
-    #                     for (site, process) in tuple(m.availability_dict.keys())],
-    #         doc='Outputs of processes with time dependent efficiency')
-    # else:
-    #     # empty tuples needed for the other constraints
-    #     m.pro_availability_tuples = pyomo.Set(
-    #         within=m.stf * m.sit * m.pro,
-    #         doc='Outputs of processes with time dependent efficiency')
+    if m.mode['ava']: #LVDS: tuple definitions for the processes availability (similar to 'tve')
+        ava_stflist = set()
+        # get all support timeframes for which availability is enabled
+        for key in m.availability_dict[tuple(m.availability_dict.keys())[0]]:
+            ava_stflist.add(tuple(key)[0])
+        m.pro_availability_tuples = pyomo.Set(
+            within=m.stf * m.sit * m.pro,
+            initialize=[(stf, site, process)
+                        for stf in ava_stflist
+                        for (site, process) in tuple(m.availability_dict.keys())],
+            doc='Processes whose throughput is limited by a time dependent availability')
+    else:
+        # empty tuples needed for the other constraints
+        m.pro_availability_tuples = pyomo.Set(
+            within=m.stf * m.sit * m.pro,
+            doc='Processes whose throughput is limited by a time dependent availability')
 
     # # process tuples for on/off
     # if m.mode['onoff']:
@@ -434,11 +434,11 @@ def add_advanced_processes(m):
     #     rule=res_start_up_rule,
     #     doc='start >= on_off(t) - on_off(t-1)')
 
-    # #LVDS: availability rule
-    # m.res_process_throughput_by_available_capacity = pyomo.Constraint(
-    #     m.tm, m.pro_availability_tuples,
-    #     rule=res_process_throughput_by_available_capacity_rule,
-    #     doc='process throughput <= available process capacity')
+    #LVDS: availability rule
+    m.res_process_throughput_by_available_capacity = pyomo.Constraint(
+        m.tm, m.pro_availability_tuples,
+        rule=res_process_throughput_by_available_capacity_rule,
+        doc='process throughput <= available process capacity')
     
     return m
 
