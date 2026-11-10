@@ -44,6 +44,8 @@ uv run gridexpand optimize <inputfile_id> --scenario-config config/scenarios/<sc
 | `--tsam` | scenario YAML | enable TSAM regardless of `time_aggregation.enabled` |
 | `--tsam-periods`, `--tsam-hours-per-period`, `--tsam-extreme-method` | scenario YAML | TSAM overrides |
 | `--reduce-only` | off | run preprocessing and TSAM, write `urbs_out/reduced_data` and `urbs_out/tsam`, skip the solve (needs TSAM) |
+| `--p14a-ref` | none | urbs only: Section 14a EnWG control; Step 3 result of the same input without control (see below), output `<result>_p14a.h5` |
+| `--p14a-rating-kva` | `raw_data/net` | transformer rating for `--p14a-ref` |
 
 **Partition.** The buildings (sites) are split into `n_cpu` contiguous, equally sized clusters in site order (the
 first `len % n_cpu` clusters get one more building; empty clusters are dropped). The synthetic runner chooses
@@ -90,6 +92,19 @@ SCENARIO_CONFIG=config/scenarios/<scenario>.yaml bash scripts/hpc/start_batch_jo
 
 The templates (adapt the `#SBATCH` header) run `uv run --frozen gridexpand optimize <INDEX> --n_cpu
 $SLURM_CPUS_PER_TASK`; logs go to `work/runs/slurm/`.
+
+**Section 14a (`--p14a-ref`).** Grid-oriented control following BNetzA BK6-22-300 on the optimized case (Lee,
+2026), in two runs. The first run is the same input without control. Hours in which its import divided by `PF_ELC`
+exceeds the transformer rating are congested. Controllable devices are heat-pump systems of a site (heat pump and
+auxiliary heater carry one setpoint), charging stations and private batteries while charging, each above 4.2 kW.
+In a congested hour every device gets the setpoint `cap − ratio · (cap − p_min)` with one common ratio, the
+smallest that clears the overload of the first run; `p_min` is 4.2 kW, or 0.4 × connection power for heat pumps
+above 11 kW. Outside congested hours a device may draw its first-run draw plus a share of the headroom below the
+rating, in proportion to its free capacity. The second run limits the device input to the setpoint
+(`tau_pro ≤ dt · cap_pro · share`, `e_sto_in ≤ dt · cap_sto_p · share`; `features/section14a.py`). The capacities of
+the controlled devices are fixed to the first run (as installed capacity, so the second run carries no investment
+cost for them), and a last-resort heat source (`heat_backup`) and charger (`mobility_backup<n>`) priced at
+1,000 EUR/kWh keep the model feasible; their throughput is the unserved heat and mobility.
 
 ## Conventions
 

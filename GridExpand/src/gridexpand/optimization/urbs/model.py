@@ -20,6 +20,7 @@ from .features.modelhelper import commodity_balance, commodity_subset
 from .features.storage import add_storage, storage_cost
 from .features.typeperiod import add_typeperiod
 from .input import pyomo_model_prep
+from .features.section14a import add_section14a
 from .features.thermal import add_thermal
 
 
@@ -230,6 +231,8 @@ def pyomo_assign_advanced_features(m, global_settings, data=None):
         m.pro_timevar_output_tuples = pyomo.Set(
             within=m.stf * m.sit * m.pro * m.com,
             doc='empty set needed for (partial) process output')
+    if data is not None and ("p14a_process" in data or "p14a_storage" in data):
+        m = add_section14a(m, data)
     return m
 
 
