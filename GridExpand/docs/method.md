@@ -293,7 +293,8 @@ internal 1R1C model does not read this block.
 |---|---|---|---|
 | `heated_area_ratio` | 0.55 | 1.0 | TEASER scales every element, the air volume and the internal masses with `net_leased_area`, which is TABULA's conditioned reference area (≈ 1.0–1.1 × living area). InfDB's gross area counts floors from the ridge height (≈ 4 m per floor, attics as full storeys); Bavaria-wide the occupied living area is ≈ 0.55 × this gross area (below) |
 | `envelope_source` | `lod2` | `tabula` | walls = Σ LoD2 WallSurface − shared walls − windows (TEASER's orientation split), roof = Σ LoD2 RoofSurface, ground floor = footprint, as in InfDB ro_heat; buildings without stored surfaces keep the TABULA envelope |
-| `subtract_shared_walls` | true | – | LoD2 WallSurface includes party walls (Bavarian sample: 21–27 % of the wall area of every type) |
+| `subtract_shared_walls` | true | – | LoD2 WallSurface includes party walls (Bavarian sample, residential neighbours: TH 31 %, AB 22 %, MFH 12 %, SFH 11 % of the wall area) |
+| `attic`, `attic_ceiling_b`, `pitched_roof_area_ratio` | `unheated`, 0.8, 1.05 | – | the LoD2 hull encloses the attic, TABULA's envelope only the heated zone: for a pitched roof (roof surface > 1.05 × footprint) the top-floor ceiling (= footprint, b = 0.8 as for a ceiling to an unheated attic, no solar or sky radiation) replaces the roof surface and the gable walls above the eaves leave the walls; flat roofs keep the roof. Eaves as in InfDB `05_fill_floor_number.sql`: lowest point of the roof surfaces at the roof-area median above the lowest ground point; a wall's area above it is its polygon projected onto its vertical plane and clipped. `heated` keeps the full hull |
 | `lod2_window_ratio` | null (TEASER's TABULA ratio on the heated area) | – | a number sets windows = ratio × heated area (ro_heat: 0.2) |
 | `sfh_roof_fix` | true | false | TEASER files the tilted SFH roof under orientations 0/90; legacy counted it as wall and added a roof of 1.2 × ground floor |
 | `solar_beam` | `horizontal` (GHI − DHI) | `normal` (DNI) | the Perez/Duffie–Beckman code expects the beam irradiance on the horizontal |
@@ -316,7 +317,8 @@ a Bavarian average, not per type, on a Zensus 2011-based stock update; the two B
 InfDB version with eaves-based floors (`floor_source: eaves`) needs ≈ 0.73.
 
 LoD2 surfaces reach the grid inputs as the optional h5 table `raw_data/building_surfaces` (`objectid`,
-`wall_surface_area_m2`, `roof_surface_area_m2`, `shared_wall_area_m2`), written by
+`wall_surface_area_m2`, `roof_surface_area_m2`, `shared_wall_area_m2`, `wall_above_eaves_m2`,
+`shared_wall_above_eaves_m2`), written by
 `scripts/lod2_building_surfaces.py` from a read-only InfDB query. Database-backed grids have no such table yet and
 use the TABULA envelope.
 
