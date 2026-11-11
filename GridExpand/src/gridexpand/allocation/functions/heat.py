@@ -140,27 +140,44 @@ def _default_teaser():
 
 
 # Per-building LoD2 surface sums stored with the grid inputs (h5 key raw_data/building_surfaces).
-BUILDING_SURFACE_COLUMNS = ("wall_surface_area_m2", "roof_surface_area_m2", "shared_wall_area_m2")
+BUILDING_SURFACE_COLUMNS = (
+    "wall_surface_area_m2", "roof_surface_area_m2", "shared_wall_area_m2",
+    "wall_above_eaves_m2", "shared_wall_above_eaves_m2",
+)
 
 
 def lod2_inputs(df_buildings, teaser):
-    """Per-building LoD2 surface inputs of the TEASER envelope, scaled to the residential share.
+    """Per-building LoD2 envelope inputs of the TEASER path, scaled to the residential share.
 
-    Uses ``wall_surface_area_m2``, ``roof_surface_area_m2`` and ``shared_wall_area_m2`` (optional) and the
-    footprint ``floor_area``. Missing columns or values give NaN, which keeps the TABULA envelope.
+    Returns (walls incl. windows, roof or top-floor ceiling, ground floor, temperature reduction factor of the
+    roof element). Uses ``wall_surface_area_m2``, ``roof_surface_area_m2``, ``shared_wall_area_m2``,
+    ``wall_above_eaves_m2`` and ``shared_wall_above_eaves_m2`` (optional) and the footprint ``floor_area``.
+    With ``attic: unheated`` a pitched roof (roof surface > ``pitched_roof_area_ratio`` x footprint) closes
+    the heated zone at the eaves: the ceiling (= footprint) with ``attic_ceiling_b`` replaces the roof, and the
+    walls above the eaves leave the envelope. Missing values give NaN, which keeps the TABULA envelope.
     """
     n = len(df_buildings)
     def column(name):
         if name not in df_buildings.columns:
             return np.full(n, np.nan)
         return pd.to_numeric(df_buildings[name], errors="coerce").to_numpy(dtype=float)
-    gross = column("floor_area") * column("floor_number")
+    footprint = column("floor_area")
+    gross = footprint * column("floor_number")
     share = np.clip(column("residential_effective_floor_area_m2") / gross, 0.0, 1.0)
     share = np.where(np.isfinite(share), share, 1.0)
-    wall = column("wall_surface_area_m2")
+    wall, roof = column("wall_surface_area_m2"), column("roof_surface_area_m2")
+    shared = np.nan_to_num(column("shared_wall_area_m2"), nan=0.0)
+    above = np.nan_to_num(column("wall_above_eaves_m2"), nan=0.0)
+    shared_above = np.nan_to_num(column("shared_wall_above_eaves_m2"), nan=0.0)
+    attic = (np.full(n, teaser.attic == "unheated")
+             & (roof > teaser.pitched_roof_area_ratio * footprint))
+    walls = np.where(attic, wall - above, wall)
     if teaser.subtract_shared_walls:
-        wall = wall - np.nan_to_num(column("shared_wall_area_m2"), nan=0.0)
-    return wall * share, column("roof_surface_area_m2") * share, column("floor_area") * share
+        walls = walls - np.where(attic, shared - shared_above, shared)
+    roof_element = np.where(attic, footprint, roof)
+    roof_b = np.where(attic, teaser.attic_ceiling_b, 1.0)
+    return walls * share, roof_element * share, footprint * share, roof_b
+
 
 ##############################################################
 ################## Obtaining GHD + HP COP ####################
@@ -304,8 +321,9 @@ def generate_heat_demands(df_buildings, df_elec_demand, weather_data, zip, base_
         df_buildings["residential_effective_floor_area_m2"], errors="coerce"
     ).to_numpy() * teaser.heated_area_ratio
     if teaser.envelope_source == "lod2":
-        wall, roof, ground = lod2_inputs(df_buildings, teaser)
+        wall, roof, ground, roof_b = lod2_inputs(df_buildings, teaser)
         scenario["lod2_wall_m2"], scenario["lod2_roof_m2"], scenario["lod2_ground_m2"] = wall, roof, ground
+        scenario["lod2_roof_b"] = roof_b
     scenario["floors"] = 1
     scenario["nb_occ"] = scenario["nb_occ"].apply(lambda x: [int(round(y,0)) for y in x])
     # TABULA variant applied relative to each building's own year class

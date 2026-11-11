@@ -68,6 +68,8 @@ def sample_buildings(with_surfaces=False):
         buildings["wall_surface_area_m2"] = [260.0, 230.0, 640.0, 1500.0]
         buildings["roof_surface_area_m2"] = [140.0, 90.0, 260.0, 540.0]
         buildings["shared_wall_area_m2"] = [0.0, 90.0, 0.0, 300.0]
+        buildings["wall_above_eaves_m2"] = [40.0, 25.0, 60.0, 10.0]
+        buildings["shared_wall_above_eaves_m2"] = [0.0, 15.0, 0.0, 5.0]
     return buildings
 
 
@@ -239,3 +241,25 @@ def test_energy_only_scaling_keeps_the_peak():
     assert scaled.max() == pytest.approx(5.0) and scaled.sum() == pytest.approx(0.7 * q.sum(), rel=1e-9)
     assert scaled[0] == 0.0
     np.testing.assert_array_equal(heat.energy_only_scaling(q, 1.0), q)
+
+
+def test_unheated_attic_inputs_for_pitched_and_flat_roofs():
+    buildings = sample_buildings(with_surfaces=True)  # roof/footprint: 1.27, 1.29, 1.18 (pitched), 1.04 (flat)
+    wall, roof, ground, roof_b = heat.lod2_inputs(buildings, TeaserHeatConfig())
+    np.testing.assert_allclose(wall, [260 - 40, 230 - 25 - (90 - 15), 640 - 60, 1500 - 300])
+    np.testing.assert_allclose(roof, [110, 70, 220, 540])
+    np.testing.assert_allclose(ground, [110, 70, 220, 520])
+    np.testing.assert_allclose(roof_b, [0.8, 0.8, 0.8, 1.0])
+    wall_h, roof_h, _, b_h = heat.lod2_inputs(buildings, TeaserHeatConfig.from_dict({"attic": "heated"}))
+    np.testing.assert_allclose(wall_h, [260, 230 - 90, 640, 1500 - 300])
+    np.testing.assert_allclose(roof_h, [140, 90, 260, 540])
+    np.testing.assert_allclose(b_h, 1.0)
+
+
+def test_unheated_attic_lowers_pitched_roof_buildings_only():
+    buildings = sample_buildings(with_surfaces=True)
+    attic = simulate(TeaserHeatConfig(), buildings)
+    heated = simulate(TeaserHeatConfig.from_dict({"attic": "heated"}), buildings)
+    for key in ("B-SFH", "B-TH", "B-MFH"):
+        assert attic[key][0] < heated[key][0] and attic[key][1] < heated[key][1]
+    assert attic["B-AB"] == heated["B-AB"]  # flat roof

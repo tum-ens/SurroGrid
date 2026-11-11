@@ -96,8 +96,9 @@ class SaveFile:
     def get_building_surfaces(self) -> pd.DataFrame | None:
         """Return the optional LoD2 surface sums per building (``raw_data/building_surfaces``) or None.
 
-        Columns: ``objectid``, ``wall_surface_area_m2``, ``roof_surface_area_m2`` and ``shared_wall_area_m2``
-        (WallSurface area on a heated neighbour's footprint). The TEASER LoD2 envelope reads them; a grid
+        Columns: ``objectid``, ``wall_surface_area_m2``, ``roof_surface_area_m2``, ``shared_wall_area_m2``
+        (WallSurface area on a heated neighbour's footprint), ``wall_above_eaves_m2`` and
+        ``shared_wall_above_eaves_m2`` (the parts above the eaves). The TEASER LoD2 envelope reads them; a grid
         without the key keeps the TABULA envelope. Written by ``scripts/lod2_building_surfaces.py``.
         """
         if self.storage == "db":

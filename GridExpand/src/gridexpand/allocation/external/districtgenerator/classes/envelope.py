@@ -484,6 +484,8 @@ class Envelope:
         self.A["window"]["sum"] = sum(self.A["window"][d] for d in drct)
 
         self.envelope_source = "tabula"
+        # GridExpand: temperature reduction factor of the roof element (a ceiling to an unheated attic < 1).
+        self.b_roof = 1.0
         if self.options is not None and self.options.sfh_roof_fix:
             self._fixTiltedRoof(prj.buildings[self.id], drct)
         if self.options is not None and self.options.envelope_source == "lod2":
@@ -508,8 +510,9 @@ class Envelope:
         """GridExpand: replace the TABULA element areas by the building's LoD2 surfaces.
 
         Inputs per building (already scaled to the residential share of a mixed building):
-        ``lod2_wall_m2`` (sum of WallSurface, shared walls removed if configured), ``lod2_roof_m2`` (sum of
-        RoofSurface) and ``lod2_ground_m2`` (footprint). Windows keep TEASER's TABULA ratio on the heated area,
+        ``lod2_wall_m2`` (sum of WallSurface, shared walls and, below an unheated attic, the gables removed),
+        ``lod2_roof_m2`` (sum of RoofSurface, or the top-floor ceiling below an unheated attic),
+        ``lod2_ground_m2`` (footprint) and ``lod2_roof_b`` (temperature reduction factor of that element). Windows keep TEASER's TABULA ratio on the heated area,
         or ``lod2_window_ratio`` x heated area; the opaque walls are the LoD2 walls minus the windows, split by
         TEASER's wall orientation shares. Buildings without surfaces keep the TABULA envelope.
         """
@@ -530,6 +533,7 @@ class Envelope:
             self.A["opaque"][d] = opaque * share
         self.A["opaque"]["wall"] = sum(self.A["opaque"][d] for d in drct)
         self.A["opaque"]["roof"] = float(roof)
+        self.b_roof = float(p.get("lod2_roof_b", 1.0))
         self.A["opaque"]["floor"] = float(ground)
         self.A["opaque"]["ceiling"] = self.A["opaque"]["floor"]
         self.A["opaque"]["intWall"] = 1.5 * self.A["opaque"]["wall"]
@@ -562,7 +566,7 @@ class Envelope:
         if method == "design":
             Q_nHC = (self.A["opaque"]["wall"] * (self.U["opaque"]["wall"] + U_TB) +
                             self.A["window"]["sum"] * (self.U["window"] + U_TB) +
-                            self.A["opaque"]["roof"] * (self.U["opaque"]["roof"] + U_TB) +
+                            self.A["opaque"]["roof"] * (self.U["opaque"]["roof"] + U_TB) * self.b_roof +
                             self.A["opaque"]["floor"] * self.U["opaque"]["floor"] * f_g1 * f_g2 * G_w +
                             self.ventilationRate * self.c_p_air * self.rho_air * self.V / 3600) * (self.T_set_min - site["T_ne"])
 
@@ -697,6 +701,10 @@ class Envelope:
                      "roof": np.ones(len(SunRad[0])),
                      "floor": np.zeros(len(SunRad[0]))}
         self.b_tr["floor"][:] = self.b_floor
+        if self.b_roof != 1.0:
+            # GridExpand: ceiling to an unheated attic: reduced transmission, no solar or sky radiation.
+            self.b_tr["roof"][:] = self.b_roof
+            self.F_r["roof"] = 0.0
 
         # Mean difference between outdoor temperature and
         # the apparent sky-temperature
@@ -710,6 +718,8 @@ class Envelope:
             self.I_sol[directions[drct]] = SunRad[drct, :].copy()
             self.I_sol["window", directions[drct]] = SunRad[drct, :].copy()
 
+        if self.b_roof != 1.0:
+            self.I_sol["roof"] = np.zeros_like(self.I_sol["roof"])
         self.I_sol["floor"] = np.zeros_like(self.I_sol["roof"])
         self.I_sol["window", "floor"] = np.zeros_like(self.I_sol["roof"])
 

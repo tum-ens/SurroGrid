@@ -263,6 +263,9 @@ _TEASER_LEGACY = {
     "heated_area_ratio": 1.0,
     "envelope_source": "tabula",
     "subtract_shared_walls": False,
+    "attic": "heated",
+    "attic_ceiling_b": 0.8,
+    "pitched_roof_area_ratio": 1.05,
     "lod2_window_ratio": None,
     "sfh_roof_fix": False,
     "solar_beam": "normal",
@@ -314,6 +317,12 @@ class TeaserHeatConfig:
     (minus shared walls if ``subtract_shared_walls``) minus the window area, split by TEASER's orientation shares;
     roof = sum of LoD2 RoofSurface areas; ground floor = footprint. Windows keep TEASER's TABULA window ratio on
     the heated area, or ``lod2_window_ratio`` x heated area. Buildings without surfaces keep the TABULA envelope.
+    ``attic: unheated`` (default) closes the heated zone at the eaves for pitched roofs (roof surface >
+    ``pitched_roof_area_ratio`` x footprint): the top-floor ceiling (= footprint) with the temperature reduction
+    factor ``attic_ceiling_b`` (0.8, DIN V 4108-6 for a ceiling to an unheated attic) replaces the roof surface,
+    gets no solar or sky radiation, and the gable walls above the eaves leave the wall area. Flat roofs keep the
+    roof surface. The eaves height follows InfDB (05_fill_floor_number.sql): the lowest point of the roof
+    surfaces at the roof-area median, above the lowest ground point. ``attic: heated`` keeps the full LoD2 hull.
 
     S2 ``sfh_roof_fix``: TEASER stores the tilted SFH roof under orientations 0/90; the legacy loader counted it as
     wall and added a second roof of 1.2 x the ground floor. S3 ``solar_beam: horizontal`` passes GHI - DHI as the
@@ -331,6 +340,9 @@ class TeaserHeatConfig:
     heated_area_ratio: float = 0.55
     envelope_source: str = "lod2"
     subtract_shared_walls: bool = True
+    attic: str = "unheated"
+    attic_ceiling_b: float = 0.8
+    pitched_roof_area_ratio: float = 1.05
     lod2_window_ratio: float | None = None
     sfh_roof_fix: bool = True
     solar_beam: str = "horizontal"
@@ -365,6 +377,7 @@ class TeaserHeatConfig:
         label = "asset_sizing.heat.teaser"
         choices = {
             "envelope_source": {"tabula", "lod2"},
+            "attic": {"heated", "unheated"},
             "solar_beam": {"normal", "horizontal"},
             "age_mapping": {"band_end", "stock_share"},
             "apartment_block_after_1978": {"cap_1978", "multi_family_house"},
@@ -380,7 +393,8 @@ class TeaserHeatConfig:
         values["heated_area_ratio"] = _positive(values["heated_area_ratio"], f"{label}.heated_area_ratio")
         if values["heated_area_ratio"] > 1:
             raise ValueError(f"{label}.heated_area_ratio must be <= 1.")
-        for name in ("window_shading_factor", "window_frame_fraction", "ground_floor_b",
+        values["pitched_roof_area_ratio"] = _positive(values["pitched_roof_area_ratio"], f"{label}.pitched_roof_area_ratio")
+        for name in ("window_shading_factor", "window_frame_fraction", "ground_floor_b", "attic_ceiling_b",
                      "retrofit_share_before_1979", "retrofit_share_1979_1994"):
             values[name] = _share(values[name], f"{label}.{name}")
         values["air_change_per_h"] = _positive(values["air_change_per_h"], f"{label}.air_change_per_h", allow_zero=True)
