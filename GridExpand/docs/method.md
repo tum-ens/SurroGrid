@@ -284,7 +284,7 @@ The space-heat source is `asset_sizing.heat.space_heat_source`:
 
 #### TEASER envelope and assumptions
 
-`asset_sizing.heat.teaser` (only with `space_heat_source: teaser`) sets the assumptions of the TEASER path.
+`asset_sizing.heat.teaser` (read only by `space_heat_source: teaser`) sets the assumptions of the TEASER path.
 `preset: corrected` is the default; `preset: legacy` reproduces the TEASER profiles of SurroGrid 2.0.0 bit for
 bit (test `tests/allocation/test_teaser_heat.py`). Single keys can be set on top of either preset. The
 internal 1R1C model does not read this block.

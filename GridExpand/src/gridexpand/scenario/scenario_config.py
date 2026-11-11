@@ -449,8 +449,7 @@ class HeatSizingConfig:
         internal = InternalHeatConfig.from_dict(raw.get("internal", {})) if source == "internal" else None
         if source != "internal" and raw.get("internal") is not None:
             raise ValueError("The internal heat block requires space_heat_source=internal.")
-        if source != "teaser" and raw.get("teaser") is not None:
-            raise ValueError("The teaser heat block requires space_heat_source=teaser.")
+        # Like teaser_retrofit_level, the block is validated for every source and read by the teaser source only.
         teaser = TeaserHeatConfig.from_dict(raw.get("teaser"))
         inside = _positive(raw["indoor_design_temperature_c"], "asset_sizing.heat.indoor_design_temperature_c")
         limit = _positive(raw["heating_limit_temperature_c"], "asset_sizing.heat.heating_limit_temperature_c")

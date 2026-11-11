@@ -128,8 +128,8 @@ def test_teaser_block_validation():
     assert HeatSizingConfig.from_dict({**base, "space_heat_source": "teaser"}).teaser == TeaserHeatConfig()
     legacy = HeatSizingConfig.from_dict({**base, "space_heat_source": "teaser", "teaser": {"preset": "legacy"}})
     assert legacy.teaser == TeaserHeatConfig.legacy()
-    with pytest.raises(ValueError, match="teaser heat block"):
-        HeatSizingConfig.from_dict({**base, "space_heat_source": "infdb_ro_heat", "teaser": {}})
+    other = HeatSizingConfig.from_dict({**base, "space_heat_source": "infdb_ro_heat", "teaser": {"preset": "legacy"}})
+    assert other.teaser == TeaserHeatConfig.legacy()  # validated, read by the teaser source only
 
 
 def test_weather_beam_is_horizontal_by_default_and_dni_for_legacy():
