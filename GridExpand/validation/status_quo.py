@@ -1,4 +1,4 @@
-"""Status-quo test of real grids at alignment (``gridexpand status-quo-test``).
+"""Status-quo test of real grids at alignment (``python -m validation status-quo-test``).
 
 For each real grid of a provider, the status-quo base electricity (households and GHD with
 the current GridExpand model, including the scenario's ``ghd:`` rules) runs through the Step 4
@@ -179,7 +179,7 @@ def bundle_buildings(
     provider: str, alignment_dir: Path, dso_b_grids_dir: Path | None, bundle_name: str | None = None
 ) -> pd.DataFrame:
     """Real grid number, bus and grid file of every bundle building (``aligned_allocation``'s mapping)."""
-    from gridexpand.allocation.scenario_calibration.allocation.aligned_allocation import real_building_mapping
+    from .aligned_allocation import real_building_mapping
 
     return real_building_mapping(provider, alignment_dir, dso_b_grids_dir, bundle_name)
 
@@ -463,7 +463,7 @@ def jobs_from_dataset(
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="gridexpand status-quo-test", description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(prog="python -m validation status-quo-test", description=__doc__.split("\n\n")[0])
     parser.add_argument("--provider", choices=PROVIDERS, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     source = parser.add_mutually_exclusive_group(required=True)

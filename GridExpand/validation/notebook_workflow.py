@@ -16,7 +16,7 @@ from gridexpand.analysis.ids import ags_string, canonical_real_grid_id
 from gridexpand.db.database import SurroGridDatabase
 from gridexpand.paths import PROJECT_DIR
 from gridexpand.analysis.expansion.overview import load_expansion_overview
-from gridexpand.analysis.powerflow.comparison_data import (
+from .comparison_data import (
     load_synthetic_powerflow_cutoff_profile,
     real_powerflow_headline_summary_db,
     real_powerflow_percentile_profile_db,
@@ -731,7 +731,7 @@ def scenario_analysis_keys(
     """Derive stable expansion-analysis keys for one network source.
 
     With ``provider`` the aligned keys ``{run_id}_{provider}_{real|synthetic}_*``
-    written by ``expansion.aligned_expansion`` are returned.
+    written by ``validation.aligned_expansion`` are returned.
     """
     labels = dict(stage_labels or DEFAULT_STAGE_LABELS)
     if provider is not None:

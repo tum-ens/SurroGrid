@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from gridexpand.analysis.expansion import notebook_workflow as nw
+from validation import notebook_workflow as nw
 
 
 def test_group_columns():

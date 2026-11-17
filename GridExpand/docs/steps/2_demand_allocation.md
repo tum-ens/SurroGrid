@@ -17,7 +17,7 @@ stages of `STAGES[profile]` on a `Grid` (`classes/grid.py`) and writes the keys 
 | `assets/pv/`, `assets/battery/`, `assets/heat/`, `assets/urbs_rows.py` | LoD2 roof catalog, sizing and urbs rows of PV, batteries, heat pumps and buffers |
 | `electrification.py`, `electrification_preparation.py` | electrification inventory and the regional assignment manifest |
 | `generate_mobility_profile_pool.py` | builds the mobility profile pools |
-| `scenario_calibration/` | paired (real vs synthetic) preparation, see [paired_validation.md](../paired_validation.md) |
+| `scenario_calibration/` | paired (real vs synthetic) profiles and urbs inputs, see [validation/README.md](../../validation/README.md) |
 | `external/` | vendored districtgenerator and emobpy (licences in `external/third_party_licenses/`) |
 
 ## Inputs

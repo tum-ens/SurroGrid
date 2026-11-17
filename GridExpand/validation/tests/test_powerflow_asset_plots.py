@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gridexpand.analysis.plotting.powerflow_asset_plots import (
+from validation.powerflow_asset_plots import (
     _static_axis_limits,
     plot_powerflow_asset_cutoff_overview_static,
 )

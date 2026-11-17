@@ -1,11 +1,11 @@
-"""Retained-asset cutoff data preparation (gridexpand.analysis.plotting.cutoff_data)."""
+"""Retained-asset cutoff data preparation (validation.cutoff_data)."""
 
 from __future__ import annotations
 
 import pandas as pd
 import pytest
 
-from gridexpand.analysis.plotting import cutoff_data as cd
+from validation import cutoff_data as cd
 
 
 def _frame():

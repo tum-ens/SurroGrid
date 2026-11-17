@@ -1,6 +1,6 @@
 """Materialize expansion costs for every provider group of one aligned run.
 
-An aligned run (``gridexpand run-aligned``) writes power-flow
+An aligned run (``python -m validation run``) writes power-flow
 summaries named ``{run_id}_{provider}_{network}_{case}`` with network
 ``real_<provider>`` or ``synthetic``. This entry point materializes the four
 groups (DSO A real, DSO A synthetic, DSO B real, DSO B synthetic) under the analysis
@@ -8,7 +8,7 @@ keys ``{run_id}_{provider}_{real|synthetic}_{pre|post_inflex|post}``.
 
 Example::
 
-    uv run python -m gridexpand.analysis.expansion.aligned_expansion \\
+    uv run python -m validation.aligned_expansion \\
         --run-id joint_2045_v1_smoke24 --providers dso_a dso_b \\
         --cases pre post-inflex-heuristic post-hems-heuristic
 
@@ -26,8 +26,8 @@ from sqlalchemy import text
 from gridexpand.db import refresh_qgis_views
 from gridexpand.db.database import SurroGridDatabase
 
-from . import grid_expansion
-from .cases import CASE_STAGES
+from gridexpand.analysis.expansion import grid_expansion
+from gridexpand.analysis.expansion.cases import CASE_STAGES
 
 # DSO providers of an aligned run.
 PROVIDERS = ("dso_a", "dso_b")

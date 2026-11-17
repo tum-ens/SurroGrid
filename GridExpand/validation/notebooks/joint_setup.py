@@ -17,15 +17,16 @@ from __future__ import annotations
 import pandas as pd
 import yaml
 
-from gridexpand.analysis.expansion.notebook_workflow import (
+from validation.notebook_workflow import (
     PROVIDER_LABELS,
     excluded_grids_by_group,
     nonconverged_grids,
     prepare_expansion_analysis,
 )
-from gridexpand.paths import ANALYSIS_OUTPUT_DIR, RUN_CONFIG_DIR, SCENARIO_CALIBRATION_OUTPUT_DIR
+from gridexpand.paths import ANALYSIS_OUTPUT_DIR, SCENARIO_CALIBRATION_OUTPUT_DIR
+from validation import CONFIG_DIR
 
-RUN_ID = "joint_2045_v1_full_year"  # the aligned run to analyse: config/runs/<RUN_ID>.yaml
+RUN_ID = "joint_2045_v1_full_year"  # the aligned run to analyse: validation/config/<RUN_ID>.yaml
 PROVIDERS = ("dso_a", "dso_b")
 EXPECTED_GRID_COUNTS = None  # optional, e.g. {"Real DSO A": 10, "Synthetic DSO A": 12}: fail on another count
 MIN_FAILED_SHARE = 0.01  # 1 % of the hours of one case (88 h of 8,760)
@@ -50,7 +51,7 @@ def small_synthetic_grids(run_id: str = RUN_ID, min_buildings: int = MIN_SYNTHET
     Reads ``paired_registered_synthetic_grids.csv`` of each provider's paired dataset (named in the run YAML) and
     returns ``data_source``, the ``PLZ_kcid_bcid`` ``grid_key`` of the loaders and ``n_buildings``.
     """
-    run = yaml.safe_load((RUN_CONFIG_DIR / f"{run_id}.yaml").read_text(encoding="utf-8"))
+    run = yaml.safe_load((CONFIG_DIR / f"{run_id}.yaml").read_text(encoding="utf-8"))
     frames = []
     for provider in PROVIDERS:
         dataset_id = run["resources"]["providers"][provider]["paired_dataset_id"]

@@ -10,7 +10,7 @@ import pytest
 import gridexpand.allocation.functions.electricity as electricity
 from gridexpand.allocation.config import config
 from gridexpand.common import ghd
-from gridexpand.paired import status_quo
+from validation import status_quo
 
 
 def _feeder(length_km, std_type="NAYY 4x150 SE"):

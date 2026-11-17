@@ -10,6 +10,8 @@ gurobi.lic
 **/.ipynb_checkpoints
 work
 notebooks
+# the real-vs-synthetic validation is not part of the image
+validation
 docs/img
 **/*.out
 **/*.err

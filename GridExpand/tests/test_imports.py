@@ -6,6 +6,7 @@ so any connection attempt during an import or a ``--help`` call fails.
 
 from __future__ import annotations
 
+import ast
 import importlib
 import os
 import pkgutil
@@ -74,6 +75,22 @@ def test_no_sys_path_or_chdir_hacks() -> None:
         text = path.read_text(encoding="utf-8")
         if "sys.path" in text or "os.chdir(" in text:
             offenders.append(str(path.relative_to(PACKAGE_DIR)))
+    assert offenders == []
+
+
+def test_gridexpand_never_imports_the_validation() -> None:
+    """GridExpand/validation imports gridexpand, never the other way round."""
+    offenders = []
+    for path in PACKAGE_DIR.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                names = [node.module or ""]
+            else:
+                continue
+            if any(name == "validation" or name.startswith("validation.") for name in names):
+                offenders.append(f"{path.relative_to(PACKAGE_DIR)}:{node.lineno}")
     assert offenders == []
 
 

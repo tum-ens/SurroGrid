@@ -24,7 +24,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import text
 
-from ..paths import ENV_PATH
+from gridexpand.allocation.scenario_calibration.paths import ENV_PATH
 
 from gridexpand.db.database import SurroGridDatabase
 from gridexpand.common import ghd
@@ -42,12 +42,12 @@ from gridexpand.scenario.config_loader import (
     scenario_identity_key,
 )
 
-from ..profiles.paired_profiles import session_pool_supported_models
-from ..profiles.profile_contract import (
+from gridexpand.allocation.scenario_calibration.profiles.paired_profiles import session_pool_supported_models
+from gridexpand.allocation.scenario_calibration.profiles.profile_contract import (
     assert_paired_component_plan_equivalence,
     assert_paired_plan_equivalence,
 )
-from ...assets.pv.roof_catalog import (
+from gridexpand.allocation.assets.pv.roof_catalog import (
     LOD2_QUALITY_FLAG,
     building_lod2_capacity,
     load_lod2_roof_catalog,

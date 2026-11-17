@@ -82,15 +82,11 @@ refreshes the QGIS views; `--resume` continues an interrupted run. The YAML keys
 [docs/configuration.md](docs/configuration.md), the model cases and scientific rules in
 [docs/method.md](docs/method.md). `gridexpand synthetic --help` runs one batch directly (same flags).
 
-## Quick start: paired and aligned validation
+## Real-vs-synthetic validation
 
-```bash
-uv run gridexpand run config/runs/joint_2045_v1_smoke24.yaml --prepare-only   # build and check the paired datasets
-uv run gridexpand run config/runs/joint_2045_v1_smoke24.yaml --skip-prepare   # real and synthetic runs + expansion
-```
-
-`pipeline: paired_aligned` compares the DSO A and DSO B grids of a pylovo alignment bundle with their synthetic
-counterparts. See [docs/paired_validation.md](docs/paired_validation.md).
+The comparison of real DSO grids with their synthetic pylovo counterparts (`pipeline: paired_aligned`, the case
+study of the pylovo validation paper) lives in [validation/](validation/README.md), outside the package:
+`uv run python -m validation run validation/config/<run>.yaml`.
 
 ## Quick start: API and Docker
 
@@ -108,7 +104,7 @@ repository, which runs both images behind one proxy.
 
 | command | does |
 |---|---|
-| `gridexpand run <run.yaml>` | one run YAML: `synthetic` or `paired_aligned` (`run-aligned` is an older name) |
+| `gridexpand run <run.yaml>` | one run YAML (`pipeline: synthetic`) |
 | `gridexpand status <run>` | state of a run directory (no database) |
 | `gridexpand grids --ags <AGS> --pylovo-version-id <V>` | candidate grids of an AGS with the runner's numbering |
 | `gridexpand config check <yaml...>` | validate run/scenario YAMLs, print hashes and keys (no database) |
@@ -117,15 +113,13 @@ repository, which runs both images behind one proxy.
 | `gridexpand optimize <id> --scenario-config ...` | Step 3 for one Step 2 file ([docs](docs/steps/3_urbs.md)) |
 | `gridexpand powerflow <id>` | Step 4 for one scenario file ([docs](docs/steps/4_powerflow.md)) |
 | `gridexpand expansion --run-name ... --stage ...` | Step 5 expansion materialization ([docs](docs/steps/5_postprocessing.md)) |
-| `gridexpand status-quo-test --provider ... (--alignment-dir ... \| --dataset ...) --output-dir ...` | status-quo power flow of the real grids at alignment; exclusion list per provider ([docs](docs/configuration.md#status-quo-test)) |
 | `gridexpand db <init-schema\|migrate\|compress\|relink-pylovo\|delete-scenario>` | database maintenance |
 | `gridexpand api` | HTTP API for the GridPlanner UI (`api` extra) |
 
 `gridexpand <command> --help` lists the options. Module entry points without a command:
 `python -m gridexpand.sampling.export_single_grid` (Step 1),
 `gridexpand.allocation.electrification_preparation`, `gridexpand.allocation.generate_mobility_profile_pool`,
-`gridexpand.paired.runner`, `gridexpand.analysis.expansion.aligned_expansion` (all with
-`uv run python -m ... --help`).
+`gridexpand.paired.runner` (all with `uv run python -m ... --help`).
 
 ## Layout
 
@@ -137,11 +131,12 @@ GridExpand/
                             sampling/, allocation/, optimization/, powerflow/, analysis/, scenario/, paired/, api/
   config/                   scenarios/ and runs/ YAMLs
   data/                     static inputs: sampling/, statistics/
-  notebooks/                sampling/, analysis/
+  notebooks/                sampling/ (Step 1)
   docs/                     documentation (index: docs/README.md)
   docker/                   Dockerfile and compose.yaml of the image (CLI + API)
   scripts/                  hpc/ Slurm templates, migrate_local_layout.py
   tests/                    unit tests, regression/ harness
+  validation/               real-vs-synthetic validation (not part of the package; validation/README.md)
   work/                     runtime artifacts (gitignored)
 ```
 
@@ -188,7 +183,7 @@ tests/analysis` (SQL parity), `GRIDEXPAND_API_TEST_DATABASE=<sandbox db> uv run 
 | [docs/configuration.md](docs/configuration.md) | scenario and run YAML reference, grid selection, run directories, environment |
 | [docs/method.md](docs/method.md) | model cases, sizing rules, heat, mobility, paired contract, acceptance checks |
 | [docs/steps/](docs/steps/) | Steps 1-5: inputs, outputs, HDF keys, options, conventions |
-| [docs/paired_validation.md](docs/paired_validation.md) | the aligned DSO A/DSO B pipeline |
+| [validation/README.md](validation/README.md) | the real-vs-synthetic validation (aligned DSO A/DSO B pipeline) |
 | [docs/database.md](docs/database.md) | `surrogrid` schema, migrations, maintenance |
 | [docs/expansion_costs.md](docs/expansion_costs.md) | reinforcement rules and cost assumptions |
 | [docs/api.md](docs/api.md) | HTTP API, its contract, container |

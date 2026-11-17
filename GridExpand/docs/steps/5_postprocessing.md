@@ -1,7 +1,7 @@
 # Step 5: expansion analysis and postprocessing
 
 Step 5 reads power-flow results from the `surrogrid` schema and turns them into expansion measures and costs. It
-also provides the loaders, plots and notebooks of the result analysis. It writes only derived analysis tables, QGIS
+also provides the loaders and plots of the result analysis. It writes only derived analysis tables, QGIS
 views, figures and audit exports.
 
 The rules are the staged rules (`staged_2026`): station limit, capped cables, load transfer to neighbouring
@@ -19,12 +19,10 @@ Code: `src/gridexpand/analysis/`
 | `expansion/synthetic_materialization.py` | synthetic grids: rules in Python; decisions in temp tables for the SQL inserts |
 | `expansion/sql/*.sql` | synthetic scope and mapping: selected runs, component loading, transformer peaks, line and transformer inserts |
 | `expansion/real_materialization.py` | real DSO A / DSO B grids: cable corridors, grid status |
-| `expansion/aligned_expansion.py` | all provider groups of an aligned run in one command |
 | `expansion/cases.py` | model case → stage and analysis-key suffix |
-| `expansion/overview.py`, `expansion/notebook_workflow.py` | read-only loaders for the notebooks |
-| `powerflow/comparison_data.py`, `powerflow/raw.py`, `powerflow/scope.py` | summary and raw-series loaders, run/scope resolution |
-| `plotting/*` | figures (asset cutoff and percentile plots, voltage, transformer import, heatmaps, expansion costs, geoplots) |
-| `audits/feeder_structure.py` | feeder-structure comparison (functions) |
+| `expansion/overview.py` | read-only loaders of expansion analyses |
+| `powerflow/raw.py`, `powerflow/scope.py` | raw-series loaders, run/scope resolution |
+| `plotting/*` | figures (voltage, transformer import, heatmaps, expansion costs) |
 
 ## Expansion materialization
 
@@ -61,17 +59,10 @@ Analysis keys written by the pipelines:
 | pipeline | key |
 |---|---|
 | synthetic | `<ags:08d>_<scenario key>_<timeframe>_<profiles>[_hh_only][_tsam][_<model case>]_<pre\|post>` (override the prefix with `gridexpand synthetic --expansion-analysis-prefix`) |
-| paired_aligned | `<run.id>_<provider>_<real\|synthetic>_<pre\|post_inflex\|post\|post_hems_optimized>` |
+| paired_aligned (validation) | `<run.id>_<provider>_<real\|synthetic>_<pre\|post_inflex\|post\|post_hems_optimized>` |
 
-Aligned runs (all four groups DSO A real/synthetic, DSO B real/synthetic, or a subset):
-
-```bash
-uv run python -m gridexpand.analysis.expansion.aligned_expansion --run-id joint_2045_v1_smoke24 \
-  --providers dso_a dso_b --cases pre post-inflex-heuristic post-hems-heuristic [--dry-run]
-```
-
-(`--pylovo-version-id`, `--exclude-real-grid PROVIDER:ID` repeatable; power-flow run names
-`<run.id>_<provider>_<real_<provider>|synthetic>_<case>`.)
+The validation materializes all provider groups of an aligned run with `python -m validation.aligned_expansion`
+([validation/README.md](../../validation/README.md)).
 
 **Method in short** ([expansion_costs.md](../expansion_costs.md)), rule set `staged_2026`:
 1. **Station.** Transformer exchange up to 1000 kVA in every settlement type, at literature unit costs.
@@ -107,33 +98,11 @@ destination of plots.
 
 ## Notebooks
 
-```bash
-uv sync --extra notebooks
-uv run jupyter lab notebooks/analysis
-```
+The analysis notebooks of the real-vs-synthetic comparison (`analysis_powerflow.ipynb`, `analysis_expansion.ipynb`,
+`grid_area_envelope_comparison.ipynb`) are in [validation/notebooks](../../validation/notebooks). Step 1's sampling
+notebooks are in `notebooks/sampling/`.
 
-- `analysis_powerflow.ipynb`: status-quo validation of an aligned run, synthetic vs real (distribution
-  similarity, figure `asset-percentiles`);
-- `analysis_expansion.ipynb`: status quo, INFLEX and HEMS of an aligned run (figure
-  `pre_post_flex_no_flex_asset_cutoff_overview`, expansion costs on one grid set for all cases with figure
-  `expansion_cost_overview`, cable and voltage diagnostics);
-- `joint_setup.py`: the setup both notebooks import (`RUN_ID`, the run to analyse; providers, case colors and
-  labels, exclusion threshold, `CURVE_Y_LIMITS`: the fixed top-row scale shared by both figures).
-  `prepare_joint_analysis()` calls `prepare_expansion_analysis(providers=("dso_a", "dso_b"))` (in
-  `expansion.notebook_workflow`), which prepares the four groups and enforces consistent provenance, and adds
-  `nonconverged_grids` and their `excluded_grids`: a grid with non-converged power-flow hours in at least 1 % of
-  the hours of any case is left out of every case of its own group. The loaders take `excluded_grids`
-  (group → LV/area ids or `PLZ_kcid_bcid`); `expansion_cost_comparison` also leaves out real grids whose cost is
-  incomplete in one of the cases. The pooled figures label the providers as `Real`/`Synthetic` (column `network`),
-  so no DSO is named;
-- `grid_area_envelope_comparison.ipynb`: supplied-area envelope diagnostic (OSM tiles need `contextily` and
-  network access).
+## Plots from the command line
 
-The notebooks ship without outputs. Set `RUN_ID` in `joint_setup.py` (and `PLZ` in the envelope notebook) to a run
-of your database.
-
-## Audits
-
-`audits.feeder_structure` (graph-normalized feeder, downstream-demand and path-depth comparison) and the plotting
-modules are used from notebooks; `python -m gridexpand.analysis.plotting.powerflow_heatmaps` plots one grid from
-an HDF5 file or, with `--storage db --run-name <run>`, from the database.
+`python -m gridexpand.analysis.plotting.powerflow_heatmaps` plots one grid from an HDF5 file or, with
+`--storage db --run-name <run>`, from the database.

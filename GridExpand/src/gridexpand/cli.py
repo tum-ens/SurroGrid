@@ -15,7 +15,7 @@ import sys
 COMMANDS: dict[str, tuple[str, str]] = {
     "run": (
         "gridexpand.scenario.run",
-        "Run one run YAML (config/runs/*.yaml): synthetic or paired_aligned.",
+        "Run one run YAML (config/runs/*.yaml): Steps 2-4 and the expansion analyses of a region.",
     ),
     "status": (
         "gridexpand.scenario.tools:status_main",
@@ -28,10 +28,6 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "config": (
         "gridexpand.scenario.tools:config_main",
         "config check <yaml...>: validate run/scenario YAMLs, print hashes and keys; no database.",
-    ),
-    "run-aligned": (
-        "gridexpand.scenario.run",
-        "Older name of 'run' for paired_aligned YAMLs (same options).",
     ),
     "synthetic": (
         "gridexpand.scenario.synthetic_ags_runner",
@@ -52,10 +48,6 @@ COMMANDS: dict[str, tuple[str, str]] = {
     "expansion": (
         "gridexpand.analysis.expansion.grid_expansion",
         "Step 5: materialize grid-expansion results from power-flow summaries.",
-    ),
-    "status-quo-test": (
-        "gridexpand.paired.status_quo",
-        "Status-quo power flow of the real grids at alignment; writes the exclusion list per provider.",
     ),
     "db": (
         "gridexpand.db.maintenance",

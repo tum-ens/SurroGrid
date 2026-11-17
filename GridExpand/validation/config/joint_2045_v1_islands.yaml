@@ -1,44 +1,44 @@
-# Joint paired DSO A + DSO B full-year comparison on pylovo a1 aligned grids.
+# TEST SUBSET of the joint paired DSO A + DSO B full-year comparison on pylovo v1:
+# only the one-real-one-synthetic "islands" (identical building sets), to
+# validate the complete pipeline before the full region is run.
 # One scenario YAML and one pylovo version for both providers; each provider
 # gets its own paired dataset (weather, PV and TEASER heat libraries, adoption
 # selection) built from its alignment bundle. Launch with
-#   uv run gridexpand run config/runs/joint_2045_v1_full_year.yaml
+#   uv run python -m validation run validation/config/joint_2045_v1_islands.yaml
 run:
-  id: joint_2045_v1_full_year
-  scenario: ../scenarios/joint_2045_full_year.yaml
+  id: joint_2045_v1_islands
+  scenario: ../../config/scenarios/joint_2045_full_year.yaml
   pipeline: paired_aligned
 
 resources:
-  pylovo_version_id: a1
+  pylovo_version_id: 1
   alignment_dir: ~/data/alignment
-  # Frozen copy of pylovo validations_new/metrics/va1/comparison.json
-  # (sha256 c9ce248f…); its metric cohort is the compared building population.
-  population: ~/data/joint_paired_a1/pylovo-a1-comparison.json
+  # Frozen copy of pylovo validations_new/metrics/v1/comparison.json; its
+  # metric cohort is the compared building population.
+  population: ~/data/joint_paired_v1/pylovo-v1-comparison.json
   # Frozen, fingerprint-checked copy of the DSO B delivery (87c5e86c…).
   dso_b_grids_dir: ~/data/dso-b-grids-87c5e86c
   providers:
     dso_a:
       paired_dataset_id: joint_2045_v1_dso_a
       weather_source_hdf: weather_joint_dso_a_v1.h5
-      workers: 3 # fewer, larger grids; Step 4 costs ~11 s per building (DSO B ~5 s): 3 + 5 balances the providers
+      workers: 1
     dso_b:
       paired_dataset_id: joint_2045_v1_dso_b
       weather_source_hdf: weather_joint_dso_b_v1.h5
-      workers: 5 # 8 jobs in total; <= ~1.7 GB per job in Step 3 (1 PyPSA worker), ~0.7 GB in Step 4
+      workers: 2
   target_network: both # both, real, or synthetic
 
 execution:
-  optimizer: pypsa
   powerflow_grid_scope: full
   model_cases:
     - post-inflex-heuristic
     - post-hems-heuristic
   workers: 2
   step3_cpus: 40
-  # 1 PyPSA worker per job: 2 workers x 8 jobs filled RAM + swap when all jobs were in Step 3 (2026-09-29).
   step3_cluster_concurrency: 1
   step4_cpus: 2
-  heat_workers: 8
+  heat_workers: 6
   # null = the full 8760 h year; a number caps Step-4 power flow (smoke tests).
   powerflow_max_timesteps: null
   profile_seed: 481527
@@ -48,3 +48,8 @@ execution:
   parallel_providers: true
   # Expansion tables for all four groups after both providers finished.
   materialize_expansion: true
+  # All 1:1 overlap components (6 DSO A, 13 DSO B; 38 jobs). Assignments stay the
+  # full-population ones, so these results equal the full run's for these grids.
+  grid_subset:
+    method: islands
+    seed: 20260924

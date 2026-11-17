@@ -3,7 +3,7 @@
 
 SurroGrid is a research codebase that combines two workflows:
 
-1) **GridExpand**: one Python package (`gridexpand`) that simulates low-voltage (LV) distribution grids before and after electrification in five steps (grid sampling, demand allocation, urbs optimization, power flow, expansion analysis), backed by an InfDB/pylovo PostgreSQL database, plus paired real/synthetic validation and an HTTP API for the GridPlanner UI.
+1) **GridExpand**: one Python package (`gridexpand`) that simulates low-voltage (LV) distribution grids before and after electrification in five steps (grid sampling, demand allocation, urbs optimization, power flow, expansion analysis), backed by an InfDB/pylovo PostgreSQL database, plus an HTTP API for the GridPlanner UI. The comparison of real DSO grids with synthetic pylovo grids (the validation of the pylovo paper) is a separate directory, [GridExpand/validation/](GridExpand/validation/README.md).
 2) **GridForecast**: preprocessing + machine learning models (MLP and Transformer) to train **surrogate forecasters** on the GridExpand outputs.
 
 In short: **GridExpand produces grid-level results (in the `surrogrid` database schema and, in HDF5 mode, one `.h5` file per grid/scenario with inputs, optimization and power-flow results), and GridForecast turns those HDF5 files into ML-ready time-series tables and trains forecasting models.**
@@ -24,7 +24,7 @@ In short: **GridExpand produces grid-level results (in the `surrogrid` database 
 - Allocate building- and bus-resolved hourly time series (electricity/heat/mobility/PV) and write **MILP-ready** urbs input tables.
 - Run the **urbs** (Pyomo) optimization to simulate DER dispatch and sizing (PV, battery, heat pump, EV) and write the results.
 - Run time-series **pandapower** power flow before and after electrification and store voltages, line loadings and external-grid imports (raw series and/or compact summaries).
-- Estimate cable and transformer **expansion costs**, compare real DSO grids with synthetic pylovo grids, and run all of it for a region from one run YAML (`gridexpand run`) or from a web UI (`gridexpand api`).
+- Estimate cable and transformer **expansion costs**, and run all of it for a region from one run YAML (`gridexpand run`) or from a web UI (`gridexpand api`).
 
 **Surrogate modeling / forecasting (GridForecast):**
 
@@ -66,8 +66,9 @@ GridExpand Steps 2-4 hand over a **single `.h5` file per grid/scenario**: each s
   - [GridExpand/src/gridexpand/allocation/](GridExpand/src/gridexpand/allocation): generate demands + write `/urbs_in/*`
   - [GridExpand/src/gridexpand/optimization/](GridExpand/src/gridexpand/optimization): run the urbs optimization + write `/urbs_out/*`
   - [GridExpand/src/gridexpand/powerflow/](GridExpand/src/gridexpand/powerflow): run the pandapower power flow + write `/pwrflw/*`
-  - [GridExpand/src/gridexpand/analysis/](GridExpand/src/gridexpand/analysis): expansion costs, loaders, plots (notebooks in [GridExpand/notebooks/analysis/](GridExpand/notebooks/analysis))
-  - [GridExpand/src/gridexpand/scenario/](GridExpand/src/gridexpand/scenario), [paired/](GridExpand/src/gridexpand/paired), [api/](GridExpand/src/gridexpand/api): run YAMLs and orchestration, paired validation, HTTP API
+  - [GridExpand/src/gridexpand/analysis/](GridExpand/src/gridexpand/analysis): expansion costs, loaders, plots
+  - [GridExpand/src/gridexpand/scenario/](GridExpand/src/gridexpand/scenario), [paired/](GridExpand/src/gridexpand/paired), [api/](GridExpand/src/gridexpand/api): run YAMLs and orchestration, the paired runner, HTTP API
+  - [GridExpand/validation/](GridExpand/validation/README.md): real-vs-synthetic validation (not part of the package)
   - [GridExpand/docs/](GridExpand/docs): documentation ([index](GridExpand/docs/README.md), one document per step in [GridExpand/docs/steps/](GridExpand/docs/steps))
 
 - [GridForecast/](GridForecast): preprocessing + ML training for forecasting
@@ -90,8 +91,7 @@ uv run gridexpand config check config/runs/<run>.yaml
 uv run gridexpand run config/runs/<run>.yaml          # Steps 2-4 + expansion analysis
 ```
 
-See [GridExpand/README.md](GridExpand/README.md) for installation, data assets, database setup, the paired
-validation and the API. To produce HDF5 files step by step (for example for GridForecast):
+See [GridExpand/README.md](GridExpand/README.md) for installation, data assets, database setup and the API. To produce HDF5 files step by step (for example for GridForecast):
 
 1) **Grids**: Step 1 export ([GridExpand/docs/steps/1_grid_sampling.md](GridExpand/docs/steps/1_grid_sampling.md)) into `GridExpand/work/sampling/results/`, then copy the files to `GridExpand/work/allocation/grids/`.
 2) **Demand allocation**: `uv run gridexpand allocate <id> --scenario-config config/scenarios/<scenario>.yaml` ([Step 2](GridExpand/docs/steps/2_demand_allocation.md)); output in `GridExpand/work/allocation/results/<scenario key>/`.

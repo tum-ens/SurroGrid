@@ -1,13 +1,12 @@
-"""Run YAMLs (``config/runs/*.yaml``): one loader, one dataclass per pipeline.
+"""Run YAMLs (``config/runs/*.yaml``): the loader of ``pipeline: synthetic``.
 
 A run YAML has three blocks: ``run`` (``id``, ``scenario``, ``pipeline``),
-``resources`` (what to run on) and ``execution`` (how). ``run.pipeline`` is
-
-- ``synthetic``: Steps 2-4 and the expansion analyses for the synthetic grids
-  of one AGS (optionally one PLZ or one grid), one batch per execution group
-  (:class:`SyntheticRun`);
-- ``paired_aligned``: every provider of a pylovo alignment bundle
-  (:class:`AlignedRun`).
+``resources`` (what to run on) and ``execution`` (how). ``pipeline: synthetic``
+runs Steps 2-4 and the expansion analyses for the synthetic grids of one AGS
+(optionally one PLZ or one grid), one batch per execution group
+(:class:`SyntheticRun`). The real-vs-synthetic validation (``pipeline:
+paired_aligned``) has its own loader in ``GridExpand/validation``, built on
+:func:`parse_run_blocks` and the helpers here.
 
 Parsing never touches a database. Relative paths resolve against the YAML's
 directory. :func:`load_run_config` returns the run and the SHA-256 of the
@@ -24,8 +23,7 @@ from typing import Any
 
 from gridexpand.common.reproducibility import DEFAULT_PROFILE_SEED
 from gridexpand.common.timeframe import TIMEFRAME_MODES
-from gridexpand.paths import ALLOCATION_RESULTS_DIR, SCENARIO_CALIBRATION_OUTPUT_DIR
-from gridexpand.scenario.config_loader import _read_yaml, configuration_hash, load_scenario_config
+from gridexpand.scenario.config_loader import _read_yaml, configuration_hash
 from gridexpand.scenario.model_cases import (
     POST_MODEL_CASES,
     SYNTHETIC_UNSUPPORTED_CASES,
@@ -35,11 +33,8 @@ from gridexpand.scenario.scenario_config import _mapping as mapping
 from gridexpand.scenario.scenario_config import _only as only
 from gridexpand.scenario.scenario_config import _positive
 
-PIPELINES = ("synthetic", "paired_aligned")
+PIPELINES = ("synthetic",)
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-PAIRED_DATASET_ROOT = SCENARIO_CALIBRATION_OUTPUT_DIR
-HEAT_LIBRARY_ROOT = PAIRED_DATASET_ROOT / "profile_libraries"
-WEATHER_RESULT_ROOT = ALLOCATION_RESULTS_DIR
 
 
 # Validation helpers ----------------------------------------------------------------
@@ -305,193 +300,13 @@ class SyntheticRun:
         }
 
 
-# Paired aligned (DSO A + DSO B) ------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ProviderResources:
-    """One DSO of an aligned run and the paths of its paired dataset."""
-
-    provider: str
-    paired_dataset_id: str
-    weather_source_hdf: str
-    workers: int | None = None
-    # First 12 characters of the scenario hash: heat profiles depend on the
-    # scenario (e.g. TEASER retrofit level), so their library does too.
-    scenario_tag: str = ""
-    # The provider's name inside the pylovo alignment bundle and the comparison
-    # JSON; empty: the provider key.
-    bundle_name: str = ""
-
-    @property
-    def bundle_key(self) -> str:
-        return self.bundle_name or self.provider
-
-    @property
-    def paired_dir(self) -> Path:
-        return PAIRED_DATASET_ROOT / self.paired_dataset_id
-
-    @property
-    def heat_profile_set_id(self) -> str:
-        return f"{self.paired_dataset_id}_teaser_heat_{self.scenario_tag}"
-
-    @property
-    def heat_library(self) -> Path:
-        return HEAT_LIBRARY_ROOT / f"{self.heat_profile_set_id}.h5"
-
-    @property
-    def heat_sources(self) -> Path:
-        return self.paired_dir / "heat_sources" / self.scenario_tag
-
-    @property
-    def weather_hdf(self) -> Path:
-        return WEATHER_RESULT_ROOT / self.weather_source_hdf
-
-
-@dataclass(frozen=True)
-class AlignedRun:
-    """``pipeline: paired_aligned``: every provider of a pylovo alignment bundle."""
-
-    run_id: str
-    scenario_path: Path
-    pylovo_version_id: str
-    alignment_dir: Path
-    population: Path
-    dso_b_grids_dir: Path | None
-    providers: tuple[ProviderResources, ...]
-    target_network: str
-    model_cases: tuple[str, ...]
-    workers: int
-    step3_cpus: int
-    step3_cluster_concurrency: int | None
-    step4_cpus: int
-    heat_workers: int
-    powerflow_grid_scope: str
-    powerflow_max_timesteps: int | None
-    profile_seed: int
-    cleanup_intermediates: bool
-    resume: bool
-    parallel_providers: bool
-    materialize_expansion: bool
-    grid_subset: dict[str, Any] | None
-    optimizer: str | None = None
-    # None: PVGIS TMY per provider; a year: that real calendar year for every provider.
-    weather_year: int | None = None
-    pipeline: str = "paired_aligned"
-
-    @classmethod
-    def from_blocks(
-        cls,
-        run_id: str,
-        scenario_path: Path,
-        resources: dict[str, Any],
-        execution: dict[str, Any],
-        *,
-        base_dir: Path,
-    ) -> "AlignedRun":
-        only(resources, {"pylovo_version_id", "alignment_dir", "population", "dso_b_grids_dir", "providers",
-                         "target_network", "weather_year"}, "paired_aligned resources")
-        only(execution, {"model_cases", "workers", "step3_cpus", "step3_cluster_concurrency", "step4_cpus",
-                         "heat_workers", "powerflow_grid_scope", "powerflow_max_timesteps", "profile_seed",
-                         "cleanup_intermediates", "resume", "parallel_providers", "materialize_expansion",
-                         "grid_subset", "optimizer"}, "paired_aligned execution")
-        scenario_tag = load_scenario_config(scenario_path)[1][:12]
-        providers = []
-        for name, block in mapping(resources.get("providers"), "resources.providers").items():
-            if name not in {"dso_a", "dso_b"}:
-                raise ValueError(f"Unknown provider {name!r}.")
-            block = mapping(block, f"resources.providers.{name}")
-            only(block, {"paired_dataset_id", "weather_source_hdf", "workers", "bundle_name"}, f"provider {name}")
-            providers.append(ProviderResources(
-                provider=name,
-                paired_dataset_id=directory_safe(block.get("paired_dataset_id"),
-                                                 f"resources.providers.{name}.paired_dataset_id"),
-                weather_source_hdf=str(block["weather_source_hdf"]),
-                bundle_name=str(block.get("bundle_name") or ""),
-                workers=None if block.get("workers") is None
-                else positive_int(block["workers"], f"provider {name} workers"),
-                scenario_tag=scenario_tag,
-            ))
-        if not providers:
-            raise ValueError("resources.providers must name at least one provider.")
-        if any(p.provider == "dso_b" for p in providers) and resources.get("dso_b_grids_dir") in (None, ""):
-            raise ValueError("resources.dso_b_grids_dir is required for the dso_b provider.")
-        max_steps = execution.get("powerflow_max_timesteps")
-        return cls(
-            run_id=run_id,
-            scenario_path=scenario_path,
-            pylovo_version_id=_pylovo_version(resources),
-            alignment_dir=_resolve(resources["alignment_dir"], base_dir),
-            population=_resolve(resources["population"], base_dir),
-            dso_b_grids_dir=_resolve(resources["dso_b_grids_dir"], base_dir) if resources.get("dso_b_grids_dir") else None,
-            providers=tuple(providers),
-            target_network=choice(resources.get("target_network", "both"), "resources.target_network",
-                                  ("both", "real", "synthetic")),
-            model_cases=validate_cases(execution.get("model_cases") or (), allowed=POST_MODEL_CASES),
-            workers=positive_int(execution.get("workers", 1), "execution.workers"),
-            step3_cpus=positive_int(execution.get("step3_cpus", 1), "execution.step3_cpus"),
-            step3_cluster_concurrency=_concurrency(execution),
-            step4_cpus=positive_int(execution.get("step4_cpus", 1), "execution.step4_cpus"),
-            heat_workers=positive_int(execution.get("heat_workers", 4), "execution.heat_workers"),
-            powerflow_grid_scope=_grid_scope(execution),
-            powerflow_max_timesteps=(
-                None if max_steps is None else positive_int(max_steps, "execution.powerflow_max_timesteps")
-            ),
-            profile_seed=_seed(execution),
-            cleanup_intermediates=flag(execution.get("cleanup_intermediates", False), "execution.cleanup_intermediates"),
-            resume=flag(execution.get("resume", False), "execution.resume"),
-            parallel_providers=flag(execution.get("parallel_providers", False), "execution.parallel_providers"),
-            materialize_expansion=flag(execution.get("materialize_expansion", False), "execution.materialize_expansion"),
-            grid_subset=_grid_subset(execution.get("grid_subset")),
-            optimizer=_optimizer(execution),
-            weather_year=(None if resources.get("weather_year") is None
-                          else positive_int(resources["weather_year"], "resources.weather_year")),
-        )
-
-    def provider(self, name: str) -> ProviderResources:
-        for provider in self.providers:
-            if provider.provider == name:
-                return provider
-        raise ValueError(f"Provider {name!r} is not part of run {self.run_id}.")
-
-    def target_for(self, provider: ProviderResources) -> str:
-        """Paired-runner ``--target`` of one provider."""
-        return {"both": "both", "synthetic": "synthetic", "real": f"real_{provider.provider}"}[self.target_network]
-
-    def identity(self) -> dict[str, Any]:
-        return {
-            "pipeline": self.pipeline,
-            "run_id": self.run_id,
-            "pylovo_version_id": self.pylovo_version_id,
-            "providers": {p.provider: p.paired_dataset_id for p in self.providers},
-            "target_network": self.target_network,
-            "profile_seed": self.profile_seed,
-            "powerflow_grid_scope": self.powerflow_grid_scope,
-            "powerflow_max_timesteps": self.powerflow_max_timesteps,
-            "grid_subset": self.grid_subset,
-        }
-
-
-def _grid_subset(raw: Any) -> dict[str, Any] | None:
-    if raw is None:
-        return None
-    raw = mapping(raw, "execution.grid_subset")
-    only(raw, {"method", "seed", "real_grids_per_provider"}, "execution.grid_subset")
-    limit = raw.get("real_grids_per_provider")
-    return {
-        "method": choice(raw.get("method", "components"), "grid_subset.method", ("components", "islands")),
-        "seed": positive_int(raw["seed"], "grid_subset.seed", allow_zero=True),
-        "real_grids_per_provider": None if limit is None else positive_int(limit, "grid_subset.real_grids_per_provider"),
-    }
-
-
 # Loader --------------------------------------------------------------------------------------
 
-RunConfig = SyntheticRun | AlignedRun
+RunConfig = SyntheticRun
 
 
-def run_config_from_dict(raw: dict[str, Any], *, base_dir: Path) -> RunConfig:
-    """Parse a run YAML mapping (``base_dir``: directory of relative paths)."""
+def parse_run_blocks(raw: dict[str, Any], *, base_dir: Path) -> tuple[str, str, Path, dict[str, Any], dict[str, Any]]:
+    """``(run id, pipeline, scenario path, resources, execution)`` of a run YAML mapping; the pipeline is not checked."""
     raw = mapping(raw, "run configuration")
     only(raw, {"run", "resources", "execution"}, "top-level run")
     for block in ("run", "resources", "execution"):
@@ -503,20 +318,29 @@ def run_config_from_dict(raw: dict[str, Any], *, base_dir: Path) -> RunConfig:
     only(run, {"id", "scenario", "pipeline"}, "run")
     run_id = directory_safe(run.get("id"), "run.id")
     pipeline = str(run.get("pipeline"))
-    if pipeline == "scenario":
-        raise ValueError(
-            "run.pipeline 'scenario' was renamed to 'synthetic', which runs Steps 2-4 and the "
-            "expansion analyses (not Step 2 only). Rename it in the run YAML."
-        )
-    pipeline = choice(pipeline, "run.pipeline", PIPELINES)
     if not run.get("scenario"):
         raise ValueError("run.scenario (the scenario YAML) is required.")
     scenario_path = _resolve(run["scenario"], base_dir)
     if not scenario_path.is_file():
         raise FileNotFoundError(f"Scenario YAML not found: {scenario_path}")
-    if pipeline == "synthetic":
-        return SyntheticRun.from_blocks(run_id, scenario_path, resources, execution)
-    return AlignedRun.from_blocks(run_id, scenario_path, resources, execution, base_dir=base_dir)
+    return run_id, pipeline, scenario_path, resources, execution
+
+
+def run_config_from_dict(raw: dict[str, Any], *, base_dir: Path) -> RunConfig:
+    """Parse a run YAML mapping (``base_dir``: directory of relative paths)."""
+    run_id, pipeline, scenario_path, resources, execution = parse_run_blocks(raw, base_dir=base_dir)
+    if pipeline == "scenario":
+        raise ValueError(
+            "run.pipeline 'scenario' was renamed to 'synthetic', which runs Steps 2-4 and the "
+            "expansion analyses (not Step 2 only). Rename it in the run YAML."
+        )
+    if pipeline == "paired_aligned":
+        raise ValueError(
+            "run.pipeline paired_aligned is the real-vs-synthetic validation: run it with "
+            "'uv run python -m validation run <run.yaml>' (GridExpand/validation)."
+        )
+    choice(pipeline, "run.pipeline", PIPELINES)
+    return SyntheticRun.from_blocks(run_id, scenario_path, resources, execution)
 
 
 def load_run_config(path: str | Path) -> tuple[RunConfig, str]:

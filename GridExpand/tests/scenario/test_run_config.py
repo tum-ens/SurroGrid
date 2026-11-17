@@ -1,4 +1,4 @@
-"""Run YAML loading: one loader for synthetic and paired_aligned (no database)."""
+"""Run YAML loading of the synthetic pipeline (no database); paired_aligned YAMLs point to the validation."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import yaml
 
 from gridexpand.paths import RUN_CONFIG_DIR, SCENARIO_CONFIG_DIR
 from gridexpand.scenario.run_config import (
-    AlignedRun,
     SyntheticRun,
     load_run_config,
     run_config_from_dict,
@@ -88,45 +87,18 @@ def test_with_cases():
     assert with_cases(run, ("pre",)).model_cases == ("pre",)
     with pytest.raises(ValueError):
         with_cases(run, ("post-inflex-heuristic",))
-    paired, _ = load_run_config(RUN_CONFIG_DIR / "joint_2045_v1_islands.yaml")
-    with pytest.raises(ValueError, match="not allowed"):
-        with_cases(paired, ("pre",))  # was accepted by run_scenario and emitted pre twice
 
 
-def test_aligned_run(tmp_path):
-    run, _ = load_run_config(RUN_CONFIG_DIR / "joint_2045_v1_islands.yaml")
-    assert isinstance(run, AlignedRun)
-    assert [p.provider for p in run.providers] == ["dso_a", "dso_b"] and run.provider("dso_b").workers == 2
-    assert run.alignment_dir == Path("~/data/alignment").expanduser().resolve()
-    assert run.grid_subset == {"method": "islands", "seed": 20260924, "real_grids_per_provider": None}
-    assert run.parallel_providers is True and run.target_for(run.provider("dso_b")) == "both"
-    tag = run.providers[0].scenario_tag
-    assert len(tag) == 12 and run.providers[0].heat_profile_set_id == f"joint_2045_v1_dso_a_teaser_heat_{tag}"
-    raw = yaml.safe_load((RUN_CONFIG_DIR / "joint_2045_v1_islands.yaml").read_text(encoding="utf-8"))
-    raw["run"]["scenario"] = str(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")
-    raw["resources"]["alignment_dir"] = "alignment"  # relative: next to the YAML, not the working directory
-    assert run_config_from_dict(raw, base_dir=tmp_path).alignment_dir == tmp_path / "alignment"
-    assert run.weather_year is None  # PVGIS TMY per provider
-    raw["resources"]["weather_year"] = 2016
-    assert run_config_from_dict(raw, base_dir=tmp_path).weather_year == 2016
-    raw["resources"]["weather_year"] = 2016.5
-    with pytest.raises(ValueError, match="weather_year"):
-        run_config_from_dict(raw, base_dir=tmp_path)
-    raw["resources"]["weather_year"] = None
-    raw["execution"]["parallel_providers"] = "false"
-    with pytest.raises(ValueError, match="true or false"):
+def test_paired_aligned_points_to_the_validation(tmp_path):
+    raw = {**SYNTHETIC, "run": {**SYNTHETIC["run"], "pipeline": "paired_aligned"}}
+    with pytest.raises(ValueError, match="python -m validation run"):
         run_config_from_dict(raw, base_dir=tmp_path)
 
 
-def test_optimizer_for_every_pipeline(tmp_path):
+def test_optimizer():
     assert synthetic().optimizer is None  # $GRIDEXPAND_OPTIMIZER, else urbs
     assert synthetic().step3_cluster_concurrency is None  # the optimizer's default
     assert synthetic(execution__step3_cluster_concurrency=3).step3_cluster_concurrency == 3
     assert synthetic(execution__optimizer="pypsa").optimizer == "pypsa"
     with pytest.raises(ValueError, match="execution.optimizer"):
         synthetic(execution__optimizer="oemof")
-    raw = yaml.safe_load((RUN_CONFIG_DIR / "joint_2045_v1_islands.yaml").read_text(encoding="utf-8"))
-    raw["run"]["scenario"] = str(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")
-    assert run_config_from_dict(raw, base_dir=tmp_path).optimizer is None
-    raw["execution"]["optimizer"] = "pypsa"
-    assert run_config_from_dict(raw, base_dir=tmp_path).optimizer == "pypsa"

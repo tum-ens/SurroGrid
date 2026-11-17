@@ -33,7 +33,7 @@ is optional (see [`ghd:` block](#ghd-block)).
 | key | type / allowed values | meaning |
 |---|---|---|
 | `scenario.id` | string | stable scientific-case identifier (part of the scenario key) |
-| `scenario.milestone_year` | positive integer | modelled year (paired preparation `--final-year`) |
+| `scenario.milestone_year` | positive integer | modelled year |
 | `economics.electricity.import_price_eur_per_kwh` | ≥ 0 | electricity import price |
 | `economics.electricity.pv_feed_in_tariff_eur_per_kwh` | ≥ 0 | PV feed-in tariff (0 keeps unremunerated export) |
 | `asset_sizing.pv.heuristic_method` | `annual_electricity_rule`, `optimization` | PV sizing of the heuristic cases |
@@ -140,10 +140,10 @@ ghd:
     building_layer: {table: opendata.osm_building_polygon}
 ```
 
-The PostGIS source reads with the pipeline's database connection (`DB_*`, the status-quo test's `--db-env-prefix`).
+The PostGIS source reads with the pipeline's database connection (`DB_*`; the validation's status-quo test takes `--db-env-prefix`).
 
 Repository scenarios: `ro_heat_2045_synthetic.yaml` and `schweinfurt_2045.yaml` (synthetic runs),
-`joint_2045_full_year.yaml` (aligned DSO A + DSO B runs), `00_scenario_template.yaml`; their differences are tabulated at the top of [method.md](method.md).
+`joint_2045_full_year.yaml` (full year without TSAM; the scenario of the real-vs-synthetic validation in `../validation`), `00_scenario_template.yaml`; their differences are tabulated at the top of [method.md](method.md).
 
 ## Run YAML
 
@@ -153,7 +153,7 @@ Three blocks, all required: `run`, `resources`, `execution`.
 |---|---|
 | `run.id` | directory-safe identifier (`[A-Za-z0-9][A-Za-z0-9._-]*`); default run directory `work/runs/<run.id>/` |
 | `run.scenario` | scenario YAML, relative to the run YAML's directory |
-| `run.pipeline` | `synthetic` or `paired_aligned` (the old name `scenario` is refused with a hint) |
+| `run.pipeline` | `synthetic` (the old name `scenario` is refused with a hint; `paired_aligned` runs with `python -m validation run`, see [validation/README.md](../validation/README.md)) |
 
 Relative paths resolve against the YAML's directory; booleans must be YAML booleans (`"false"` is an error).
 `execution.profile_seed` (all pipelines, default 481527) is the realization seed, and
@@ -201,69 +201,6 @@ batch per execution group (see [method.md](method.md#model-cases)). Outputs are 
 | `pilot_gate`, `pilot_index` | true, 0 | stop the batch if the pilot grid fails |
 | `resume`, `rerun_failed` | false | skip grids already done; with resume, retry failed ones |
 
-### `pipeline: paired_aligned`
-
-Every provider (DSO A, DSO B) of a pylovo alignment bundle, each against its synthetic counterpart.
-
-| key | default | meaning |
-|---|---|---|
-| `resources.pylovo_version_id` | required | pylovo version of the alignment bundle |
-| `resources.alignment_dir` | required | pylovo alignment bundle |
-| `resources.population` | required | pylovo comparison JSON (metric cohort) |
-| `resources.dso_b_grids_dir` | required with `dso_b` | DSO B grid delivery (fingerprint checked against the bundle) |
-| `resources.providers.<dso_a\|dso_b>.paired_dataset_id` | required | dataset directory per provider |
-| `resources.providers.<…>.weather_source_hdf` | required | weather file name in `work/allocation/results/` |
-| `resources.providers.<…>.bundle_name` | the key | the provider's name inside the alignment bundle (`<alignment_dir>/<name>/`) and the comparison JSON |
-| `resources.weather_year` | null | null: PVGIS TMY per provider; a year (2005–2023): that real year for every provider ([method](method.md#time-axis)) |
-| `resources.providers.<…>.workers` | `execution.workers` | grids in parallel for this provider |
-| `resources.target_network` | `both` | `both`, `real` or `synthetic` |
-| `execution.model_cases` | required | post cases only |
-| `execution.workers`, `step3_cpus`, `step4_cpus` | 1 each | resources |
-| `execution.step3_cluster_concurrency` | null | Step 3 models solved at the same time; null: 1 for urbs, automatic for pypsa |
-| `execution.heat_workers` | 4 | parallel TEASER heat regeneration jobs |
-| `execution.powerflow_max_timesteps` | null | smoke-test cap (not for publication) |
-| `execution.cleanup_intermediates`, `resume`, `parallel_providers` | false | lifecycle; providers in parallel |
-| `execution.materialize_expansion` | false | expansion analyses of all provider groups after success |
-| `execution.grid_subset` | null | `{method: components\|islands, seed, real_grids_per_provider}` |
-| `execution.optimizer` | null | Step 3 optimizer `urbs` or `pypsa` for all jobs of the run (null: `$GRIDEXPAND_OPTIMIZER`, else `urbs`) |
-
-The heat library of a provider is derived: `<paired_dataset_id>_teaser_heat_<scenario_hash[:12]>`.
-`grid_subset` picks whole pylovo overlap components (`components`, in seeded random order up to
-`real_grids_per_provider` real grids) or only one-real-one-synthetic components (`islands`).
-
-## Status-quo test
-
-`gridexpand status-quo-test` checks the real grids of one provider under status-quo base electricity before pylovo
-generation (method in [method.md](method.md#status-quo-test)); read-only on the database.
-
-```bash
-uv run gridexpand status-quo-test --provider dso_a --alignment-dir <bundle root> \
-    --scenario-config config/scenarios/joint_2045_full_year.yaml --output-dir <dir> --jobs 4
-uv run gridexpand status-quo-test --provider dso_b --alignment-dir <bundle root> --dso-b-grids-dir <delivery> \
-    --scenario-config <scenario.yaml> --db-env-prefix INFDB_ --output-dir <dir>
-uv run gridexpand status-quo-test --provider dso_a --dataset work/allocation/outputs/scenario_calibration/<dataset> \
-    --output-dir <dir>                                        # regression: demand of a prepared paired dataset
-```
-
-| option | default | meaning |
-|---|---|---|
-| `--provider` | required | `dso_a` or `dso_b` |
-| `--alignment-dir` / `--dataset` | one required | bundle root (`<dir>/<provider>/building-mapping.json`) or a prepared paired dataset |
-| `--dso-b-grids-dir` | – | frozen DSO B delivery (bundle input) |
-| `--bundle-name` | `--provider` | the provider's name inside the alignment bundle |
-| `--scenario-config` | required with `--alignment-dir` | its `ghd:` block applies |
-| `--db-env-prefix` | `DB_` | InfDB connection from `<prefix>HOST`, `PORT`, `NAME`, `USER`, `PASSWORD` (read-only session) |
-| `--basedata-schema` | `basedata` | schema of `buildings` and `classify_building_use` |
-| `--profile-seed` | 481527 | realization seed (a dataset must match its own) |
-| `--peak-hours`, `--all-hours` | 60, off | evaluated hours per grid |
-| `--grids` | all | comma-separated real grid numbers |
-| `--jobs` | 1 | grids in parallel |
-
-The exclusion list `status_quo_<provider>_exclusions.csv` has exactly the columns `provider` (`dso_a`, `dso_b`),
-`real_grid_id` (the bundle's id: DSO A `station_id`, e.g. `LV_059`; DSO B `area_id`, e.g. `113`) and `reason`
-(`transformer_overload`, `cable_overload`, `undervoltage`, `nonconvergence`, joined by `;`), one row per excluded
-grid; a pylovo alignment option consumes it to drop these grids and their buildings.
-
 ## Grid selection
 
 Synthetic runs take one region selector and optional filters; the user never enters a file name or a
@@ -290,10 +227,7 @@ uv run gridexpand run config/runs/<run>.yaml --resume                # skip jobs
 ```
 
 `--until prepare|execute|postprocess` (`--prepare-only` = `--until prepare`) stops early, `--model-case` (repeatable)
-runs a subset of the YAML's cases, and `--run-dir` overrides the run directory. Paired pipelines add
-`--skip-prepare` (use the prepared datasets as they are, validated) and `--target-grid-id` (diagnostic single
-grid, own sub-directory); aligned runs add `--provider dso_a|dso_b` and `--pre-only`. `gridexpand run-aligned` is the
-older name of the same command. Exit codes: 0 done, 1 failed, 2 finished with failed jobs, 3 invalid
+runs a subset of the YAML's cases, and `--run-dir` overrides the run directory. Exit codes: 0 done, 1 failed, 2 finished with failed jobs, 3 invalid
 configuration, 143 cancelled (SIGTERM or Ctrl-C stops the running steps and marks their jobs cancelled).
 
 The run directory holds `inputs/run.yaml` and `inputs/scenario.yaml` (frozen copies), `identity.json` (what a
@@ -333,6 +267,6 @@ supported coefficient contract. Missing coefficients, uncorrected unit provenanc
 invalid areas and TSAM fail explicitly. Each scenario has its own hash; physical
 references and fixed assets are shared across preheating sensitivities.
 
-A paired run with internal heat prepares its own paired dataset. Its preparation
+A paired validation run with internal heat prepares its own paired dataset. Its preparation
 checks RC coverage and builds provider weather/PV inputs; it does not regenerate
 TEASER heat. Check worker memory on a pilot grid before starting the full batch.

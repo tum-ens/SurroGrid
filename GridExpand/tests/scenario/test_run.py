@@ -1,4 +1,4 @@
-"""gridexpand run: plans and commands of every pipeline, run-directory state, CLI (no database)."""
+"""gridexpand run: plans and commands of the synthetic pipeline, run-directory state, CLI (no database)."""
 
 from __future__ import annotations
 
@@ -48,27 +48,7 @@ def test_until_execute_skips_the_expansion(tmp_path):
     assert not run_module.synthetic_settings(ctx, group).materialize_expansion
 
 
-def test_aligned_plan(tmp_path):
-    ctx = context(RUN_CONFIG_DIR / "joint_2045_v1_islands.yaml", "--provider", "dso_b", run_dir=tmp_path)
-    (provider,) = run_module.aligned_providers(ctx)
-    jobs = run_module.aligned_jobs(ctx, provider, tmp_path / "dso_b" / "grid_subset.json")
-    assert [key for key, _, _ in jobs] == ["dso_b/heuristic-assets"]
-    argv = jobs[0][1]
-    assert argv[argv.index("--workers") + 1] == "2" and argv[argv.index("--provider") + 1] == "dso_b"
-    assert argv[argv.index("--job-subset") + 1] == str(tmp_path / "dso_b" / "grid_subset.json")
-    lines = run_module.plan_lines(ctx)
-    assert any("grid_subset.json (computed after preparation)" in line for line in lines)
-    assert any(line.startswith("[prepare:dso_b:pv_library]") and "--reference-year 2009" in line for line in lines)
-    assert not (tmp_path / "dso_b").exists()  # dry-run planning writes no subset (review-orch B3)
-    pre_only = context(RUN_CONFIG_DIR / "joint_2045_v1_islands.yaml", "--pre-only", run_dir=tmp_path)
-    keys = [key for p in run_module.aligned_providers(pre_only) for key, _, _ in run_module.aligned_jobs(pre_only, p, None)]
-    assert keys == ["dso_a/pre-only", "dso_b/pre-only"]
-
-
 @pytest.mark.parametrize("argv", [
-    [str(SANDBOX), "--provider", "dso_a"],
-    [str(SANDBOX), "--target-grid-id", "3"],
-    [str(SANDBOX), "--pre-only"],
     [],
 ])
 def test_invalid_configuration_exit_code(argv, capsys):
