@@ -25,6 +25,10 @@ COMMANDS: dict[str, tuple[str, str]] = {
         "gridexpand.scenario.tools:grids_main",
         "List the candidate grids of an AGS with the runner's numbering.",
     ),
+    "match": (
+        "gridexpand.grids.match",
+        "Match the connection points of given grid files to InfDB buildings (read-only): CSVs and a report.",
+    ),
     "config": (
         "gridexpand.scenario.tools:config_main",
         "config check <yaml...>: validate run/scenario YAMLs, print hashes and keys; no database.",

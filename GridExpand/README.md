@@ -125,6 +125,7 @@ repository, which runs both images behind one proxy.
 | `gridexpand status <run>` | state of a run directory (no database) |
 | `gridexpand grids --ags <AGS> --pylovo-version-id <V>` | candidate grids of an AGS with the runner's numbering |
 | `gridexpand config check <yaml...>` | validate run/scenario YAMLs, print hashes and keys (no database) |
+| `gridexpand match <grid files> --output <dir>` | match the connection points of your own grids to InfDB buildings ([docs](docs/matching.md)) |
 | `gridexpand synthetic --ags ... --pylovo-version-id ... --scenario-config ... --run-dir ...` | Steps 2-4 (+ expansion) for the synthetic grids of one AGS and one model case |
 | `gridexpand allocate <id> --scenario-config ...` | Step 2 for one grid ([docs](docs/steps/2_demand_allocation.md)) |
 | `gridexpand optimize <id> --scenario-config ...` | Step 3 for one Step 2 file ([docs](docs/steps/3_urbs.md)) |
@@ -145,7 +146,7 @@ GridExpand/
   pyproject.toml, uv.lock   one environment (Python 3.12)
   .env.example              database credentials template (copy to .env)
   src/gridexpand/           cli.py, paths.py (the only module that knows directories), common/, db/ (+ sql/),
-                            sampling/, allocation/, optimization/, powerflow/, analysis/, scenario/, paired/, api/
+                            sampling/, allocation/, optimization/, powerflow/, analysis/, scenario/, paired/, grids/, api/
   config/                   scenarios/ and runs/ YAMLs
   data/                     static inputs: sampling/, statistics/
   notebooks/                sampling/ (Step 1)
@@ -198,6 +199,7 @@ tests/analysis` (SQL parity), `GRIDEXPAND_API_TEST_DATABASE=<sandbox db> uv run 
 |---|---|
 | [docs/README.md](docs/README.md) | index |
 | [docs/configuration.md](docs/configuration.md) | scenario and run YAML reference, grid selection, run directories, environment |
+| [docs/matching.md](docs/matching.md) | own grids: connection points to buildings, rules, outputs |
 | [docs/method.md](docs/method.md) | model cases, sizing rules, heat, mobility, paired contract, acceptance checks |
 | [docs/steps/](docs/steps/) | Steps 1-5: inputs, outputs, HDF keys, options, conventions |
 | [validation/README.md](validation/README.md) | the real-vs-synthetic validation (aligned DSO A/DSO B pipeline) |

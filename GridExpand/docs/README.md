@@ -7,6 +7,7 @@ Start with the [GridExpand README](../README.md) (install, data, database, quick
 | document | read it when you |
 |---|---|
 | [configuration.md](configuration.md) | write a scenario or run YAML; need a key, a default, the grid selection, the run directory or an environment variable |
+| [matching.md](matching.md) | bring your own grids: match their connection points to InfDB buildings (`gridexpand match`) |
 | [../validation/README.md](../validation/README.md) | run the real-vs-synthetic validation (aligned DSO A/DSO B pipeline) |
 | [api.md](api.md) | run the HTTP API (for the GridPlanner UI) or the Docker image; its contract |
 | [database.md](database.md) | set up or migrate the `surrogrid` schema, query results, run maintenance commands |
