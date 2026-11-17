@@ -24,7 +24,7 @@ Code: `src/gridexpand/analysis/`
 | `expansion/overview.py`, `expansion/notebook_workflow.py` | read-only loaders for the notebooks |
 | `powerflow/comparison_data.py`, `powerflow/raw.py`, `powerflow/scope.py` | summary and raw-series loaders, run/scope resolution |
 | `plotting/*` | figures (asset cutoff and percentile plots, voltage, transformer import, heatmaps, expansion costs, geoplots) |
-| `audits/topology_bottleneck.py`, `audits/feeder_structure.py` | real-grid voltage-path audit (CLI), feeder-structure comparison (functions) |
+| `audits/feeder_structure.py` | feeder-structure comparison (functions) |
 
 ## Expansion materialization
 
@@ -61,7 +61,6 @@ Analysis keys written by the pipelines:
 | pipeline | key |
 |---|---|
 | synthetic | `<ags:08d>_<scenario key>_<timeframe>_<profiles>[_hh_only][_tsam][_<model case>]_<pre\|post>` (override the prefix with `gridexpand synthetic --expansion-analysis-prefix`) |
-| paired_validation | `<run.id>[_real]_<pre\|post_inflex\|post\|post_hems_optimized>` |
 | paired_aligned | `<run.id>_<provider>_<real\|synthetic>_<pre\|post_inflex\|post\|post_hems_optimized>` |
 
 Aligned runs (all four groups DSO A real/synthetic, DSO B real/synthetic, or a subset):
@@ -134,14 +133,6 @@ The notebooks ship without outputs. Set `RUN_ID` in `joint_setup.py` (and `PLZ` 
 of your database.
 
 ## Audits
-
-```bash
-uv run python -m gridexpand.analysis.audits.topology_bottleneck --real-run-name <real run> --plz 99999
-```
-
-(`--stage` default `pre`, `--voltage-threshold` default 0.90, `--output-dir` default
-`work/analysis/output/audits/topology`; writes `critical_grid_summary.csv`, `critical_path_lines.csv` and
-`critical_path_alternative_lines.csv`.)
 
 `audits.feeder_structure` (graph-normalized feeder, downstream-demand and path-depth comparison) and the plotting
 modules are used from notebooks; `python -m gridexpand.analysis.plotting.powerflow_heatmaps` plots one grid from

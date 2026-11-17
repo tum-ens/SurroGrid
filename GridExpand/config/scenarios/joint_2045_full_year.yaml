@@ -1,8 +1,6 @@
 # Scientific assumptions for the joint DSO A + DSO B paired full-year comparison on
-# pylovo v1 (aligned building populations). Cloned from
-# dso_a_2045_full_year.yaml. Deliberate differences: scenario id, TEASER
-# space heat for both regions (INFDB ro_heat has no time series), and
-# deterministic adoption shares instead of the DSO A source inventory.
+# pylovo v1 (aligned building populations): TEASER space heat for both regions
+# (INFDB ro_heat has no time series) and deterministic adoption shares.
 scenario:
   id: joint_2045_full_year
   milestone_year: 2045
@@ -91,7 +89,7 @@ asset_sizing:
     # curve, the extra electricity of charging 10 K above the normal sink.
     buffer_charge_efficiency_method: cop_curve
 
-electrification: # deterministic_share or source_inventory
+electrification: # adoption_mode deterministic_share: a seeded building_share per technology
   # Shares of eligible physical buildings, selected per provider. Central 2045
   # values from national scenarios (sources: docs/method.md#electrification).
   heat:

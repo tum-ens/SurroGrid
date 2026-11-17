@@ -368,20 +368,11 @@ class Grid:
             )
             for column in INVENTORY_COLUMNS:
                 physical[column] = inventory[column]
-            source_columns = {
-                technology: column
-                for technology in ("heat", "mobility", "pv_battery")
-                if (column := self.settings.get(
-                    "electrification_source_evidence_columns", {}
-                ).get(technology))
-                and column in physical.columns
-            }
             assignment = build_electrification_assignment(
                 physical,
                 self.settings["scenario_config"].electrification,
                 selection_scope_id=self._electrification_scope_id(),
                 profile_seed=self.profile_seed,
-                source_evidence_columns=source_columns,
             )
 
         validate_electrification_assignment_config(

@@ -8,7 +8,6 @@ resources). Every key, default and the grid selection are documented in
 | `run.pipeline` | template | what `gridexpand run` does |
 |---|---|---|
 | `synthetic` | `runs/00_run_scenario_template.yaml` | Steps 2-4 and the expansion analyses for the synthetic grids of one region |
-| `paired_validation` | `runs/00_run_paired_validation_template.yaml` | DSO A real vs synthetic grids of one prepared paired dataset |
 | `paired_aligned` | see `runs/joint_2045_v1_*.yaml` | every provider (DSO A, DSO B) of a pylovo alignment bundle |
 
 `runs/sandbox_example.yaml` is the regression-harness run (sandbox database only).
@@ -22,8 +21,8 @@ resources). Every key, default and the grid selection are documented in
    `resources.pylovo_version_id` (never taken from `.env`).
 4. Synthetic runs: `resources.ags`, optionally `plz` or `plz` + `kcid` + `bcid`; choose `execution.model_cases`
    (remove `post-inflex-heuristic` from the template: the synthetic pipeline refuses it).
-5. Paired runs: `ags`, `plz`, `paired_dataset_id`, `heat_profile_set_id`, `weather_source_hdf`; post cases only
-   (`pre` is added automatically).
+5. Aligned runs: `alignment_dir`, `population`, `providers.<dso>.paired_dataset_id` and `weather_source_hdf`;
+   post cases only (`pre` is added automatically).
 6. Keep `execution.profile_seed` when cases or runs must be comparable; change it only for a deliberately
    independent realization.
 7. Check and launch:

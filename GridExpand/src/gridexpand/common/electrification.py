@@ -55,33 +55,6 @@ def _present(value: Any) -> bool:
         return True
 
 
-def _canonical_evidence(value: Any) -> str | None:
-    if not _present(value):
-        return None
-    if isinstance(value, str):
-        return value
-    if isinstance(value, np.generic):
-        value = value.item()
-    try:
-        return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
-    except TypeError:
-        return str(value)
-
-
-def _source_value(
-    row: pd.Series,
-    technology: str,
-    source_evidence_columns: Mapping[str, str],
-    source_evidence: Mapping[str, Mapping[str, Any]] | None,
-) -> Any:
-    column = source_evidence_columns.get(technology, f"{technology}_source_evidence")
-    if column in row:
-        return row[column]
-    if source_evidence is not None:
-        return source_evidence.get(technology, {}).get(str(row["building_objectid"]))
-    return None
-
-
 def _share_by_type(config: Any) -> dict[str, float] | None:
     by_type = _config_value(config, "building_share_by_type")
     return {str(k): float(v) for k, v in by_type.items()} if by_type else None
@@ -119,15 +92,12 @@ def build_electrification_assignment(
     *,
     selection_scope_id: str,
     profile_seed: int,
-    source_evidence_columns: Mapping[str, str] | None = None,
-    source_evidence: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> pd.DataFrame:
     """Build one auditable assignment row per building and technology.
 
     inventory must contain one row per physical building and, for each
-    technology, <technology>_eligible plus
-    <technology>_exclusion_reason. Source-inventory modes additionally
-    require a source-evidence column or explicit source_evidence mapping.
+    technology, <technology>_eligible plus <technology>_exclusion_reason.
+    ``source_evidence`` stays empty; the column is kept for the database table.
     """
     if not isinstance(inventory, pd.DataFrame):
         raise TypeError("Electrification inventory must be a pandas DataFrame.")
@@ -153,7 +123,6 @@ def build_electrification_assignment(
     )
     if stratified and "building_type" not in frame:
         raise ValueError("building_share_by_type needs a building_type column in the inventory.")
-    evidence_columns = dict(source_evidence_columns or {})
     output: list[dict[str, Any]] = []
     for technology in TECHNOLOGIES:
         eligible_column = f"{technology}_eligible"
@@ -164,22 +133,17 @@ def build_electrification_assignment(
                 f"Electrification inventory is missing {technology} columns: {missing}"
             )
         mode = _config_value(configs[technology], "adoption_mode")
-        if mode not in {"deterministic_share", "source_inventory"}:
+        if mode != "deterministic_share":
             raise ValueError(f"Unknown adoption mode for {technology}: {mode!r}.")
         configured_share = _config_value(configs[technology], "building_share")
-        if mode == "deterministic_share":
-            if configured_share is None or isinstance(configured_share, bool):
-                raise ValueError(
-                    f"{technology}.building_share is required for deterministic_share."
-                )
-            configured_share = float(configured_share)
-            if not np.isfinite(configured_share) or not 0.0 <= configured_share <= 1.0:
-                raise ValueError(
-                    f"{technology}.building_share must be finite and in [0, 1]."
-                )
-        elif configured_share is not None:
+        if configured_share is None or isinstance(configured_share, bool):
             raise ValueError(
-                f"{technology}.building_share is not allowed for source_inventory."
+                f"{technology}.building_share is required for deterministic_share."
+            )
+        configured_share = float(configured_share)
+        if not np.isfinite(configured_share) or not 0.0 <= configured_share <= 1.0:
+            raise ValueError(
+                f"{technology}.building_share must be finite and in [0, 1]."
             )
 
         records: list[dict[str, Any]] = []
@@ -189,9 +153,6 @@ def build_electrification_assignment(
             reason = row[reason_column]
             if not eligible and not _present(reason):
                 reason = "ineligible"
-            evidence = _source_value(
-                row, technology, evidence_columns, source_evidence
-            )
             score = (
                 stable_seed(
                     int(profile_seed), "electrification", technology, building_id
@@ -200,7 +161,7 @@ def build_electrification_assignment(
             )
             stratum = (
                 _stratum_of(configs[technology], row["building_type"])
-                if mode == "deterministic_share" and _share_by_type(configs[technology])
+                if _share_by_type(configs[technology])
                 else DEFAULT_STRATUM
             )
             records.append(
@@ -209,58 +170,36 @@ def build_electrification_assignment(
                     "technology": technology,
                     "selection_scope_id": str(selection_scope_id),
                     "adoption_mode": mode,
-                    "configured_share": (
-                        _stratum_share(configs[technology], stratum)
-                        if mode == "deterministic_share" else configured_share
-                    ),
+                    "configured_share": _stratum_share(configs[technology], stratum),
                     STRATUM_COLUMN: stratum,
                     "eligible": eligible,
-                    "selection_score": (
-                        float(score) if mode == "deterministic_share" else np.nan
-                    ),
+                    "selection_score": float(score),
                     "selection_rank": np.nan,
                     "selected": False,
                     "exclusion_reason": None if eligible else str(reason),
-                    "source_evidence": _canonical_evidence(evidence),
+                    "source_evidence": None,
                     "profile_seed": int(profile_seed),
                 }
             )
 
-        if mode == "source_inventory":
-            evidence_column = evidence_columns.get(
-                technology, f"{technology}_source_evidence"
+        # Rank and select within each stratum (one stratum without per-type shares).
+        for stratum in sorted({record[STRATUM_COLUMN] for record in records}):
+            ranked = sorted(
+                (
+                    record for record in records
+                    if record["eligible"] and record[STRATUM_COLUMN] == stratum
+                ),
+                key=lambda record: (
+                    record["selection_score"],
+                    record["building_objectid"],
+                ),
             )
-            has_column = evidence_column in frame.columns
-            has_mapping = source_evidence is not None and technology in source_evidence
-            if not has_column and not has_mapping:
-                raise ValueError(
-                    f"source_inventory for {technology} requires source evidence "
-                    f"column {evidence_column!r} or an explicit source_evidence mapping."
-                )
-            for record in records:
-                if record["eligible"] and _present(record["source_evidence"]):
-                    record["selected"] = True
-                elif record["eligible"]:
-                    record["exclusion_reason"] = "missing_source_evidence"
-        else:
-            # Rank and select within each stratum (one stratum without per-type shares).
-            for stratum in sorted({record[STRATUM_COLUMN] for record in records}):
-                ranked = sorted(
-                    (
-                        record for record in records
-                        if record["eligible"] and record[STRATUM_COLUMN] == stratum
-                    ),
-                    key=lambda record: (
-                        record["selection_score"],
-                        record["building_objectid"],
-                    ),
-                )
-                for rank, record in enumerate(ranked, start=1):
-                    record["selection_rank"] = rank
-                share = _stratum_share(configs[technology], stratum)
-                selected_count = int(round(float(share) * len(ranked)))
-                for record in ranked[:selected_count]:
-                    record["selected"] = True
+            for rank, record in enumerate(ranked, start=1):
+                record["selection_rank"] = rank
+            share = _stratum_share(configs[technology], stratum)
+            selected_count = int(round(float(share) * len(ranked)))
+            for record in ranked[:selected_count]:
+                record["selected"] = True
         output.extend(records)
 
     columns = [*ASSIGNMENT_COLUMNS, STRATUM_COLUMN] if stratified else list(ASSIGNMENT_COLUMNS)
@@ -314,88 +253,72 @@ def validate_electrification_assignment(
         raise ValueError("Ineligible buildings cannot be selected.")
     for technology, group in assignment.groupby("technology", sort=False):
         modes = set(group["adoption_mode"].astype(str))
-        if len(modes) != 1 or modes.isdisjoint({"deterministic_share", "source_inventory"}):
+        if modes != {"deterministic_share"}:
             raise ValueError(f"{technology} has an invalid or inconsistent adoption mode.")
-        mode = next(iter(modes))
         if group["selection_scope_id"].nunique(dropna=False) != 1:
             raise ValueError(f"{technology} has inconsistent selection_scope_id values.")
         if group["profile_seed"].nunique(dropna=False) != 1:
             raise ValueError(f"{technology} has inconsistent profile_seed values.")
-        if mode == "source_inventory":
-            if group["configured_share"].notna().any():
-                raise ValueError(
-                    f"{technology}.configured_share must be null for source_inventory."
-                )
-            expected_selected = (
-                group["eligible"].astype(bool)
-                & group["source_evidence"].map(_present)
+        if group["configured_share"].isna().any():
+            raise ValueError(
+                f"{technology}.configured_share is required for deterministic_share."
             )
-            if not group["selected"].astype(bool).equals(expected_selected):
-                raise ValueError(
-                    f"source_inventory selection for {technology} must exactly match "
-                    "eligible rows with source evidence."
-                )
-        else:
-            if group["configured_share"].isna().any():
-                raise ValueError(
-                    f"{technology}.configured_share is required for deterministic_share."
-                )
-            shares = pd.to_numeric(group["configured_share"], errors="coerce")
-            if shares.isna().any() or (~shares.between(0.0, 1.0)).any():
-                raise ValueError(
-                    f"{technology}.configured_share must be in [0, 1]."
-                )
-            if group.loc[group["eligible"], "selection_score"].isna().any():
-                raise ValueError(
-                    f"Eligible deterministic_share rows for {technology} need a selection score."
-                )
-            strata = (
-                group[STRATUM_COLUMN].astype(str)
-                if STRATUM_COLUMN in group.columns
-                else pd.Series(DEFAULT_STRATUM, index=group.index)
+        shares = pd.to_numeric(group["configured_share"], errors="coerce")
+        if shares.isna().any() or (~shares.between(0.0, 1.0)).any():
+            raise ValueError(
+                f"{technology}.configured_share must be in [0, 1]."
             )
-            for stratum, part in group.groupby(strata, sort=True):
-                part_shares = shares.loc[part.index]
-                if not np.allclose(
-                    part_shares.to_numpy(dtype=float),
-                    float(part_shares.iloc[0]),
-                    rtol=0.0,
-                    atol=1e-12,
-                ):
-                    raise ValueError(
-                        f"{technology}.configured_share must be consistent across rows "
-                        f"of stratum {stratum!r}."
-                    )
-                if not exact_share:
-                    continue
-                ranked = part.loc[part["eligible"]].sort_values(
-                    ["selection_score", "building_objectid"], kind="stable"
+        if group.loc[group["eligible"], "selection_score"].isna().any():
+            raise ValueError(
+                f"Eligible deterministic_share rows for {technology} need a selection score."
+            )
+        strata = (
+            group[STRATUM_COLUMN].astype(str)
+            if STRATUM_COLUMN in group.columns
+            else pd.Series(DEFAULT_STRATUM, index=group.index)
+        )
+        for stratum, part in group.groupby(strata, sort=True):
+            part_shares = shares.loc[part.index]
+            if not np.allclose(
+                part_shares.to_numpy(dtype=float),
+                float(part_shares.iloc[0]),
+                rtol=0.0,
+                atol=1e-12,
+            ):
+                raise ValueError(
+                    f"{technology}.configured_share must be consistent across rows "
+                    f"of stratum {stratum!r}."
                 )
-                ranks = pd.to_numeric(ranked["selection_rank"], errors="coerce")
-                expected_ranks = np.arange(1, len(ranked) + 1, dtype=float)
-                if ranks.isna().any() or not np.array_equal(
-                    ranks.to_numpy(dtype=float), expected_ranks
-                ):
-                    raise ValueError(
-                        f"{technology}.selection_rank does not match deterministic ordering."
-                    )
-                share = float(part_shares.iloc[0])
-                expected = int(round(share * int(part["eligible"].sum())))
-                actual = int(part["selected"].sum())
-                if actual != expected:
-                    raise ValueError(
-                        f"{technology} selected {actual} buildings; expected {expected}."
-                    )
-                expected_selected = set(
-                    ranked.iloc[:expected]["building_objectid"].astype(str)
+            if not exact_share:
+                continue
+            ranked = part.loc[part["eligible"]].sort_values(
+                ["selection_score", "building_objectid"], kind="stable"
+            )
+            ranks = pd.to_numeric(ranked["selection_rank"], errors="coerce")
+            expected_ranks = np.arange(1, len(ranked) + 1, dtype=float)
+            if ranks.isna().any() or not np.array_equal(
+                ranks.to_numpy(dtype=float), expected_ranks
+            ):
+                raise ValueError(
+                    f"{technology}.selection_rank does not match deterministic ordering."
                 )
-                actual_selected = set(
-                    part.loc[part["selected"], "building_objectid"].astype(str)
+            share = float(part_shares.iloc[0])
+            expected = int(round(share * int(part["eligible"].sum())))
+            actual = int(part["selected"].sum())
+            if actual != expected:
+                raise ValueError(
+                    f"{technology} selected {actual} buildings; expected {expected}."
                 )
-                if actual_selected != expected_selected:
-                    raise ValueError(
-                        f"{technology}.selected rows do not match deterministic ranking."
-                    )
+            expected_selected = set(
+                ranked.iloc[:expected]["building_objectid"].astype(str)
+            )
+            actual_selected = set(
+                part.loc[part["selected"], "building_objectid"].astype(str)
+            )
+            if actual_selected != expected_selected:
+                raise ValueError(
+                    f"{technology}.selected rows do not match deterministic ranking."
+                )
 
 
 def validate_electrification_assignment_config(

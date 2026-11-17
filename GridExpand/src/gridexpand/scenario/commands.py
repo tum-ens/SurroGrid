@@ -22,7 +22,6 @@ GRID_EXPANSION = "gridexpand.analysis.expansion.grid_expansion"
 ALIGNED_EXPANSION = "gridexpand.analysis.expansion.aligned_expansion"
 PAIRED_RUNNER = "gridexpand.paired.runner"
 PAIRED_URBS_INPUT = "gridexpand.allocation.scenario_calibration.pipeline.paired_urbs_input"
-PAIRED_ALLOCATION = "gridexpand.allocation.scenario_calibration.allocation.paired_allocation"
 ALIGNED_ALLOCATION = "gridexpand.allocation.scenario_calibration.allocation.aligned_allocation"
 PROFILES = "gridexpand.allocation.scenario_calibration.profiles"
 
@@ -196,15 +195,13 @@ def real_powerflow_command(
     plz: int,
     lv_id: int,
     provider: str,
-    profile_seed: int,
     urbs_result_hdf: Path,
+    grid_file: str | Path,
     summary_grid_scope: str,
     post_demand_mode: str,
     run_name: str,
     scenario_label: str,
     expect_temporal_method: str | None = None,
-    grid_file: str | None = None,
-    grid_data_path: Path | None = None,
     max_timesteps: int | None = None,
     post_only: bool = False,
     python: str | None = None,
@@ -218,16 +215,12 @@ def real_powerflow_command(
         "--plz", plz,
         "--lv-id", lv_id,
         "--provider", provider,
-        "--profile-seed", profile_seed,
         "--urbs-result-hdf", urbs_result_hdf,
+        "--grid-file", grid_file,
         "--summary-grid-scope", summary_grid_scope,
         python=python,
     )
     _flag(argv, "--expect-temporal-method", expect_temporal_method)
-    if grid_file is not None:
-        argv += ["--grid-file", str(grid_file)]
-    elif grid_data_path is not None:
-        argv += ["--grid-data-path", str(grid_data_path)]
     _flag(argv, "--max-timesteps", max_timesteps)
     argv += [
         "--post-demand-mode", post_demand_mode,
@@ -418,60 +411,6 @@ def pv_profile_library_command(
         "--reference-year", reference_year,
         python=python,
     )
-
-
-def paired_preparation_commands(
-    *,
-    ags: int,
-    plz: int,
-    milestone_year: int,
-    pylovo_version_id: str,
-    min_buildings: int,
-    scenario_config: Path,
-    profile_seed: int,
-    paired_dir: Path,
-    heat_library: Path,
-    weather_hdf: Path,
-    reference_year: int,
-    python: str | None = None,
-) -> list[tuple[str, list[str]]]:
-    """``(stage, argv)`` that build a DSO A paired dataset (``pipeline: paired_validation``)."""
-    stages = [
-        ("prepare_allocation", module_command(
-            PAIRED_ALLOCATION,
-            "--ags", ags,
-            "--plz", plz,
-            "--final-year", milestone_year,
-            "--pylovo-version-id", pylovo_version_id,
-            "--min-buildings", min_buildings,
-            "--scenario-config", scenario_config,
-            "--profile-seed", profile_seed,
-            "--output-dir", paired_dir,
-            python=python,
-        )),
-        ("prepare_heat_profiles", module_command(
-            f"{PROFILES}.paired_profile_readiness",
-            "--paired-dir", paired_dir,
-            "--heat-profile-library", heat_library,
-            python=python,
-        )),
-        ("prepare_pv_profiles", pv_profile_library_command(
-            roof_catalog=paired_dir / "paired_roof_sections.csv",
-            weather_source_hdf=weather_hdf,
-            output=paired_dir / "paired_pv_profile_library.h5",
-            reference_year=reference_year,
-            python=python,
-        )),
-    ]
-
-    from .config_loader import load_scenario_config
-    if Path(scenario_config).exists():
-        scenario,_ = load_scenario_config(scenario_config)
-        if scenario.heat.space_heat_source == "internal":
-            stages[1] = ("prepare_heat_profiles",module_command(
-                f"{PROFILES}.paired_profile_readiness","--paired-dir",paired_dir,
-                "--scenario-config",scenario_config,python=python))
-    return stages
 
 
 def aligned_preparation_commands(

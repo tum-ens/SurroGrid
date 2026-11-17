@@ -87,15 +87,13 @@ def run_real_powerflows(
             plz=job.get("plz", args.plz),
             lv_id=int(job["target_grid_id"]),
             provider=provider,
-            profile_seed=args.profile_seed,
             urbs_result_hdf=result_hdf,
             summary_grid_scope=args.powerflow_grid_scope,
             # A full-year request must never consume a representative-period
             # result. Pre-only jobs read the Step-2 input, which carries no
             # Step-3 temporal record.
             expect_temporal_method=None if args.tsam or args.pre_only else "full_year_no_tsam",
-            grid_file=job.get("grid_file"),
-            grid_data_path=args.grid_data_path,
+            grid_file=job["grid_file"],
             max_timesteps=getattr(args, "max_timesteps", None),
             post_demand_mode=case.real_powerflow_mode,
             post_only=case.powerflow_mode is not None,

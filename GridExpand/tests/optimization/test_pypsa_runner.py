@@ -144,7 +144,7 @@ def test_cli_rejects_tsam_with_pypsa(monkeypatch):
     from gridexpand.paths import SCENARIO_CONFIG_DIR
 
     monkeypatch.delenv(OPTIMIZER_ENV, raising=False)
-    full_year = str(SCENARIO_CONFIG_DIR / "dso_a_2045_full_year.yaml")
+    full_year = str(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")  # time_aggregation off
     with_tsam = str(SCENARIO_CONFIG_DIR / "ro_heat_2045_synthetic.yaml")  # time_aggregation.enabled
     assert parse_args(["x.h5", "--scenario-config", full_year]).optimizer == "urbs"
     assert parse_args(["x.h5", "--optimizer", "pypsa", "--scenario-config", full_year]).optimizer == "pypsa"

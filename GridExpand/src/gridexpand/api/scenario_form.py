@@ -43,8 +43,7 @@ def _adoption_fields(tech: str, label: str) -> list[dict[str, Any]]:
     return [
         _field(mode, f"{label}: selection", "enum", options=[
             {"value": "deterministic_share", "label": "Share of eligible buildings"},
-            {"value": "source_inventory", "label": "Source inventory (paired data)"},
-        ], hint="deterministic_share or source_inventory (paired DSO data only)."),
+        ], hint="deterministic_share: a seeded share of the eligible buildings."),
         _field(f"electrification.{tech}.building_share", f"{label}: building share", "percent", "%",
                min=0, max=1, step=0.05, requires={"key": mode, "value": "deterministic_share"}, after="adoption_mode",
                hint="Seeded share of the eligible buildings (only with deterministic_share)."),
@@ -59,8 +58,7 @@ def _adoption_fields(tech: str, label: str) -> list[dict[str, Any]]:
 SECTIONS: list[dict[str, Any]] = [
     {"id": "electrification", "title": "Electrification",
      "note": "Which buildings get heat pumps, EVs and PV + battery. deterministic_share selects a seeded share of the "
-             "eligible buildings; source_inventory takes the buildings of a source inventory (paired DSO data; "
-             "synthetic runs fail with it).",
+             "eligible buildings.",
      "fields": [
         *_adoption_fields("heat", "Heat pumps"),
         *_adoption_fields("mobility", "Electric vehicles"),
@@ -513,7 +511,7 @@ def form_sections(text: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """The catalogue sections with value, presence and YAML help per field, and the parsed data.
 
     Fields a file does not have are left out, except optional ones (loader default) and fields that
-    depend on another field (for example ``building_share`` of a ``source_inventory`` technology).
+    depend on another field (for example ``building_share``, which needs ``deterministic_share``).
     """
     _, doc = _round_trip(text)
     data = yaml.safe_load(text)
@@ -616,12 +614,6 @@ def validate_text(text: str) -> dict[str, Any]:
             return result
     result.update(ok=True, id=scenario.scenario_id, configuration_hash=config_hash,
                   scenario_key=scenario_identity_key(scenario.scenario_id, config_hash))
-    for tech in ("heat", "mobility", "pv_battery"):
-        if scenario.electrification.for_technology(tech).adoption_mode == "source_inventory":
-            key = f"electrification.{tech}.adoption_mode"
-            result["issues"].append({"level": "warning", "key": key, "line": _line_of(doc, key)[1],
-                                     "message": f"{key} is source_inventory: it needs source evidence of the paired "
-                                                "DSO data, so synthetic runs of this service fail with it."})
     if "CHANGE_ME" in scenario.scenario_id:
         result["issues"].append({"level": "warning", "key": "scenario.id",
                                  "message": "The scenario id still contains CHANGE_ME (listed as a template)."})

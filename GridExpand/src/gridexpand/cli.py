@@ -15,7 +15,7 @@ import sys
 COMMANDS: dict[str, tuple[str, str]] = {
     "run": (
         "gridexpand.scenario.run",
-        "Run one run YAML (config/runs/*.yaml): synthetic, paired_validation or paired_aligned.",
+        "Run one run YAML (config/runs/*.yaml): synthetic or paired_aligned.",
     ),
     "status": (
         "gridexpand.scenario.tools:status_main",

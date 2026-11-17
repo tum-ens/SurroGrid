@@ -9,7 +9,6 @@ quoted below are those of every repository scenario YAML unless a table says oth
 |---|---|---|---|---|
 | `ro_heat_2045_synthetic.yaml` | synthetic runs | `infdb_ro_heat` | deterministic 1.0 / 1.0 / 1.0 | on |
 | `schweinfurt_2045.yaml` | synthetic runs | `teaser` (level 0) | deterministic 0.75 / 0.75 / 0.75 | on |
-| `dso_a_2045_full_year.yaml` | paired DSO A runs | `infdb_ro_heat` | source inventory (DSO A) | off |
 | `joint_2045_full_year.yaml` | aligned DSO A + DSO B runs | `teaser` (level 1) | deterministic 0.8 / 1.0 / 0.8 | off |
 | `00_scenario_template.yaml` | template | `infdb_ro_heat` | deterministic 1.0 / 1.0 / 1.0 | on |
 
@@ -93,12 +92,8 @@ a controlled comparison matters.
 
 ## Electrification assignment
 
-`electrification.<heat|mobility|pv_battery>.adoption_mode` selects, per technology:
-
-- `deterministic_share`: eligible physical buildings are ranked by a stable seed and the exact rounded
-  `building_share` is selected;
-- `source_inventory`: only buildings backed by explicit source evidence (the DSO A 2045 inventory) are
-  selected; `building_share` is not allowed.
+`electrification.<heat|mobility|pv_battery>.adoption_mode: deterministic_share` ranks the eligible physical
+buildings of each technology by a stable seed and selects the exact rounded `building_share`.
 
 With `building_share_by_type` (keys `SFH`, `TH`, `MFH`, `AB`) the ranking and the rounded selection run within
 each building type; `building_share` applies to the types not listed (e.g. untyped mixed-use buildings). The
@@ -193,8 +188,7 @@ process bounded by their summed LoD2 `cap-up`.
 
 ## Stationary-battery sizing
 
-Only buildings selected for `pv_battery` are battery candidates. Battery rows of a source inventory (DSO A)
-are location evidence only; their capacities do not set the scenario capacity. With annual base
+Only buildings selected for `pv_battery` are battery candidates. With annual base
 electricity $E_{\mathrm{el},i}^{\mathrm{MWh}}$ in MWh/a and PV capacity $P_{\mathrm{PV},i}$ in kWp, the
 heuristic is
 
@@ -601,16 +595,16 @@ on.
 
 ## Paired validation contract
 
-The paired pipelines compare real DSO grids (DSO A; DSO A and DSO B in aligned runs) with synthetic pylovo grids under
-the same post-electrification scenario. They hold the physical demand and technology realization constant and
+The aligned paired pipeline compares the real grids of the DSOs in a pylovo alignment bundle (DSO A and DSO B) with
+synthetic pylovo grids of the same buildings under the same post-electrification scenario. They hold the physical demand and technology realization constant and
 change only the electrical network and the mapping of scenario units to buses. Paired validation may project a
 compiled scenario onto real and synthetic buses; it may not redefine scenario assumptions.
 
 | Layer | Shared between real and synthetic | Network-specific |
 |---|---|---|
-| Scope | physical buildings retained by both network models, same minimum-building rule | grid partition |
-| Base demand | household rows, measured annual household energy, calibrated GHD energy, sampled profile realization | allocation bus |
-| Sector assets | deduplicated source inventory (DSO A 2045 PV, EV, heat pump) or deterministic selection | allocation bus |
+| Scope | the physical buildings of the alignment bundle's cohort, same minimum-building rule | grid partition |
+| Base demand | building components of the open building data (households, GHD floor area), sampled profile realization | allocation bus |
+| Sector assets | the deterministic electrification assignment of the scenario | allocation bus |
 | Time series | profile seed, weather, mobility pool, heat demand, COP, temporal horizon | none |
 | Optimization | identical scenario-unit inputs, formulation, technology assumptions, solver settings, temporal method | target-grid batch partition |
 | Power flow | active-power time series and metric definitions | pandapower topology, impedance, equipment, bus mapping |
@@ -626,42 +620,11 @@ selected target buses immediately before the power flow; this conserves active a
 target-grid batch recreates the same deterministic scenario-unit inputs; only the grouping and the final bus
 projection differ.
 
-**One HEMS per building.** Where several source connections of one LV grid match the same LoD2 building, their
-annual demand and asset evidence are summed and assigned to the connection with the largest annual base
-electricity (ties: lowest bus id). A building matched to connections in different LV grids is excluded (no single
-connection preserves both transformer assignments). Both counts are recorded in the scope audit and the dataset
-metadata.
+**One HEMS per building.** The alignment bundle maps every canonical building to one real grid and one bus
+(pylovo's alignment rejects buildings with conflicting connections), so every building is one HEMS.
 
-**Reference-grid scope and topology (DSO A).** The reference population uses a curated dataset of station
-workbooks with exactly one transformer each, so no multi-transformer station splitting is needed. The source grids
-are meshed; their validated radialized derivatives (cycle rank 0, no unsupplied load buses) are used for power flow
-and reinforcement. `station_split_manifest.csv` and
-`station_radialization_manifest.csv` below `GRID_DATA_PATH` record the eligible stations and the derived workbooks;
-allocation and real-grid power flow select the same entries. They describe provenance, not scenario parameters.
-
-**Source inventory (DSO A).** Heat-pump rows are location evidence only (no positive capacities); the three component
-records of one installation (`load_type` `hp`, `heat`, `dhw`, same `Baujahr`) form one physical system. PV rows with
-`Baujahr <= 2045` (and legacy rows without a usable year) mark a building as a PV location; the DSO A PV capacity is
-not an installation limit. Charging-point capacities are fixed.
-
-### GHD and mixed-use evidence rules
-
-These rules belong to the DSO A inventory pipeline (`pipeline: paired_validation`); aligned runs model GHD for both
-providers as in "Commercial and public (GHD) electricity" above.
-
-pylovo's open building layer contains many more Commercial/Public polygons than a DSO has GHD customers; an ALKIS
-polygon is not necessarily an active electricity customer, and one connection can serve a mixed-use building. The
-paired scenario therefore:
-
-1. retains DSO GHD demand only where the GHD row matches a physical building;
-2. keeps DSO household rows that match a Commercial/Public polygon as mixed-use household proxies;
-3. adds pylovo per-square-metre GHD defaults to neither network;
-4. excludes an unmatched GHD row individually and audits it, without rejecting its otherwise valid LV grid.
-
-pylovo grids are still dimensioned with the open-data GHD assumptions; an open-data rule for load-active generic
-commercial buildings
-is a separate topology sensitivity and must not use DSO matching (that would leak the reference network into the
-synthetic generation).
+**Reference grids.** DSO A grids are radialized station workbooks with one transformer each (cycle rank 0, no
+unsupplied load buses); DSO B grids are area deliveries. The alignment bundle names the grid file of every real grid.
 
 ### Status-quo test
 

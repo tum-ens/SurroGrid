@@ -7,10 +7,10 @@ Pipelines (``run.pipeline``):
   assignment; execute = one ``gridexpand synthetic`` batch per execution group
   (:func:`gridexpand.scenario.synthetic_ags_runner.run_batch`, including its
   expansion analyses); postprocess = one QGIS view refresh.
-- ``paired_validation`` / ``paired_aligned``: prepare = build (unless
-  ``resume``/``--skip-prepare``) and validate the paired datasets; execute = one
-  paired-runner process per execution group (and provider); postprocess =
-  expansion analyses when every job succeeded.
+- ``paired_aligned``: prepare = build (unless ``resume``/``--skip-prepare``)
+  and validate the paired dataset of each provider; execute = one paired-runner
+  process per execution group and provider; postprocess = expansion analyses
+  when every job succeeded.
 
 The run directory (default ``WORK_DIR/runs/<run.id>``) holds frozen inputs,
 ``identity.json``, ``state.json`` and ``events.jsonl`` (see
@@ -39,7 +39,6 @@ from gridexpand.scenario.config_loader import load_scenario_config, scenario_ide
 from gridexpand.scenario.model_cases import MODEL_CASES, ExecutionGroup, execution_groups
 from gridexpand.scenario.run_config import (
     AlignedRun,
-    PairedRun,
     ProviderResources,
     RunConfig,
     SyntheticRun,
@@ -307,76 +306,12 @@ def run_synthetic(ctx: RunContext) -> int:
     return EXIT_JOB_FAILURES if any(code == 2 for code in codes.values()) else EXIT_OK
 
 
-# Paired (DSO A) -----------------------------------------------------------------------------
+# Paired runs (shared by the aligned pipeline) ------------------------------------------------
 
 
 def _group_dir(base: Path, group: str, target_grid_id: int | None) -> Path:
     """Run directory of one paired group; diagnostic single-grid runs get their own."""
     return base / (group if target_grid_id is None else f"{group}-grid{target_grid_id}")
-
-
-def paired_jobs(ctx: RunContext) -> list[tuple[str, list[str], Path]]:
-    """``(job key, argv, runner run dir)`` of a ``paired_validation`` run."""
-    run: PairedRun = ctx.run  # type: ignore[assignment]
-    target_grid_id = ctx.target_grid_id if ctx.target_grid_id is not None else run.target_grid_id
-    jobs = []
-    for group in execution_groups(run.model_cases):
-        run_dir = _group_dir(ctx.run_dir, group.name, ctx.target_grid_id)
-        jobs.append((group.name, commands.paired_runner_command(
-            paired_dataset_id=run.paired_dataset_id,
-            pylovo_version_id=run.pylovo_version_id,
-            scenario_config=run.scenario_path,
-            target=run.target_network,
-            workers=run.workers,
-            step3_cpus=run.step3_cpus,
-            step3_cluster_concurrency=run.step3_cluster_concurrency,
-            step4_cpus=run.step4_cpus,
-            powerflow_grid_scope=run.powerflow_grid_scope,
-            profile_seed=run.profile_seed,
-            scenario_label=run.run_id,
-            run_name_prefix=run.run_id,
-            run_dir=run_dir,
-            materialization_case=group.materialization_case,
-            result_cases=group.result_cases,
-            target_grid_id=target_grid_id,
-            cleanup_intermediates=run.cleanup_intermediates,
-            resume=ctx.resume,
-            skip_pre=not group.emits_pre,
-        ), run_dir))
-    return jobs
-
-
-def paired_expansion_commands(run: PairedRun, target_grid_id: int | None = None) -> list[list[str]]:
-    """Expansion analyses ``<run_id>[_real]_<analysis suffix>`` of a paired run (full grid set only)."""
-    if not run.materialize_expansion or run.target_grid_id is not None or target_grid_id is not None:
-        return []
-    targets = {"synthetic": ("synthetic",), "real_dso_a": ("real_dso_a",)}.get(run.target_network, ("synthetic", "real_dso_a"))
-    argvs = []
-    for target in targets:
-        source_suffix = "" if target == "synthetic" else "_real"
-        for case_name in ("pre", *run.model_cases):
-            case = MODEL_CASES[case_name]
-            argvs.append(commands.expansion_command(
-                f"{run.run_id}_{target}_{case_name}",
-                data_source=target,
-                stage=case.stage,
-                analysis_key=f"{run.run_id}{source_suffix}_{case.analysis_suffix}",
-                ags=run.ags if target == "synthetic" else None,
-                plz=None if target == "synthetic" else run.plz,
-                exclude_real_lv_ids=() if target == "synthetic" else run.excluded_real_lv_ids,
-            ))
-    return argvs
-
-
-def paired_preparation(ctx: RunContext) -> list[tuple[str, list[str]]]:
-    run: PairedRun = ctx.run  # type: ignore[assignment]
-    return commands.paired_preparation_commands(
-        ags=run.ags, plz=run.plz, milestone_year=ctx.scenario.milestone_year,
-        pylovo_version_id=run.pylovo_version_id, min_buildings=run.min_buildings,
-        scenario_config=run.scenario_path, profile_seed=run.profile_seed, paired_dir=run.paired_dir,
-        heat_library=run.heat_library, weather_hdf=run.weather_hdf,
-        reference_year=ctx.scenario.mobility.reference_year,
-    )
 
 
 def _run_prepare_commands(ctx: RunContext, steps: list[tuple[str, list[str]]], prefix: str = "",
@@ -418,38 +353,6 @@ def _postprocess_commands(ctx: RunContext, argvs: list[list[str]], *, refresh: b
 
         refresh_qgis_views()
         ctx.state.event(event="qgis_views_refreshed")
-
-
-def run_paired(ctx: RunContext) -> int:
-    from gridexpand.paired.datasets import validate_prepared_dataset
-
-    run: PairedRun = ctx.run  # type: ignore[assignment]
-    state = ctx.state
-    jobs = paired_jobs(ctx)
-    with state.stage_context("prepare"):
-        if not (ctx.resume or ctx.skip_prepare):
-            _run_prepare_commands(ctx, paired_preparation(ctx))
-        ctx.readiness["paired"] = validate_prepared_dataset(
-            run.paired_dataset_id, pylovo_version_id=run.pylovo_version_id, scenario_hash=ctx.scenario_hash,
-            ags=run.ags, plz=run.plz, electrification=ctx.scenario.electrification,
-            profile_seed=run.profile_seed, require_publication_ready=True,
-        )
-        print(f"[validate] {json.dumps(ctx.readiness['paired'], sort_keys=True)}", flush=True)
-        state.event(event="dataset_validated", readiness=ctx.readiness["paired"])
-        todo = set(state.plan([{"job": key, "group": key, "run_dir": str(run_dir)} for key, _, run_dir in jobs],
-                              resume=ctx.resume))
-    if not ctx.wants("execute"):
-        return EXIT_OK
-    with state.stage_context("execute"):
-        for key, argv, _ in jobs:
-            if key not in todo:
-                continue
-            if _run_job(ctx, key, argv) != 0:
-                return EXIT_FAILED
-    if ctx.wants("postprocess"):
-        with state.stage_context("postprocess"):
-            _postprocess_commands(ctx, paired_expansion_commands(run, ctx.target_grid_id), refresh=True)
-    return EXIT_OK
 
 
 # Paired aligned (DSO A + DSO B) ------------------------------------------------------------------
@@ -595,12 +498,6 @@ def plan_lines(ctx: RunContext) -> list[str]:
             lines.append(f"[execute:{group.materialization_case}] "
                          + " ".join(synthetic_equivalent_command(synthetic_settings(ctx, group))))
         lines.append("[postprocess] refresh the QGIS views")
-    elif isinstance(run, PairedRun):
-        if not (ctx.resume or ctx.skip_prepare):
-            lines += [f"[prepare:{stage}] {' '.join(argv)}" for stage, argv in paired_preparation(ctx)]
-        lines.append(f"[prepare:validate] dataset {run.paired_dataset_id}")
-        lines += [f"[execute:{key}] {' '.join(argv)}" for key, argv, _ in paired_jobs(ctx)]
-        lines += [f"[postprocess] {' '.join(argv)}" for argv in paired_expansion_commands(run, ctx.target_grid_id)]
     else:
         for provider in aligned_providers(ctx):
             if not (ctx.resume or ctx.skip_prepare):
@@ -686,7 +583,7 @@ def execute(ctx: RunContext) -> int:
     ctx.state.event(event="run_start", run_hash=ctx.run_hash, scenario_hash=ctx.scenario_hash,
                     model_cases=list(ctx.run.model_cases), resume=ctx.resume, until=ctx.until,
                     optimizer=os.environ.get(OPTIMIZER_ENV) or "urbs")
-    runner = {"synthetic": run_synthetic, "paired_validation": run_paired, "paired_aligned": run_aligned}
+    runner = {"synthetic": run_synthetic, "paired_aligned": run_aligned}
     try:
         code = runner[ctx.run.pipeline](ctx)
         status = {EXIT_OK: "done", EXIT_JOB_FAILURES: "completed_with_failures"}.get(code, "failed")

@@ -27,8 +27,8 @@ stages of `STAGES[profile]` on a `Grid` (`classes/grid.py`) and writes the keys 
   `work/allocation/grids/` that must already contain `raw_data/weather` (see [Step 1](1_grid_sampling.md)).
 - **Scenario YAML** (`--scenario-config`, required): all scientific values ([configuration.md](../configuration.md)).
 - **Electrification assignment** (`--electrification-assignment`, optional CSV or HDF5 manifest): the regional
-  selection of heat, mobility and PV+battery buildings. Required for `source_inventory` scenarios without source
-  evidence in the input; the synthetic runner always prepares one per region (below).
+  selection of heat, mobility and PV+battery buildings; the synthetic runner always prepares one per region
+  (below).
 - **Static data** in `data/statistics/` (tracked) and the large untracked inputs
   `data/statistics/inhabited_buildings/elec_lps.h5` and the mobility pools (see the
   [README](../../README.md#large-data-assets)).
@@ -122,7 +122,7 @@ uv run python -m gridexpand.allocation.electrification_preparation --ags 9184137
 ```
 
 Options: `--plz` (only that postcode's grids), `--kcid --bcid` (with `--plz`: one grid), `--min-buildings`,
-`--demand-scope`, `--profile-seed`, `--source-evidence` (evidence file for `source_inventory`). It writes the
+`--demand-scope`, `--profile-seed`. It writes the
 manifest, a `.json` sidecar (hashes, candidate grids) and `electrification_candidate_grids.json`; the runner
 refuses a manifest whose sidecar belongs to another run or candidate set.
 

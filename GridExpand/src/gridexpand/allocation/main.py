@@ -294,10 +294,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--electrification-assignment",
         type=Path,
-        help=(
-            "Optional precomputed CSV or HDF5 assignment manifest. Required "
-            "for source_inventory scenarios when the input has no source evidence."
-        ),
+        help="Optional precomputed CSV or HDF5 assignment manifest.",
     )
     parser.add_argument(
         "--case-qualified-output",

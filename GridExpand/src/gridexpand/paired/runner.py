@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the publication-oriented paired DSO A scenario on both grid models.
+"""Run one prepared paired dataset (one provider) on its real grids and their synthetic counterparts.
 
 The runner uses one stable scenario-unit profile contract for real and
 synthetic targets. TSAM methodology comes from the scenario YAML. A canonical
@@ -492,7 +492,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--plz", type=int, default=None)
     parser.add_argument("--paired-dir", type=Path, default=None)
-    parser.add_argument("--grid-data-path", type=Path, default=None)
     parser.add_argument("--target", choices=TARGET_CHOICES, default="both")
     parser.add_argument(
         "--provider",
@@ -535,7 +534,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Materialize paired demand and run only pre power flow; skip URBS and all post cases.",
     )
-    parser.add_argument("--run-name-prefix", default="paired_dso_a_2045_full_local")
+    parser.add_argument("--run-name-prefix", required=True)
     parser.add_argument(
         "--profile-seed",
         type=int,
@@ -650,8 +649,6 @@ def main(argv: list[str] | None = None) -> None:
             raise ValueError("Internal thermal inertia requires chronological inputs; TSAM is unsupported.")
         args.heat_profile_library = None
     args.paired_dir = args.paired_dir.resolve()
-    if args.grid_data_path is not None:
-        args.grid_data_path = args.grid_data_path.resolve()
     args.weather_source_hdf = args.weather_source_hdf.resolve()
     if args.heat_profile_library is not None:
         args.heat_profile_library = args.heat_profile_library.resolve()
@@ -755,7 +752,6 @@ def main(argv: list[str] | None = None) -> None:
         tsam_hours_per_period=(args.tsam_hours_per_period if args.tsam else None),
         tsam_extreme_method=(args.tsam_extreme_method if args.tsam else None),
         paired_dir=str(args.paired_dir),
-        grid_data_path=(str(args.grid_data_path) if args.grid_data_path else None),
         diagnostic_heat_profiles=diagnostic_profiles,
         publication_ready=diagnostic_profiles == 0,
         paired_dataset_id=args.paired_dataset_id,

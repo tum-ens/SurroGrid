@@ -67,7 +67,7 @@ asset_sizing:
     # Usable temperature range for converting buffer litres to kWhth.
     buffer_usable_temperature_spread_k: 5.0
 
-electrification: # deterministic_share or source_inventory
+electrification: # adoption_mode deterministic_share: a seeded building_share per technology
   heat:
     adoption_mode: deterministic_share
     building_share: 0.75

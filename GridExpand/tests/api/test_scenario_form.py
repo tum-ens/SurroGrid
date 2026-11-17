@@ -14,7 +14,7 @@ from gridexpand.api import scenario_form as sf
 
 SHIPPED = sorted(SCENARIO_CONFIG_DIR.glob("*.yaml"))
 SCHWEINFURT = SCENARIO_CONFIG_DIR / "schweinfurt_2045.yaml"
-INVENTORY = SCENARIO_CONFIG_DIR / "dso_a_2045_full_year.yaml"  # source_inventory, TSAM off
+RO_HEAT = SCENARIO_CONFIG_DIR / "ro_heat_2045_synthetic.yaml"  # infdb_ro_heat, no teaser_retrofit_level
 
 
 def text_of(path: Path) -> str:
@@ -27,7 +27,7 @@ def comments(text: str) -> list[str]:
 
 def test_shipped_scenarios_exist():
     assert {p.name for p in SHIPPED} >= {"schweinfurt_2045.yaml", "ro_heat_2045_synthetic.yaml",
-                                         "dso_a_2045_full_year.yaml", "joint_2045_full_year.yaml"}
+                                         "joint_2045_full_year.yaml"}
 
 
 @pytest.mark.parametrize("path", SHIPPED, ids=lambda p: p.name)
@@ -133,10 +133,9 @@ def test_a_change_changes_hash_and_key_and_keeps_comments_and_layout():
     assert "  id: schweinfurt_2045_custom\n" in renamed["text"]
 
 
-def test_dependent_and_optional_keys_keep_the_comments_around_them():
-    text = text_of(INVENTORY)
-    changes = {f"electrification.{tech}.adoption_mode": "deterministic_share" for tech in ("heat", "mobility", "pv_battery")}
-    changes |= {f"electrification.{tech}.building_share": 0.6 for tech in ("heat", "mobility", "pv_battery")}
+def test_optional_keys_keep_the_comments_around_them():
+    text = text_of(RO_HEAT)
+    changes = {f"electrification.{tech}.building_share": 0.6 for tech in ("heat", "mobility", "pv_battery")}
     changes["asset_sizing.heat.teaser_retrofit_level"] = 1
     result = sf.preview(text, base_name="f", changes=changes)
     assert result["ok"], result["issues"]
@@ -144,8 +143,8 @@ def test_dependent_and_optional_keys_keep_the_comments_around_them():
     assert comments(new) == comments(text)
     assert "    adoption_mode: deterministic_share\n    building_share: 0.6\n\n# Mobility behavior" in new
     assert "    space_heat_source: infdb_ro_heat\n    teaser_retrofit_level: 1\n    # Degree-day" in new
-    # and back: the share keys are removed, the comment below them stays
-    back = {f"electrification.{tech}.adoption_mode": "source_inventory" for tech in ("heat", "mobility", "pv_battery")}
+    # and back: the optional key at its default stays written, the comment below it stays
+    back = {f"electrification.{tech}.building_share": 1.0 for tech in ("heat", "mobility", "pv_battery")}
     back["asset_sizing.heat.teaser_retrofit_level"] = 0
     reverted = sf.apply_changes(new, back)
     assert reverted == text.replace("    space_heat_source: infdb_ro_heat\n",
@@ -161,15 +160,6 @@ def test_small_and_large_floats_stay_floats_for_the_loader():
     assert "pv_feed_in_tariff_eur_per_kwh: 1.0e-05\n" in new and "fallback_capacity_kwp: 2.0e+16\n" in new
     pv = yaml.safe_load(new)
     assert pv["economics"]["electricity"]["pv_feed_in_tariff_eur_per_kwh"] == 1e-05
-
-
-def test_dependent_keys_are_only_removed_when_their_rule_field_changes():
-    broken = text_of(INVENTORY).replace("    adoption_mode: source_inventory\n  mobility:",
-                                        "    adoption_mode: source_inventory\n    building_share: 0.5\n  mobility:")
-    new = sf.apply_changes(broken, {"asset_sizing.pv.demand_multiplier": 2.5})
-    assert "building_share: 0.5" in new  # the loader reports it; the editor does not repair unasked
-    fixed = sf.apply_changes(broken, {"electrification.heat.adoption_mode": "source_inventory"})
-    assert "building_share" not in fixed.split("mobility:")[0]
 
 
 def test_the_home_charger_power_writes_both_capacities():
@@ -225,11 +215,11 @@ def test_text_issues_carry_line_numbers():
                                                    "asset_sizing.pv.fallback_capacity_kwp"}
 
 
-def test_source_inventory_and_template_ids_are_warnings():
-    result = sf.preview(text_of(INVENTORY), base_name="f", scenario_id="CHANGE_ME_x")
+def test_template_ids_are_warnings():
+    result = sf.preview(text_of(SCHWEINFURT), base_name="f", scenario_id="CHANGE_ME_x")
     assert result["ok"]
     messages = [i["message"] for i in result["issues"] if i["level"] == "warning"]
-    assert sum("source_inventory" in m for m in messages) == 3 and any("CHANGE_ME" in m for m in messages)
+    assert any("CHANGE_ME" in m for m in messages)
     bad_id = sf.preview(text_of(SCHWEINFURT), base_name="s", scenario_id="../x")
     assert not bad_id["ok"] and bad_id["issues"][0]["key"] == "scenario.id"
 
@@ -251,10 +241,7 @@ def test_help_texts_are_the_yaml_comments_above_the_key():
 
 
 def test_fields_a_file_does_not_have_are_skipped():
-    text = text_of(INVENTORY)
-    sections, _ = sf.form_sections(text)
-    fields = {f["key"]: f for s in sections for f in s["fields"]}
-    assert fields["electrification.heat.building_share"]["present"] is False  # dependent: shown, disabled in the UI
+    text = text_of(RO_HEAT)
     stripped = text.replace("  commuting_probability: 0.62\n", "")
     keys = {f["key"] for s in sf.form_sections(stripped)[0] for f in s["fields"]}
     assert "mobility.commuting_probability" not in keys

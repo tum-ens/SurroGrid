@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ..paths import OUTPUT_DIR, SYNTHETIC_INPUT_DIR
+from ..paths import SYNTHETIC_INPUT_DIR
 
 from gridexpand.common.electrification import validate_electrification_assignment
 
@@ -18,10 +18,6 @@ PUBLICATION_READY_HEAT_METHODS = frozenset({
     "exact_physical_building",
     "nearest_floor_area_scaled_approved",
 })
-DEFAULT_PAIRED_DIR = (
-    OUTPUT_DIR
-    / "dso_a_2045_paired_v5_99999_station_hybrid_v2"
-)
 
 
 def build_heat_profile_catalog(
@@ -289,7 +285,7 @@ def profile_readiness_summary(catalog: pd.DataFrame) -> pd.DataFrame:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--paired-dir", type=Path, default=DEFAULT_PAIRED_DIR)
+    parser.add_argument("--paired-dir", type=Path, required=True)
     parser.add_argument(
         "--synthetic-input-dir",
         type=Path,

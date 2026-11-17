@@ -1,17 +1,15 @@
 # Paired validation (real vs synthetic grids)
 
-The paired pipelines map one scenario onto real DSO grids and onto the synthetic pylovo grids of the same
-buildings and compare power flows and expansion needs. The scientific contract (scenario units, shared layers,
-evidence rules, publication criteria) is in [method.md](method.md#paired-validation-contract).
+The paired pipeline maps one scenario onto real DSO grids and onto the synthetic pylovo grids of the same
+buildings and compares power flows and expansion needs. The scientific contract (scenario units, shared layers,
+publication criteria) is in [method.md](method.md#paired-validation-contract).
 
 | `run.pipeline` | real grids | example run YAML |
 |---|---|---|
-| `paired_validation` | DSO A station exports | `config/runs/dso_a_2045_paired_full_year.yaml` |
 | `paired_aligned` | DSO A and DSO B of a pylovo alignment bundle | `config/runs/joint_2045_v1_full_year.yaml` (smoke: `joint_2045_v1_smoke24.yaml`) |
 
-The real-grid data are confidential and not part of the repository: DSO A exports below `GRID_DATA_PATH` of `.env`;
-for aligned runs the alignment bundle, the pylovo comparison JSON and the DSO B delivery named in the run YAML
-(`resources.alignment_dir`, `population`, `dso_b_grids_dir`).
+The real-grid data are confidential and not part of the repository: the alignment bundle, the pylovo comparison
+JSON and the DSO B delivery named in the run YAML (`resources.alignment_dir`, `population`, `dso_b_grids_dir`).
 
 ## Running
 
@@ -27,10 +25,7 @@ uv run gridexpand status joint_2045_v1_smoke24
 
 1. **prepare** (skipped with `execution.resume: true` or `--skip-prepare`, which validate the prepared datasets
    instead):
-   - `paired_validation`: `allocation.scenario_calibration.allocation.paired_allocation` (registers every eligible
-     grid of the region and pylovo version, matches DSO A rows to physical buildings, writes the paired plans),
-     `profiles.paired_profile_readiness` (heat library coverage), `profiles.pv_profile_library`;
-   - `paired_aligned`, per provider: `allocation.aligned_allocation`, `profiles.aligned_weather`,
+   - per provider: `allocation.aligned_allocation`, `profiles.aligned_weather`,
      `profiles.paired_heat_profile_regeneration` (TEASER heat of every source grid, `execution.heat_workers`
      parallel jobs), readiness, `profiles.physical_heat_profile_library`, readiness against the library,
      `profiles.pv_profile_library`; with `execution.grid_subset` a subset of overlap components.

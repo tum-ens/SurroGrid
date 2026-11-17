@@ -77,17 +77,17 @@ def test_expansion_commands():
 
 def test_real_powerflow_command():
     argv = commands.real_powerflow_command(
-        plz=99999, lv_id=80, provider="dso_a", profile_seed=1, urbs_result_hdf=Path("/r.h5"), summary_grid_scope="full",
-        post_demand_mode="pre-only", run_name="p_real_dso_a_pre", scenario_label="Paired 2045 real_dso_a pre",
-        grid_file="LV_080.json", grid_data_path=Path("/grids"), python=PY,
+        plz=99999, lv_id=80, provider="dso_a", urbs_result_hdf=Path("/r.h5"), grid_file="LV_080.json",
+        summary_grid_scope="full", post_demand_mode="pre-only", run_name="p_real_dso_a_pre",
+        scenario_label="Paired 2045 real_dso_a pre", python=PY,
     )
-    assert "--grid-file" in argv and "--grid-data-path" not in argv  # an explicit grid file wins
+    assert argv[argv.index("--grid-file") + 1] == "LV_080.json"
     assert argv[argv.index("--scenario-key") + 1] == "p_real_dso_a_pre"
     assert "--post-only" not in argv
     post = commands.real_powerflow_command(
-        plz=99999, lv_id=80, provider="dso_a", profile_seed=1, urbs_result_hdf=Path("/r.h5"), summary_grid_scope="full",
-        post_demand_mode="flexible", run_name="p_real_dso_a_post", scenario_label="Paired 2045 real_dso_a HEMS",
-        post_only=True, python=PY,
+        plz=99999, lv_id=80, provider="dso_a", urbs_result_hdf=Path("/r.h5"), grid_file="LV_080.json",
+        summary_grid_scope="full", post_demand_mode="flexible", run_name="p_real_dso_a_post",
+        scenario_label="Paired 2045 real_dso_a HEMS", post_only=True, python=PY,
     )
     assert post[-1] == "--post-only"
 
@@ -116,13 +116,6 @@ def test_paired_runner_command():
 
 
 def test_preparation_commands():
-    paired = commands.paired_preparation_commands(
-        ags=9999999, plz=99999, milestone_year=2045, pylovo_version_id="11", min_buildings=5, scenario_config=SC,
-        profile_seed=481527, paired_dir=Path("/d"), heat_library=Path("/h.h5"), weather_hdf=Path("/w.h5"),
-        reference_year=2009, python=PY,
-    )
-    assert [stage for stage, _ in paired] == ["prepare_allocation", "prepare_heat_profiles", "prepare_pv_profiles"]
-    assert paired[2][1][-2:] == ["--reference-year", "2009"]
     aligned = commands.aligned_preparation_commands(
         provider="dso_b", alignment_dir=Path("/a"), population=Path("/p.json"), dso_b_grids_dir=Path("/u"),
         pylovo_version_id="1", scenario_config=SC, profile_seed=1, paired_dir=Path("/d"), weather_hdf=Path("/w.h5"),

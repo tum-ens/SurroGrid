@@ -47,11 +47,6 @@ from ..profiles.profile_contract import (
     assert_paired_component_plan_equivalence,
     assert_paired_plan_equivalence,
 )
-from .paired_allocation import (
-    PAIRED_COMPONENT_COLUMNS,
-    _paired_profile_hash,
-    _pv_scenario_unit_assignments,
-)
 from ...assets.pv.roof_catalog import (
     LOD2_QUALITY_FLAG,
     building_lod2_capacity,
@@ -62,6 +57,57 @@ from ...assets.pv.roof_catalog import (
 PROVIDERS = ("dso_a", "dso_b")
 DSO_B_INDEX_FILE = "index.json"
 DSO_B_LEDGER_FILE = "source-ledger.json"
+
+# Columns of the paired component plan (paired_component_plan.csv), the contract read by the paired
+# urbs-input materialization and the equivalence checks.
+PAIRED_COMPONENT_COLUMNS = [
+    "scenario_unit_id", "building_objectid", "component_id", "component_kind",
+    "component_category", "source_component_category", "effective_floor_area_m2",
+    "gross_floor_area_m2", "households", "occupants", "installed_peak_kw",
+    "source_pylovo_grid_result_id", "source_pylovo_version_id", "source_building_use",
+    "source_building_use_id", "source_building_type", "mix_score", "mix_rule",
+    "mix_confidence", "source_lv_id", "source_allocation_bus", "real_target_grid_id",
+    "real_target_bus", "synthetic_target_grid_case_id", "synthetic_target_bus",
+    "synthetic_bridge_filename", "included_in_lv", "mv_direct", "annual_energy_kwh",
+    "profile_method", "profile_hash", "stable_seed", "profile_seed",
+    "source_asset_count", "matched_dso_asset_count", "source_asset_ids",
+    "source_use_conflict", "suppression_reason",
+]
+
+
+def _paired_profile_hash(
+    component_id: str,
+    category: str,
+    annual_energy_kwh: float,
+    profile_method: str,
+    stable_profile_seed: int,
+    asset_ids: list[str],
+) -> str:
+    payload = "|".join([
+        str(component_id), str(category), f"{float(annual_energy_kwh):.12f}",
+        str(profile_method), str(int(stable_profile_seed)), ",".join(sorted(asset_ids)),
+    ])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _pv_scenario_unit_assignments(real_plan: pd.DataFrame) -> pd.DataFrame:
+    """Choose exactly one scenario unit for each eligible physical roof: the connection with the largest base demand."""
+    candidates = real_plan.copy()
+    candidates["building_objectid"] = candidates["building_objectid"].astype(str)
+    candidates["_base_annual_kwh"] = pd.to_numeric(
+        candidates["residential_equivalent_hh_annual_kwh"], errors="coerce"
+    ).fillna(0.0) + pd.to_numeric(
+        candidates["calibrated_annual_ghd_kwh"], errors="coerce"
+    ).fillna(0.0)
+    candidates = candidates.sort_values(
+        ["building_objectid", "_base_annual_kwh", "scenario_unit_id"],
+        ascending=[True, False, True],
+    )
+    chosen = candidates.drop_duplicates("building_objectid", keep="first").copy()
+    chosen["pv_roof_assignment_method"] = "all_buildings_primary_demand_connection"
+    return chosen[
+        ["building_objectid", "scenario_unit_id", "pv_roof_assignment_method"]
+    ].reset_index(drop=True)
 
 
 def _sha256(path: Path) -> str:
@@ -441,9 +487,7 @@ def build_aligned_allocation(
         scenario_scope="paired_full_local_demand",
         provider=provider,
     )
-    pv_assignments = _pv_scenario_unit_assignments(
-        plan_base[plan_base["pv_roof_capacity_kw"].gt(0.0)], None, location_mode="all_buildings"
-    )
+    pv_assignments = _pv_scenario_unit_assignments(plan_base[plan_base["pv_roof_capacity_kw"].gt(0.0)])
     plan_base = plan_base.merge(pv_assignments, on=["building_objectid", "scenario_unit_id"], how="left")
     plan_base["pv_roof_eligible"] = plan_base["pv_roof_assignment_method"].notna()
 

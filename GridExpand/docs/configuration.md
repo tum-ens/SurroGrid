@@ -63,8 +63,8 @@ is optional (see [`ghd:` block](#ghd-block)).
 | `asset_sizing.heat.buffer_charge_efficiency_method` | optional, `technology` (default), `cop_curve` | buffer charge efficiency: storage value, or per building COP(lift + spread) / COP(lift) |
 | `asset_sizing.heat.teaser_retrofit_level` | optional, 0/1/2 (default 0) | TABULA variant of the `teaser` source |
 | `asset_sizing.heat.teaser` | optional mapping (read by the `teaser` source only) | TEASER envelope, area, solar, age and ventilation assumptions; `preset: corrected` (default) or `legacy`, keys in [method](method.md#teaser-envelope-and-assumptions) |
-| `electrification.<heat\|mobility\|pv_battery>.adoption_mode` | `deterministic_share`, `source_inventory` | selection rule per technology |
-| `electrification.<…>.building_share` | 0–1; required for `deterministic_share`, forbidden otherwise | selected share of eligible buildings |
+| `electrification.<heat\|mobility\|pv_battery>.adoption_mode` | `deterministic_share` | selection rule per technology |
+| `electrification.<…>.building_share` | 0–1, required | selected share of eligible buildings |
 | `electrification.<…>.building_share_by_type` | optional mapping `SFH`/`TH`/`MFH`/`AB` → 0–1 (`deterministic_share`) | shares per building type; `building_share` applies to the types not listed |
 | `electrification.pv_battery.battery_share_of_selected` | optional, 0–1 (default 1) | seeded share of the selected PV buildings that also get a battery |
 | `mobility.commuting_probability` | 0–1 | emobpy commuter share |
@@ -143,8 +143,7 @@ ghd:
 The PostGIS source reads with the pipeline's database connection (`DB_*`, the status-quo test's `--db-env-prefix`).
 
 Repository scenarios: `ro_heat_2045_synthetic.yaml` and `schweinfurt_2045.yaml` (synthetic runs),
-`dso_a_2045_full_year.yaml` (paired DSO A runs), `joint_2045_full_year.yaml` (aligned DSO A + DSO B runs),
-`00_scenario_template.yaml`; their differences are tabulated at the top of [method.md](method.md).
+`joint_2045_full_year.yaml` (aligned DSO A + DSO B runs), `00_scenario_template.yaml`; their differences are tabulated at the top of [method.md](method.md).
 
 ## Run YAML
 
@@ -154,7 +153,7 @@ Three blocks, all required: `run`, `resources`, `execution`.
 |---|---|
 | `run.id` | directory-safe identifier (`[A-Za-z0-9][A-Za-z0-9._-]*`); default run directory `work/runs/<run.id>/` |
 | `run.scenario` | scenario YAML, relative to the run YAML's directory |
-| `run.pipeline` | `synthetic`, `paired_validation` or `paired_aligned` (the old name `scenario` is refused with a hint) |
+| `run.pipeline` | `synthetic` or `paired_aligned` (the old name `scenario` is refused with a hint) |
 
 Relative paths resolve against the YAML's directory; booleans must be YAML booleans (`"false"` is an error).
 `execution.profile_seed` (all pipelines, default 481527) is the realization seed, and
@@ -201,31 +200,6 @@ batch per execution group (see [method.md](method.md#model-cases)). Outputs are 
 | `materialize_expansion` | true | expansion analyses at the end of each batch |
 | `pilot_gate`, `pilot_index` | true, 0 | stop the batch if the pilot grid fails |
 | `resume`, `rerun_failed` | false | skip grids already done; with resume, retry failed ones |
-
-### `pipeline: paired_validation`
-
-DSO A real grids versus the synthetic grids of one prepared paired dataset ([paired_validation.md](paired_validation.md)).
-
-| key | default | meaning |
-|---|---|---|
-| `resources.ags`, `resources.plz` | required | region (preparation registers every eligible grid of that pylovo version) |
-| `resources.pylovo_version_id` | required | must equal the version recorded in the prepared dataset |
-| `resources.min_buildings` | 5 | symmetric minimum retained buildings per grid |
-| `resources.paired_dataset_id` | required | dataset directory `work/allocation/outputs/scenario_calibration/<id>/` |
-| `resources.heat_profile_set_id` | required | heat library `…/scenario_calibration/profile_libraries/<id>.h5` |
-| `resources.weather_source_hdf` | required | weather file name in `work/allocation/results/` |
-| `resources.excluded_real_lv_ids` | empty | real grids kept in coverage but excluded from costing |
-| `resources.target_network` | `both` | `both`, `real_dso_a` or `synthetic` |
-| `resources.target_grid_id` | null | diagnostic single-grid filter |
-| `execution.model_cases` | required | post cases only (`pre` is added to the first group) |
-| `execution.workers`, `step3_cpus`, `step4_cpus` | 1 each | resources |
-| `execution.step3_cluster_concurrency` | null | Step 3 models solved at the same time; null: 1 for urbs, automatic for pypsa |
-| `execution.cleanup_intermediates`, `resume` | false | lifecycle |
-| `execution.materialize_expansion` | true | expansion analyses `<run.id>[_real]_<case suffix>` after success |
-| `execution.optimizer` | null | Step 3 optimizer `urbs` or `pypsa` for all jobs of the run (null: `$GRIDEXPAND_OPTIMIZER`, else `urbs`) |
-
-The DSO A export root is the `.env` variable `GRID_DATA_PATH` (a deployment setting, not a run choice); a station
-dataset must contain `station_split_manifest.csv` and `station_radialization_manifest.csv`.
 
 ### `pipeline: paired_aligned`
 

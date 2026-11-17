@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..paths import OUTPUT_DIR, SYNTHETIC_INPUT_DIR
+from ..paths import SYNTHETIC_INPUT_DIR
 from gridexpand.allocation.config import config
 from gridexpand.common.electrification import (
     assignment_manifest_hash,
@@ -29,7 +29,6 @@ from gridexpand.allocation.assets.pv.roof_catalog import assert_fallback_share
 from gridexpand.allocation.scenario_calibration.profiles.paired_profiles import (
     build_paired_base_electric_demand,
     build_paired_sector_urbs_inputs,
-    source_match_buildings,
 )
 from gridexpand.allocation.scenario_calibration.profiles.physical_heat_profile_library import (
     PhysicalHeatProfileLibrary,
@@ -46,10 +45,6 @@ from gridexpand.allocation.scenario_calibration.profiles.profile_contract import
     assert_paired_component_plan_equivalence,
 )
 
-DEFAULT_PAIRED_DIR = (
-    OUTPUT_DIR
-    / "dso_a_2045_paired_v5_99999_station_hybrid_v2"
-)
 DEFAULT_OUTPUT_DIR = SYNTHETIC_INPUT_DIR
 
 
@@ -361,7 +356,7 @@ def materialize_paired_urbs_input(
     assignment_path = paired_dir / "paired_electrification_assignment.csv"
     if not assignment_path.exists():
         raise FileNotFoundError(
-            "Run paired_allocation with the selected scenario before materialization: "
+            "Run the aligned allocation with the selected scenario before materialization: "
             f"{assignment_path}"
         )
     electrification_assignment = pd.read_csv(assignment_path)
@@ -393,7 +388,7 @@ def materialize_paired_urbs_input(
     if "scenario_unit_id" not in allocation:
         raise ValueError(
             "Paired allocation is missing scenario_unit_id. Regenerate it with "
-            "paired_allocation before materializing URBS inputs."
+            "the aligned allocation before materializing URBS inputs."
         )
     allocation["_profile_site_id"] = allocation["scenario_unit_id"].astype(int)
     catalog_path = paired_dir / "paired_heat_profile_catalog.csv"
@@ -415,21 +410,12 @@ def materialize_paired_urbs_input(
     pv_battery_assignment = electrification_assignment.loc[
         electrification_assignment["technology"].eq("pv_battery")
     ]
-    if str(pv_battery_assignment["adoption_mode"].iloc[0]) == "source_inventory":
-        selected_pv_buildings = source_match_buildings(
-            electrification_assignment, "pv_match_count"
-        )
-        selected_battery_buildings = source_match_buildings(
-            electrification_assignment, "battery_match_count"
-        )
-        planning_buildings = selected_pv_buildings | selected_battery_buildings
-    else:
-        planning_buildings = set(
-            pv_battery_assignment.loc[
-                pv_battery_assignment["selected"].astype(bool),
-                "building_objectid",
-            ].astype(str)
-        )
+    planning_buildings = set(
+        pv_battery_assignment.loc[
+            pv_battery_assignment["selected"].astype(bool),
+            "building_objectid",
+        ].astype(str)
+    )
     if planning_buildings and not pv_profile_library.exists():
         raise FileNotFoundError(
             "Build the shared PV profile library before materialization: "
@@ -669,7 +655,7 @@ def materialize_paired_urbs_input(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--paired-dir", type=Path, default=DEFAULT_PAIRED_DIR)
+    parser.add_argument("--paired-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument(
         "--target-network",
@@ -677,10 +663,7 @@ def main() -> None:
         required=True,
     )
     parser.add_argument("--target-grid-id", type=int, required=True)
-    parser.add_argument(
-        "--scenario-label",
-        default="dso_a_2045_paired_full_local",
-    )
+    parser.add_argument("--scenario-label", required=True)
     parser.add_argument(
         "--profile-seed",
         type=int,

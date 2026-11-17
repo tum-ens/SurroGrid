@@ -59,9 +59,9 @@ def _capture(monkeypatch, module):
 def test_real_adapter_commands(tmp_path, monkeypatch):
     calls = _capture(monkeypatch, dso_a)
     args = argparse.Namespace(result_cases=("post-inflex-heuristic", "post-hems-heuristic"), skip_pre=False, plz=99999,
-                              profile_seed=1, powerflow_grid_scope="full", tsam=False, pre_only=False,
-                              grid_data_path=Path("/grids"), max_timesteps=None, run_name_prefix="run")
-    job = {"target_network": "real_dso_a", "target_grid_id": 80, "job": "real_dso_a:80"}
+                              powerflow_grid_scope="full", tsam=False, pre_only=False, max_timesteps=None,
+                              run_name_prefix="run")
+    job = {"target_network": "real_dso_a", "target_grid_id": 80, "job": "real_dso_a:80", "grid_file": "/g/LV_080.xlsx"}
     dso_a.run_powerflows(job=job, args=args, result_hdf=Path("/r.h5"), log_path=tmp_path / "x.log", status=None)
     assert [stage for stage, _, _ in calls] == ["step4_real_dso_a_pre", "step4_real_dso_a_post-inflex-heuristic",
                                                 "step4_real_dso_a_post-hems-heuristic"]
@@ -72,7 +72,8 @@ def test_real_adapter_commands(tmp_path, monkeypatch):
     assert ["--post-only" in cmd for _, _, cmd in calls] == [False, True, True]
     assert labels == ["Paired 2045 real_dso_a pre electricity-only", "Paired 2045 real_dso_a heuristic-assets INFLEX",
                       "Paired 2045 real_dso_a heuristic-assets HEMS"]
-    assert all("--expect-temporal-method" in cmd and "--grid-data-path" in cmd for _, _, cmd in calls)
+    assert all("--expect-temporal-method" in cmd and cmd[cmd.index("--grid-file") + 1] == "/g/LV_080.xlsx"
+               for _, _, cmd in calls)
     assert {key for _, key, _ in calls} == {"real_dso_a:80"}
 
 

@@ -14,7 +14,7 @@ from gridexpand.common.timeframe import REFERENCE_YEAR
 from .model_cases import get_model_case
 
 PV_SIZING_METHODS = ("annual_electricity_rule", "optimization")
-ADOPTION_MODES = ("deterministic_share", "source_inventory")
+ADOPTION_MODES = ("deterministic_share",)
 ELECTRIFICATION_TECHNOLOGIES = ("heat", "mobility", "pv_battery")
 
 
@@ -84,27 +84,21 @@ class TechnologyAdoptionConfig:
             raise ValueError(
                 f"{label}.adoption_mode must be one of {ADOPTION_MODES}."
             )
-        has_share = "building_share" in raw
         by_type = None
-        if mode == "deterministic_share":
-            if not has_share:
-                raise ValueError(f"{label}.building_share is required for deterministic_share.")
-            share = _share(raw["building_share"], f"{label}.building_share")
-            if "building_share_by_type" in raw:
-                mapping = _mapping(raw["building_share_by_type"], f"{label}.building_share_by_type")
-                unknown = sorted(set(map(str, mapping)).difference(BUILDING_TYPES))
-                if unknown or not mapping:
-                    raise ValueError(
-                        f"{label}.building_share_by_type needs keys from {BUILDING_TYPES}; got {unknown or 'none'}."
-                    )
-                by_type = {
-                    str(key): _share(value, f"{label}.building_share_by_type.{key}")
-                    for key, value in mapping.items()
-                }
-        else:
-            if has_share or "building_share_by_type" in raw:
-                raise ValueError(f"{label}.building_share is not allowed for source_inventory.")
-            share = None
+        if "building_share" not in raw:
+            raise ValueError(f"{label}.building_share is required for deterministic_share.")
+        share = _share(raw["building_share"], f"{label}.building_share")
+        if "building_share_by_type" in raw:
+            mapping = _mapping(raw["building_share_by_type"], f"{label}.building_share_by_type")
+            unknown = sorted(set(map(str, mapping)).difference(BUILDING_TYPES))
+            if unknown or not mapping:
+                raise ValueError(
+                    f"{label}.building_share_by_type needs keys from {BUILDING_TYPES}; got {unknown or 'none'}."
+                )
+            by_type = {
+                str(key): _share(value, f"{label}.building_share_by_type.{key}")
+                for key, value in mapping.items()
+            }
         battery = _share(raw.get("battery_share_of_selected", 1.0), f"{label}.battery_share_of_selected")
         return cls(
             adoption_mode=mode, building_share=share, building_share_by_type=by_type,

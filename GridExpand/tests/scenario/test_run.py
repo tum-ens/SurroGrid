@@ -48,40 +48,6 @@ def test_until_execute_skips_the_expansion(tmp_path):
     assert not run_module.synthetic_settings(ctx, group).materialize_expansion
 
 
-def test_paired_plan_and_expansion_keys(tmp_path):
-    ctx = context(RUN_CONFIG_DIR / "dso_a_2045_paired_full_year.yaml", run_dir=tmp_path)
-    jobs = run_module.paired_jobs(ctx)
-    assert [(key, run_dir.name) for key, _, run_dir in jobs] == [
-        ("heuristic-assets", "heuristic-assets"), ("post-hems-optimized", "post-hems-optimized")]
-    heuristic, optimized = (argv for _, argv, _ in jobs)
-    assert heuristic[heuristic.index("--model-case") + 1] == "post-hems-heuristic" and "--skip-pre" not in heuristic
-    assert "--skip-pre" in optimized and optimized[optimized.index("--scenario-label") + 1] == ctx.run.run_id
-    expansion = run_module.paired_expansion_commands(ctx.run)
-    keys = [(a[a.index("--analysis-key") + 1], a[a.index("--stage") + 1], a[a.index("--run-name") + 1])
-            for a in expansion]
-    rid = ctx.run.run_id
-    assert keys == [
-        (f"{rid}_pre", "pre", f"{rid}_synthetic_pre"),
-        (f"{rid}_post_inflex", "post", f"{rid}_synthetic_post-inflex-heuristic"),
-        (f"{rid}_post", "post", f"{rid}_synthetic_post-hems-heuristic"),
-        (f"{rid}_post_hems_optimized", "post", f"{rid}_synthetic_post-hems-optimized"),
-        (f"{rid}_real_pre", "pre", f"{rid}_real_dso_a_pre"),
-        (f"{rid}_real_post_inflex", "post", f"{rid}_real_dso_a_post-inflex-heuristic"),
-        (f"{rid}_real_post", "post", f"{rid}_real_dso_a_post-hems-heuristic"),
-        (f"{rid}_real_post_hems_optimized", "post", f"{rid}_real_dso_a_post-hems-optimized"),
-    ]
-    assert expansion[0][expansion[0].index("--ags") + 1] == "9999999"
-    assert expansion[4][expansion[4].index("--exclude-real-lv-id") + 1] == "113"
-    # a diagnostic single grid gets its own runner directory and no regional expansion
-    diagnostic = context(RUN_CONFIG_DIR / "dso_a_2045_paired_full_year.yaml", "--target-grid-id", "80",
-                         run_dir=tmp_path)
-    assert run_module.paired_jobs(diagnostic)[0][2].name == "heuristic-assets-grid80"
-    assert run_module.paired_expansion_commands(diagnostic.run, diagnostic.target_grid_id) == []
-    lv080 = context(RUN_CONFIG_DIR / "dso_a_2045_paired_full_year_lv080.yaml")
-    assert run_module.paired_expansion_commands(lv080.run) == []
-    assert any(line.startswith("[prepare:prepare_allocation]") for line in run_module.plan_lines(ctx))
-
-
 def test_aligned_plan(tmp_path):
     ctx = context(RUN_CONFIG_DIR / "joint_2045_v1_islands.yaml", "--provider", "dso_b", run_dir=tmp_path)
     (provider,) = run_module.aligned_providers(ctx)
@@ -102,7 +68,7 @@ def test_aligned_plan(tmp_path):
 @pytest.mark.parametrize("argv", [
     [str(SANDBOX), "--provider", "dso_a"],
     [str(SANDBOX), "--target-grid-id", "3"],
-    [str(RUN_CONFIG_DIR / "dso_a_2045_paired_full_year.yaml"), "--pre-only"],
+    [str(SANDBOX), "--pre-only"],
     [],
 ])
 def test_invalid_configuration_exit_code(argv, capsys):

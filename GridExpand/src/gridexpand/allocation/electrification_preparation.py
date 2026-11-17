@@ -130,7 +130,6 @@ def _build_inventory(
     demand_scope: str,
     mobility_source: str,
     profile_seed: int,
-    source_evidence_path: Path | None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     database = SurroGridDatabase()
     database.pylovo_version_id = str(pylovo_version_id)
@@ -186,21 +185,6 @@ def _build_inventory(
     for column in INVENTORY_COLUMNS:
         physical[column] = inventory[column]
 
-    if source_evidence_path is not None:
-        evidence = pd.read_csv(source_evidence_path)
-        if "building_objectid" not in evidence:
-            raise ValueError("Source evidence must contain building_objectid.")
-        evidence["building_objectid"] = evidence["building_objectid"].astype(str)
-        if evidence["building_objectid"].duplicated().any():
-            raise ValueError("Source evidence must have one row per building.")
-        physical = physical.merge(
-            evidence,
-            on="building_objectid",
-            how="left",
-            suffixes=("", "_source"),
-            validate="one_to_one",
-        )
-
     return physical, roofs
 
 
@@ -213,7 +197,6 @@ def prepare_regional_electrification_assignment(
     mobility_source: str,
     profile_seed: int,
     output_path: Path,
-    source_evidence_path: Path | None = None,
 ) -> dict[str, Any]:
     if not candidates:
         raise ValueError("Regional electrification preparation requires candidates.")
@@ -226,7 +209,6 @@ def prepare_regional_electrification_assignment(
         demand_scope=demand_scope,
         mobility_source=mobility_source,
         profile_seed=profile_seed,
-        source_evidence_path=source_evidence_path,
     )
     candidate_hash = _candidate_manifest_hash(candidates)
     selection_scope_id = (
@@ -239,10 +221,6 @@ def prepare_regional_electrification_assignment(
         scenario.electrification,
         selection_scope_id=selection_scope_id,
         profile_seed=profile_seed,
-        source_evidence_columns={
-            technology: f"{technology}_source_evidence"
-            for technology in ("heat", "mobility", "pv_battery")
-        },
     )
     summary = assignment_summary(assignment)
     output_path = output_path.resolve()
@@ -306,7 +284,6 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--profile-seed", type=int, default=481527)
     parser.add_argument("--scenario-config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--source-evidence", type=Path)
     args = parser.parse_args(argv)
     if (args.kcid is None) != (args.bcid is None) or (args.kcid is not None and args.plz is None):
         parser.error("--kcid and --bcid go together and need --plz.")
@@ -332,11 +309,6 @@ def main(argv: list[str] | None = None) -> None:
         mobility_source=args.mobility_source,
         profile_seed=args.profile_seed,
         output_path=args.output,
-        source_evidence_path=(
-            args.source_evidence.resolve()
-            if args.source_evidence is not None
-            else None
-        ),
     )
     print(json.dumps(metadata, indent=2, sort_keys=True, default=str))
 

@@ -6,8 +6,6 @@ A run YAML has three blocks: ``run`` (``id``, ``scenario``, ``pipeline``),
 - ``synthetic``: Steps 2-4 and the expansion analyses for the synthetic grids
   of one AGS (optionally one PLZ or one grid), one batch per execution group
   (:class:`SyntheticRun`);
-- ``paired_validation``: DSO A real vs synthetic grids of one prepared paired
-  dataset (:class:`PairedRun`);
 - ``paired_aligned``: every provider of a pylovo alignment bundle
   (:class:`AlignedRun`).
 
@@ -37,7 +35,7 @@ from gridexpand.scenario.scenario_config import _mapping as mapping
 from gridexpand.scenario.scenario_config import _only as only
 from gridexpand.scenario.scenario_config import _positive
 
-PIPELINES = ("synthetic", "paired_validation", "paired_aligned")
+PIPELINES = ("synthetic", "paired_aligned")
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 PAIRED_DATASET_ROOT = SCENARIO_CALIBRATION_OUTPUT_DIR
 HEAT_LIBRARY_ROOT = PAIRED_DATASET_ROOT / "profile_libraries"
@@ -307,108 +305,6 @@ class SyntheticRun:
         }
 
 
-# Paired validation (DSO A) --------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class PairedRun:
-    """``pipeline: paired_validation``: DSO A real and synthetic grids of one prepared dataset."""
-
-    run_id: str
-    scenario_path: Path
-    pylovo_version_id: str
-    ags: int
-    plz: int
-    min_buildings: int
-    heat_profile_set_id: str
-    weather_source_hdf: str
-    excluded_real_lv_ids: tuple[int, ...]
-    paired_dataset_id: str
-    target_network: str
-    target_grid_id: int | None
-    model_cases: tuple[str, ...]
-    workers: int
-    step3_cpus: int
-    step3_cluster_concurrency: int | None
-    step4_cpus: int
-    powerflow_grid_scope: str
-    profile_seed: int
-    cleanup_intermediates: bool
-    resume: bool
-    materialize_expansion: bool
-    optimizer: str | None = None
-    pipeline: str = "paired_validation"
-
-    @classmethod
-    def from_blocks(
-        cls, run_id: str, scenario_path: Path, resources: dict[str, Any], execution: dict[str, Any]
-    ) -> "PairedRun":
-        only(resources, {
-            "paired_dataset_id", "pylovo_version_id", "target_network", "target_grid_id", "ags", "plz",
-            "min_buildings", "heat_profile_set_id", "weather_source_hdf", "excluded_real_lv_ids",
-        }, "paired-validation resources")
-        only(execution, {
-            "model_cases", "workers", "step3_cpus", "step3_cluster_concurrency", "step4_cpus",
-            "powerflow_grid_scope", "profile_seed", "cleanup_intermediates", "resume", "materialize_expansion",
-            "optimizer",
-        }, "paired-validation execution")
-        missing = [name for name in ("ags", "plz", "heat_profile_set_id", "weather_source_hdf")
-                   if resources.get(name) in (None, "")]
-        if missing:
-            raise ValueError("Paired preparation requires resources: " + ", ".join(missing))
-        return cls(
-            run_id=run_id,
-            scenario_path=scenario_path,
-            pylovo_version_id=_pylovo_version(resources),
-            ags=int(resources["ags"]),
-            plz=int(resources["plz"]),
-            min_buildings=positive_int(resources.get("min_buildings", 5), "resources.min_buildings"),
-            heat_profile_set_id=str(resources["heat_profile_set_id"]),
-            weather_source_hdf=str(resources["weather_source_hdf"]),
-            excluded_real_lv_ids=tuple(int(value) for value in resources.get("excluded_real_lv_ids") or ()),
-            paired_dataset_id=directory_safe(resources.get("paired_dataset_id"), "resources.paired_dataset_id"),
-            target_network=choice(resources.get("target_network", "both"), "resources.target_network",
-                                  ("both", "real_dso_a", "synthetic")),
-            target_grid_id=optional_int(resources.get("target_grid_id"), "resources.target_grid_id"),
-            model_cases=validate_cases(execution.get("model_cases") or (), allowed=POST_MODEL_CASES),
-            workers=positive_int(execution.get("workers", 1), "execution.workers"),
-            step3_cpus=positive_int(execution.get("step3_cpus", 1), "execution.step3_cpus"),
-            step3_cluster_concurrency=_concurrency(execution),
-            step4_cpus=positive_int(execution.get("step4_cpus", 1), "execution.step4_cpus"),
-            powerflow_grid_scope=_grid_scope(execution),
-            profile_seed=_seed(execution),
-            cleanup_intermediates=flag(execution.get("cleanup_intermediates", False), "execution.cleanup_intermediates"),
-            resume=flag(execution.get("resume", False), "execution.resume"),
-            materialize_expansion=flag(execution.get("materialize_expansion", True), "execution.materialize_expansion"),
-            optimizer=_optimizer(execution),
-        )
-
-    @property
-    def paired_dir(self) -> Path:
-        return PAIRED_DATASET_ROOT / self.paired_dataset_id
-
-    @property
-    def heat_library(self) -> Path:
-        return HEAT_LIBRARY_ROOT / f"{self.heat_profile_set_id}.h5"
-
-    @property
-    def weather_hdf(self) -> Path:
-        return WEATHER_RESULT_ROOT / self.weather_source_hdf
-
-    def identity(self) -> dict[str, Any]:
-        return {
-            "pipeline": self.pipeline,
-            "run_id": self.run_id,
-            "pylovo_version_id": self.pylovo_version_id,
-            "paired_dataset_id": self.paired_dataset_id,
-            "region": {"ags": self.ags, "plz": self.plz},
-            "target_network": self.target_network,
-            "target_grid_id": self.target_grid_id,
-            "profile_seed": self.profile_seed,
-            "powerflow_grid_scope": self.powerflow_grid_scope,
-        }
-
-
 # Paired aligned (DSO A + DSO B) ------------------------------------------------------------------
 
 
@@ -591,7 +487,7 @@ def _grid_subset(raw: Any) -> dict[str, Any] | None:
 
 # Loader --------------------------------------------------------------------------------------
 
-RunConfig = SyntheticRun | PairedRun | AlignedRun
+RunConfig = SyntheticRun | AlignedRun
 
 
 def run_config_from_dict(raw: dict[str, Any], *, base_dir: Path) -> RunConfig:
@@ -620,8 +516,6 @@ def run_config_from_dict(raw: dict[str, Any], *, base_dir: Path) -> RunConfig:
         raise FileNotFoundError(f"Scenario YAML not found: {scenario_path}")
     if pipeline == "synthetic":
         return SyntheticRun.from_blocks(run_id, scenario_path, resources, execution)
-    if pipeline == "paired_validation":
-        return PairedRun.from_blocks(run_id, scenario_path, resources, execution)
     return AlignedRun.from_blocks(run_id, scenario_path, resources, execution, base_dir=base_dir)
 
 

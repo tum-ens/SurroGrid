@@ -1,29 +1,17 @@
-"""Run compact power-flow summaries for real DSO A scenario allocation plans.
+"""Step 4 of one real grid: power-flow summaries of a Step-3 result on the real network.
 
-This runner consumes the bus-level scenario calibration output from Step 2,
-currently `dso_a_2045_full_local_demand_bus_allocation_plan.csv`, and maps the
-calibrated annual demand back to the real DSO A pandapower buses.
-
-Implemented scope in this first runner:
-
-- residential-equivalent HH electricity from calibrated annual HH rows
-- calibrated GHD electricity from DSO A annual GHD demand
-- compact p99/p01-style power-flow summaries in the existing real summary DB tables
-
-Sector-coupling assets are kept in the allocation plan and stored in the run
-assumptions, but heat, EV, PV and battery time-series are intentionally not yet
-translated here. That keeps this first executable step auditable before the post
-flex/inflex sector-coupling layer is added.
+The paired runner calls this module once per real grid and model case. The real grid is a file named by the
+paired dataset (``--grid-file``); the Step-3 result HDF carries the scenario units and their allocation buses
+(``raw_data/allocation_plan``). Demand reconstruction is the shared Step-4 logic of the synthetic grids; only the
+pandapower network and the bus allocation differ. Summaries go to the ``real_powerflow_*`` tables.
 """
 
 from __future__ import annotations
 
 import argparse
 from copy import deepcopy
-import os
-import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
+import time
 from typing import Any
 
 import pandas as pd
@@ -31,10 +19,7 @@ import pandapower as pp
 from dotenv import load_dotenv
 
 from gridexpand.db.database import SurroGridDatabase
-from gridexpand.common.timeframe import (
-    build_full_year_metadata,
-    read_hdf_metadata as read_timeframe_metadata,
-)
+from gridexpand.common.timeframe import read_hdf_metadata as read_timeframe_metadata
 import gridexpand.powerflow.powerflow as pwrflw
 import gridexpand.powerflow.demands as dmnds
 from gridexpand.powerflow import network, station_voltage
@@ -44,56 +29,13 @@ from gridexpand.powerflow.io import (
     require_temporal_method,
     temporal_assumptions,
 )
-from gridexpand.paths import ENV_FILE, SCENARIO_CALIBRATION_OUTPUT_DIR
-from gridexpand.allocation.scenario_calibration.profiles import (
-    dso_a_electricity_profiles as _electricity_profiles,
-)
-from gridexpand.powerflow.run_real_powerflow import (
-    _grid_ref,
-    _select_manifest_rows,
-)
+from gridexpand.paths import ENV_FILE
 
 ENV_PATH = ENV_FILE
-DEFAULT_ALLOCATION_PLAN = (
-    SCENARIO_CALIBRATION_OUTPUT_DIR
-    / "dso_a_building_match_99999"
-    / "dso_a_2045_full_local_demand_bus_allocation_plan.csv"
-)
-
-DEFAULT_MEASURED_PROFILE_BAND_PCT = (
-    _electricity_profiles.DEFAULT_MEASURED_PROFILE_BAND_PCT
-)
-DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES = (
-    _electricity_profiles.DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES
-)
-MEASURED_PROFILE_SELECTION_CHOICES = (
-    _electricity_profiles.MEASURED_PROFILE_SELECTION_CHOICES
-)
-MEASURED_PROFILE_SELECTION_RANDOM_BAND = (
-    _electricity_profiles.MEASURED_PROFILE_SELECTION_RANDOM_BAND
-)
-build_scenario_base_electric_demand = (
-    _electricity_profiles.build_scenario_base_electric_demand
-)
-profile_selection_summary = _electricity_profiles.profile_selection_summary
-read_allocation_plan = _electricity_profiles.read_allocation_plan
-
-DEFAULT_RUN_NAME = "real_dso_a_2045_full_local_base_electricity"
-DEFAULT_SCENARIO_KEY = "real_dso_a_2045_full_local_base_electricity"
-DEFAULT_SCENARIO_LABEL = "Real DSO A 2045 full-local calibrated base electricity"
-ASSUMPTION_TEXT = (
-    "Real DSO A scenario power flow based on the Step-2 DSO A 2045 bus allocation plan. "
-    "Residential-equivalent HH rows use measured annual kWh from the calibration plan and residential "
-    "profile shapes from the synthetic demand-allocation library. Calibrated GHD rows use DSO A annual "
-    "GHD kWh and normalized Step-2 GHD profile shapes. Heat, EV, PV and batteries are audited in the "
-    "plan but not yet translated into this first base-electricity runner."
-)
-
+GRID_ASSUMPTION_TEXT = "Real grid from the file named by the paired dataset; scenario loads replace its loads."
 URBS_ASSUMPTION_TEXT = (
-    "Real DSO A sector-coupling power flow based on a Step-3 URBS result HDF generated from "
-    "the calibrated real DSO A scenario allocation plan. Demand reconstruction uses the shared "
-    "GridExpand Step-4 demand logic also used for synthetic grids; only the pandapower network "
-    "and bus allocation differ."
+    "Real-grid power flow of a Step-3 result HDF. Demand reconstruction uses the shared GridExpand Step-4 "
+    "demand logic also used for synthetic grids; only the pandapower network and bus allocation differ."
 )
 
 
@@ -128,6 +70,24 @@ def _lv_id_from_hdf(hdf_path: Path) -> int | None:
     if len(values) == 1:
         return int(values[0])
     return None
+
+
+def _grid_ref(row: dict[str, Any]) -> dict[str, Any]:
+    """``real_grid_case`` identity of one real grid file."""
+    return {
+        "source": str(row["source"]),
+        "plz": int(row["plz"]),
+        "lv_id": str(row["lv_id"]),
+        "variant": row.get("variant"),
+        "category": row.get("category"),
+        "load_status": row.get("load_status"),
+        "status": row.get("status"),
+        "source_file": str(row["source_file"]),
+        "bus_count": None,
+        "line_count": None,
+        "load_count": None,
+        "assumptions": {"demand_allocation": GRID_ASSUMPTION_TEXT},
+    }
 
 
 def load_real_net(source_file: Path) -> tuple[pp.pandapowerNet, float]:
@@ -203,168 +163,6 @@ def _prepare_real_grid_for_allocation(
         summary_cable_ids,
         load_scope,
     )
-
-
-def _allocation_totals(
-    allocation: pd.DataFrame, demand_audit: pd.DataFrame
-) -> dict[str, Any]:
-    selection_summary = profile_selection_summary(demand_audit)
-    return {
-        "allocation_plan_rows": int(len(allocation)),
-        "allocation_plan_buses": int(allocation["allocation_bus"].nunique()),
-        "allocation_plan_buildings": int(allocation["building_match_id"].nunique()),
-        "allocation_hh_rows": int(
-            pd.to_numeric(allocation["residential_equivalent_hh_rows"], errors="coerce")
-            .fillna(0.0)
-            .sum()
-        ),
-        "allocation_hh_annual_kwh": float(
-            pd.to_numeric(
-                allocation["residential_equivalent_hh_annual_kwh"], errors="coerce"
-            )
-            .fillna(0.0)
-            .sum()
-        ),
-        "allocation_ghd_annual_kwh": float(
-            pd.to_numeric(allocation["calibrated_annual_ghd_kwh"], errors="coerce")
-            .fillna(0.0)
-            .sum()
-        ),
-        "generated_profile_energy_kwh": float(
-            pd.to_numeric(demand_audit["annual_demand_kwh"], errors="coerce")
-            .fillna(0.0)
-            .sum()
-        ),
-        "residential_ev_charger_kw_audited_not_simulated": float(
-            pd.to_numeric(allocation.get("residential_ev_charger_kw"), errors="coerce")
-            .fillna(0.0)
-            .sum()
-        ),
-        "ghd_ev_charger_kw_audited_not_simulated": float(
-            pd.to_numeric(allocation.get("ghd_ev_charger_kw"), errors="coerce")
-            .fillna(0.0)
-            .sum()
-        ),
-        "residential_pv_kw_audited_not_simulated": float(
-            pd.to_numeric(allocation.get("residential_pv_kw"), errors="coerce")
-            .fillna(0.0)
-            .sum()
-        ),
-        "ghd_pv_kw_audited_not_simulated": float(
-            pd.to_numeric(allocation.get("ghd_pv_kw"), errors="coerce")
-            .fillna(0.0)
-            .sum()
-        ),
-        **selection_summary,
-    }
-
-
-def run_one(
-    row: dict[str, Any],
-    allocation_plan_path: str,
-    run_name: str,
-    scenario_key: str,
-    scenario_label: str,
-    seed: int,
-    measured_profile_selection: str = MEASURED_PROFILE_SELECTION_RANDOM_BAND,
-    measured_profile_band_pct: float = DEFAULT_MEASURED_PROFILE_BAND_PCT,
-    measured_profile_min_candidates: int = DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES,
-    max_timesteps: int | None = None,
-) -> dict[str, Any]:
-    start = time.perf_counter()
-    allocation_all = read_allocation_plan(Path(allocation_plan_path), scope=None)
-    lv_id = int(str(row["lv_id"]).removeprefix("LV_"))
-    allocation = allocation_all[allocation_all["lv_id"].astype(int).eq(lv_id)].copy()
-    if allocation.empty:
-        raise ValueError(f"Allocation plan contains no rows for LV {lv_id}.")
-
-    source_file = Path(row["source_file"])
-    net = pp.from_excel(source_file)
-    (
-        grid,
-        transformer_s_rated_mva,
-        cable_max_i_ka,
-        voltage_buses,
-        summary_cable_ids,
-        load_scope,
-    ) = _prepare_real_grid_for_allocation(
-        net,
-        allocation["allocation_bus"].astype(int).tolist(),
-    )
-    df_demand, demand_audit = build_scenario_base_electric_demand(
-        allocation,
-        seed=seed,
-        measured_profile_selection=measured_profile_selection,
-        measured_profile_band_pct=measured_profile_band_pct,
-        measured_profile_min_candidates=measured_profile_min_candidates,
-    )
-    if max_timesteps is not None:
-        df_demand = df_demand.iloc[: int(max_timesteps)].copy()
-    summary = pwrflw.pf_summary(
-        grid,
-        df_demand,
-        transformer_s_rated_mva=transformer_s_rated_mva,
-        cable_max_i_ka=cable_max_i_ka,
-        voltage_buses=voltage_buses,
-        algorithm=["nr", "iwamoto_nr"],
-        cable_ids=summary_cable_ids,
-        on_nonconvergence="nan",
-    )
-
-    db = SurroGridDatabase()
-    db.ensure_schema()
-    assumptions = {
-        **build_full_year_metadata(),
-        "demand_allocation": ASSUMPTION_TEXT,
-        "allocation_plan_path": str(allocation_plan_path),
-        "station_voltage": station_voltage.assumptions(),
-        "profile_seed": int(seed),
-        "sector_assets_simulated": False,
-        "stage_label": "base_electricity",
-        "max_timesteps": None if max_timesteps is None else int(max_timesteps),
-        **_allocation_totals(allocation, demand_audit),
-        **load_scope,
-        "nonconverged_timesteps": int(
-            summary["grid_summary"].get("n_failed_timesteps", 0)
-        ),
-    }
-    run_id = db.create_real_powerflow_run(
-        _grid_ref(row),
-        run_name=run_name,
-        scenario_key=scenario_key,
-        scenario_label=scenario_label,
-        assumptions=assumptions,
-    )
-    db.write_real_powerflow_summary(run_id, "base_electricity", summary)
-    elapsed = time.perf_counter() - start
-    grid_summary = summary["grid_summary"]
-    return {
-        "lv_id": lv_id,
-        "run_id": run_id,
-        "source_file": str(source_file),
-        "elapsed_s": elapsed,
-        "n_timesteps": grid_summary["n_timesteps"],
-        "n_converged_timesteps": grid_summary.get("n_converged_timesteps"),
-        "n_failed_timesteps": grid_summary.get("n_failed_timesteps"),
-        "n_voltage_buses": grid_summary["n_voltage_buses"],
-        "n_cables": grid_summary["n_cables"],
-        "tail_rows": len(summary.get("tail_summary", [])),
-        **_allocation_totals(allocation, demand_audit),
-        **load_scope,
-    }
-
-
-def _selected_rows_for_plan(
-    root: Path, plz: int, limit: int | None, lv_id: str | None, plan: pd.DataFrame
-) -> list[dict[str, Any]]:
-    rows = _select_manifest_rows(root, plz, limit=None, lv_id=lv_id)
-    plan_lv_ids = set(plan["lv_id"].astype(int))
-    rows = [
-        row for row in rows if int(str(row["lv_id"]).removeprefix("LV_")) in plan_lv_ids
-    ]
-    if limit is not None:
-        rows = rows[: int(limit)]
-    return rows
 
 
 def run_one_urbs_result(
@@ -490,7 +288,7 @@ def run_one_urbs_result(
     }
     if post_demand_mode == "inflex":
         assumptions["inflex_battery_control"] = (
-            "fixed DSO A battery inventory; causal local PV self-consumption; "
+            "fixed battery of the asset plan; causal local PV self-consumption; "
             "no grid charging or battery export; cyclic state per TSAM period"
         )
     for stage, summary in summaries.items():
@@ -533,19 +331,10 @@ def run_one_urbs_result(
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        description="Run real DSO A scenario-plan base-electricity power-flow summaries."
+        description="Step 4 of one real grid: pre/post power-flow summaries of a Step-3 result HDF."
     )
-    parser.add_argument("--plz", type=int, required=True)
-    parser.add_argument("--grid-data-path", type=Path, default=None)
-    parser.add_argument("--allocation-plan", type=Path, default=DEFAULT_ALLOCATION_PLAN)
-    parser.add_argument(
-        "--timeframe-mode",
-        choices=["full_year"],
-        default="full_year",
-        help="Only full_year is supported until real-grid URBS/TSAM input generation is implemented.",
-    )
-    parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--lv-id", default=None)
+    parser.add_argument("--plz", type=int, required=True, help="Postcode stored with the real grid case.")
+    parser.add_argument("--lv-id", default=None, help="Real grid id (default: from raw_data/allocation_plan).")
     parser.add_argument(
         "--provider",
         choices=["dso_a", "dso_b"],
@@ -555,15 +344,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--grid-file",
         type=Path,
-        default=None,
-        help=(
-            "Aligned mode: the real grid file (DSO A .xlsx or DSO B .json) named by the "
-            "alignment bundle. Bypasses the DSO A split manifest; requires --lv-id."
-        ),
+        required=True,
+        help="The real grid file (DSO A .xlsx or DSO B .json) named by the paired dataset.",
     )
-    parser.add_argument("--workers", type=int, default=1)
-    parser.add_argument("--run-name", default=DEFAULT_RUN_NAME)
-    parser.add_argument("--scenario-key", default=DEFAULT_SCENARIO_KEY)
+    parser.add_argument("--run-name", required=True)
+    parser.add_argument("--scenario-key", required=True)
     parser.add_argument(
         "--expect-temporal-method",
         choices=("full_year_no_tsam", "shared_weather_tsam"),
@@ -575,27 +360,6 @@ def main(argv: list[str] | None = None) -> None:
         ),
     )
     parser.add_argument(
-        "--profile-seed",
-        type=int,
-        default=481527,
-        help="Arbitrary fixed seed for reproducible stochastic input profiles.",
-    )
-    parser.add_argument(
-        "--measured-profile-selection",
-        choices=MEASURED_PROFILE_SELECTION_CHOICES,
-        default=MEASURED_PROFILE_SELECTION_RANDOM_BAND,
-    )
-    parser.add_argument(
-        "--measured-profile-band-pct",
-        type=float,
-        default=DEFAULT_MEASURED_PROFILE_BAND_PCT,
-    )
-    parser.add_argument(
-        "--measured-profile-min-candidates",
-        type=int,
-        default=DEFAULT_MEASURED_PROFILE_MIN_CANDIDATES,
-    )
-    parser.add_argument(
         "--max-timesteps",
         type=int,
         default=None,
@@ -604,14 +368,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--urbs-result-hdf",
         type=Path,
-        default=None,
-        help="Optional Step-3 URBS result HDF. If set, run real-grid pre/post sector power-flow from this HDF instead of base-electricity allocation.",
+        required=True,
+        help="Step-3 result HDF (Step-2 input HDF for --post-demand-mode pre-only).",
     )
     parser.add_argument(
         "--post-demand-mode",
         choices=["flexible", "inflex", "pre-only"],
         default="flexible",
-        help="Demand reconstruction for --urbs-result-hdf. 'pre-only' runs only urbs_in/reduced pre demand.",
+        help="Demand reconstruction. 'pre-only' runs only urbs_in/reduced pre demand.",
     )
     parser.add_argument(
         "--inflex-ev-charger-kw",
@@ -619,11 +383,7 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Optional EV charger cap for --post-demand-mode inflex; defaults to Step-4 config.",
     )
-    parser.add_argument(
-        "--scenario-label",
-        default=None,
-        help="Optional scenario label stored in the DB. Defaults depend on base-electricity vs URBS-result mode.",
-    )
+    parser.add_argument("--scenario-label", default=None, help="Scenario label stored in the DB.")
     parser.add_argument(
         "--summary-grid-scope",
         choices=["full", "backbone"],
@@ -633,168 +393,49 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--post-only",
         action="store_true",
-        help="With --urbs-result-hdf: run only the post stage; the pre stage comes from a separate pre-only run.",
+        help="Run only the post stage; the pre stage comes from a separate pre-only run.",
     )
     args = parser.parse_args(argv)
-    if args.post_only and (args.urbs_result_hdf is None or args.post_demand_mode == "pre-only"):
-        parser.error("--post-only requires --urbs-result-hdf and a post --post-demand-mode (flexible or inflex).")
+    if args.post_only and args.post_demand_mode == "pre-only":
+        parser.error("--post-only requires a post --post-demand-mode (flexible or inflex).")
 
     load_dotenv(ENV_PATH, override=True)
-    root = args.grid_data_path or Path(os.environ["GRID_DATA_PATH"])
-    if args.urbs_result_hdf is not None:
-        inferred_lv_id = _lv_id_from_hdf(args.urbs_result_hdf)
-        lv_id = args.lv_id or (None if inferred_lv_id is None else str(inferred_lv_id))
-        if lv_id is None:
-            raise ValueError(
-                "--urbs-result-hdf requires --lv-id when the LV id cannot be inferred from raw_data/allocation_plan."
-            )
-        if args.grid_file is not None:
-            rows = [
-                {
-                    "source": args.provider,
-                    "lv_id": str(int(lv_id)),
-                    "plz": int(args.plz),
-                    "source_file": str(args.grid_file.resolve()),
-                    "variant": "aligned",
-                    "status": "exported",
-                }
-            ]
-        else:
-            rows = _select_manifest_rows(root, args.plz, limit=1, lv_id=lv_id)
-        if not rows:
-            raise ValueError(f"No DSO A real-grid manifest row matched LV {lv_id}.")
-        scenario_label = (
-            args.scenario_label
-            or f"Real DSO A 2045 sector-coupling {args.post_demand_mode}"
-        )
-        print(
-            f"Running real DSO A URBS-result powerflow for LV {rows[0]['lv_id']} from {args.urbs_result_hdf} "
-            f"with post_demand_mode={args.post_demand_mode}.",
-            flush=True,
-        )
-        result = run_one_urbs_result(
-            rows[0],
-            str(args.urbs_result_hdf),
-            args.run_name,
-            args.scenario_key,
-            scenario_label,
-            args.post_demand_mode,
-            args.max_timesteps,
-            args.inflex_ev_charger_kw,
-            args.summary_grid_scope,
-            args.expect_temporal_method,
-            args.post_only,
-        )
-        result["status"] = "ok"
-        result["error"] = ""
-        print(pd.DataFrame([result]).to_string(index=False), flush=True)
-        return
-
-    plan = read_allocation_plan(args.allocation_plan, scope=None)
-    rows = _selected_rows_for_plan(root, args.plz, args.limit, args.lv_id, plan)
-    if not rows:
+    inferred_lv_id = _lv_id_from_hdf(args.urbs_result_hdf)
+    lv_id = args.lv_id or (None if inferred_lv_id is None else str(inferred_lv_id))
+    if lv_id is None:
         raise ValueError(
-            "No DSO A real-grid rows matched the allocation plan and requested filters."
+            "--lv-id is required when the LV id cannot be inferred from raw_data/allocation_plan."
         )
-
+    row = {
+        "source": args.provider,
+        "lv_id": str(int(lv_id)),
+        "plz": int(args.plz),
+        "source_file": str(args.grid_file.resolve()),
+        "variant": "aligned",
+        "status": "exported",
+    }
+    scenario_label = args.scenario_label or f"Real grid {args.post_demand_mode}"
     print(
-        f"Running {len(rows)} DSO A scenario-plan base-electricity job(s) from {root} "
-        f"using {args.allocation_plan} with {args.workers} worker(s).",
+        f"Running the real-grid power flow of LV {row['lv_id']} ({args.provider}) from {args.urbs_result_hdf} "
+        f"with post_demand_mode={args.post_demand_mode}.",
         flush=True,
     )
-    scenario_label = args.scenario_label or DEFAULT_SCENARIO_LABEL
-    start = time.perf_counter()
-    results: list[dict[str, Any]] = []
-    if args.workers == 1:
-        for i, row in enumerate(rows):
-            print(
-                f"[{i + 1}/{len(rows)}] LV {row['lv_id']} {row['source_file']}",
-                flush=True,
-            )
-            try:
-                result = run_one(
-                    row,
-                    str(args.allocation_plan),
-                    args.run_name,
-                    args.scenario_key,
-                    scenario_label,
-                    args.profile_seed + i,
-                    args.measured_profile_selection,
-                    args.measured_profile_band_pct,
-                    args.measured_profile_min_candidates,
-                    args.max_timesteps,
-                )
-            except Exception as exc:
-                result = {
-                    "lv_id": row["lv_id"],
-                    "run_id": None,
-                    "status": "failed",
-                    "error": str(exc),
-                }
-                print(f"  -> FAILED: {exc}", flush=True)
-            else:
-                result["status"] = "ok"
-                result["error"] = ""
-                print(
-                    f"  -> run_id={result['run_id']} elapsed={result['elapsed_s']:.1f}s tail_rows={result['tail_rows']}",
-                    flush=True,
-                )
-            results.append(result)
-    else:
-        with ProcessPoolExecutor(max_workers=args.workers) as pool:
-            futures = {
-                pool.submit(
-                    run_one,
-                    row,
-                    str(args.allocation_plan),
-                    args.run_name,
-                    args.scenario_key,
-                    scenario_label,
-                    args.profile_seed + i,
-                    args.measured_profile_selection,
-                    args.measured_profile_band_pct,
-                    args.measured_profile_min_candidates,
-                    args.max_timesteps,
-                ): row
-                for i, row in enumerate(rows)
-            }
-            for done, future in enumerate(as_completed(futures), start=1):
-                row = futures[future]
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    result = {
-                        "lv_id": row["lv_id"],
-                        "run_id": None,
-                        "status": "failed",
-                        "error": str(exc),
-                    }
-                    print(
-                        f"[{done}/{len(rows)}] LV {row['lv_id']} FAILED: {exc}",
-                        flush=True,
-                    )
-                else:
-                    result["status"] = "ok"
-                    result["error"] = ""
-                    print(
-                        f"[{done}/{len(rows)}] LV {result['lv_id']} -> run_id={result['run_id']} "
-                        f"elapsed={result['elapsed_s']:.1f}s tail_rows={result['tail_rows']}",
-                        flush=True,
-                    )
-                results.append(result)
-
-    elapsed = time.perf_counter() - start
-    result_df = pd.DataFrame(results).sort_values("lv_id")
-    print(result_df.to_string(index=False), flush=True)
-    ok_count = (
-        int((result_df.get("status", "ok") == "ok").sum())
-        if "status" in result_df
-        else len(result_df)
+    result = run_one_urbs_result(
+        row,
+        str(args.urbs_result_hdf),
+        args.run_name,
+        args.scenario_key,
+        scenario_label,
+        args.post_demand_mode,
+        args.max_timesteps,
+        args.inflex_ev_charger_kw,
+        args.summary_grid_scope,
+        args.expect_temporal_method,
+        args.post_only,
     )
-    print(
-        f"Finished {ok_count}/{len(results)} real scenario-plan job(s) successfully in {elapsed:.1f}s.",
-        flush=True,
-    )
+    result["status"] = "ok"
+    result["error"] = ""
+    print(pd.DataFrame([result]).to_string(index=False), flush=True)
 
 
 if __name__ == "__main__":

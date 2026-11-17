@@ -51,7 +51,7 @@ asset_sizing:
     # (per-building COP penalty of charging by the usable spread).
     buffer_charge_efficiency_method: cop_curve
 
-electrification: # deterministic_share or source_inventory
+electrification: # adoption_mode deterministic_share: a seeded building_share per technology
   heat:
     adoption_mode: deterministic_share
     building_share: 1.0

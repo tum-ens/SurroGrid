@@ -119,8 +119,7 @@ unified diff, the configuration hash and the scenario key the copy gets.
 - **Comments and layout stay.** Form edits go through ruamel.yaml's round trip (indentation taken from
   the file); only the edited lines change, and a value equal to the current one (also `2` for `2.0`) is
   no change, so a no-op edit keeps the hash. Dependent keys follow the loader's rules:
-  `building_share` is removed for `source_inventory` and inserted after `adoption_mode` for
-  `deterministic_share`; `teaser_retrofit_level` (optional, default 0) is inserted after
+  `teaser_retrofit_level` (optional, default 0) is inserted after
   `space_heat_source` when it is set to 1 or 2; the home-charger power writes `installed_capacity_kw`
   and `capacity_upper_kw` (Step 2 and urbs use both; the charger is not sized). A result that PyYAML
   would read differently from the intended values is refused.
@@ -135,8 +134,7 @@ unified diff, the configuration hash and the scenario key the copy gets.
 - **Scenario key.** Results are keyed by `scenario_<id>_<hash[:12]>` (plus the timeframe suffix of the
   week runs), so an edited copy never mixes with the results of its base; the preview warns when another
   listed file has the same id or the same key (identical content).
-- `source_inventory` needs the source evidence of paired DSO data; synthetic runs fail with it, so the
-  preview shows a warning. Shipped files and scientific defaults are never changed by the editor.
+- Shipped files and scientific defaults are never changed by the editor.
 
 ## Container
 

@@ -1,4 +1,4 @@
-"""Run YAML loading: one loader for synthetic, paired_validation and paired_aligned (no database)."""
+"""Run YAML loading: one loader for synthetic and paired_aligned (no database)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import yaml
 from gridexpand.paths import RUN_CONFIG_DIR, SCENARIO_CONFIG_DIR
 from gridexpand.scenario.run_config import (
     AlignedRun,
-    PairedRun,
     SyntheticRun,
     load_run_config,
     run_config_from_dict,
@@ -89,20 +88,9 @@ def test_with_cases():
     assert with_cases(run, ("pre",)).model_cases == ("pre",)
     with pytest.raises(ValueError):
         with_cases(run, ("post-inflex-heuristic",))
-    paired, _ = load_run_config(RUN_CONFIG_DIR / "dso_a_2045_paired_full_year.yaml")
+    paired, _ = load_run_config(RUN_CONFIG_DIR / "joint_2045_v1_islands.yaml")
     with pytest.raises(ValueError, match="not allowed"):
         with_cases(paired, ("pre",))  # was accepted by run_scenario and emitted pre twice
-
-
-def test_paired_run():
-    run, _ = load_run_config(RUN_CONFIG_DIR / "dso_a_2045_paired_full_year.yaml")
-    assert isinstance(run, PairedRun)
-    assert (run.ags, run.plz, run.excluded_real_lv_ids, run.target_grid_id) == (9999999, 99999, (113,), None)
-    assert run.model_cases == ("post-inflex-heuristic", "post-hems-heuristic", "post-hems-optimized")
-    assert run.paired_dir.name == "dso_a_2045_paired_v11"
-    assert run.heat_library.name == "dso_a_2045_infdb_ro_heat_v1.h5"
-    lv080, _ = load_run_config(RUN_CONFIG_DIR / "dso_a_2045_paired_full_year_lv080.yaml")
-    assert lv080.target_grid_id == 80 and lv080.identity()["target_grid_id"] == 80
 
 
 def test_aligned_run(tmp_path):
@@ -137,9 +125,8 @@ def test_optimizer_for_every_pipeline(tmp_path):
     assert synthetic(execution__optimizer="pypsa").optimizer == "pypsa"
     with pytest.raises(ValueError, match="execution.optimizer"):
         synthetic(execution__optimizer="oemof")
-    for name in ("dso_a_2045_paired_full_year.yaml", "joint_2045_v1_islands.yaml"):
-        raw = yaml.safe_load((RUN_CONFIG_DIR / name).read_text(encoding="utf-8"))
-        raw["run"]["scenario"] = str(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")
-        assert run_config_from_dict(raw, base_dir=tmp_path).optimizer is None
-        raw["execution"]["optimizer"] = "pypsa"
-        assert run_config_from_dict(raw, base_dir=tmp_path).optimizer == "pypsa"
+    raw = yaml.safe_load((RUN_CONFIG_DIR / "joint_2045_v1_islands.yaml").read_text(encoding="utf-8"))
+    raw["run"]["scenario"] = str(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")
+    assert run_config_from_dict(raw, base_dir=tmp_path).optimizer is None
+    raw["execution"]["optimizer"] = "pypsa"
+    assert run_config_from_dict(raw, base_dir=tmp_path).optimizer == "pypsa"
