@@ -2,8 +2,8 @@
 
 GridExpand simulates low-voltage (LV) distribution grids of a region before and after electrification (heat
 pumps, EVs, rooftop PV, batteries) and estimates the grid reinforcement they need. It reads synthetic grids and
-buildings from a [pylovo](https://github.com/tum-ens/pylovo) database (usually an InfDB) and optionally real DSO
-grids for validation.
+buildings from a [pylovo](https://github.com/tum-ens/pylovo) database (usually an InfDB). The comparison with real
+DSO grids, the validation of the pylovo paper, is a separate directory: [validation/](validation/README.md).
 
 | step | package | does |
 |---|---|---|
@@ -11,7 +11,7 @@ grids for validation.
 | 2 demand allocation | `gridexpand.allocation` | hourly building/bus time series and asset plans, urbs inputs |
 | 3 optimization | `gridexpand.optimization` | building model (urbs or PyPSA optimizer): dispatch (and sizing for the optimized case) |
 | 4 power flow | `gridexpand.powerflow` | pandapower time series before and after electrification |
-| 5 analysis | `gridexpand.analysis` | cable and transformer expansion costs, loaders, plots, notebooks |
+| 5 analysis | `gridexpand.analysis` | cable and transformer expansion costs, loaders, plots |
 | API | `gridexpand.api` | HTTP API for the GridPlanner UI: jobs, results, scenario files |
 
 Everything is one Python package (`src/gridexpand/`) with one uv environment and one command, `gridexpand`.
@@ -45,11 +45,10 @@ Not tracked; copy or symlink them into place (the `*_required.txt` files mark th
 |---|---|
 | `inhabited_buildings/elec_lps.h5` | Step 2 residential load profiles (all runs) |
 | `general/mobility_profile_pool_old/mobility_demand_pool.csv`, `mobility_availability_pool.csv` | synthetic runs (legacy pool `emobpy_pool_v1`) |
-| `general/mobility_profile_pool/` | paired runs (session pool with `mobility_pool_manifest.json`) |
+| `general/mobility_profile_pool/` | paired runs of the validation (session pool with `mobility_pool_manifest.json`) |
 
 The database must provide the `pylovo` schema (grids, buildings), `citydb` LoD2 roof surfaces for PV (without
-them every building gets the PV fallback) and, for `infdb_ro_heat` scenarios, the INFDB `ro_heat` schema. Paired
-validation needs confidential DSO data: the alignment bundle and the DSO B delivery named in the run YAML.
+them every building gets the PV fallback) and, for `infdb_ro_heat` scenarios, the INFDB `ro_heat` schema.
 
 ## Database
 
@@ -81,6 +80,24 @@ execution group (`pre`, `heuristic-assets`, `post-hems-optimized`), materializes
 refreshes the QGIS views; `--resume` continues an interrupted run. The YAML keys are in
 [docs/configuration.md](docs/configuration.md), the model cases and scientific rules in
 [docs/method.md](docs/method.md). `gridexpand synthetic --help` runs one batch directly (same flags).
+
+## Results
+
+A run writes into the `surrogrid` schema of the database in `.env`; the run directory `work/runs/<run.id>/`
+records what ran (`state.json`, `summary.json`, logs).
+
+- **Expansion costs** (one analysis per model case and stage, keys in
+  [Step 5](docs/steps/5_postprocessing.md#expansion-materialization)): `surrogrid.expansion_grid_result` (cost and
+  measures per grid), `expansion_line_result` and `expansion_transformer_result`; for QGIS the layers
+  `surrogrid.expansion_line_qgis_mv` and `surrogrid.expansion_transformer_qgis_mv`.
+- **Power flow**: `surrogrid.powerflow_summary` (per grid, model case and stage) with cable and bus-voltage
+  summaries; hourly raw tables with `execution.powerflow_output: raw` or `both`.
+- **In Python**: `load_expansion_overview(analysis_key=...)` in `gridexpand.analysis.expansion.overview` returns
+  the summary tables of one analysis (the newest without a key).
+- **Through the API**: `GET /api/results/analyses`, `/api/results/analyses/{key}/grids` and
+  `/api/results/powerflow` ([docs/api.md](docs/api.md)).
+
+Tables and views: [docs/database.md](docs/database.md).
 
 ## Real-vs-synthetic validation
 
