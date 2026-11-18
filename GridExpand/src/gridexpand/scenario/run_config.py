@@ -7,12 +7,13 @@ A run YAML is one short file::
     scenario_overrides: {...}         # optional: single scenario values, merged into the scenario
     grids:
       pylovo: {version: "3", ags: 9184137}   # synthetic grids of a pylovo version (optional plz, kcid/bcid, ...)
-    model_cases: [pre, post-hems-heuristic, post-hems-optimized]   # optional, these are the defaults
+    model_cases: [post-inflex-heuristic, post-hems-heuristic, post-hems-optimized]   # optional, the defaults
     execution: {...}                  # optional: CPUs, solver, outputs, seed (keys in docs/configuration.md)
 
 The scenario is the scientific part: it is shared by many runs and its hash names the results. With
 ``scenario_overrides`` the run uses the merged scenario, written to ``<run dir>/inputs/scenario.yaml``; its hash
-is taken after the merge. ``grids: files`` runs own grid files (:class:`RealRun`, ``pipeline: real``).
+is taken after the merge. ``grids: files`` runs own grid files (:class:`RealRun`, ``pipeline: real``); both
+grid sources run the same scenario method (:mod:`gridexpand.scenario.grid_run`), the pre stage always included.
 
 Parsing never touches a database. Relative paths resolve against the YAML's directory. :func:`load_run_config`
 returns the run and the SHA-256 of the parsed YAML (``run_hash``). The real-vs-synthetic validation has its own
@@ -29,20 +30,14 @@ from pathlib import Path
 from typing import Any
 
 from gridexpand.common.reproducibility import DEFAULT_PROFILE_SEED
-from gridexpand.common.timeframe import TIMEFRAME_MODES
 from gridexpand.paths import SCENARIO_CONFIG_DIR
 from gridexpand.scenario.config_loader import _read_yaml, configuration_hash
-from gridexpand.scenario.model_cases import (
-    POST_MODEL_CASES,
-    SYNTHETIC_UNSUPPORTED_CASES,
-    validate_cases,
-)
+from gridexpand.scenario.model_cases import POST_MODEL_CASES, validate_cases
 from gridexpand.scenario.scenario_config import _mapping as mapping
 from gridexpand.scenario.scenario_config import _only as only
 from gridexpand.scenario.scenario_config import _positive
 
 PIPELINES = ("synthetic", "real")
-DEFAULT_MODEL_CASES = ("pre", "post-hems-heuristic", "post-hems-optimized")
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
@@ -165,72 +160,128 @@ def _seed(execution: dict[str, Any]) -> int:
     return positive_int(execution.get("profile_seed", DEFAULT_PROFILE_SEED), "execution.profile_seed", allow_zero=True)
 
 
-# Synthetic ---------------------------------------------------------------------------
+# Runs -----------------------------------------------------------------------------------------
+
+# Every run computes the pre stage once (with the first execution group); ``[pre]`` alone runs only the pre stage.
+DEFAULT_MODEL_CASES = ("post-inflex-heuristic", "post-hems-heuristic", "post-hems-optimized")
+EXECUTION_KEYS = frozenset({
+    "profile_seed", "weather_year", "workers", "step3_cpus", "step3_cluster_concurrency", "step4_cpus",
+    "heat_workers", "solver", "optimizer", "powerflow_grid_scope", "powerflow_max_timesteps",
+    "cleanup_intermediates", "materialize_expansion", "resume",
+})
+
+
+def _cases(model_cases: Any) -> tuple[str, ...]:
+    """The model cases; ``pre`` is implied by any post case and kept only alone (a status-quo run)."""
+    if isinstance(model_cases, str) or not isinstance(model_cases, (list, tuple)):
+        raise ValueError("model_cases must be a list of model cases.")
+    cases = validate_cases(model_cases)
+    posts = tuple(case for case in cases if case in POST_MODEL_CASES)
+    return posts or ("pre",)
+
+
+def _execution(execution: dict[str, Any]) -> dict[str, Any]:
+    """The execution fields shared by both grid sources (``execution`` keys of the run YAML)."""
+    only(execution, set(EXECUTION_KEYS), "execution")
+
+    def number(name: str, default: int) -> int:
+        return positive_int(execution.get(name, default), f"execution.{name}")
+
+    weather_year = execution.get("weather_year")
+    max_timesteps = execution.get("powerflow_max_timesteps")
+    solver = execution.get("solver")
+    if solver is not None:
+        from gridexpand.optimization.solver import SUPPORTED_SOLVERS
+
+        solver = choice(solver, "execution.solver", SUPPORTED_SOLVERS)
+    return {
+        "profile_seed": _seed(execution),
+        "weather_year": None if weather_year is None else positive_int(weather_year, "execution.weather_year"),
+        "workers": number("workers", 1),
+        "step3_cpus": number("step3_cpus", 16),
+        "step3_cluster_concurrency": _concurrency(execution),
+        "step4_cpus": number("step4_cpus", 4),
+        "heat_workers": number("heat_workers", 4),
+        "solver": solver,
+        "optimizer": _optimizer(execution),
+        "powerflow_grid_scope": _grid_scope(execution),
+        "powerflow_max_timesteps": None if max_timesteps is None else positive_int(
+            max_timesteps, "execution.powerflow_max_timesteps"),
+        "cleanup_intermediates": flag(execution.get("cleanup_intermediates", False), "execution.cleanup_intermediates"),
+        "materialize_expansion": flag(execution.get("materialize_expansion", True), "execution.materialize_expansion"),
+        "resume": flag(execution.get("resume", False), "execution.resume"),
+    }
 
 
 @dataclass(frozen=True)
-class SyntheticRun:
-    """The synthetic grids of one region (``grids: pylovo``): Steps 2-4 and the expansion analyses.
+class _GridRun:
+    """What both grid sources share: scenario, model cases and execution (:mod:`gridexpand.scenario.grid_run`).
 
-    ``grids.pylovo`` selects the region (``ags``; optional ``plz`` or ``plz/kcid/bcid``, which is also the scope
-    of the electrification assignment) and optionally a candidate range (``start_index``/``limit``, like
-    ``gridexpand synthetic``). Execution keys are the ``gridexpand synthetic`` flags; output is always
-    case-qualified. ``scenario_path`` is the scenario file Steps 2-4 read: the named scenario, or with overrides
-    the merged copy in the run directory (set by ``gridexpand run``).
+    ``scenario_path`` is the scenario file the steps read: the named scenario, or with overrides the merged copy in
+    the run directory (set by ``gridexpand run``).
     """
 
     run_id: str
     scenario_path: Path
-    pylovo_version_id: str
-    ags: int
     model_cases: tuple[str, ...]
+    profile_seed: int = DEFAULT_PROFILE_SEED
+    weather_year: int | None = None
+    workers: int = 1
+    step3_cpus: int = 16
+    step3_cluster_concurrency: int | None = None
+    step4_cpus: int = 4
+    heat_workers: int = 4
+    solver: str | None = None
+    optimizer: str | None = None
+    powerflow_grid_scope: str = "full"
+    powerflow_max_timesteps: int | None = None
+    cleanup_intermediates: bool = False
+    materialize_expansion: bool = True
+    resume: bool = False
+    scenario_source: Path | None = None
+    scenario_overrides: dict[str, Any] = field(default_factory=dict)
+
+    def scenario_raw(self) -> dict[str, Any]:
+        """The scenario mapping of the run: the named scenario with the overrides merged in."""
+        raw = _read_yaml(self.scenario_source or self.scenario_path)
+        return deep_merge(raw, self.scenario_overrides) if self.scenario_overrides else raw
+
+    def _identity(self) -> dict[str, Any]:
+        """What a resumed run must share with the recorded one (not resources or cases)."""
+        return {
+            "pipeline": self.pipeline,
+            "run_id": self.run_id,
+            "profile_seed": self.profile_seed,
+            "weather_year": self.weather_year,
+            "powerflow_grid_scope": self.powerflow_grid_scope,
+            "powerflow_max_timesteps": self.powerflow_max_timesteps,
+        }
+
+
+@dataclass(frozen=True)
+class SyntheticRun(_GridRun):
+    """The pylovo grids of one region (``grids: pylovo``) through the scenario method.
+
+    ``grids.pylovo`` selects the region (``ags``; optional ``plz`` or ``plz/kcid/bcid``) and optionally a candidate
+    range (``start_index``/``limit``), numbered as ``gridexpand grids`` lists them.
+    """
+
+    pylovo_version_id: str = ""
+    ags: int = 0
     plz: int | None = None
     kcid: int | None = None
     bcid: int | None = None
     min_buildings: int = 5
     start_index: int | None = None
     limit: int | None = None
-    profile_seed: int = DEFAULT_PROFILE_SEED
-    timeframe_mode: str = "full_year"
-    demand_scope: str = "all"
-    workers: int = 1
-    step2_cpus: int = 4
-    step2_timeseries_storage: str = "temp"
-    step3_cpus: int = 16
-    step3_max_cpus: int = 32
-    step3_target_columns: int = 35
-    step3_cluster_concurrency: int | None = None  # None: 1 for urbs, automatic for pypsa
-    dynamic_step3: bool = True
-    step4_cpus: int = 4
-    solver: str | None = None
-    optimizer: str | None = None
-    powerflow_output: str = "summary"
-    powerflow_grid_scope: str = "full"
-    cleanup_intermediates: str = "never"
-    materialize_expansion: bool = True
-    pilot_gate: bool = True
-    pilot_index: int = 0
-    resume: bool = False
-    rerun_failed: bool = False
-    scenario_source: Path | None = None
-    scenario_overrides: dict[str, Any] = field(default_factory=dict)
     pipeline: str = "synthetic"
 
     PYLOVO_KEYS = frozenset({"version", "ags", "plz", "kcid", "bcid", "min_buildings", "start_index", "limit"})
-    EXECUTION_KEYS = frozenset({
-        "profile_seed", "timeframe_mode", "demand_scope", "workers", "step2_cpus", "step2_timeseries_storage",
-        "step3_cpus", "step3_max_cpus", "step3_target_columns", "step3_cluster_concurrency", "dynamic_step3",
-        "step4_cpus", "solver", "optimizer", "powerflow_output", "powerflow_grid_scope", "cleanup_intermediates",
-        "materialize_expansion", "pilot_gate", "pilot_index", "resume", "rerun_failed",
-    })
 
     @classmethod
-    def from_blocks(
-        cls, run_id: str, scenario_source: Path, scenario_overrides: dict[str, Any], pylovo: dict[str, Any],
-        model_cases: Any, execution: dict[str, Any],
-    ) -> "SyntheticRun":
+    def from_blocks(cls, run_id: str, scenario_source: Path, scenario_overrides: dict[str, Any],
+                    pylovo: dict[str, Any], model_cases: Any, execution: dict[str, Any]) -> "SyntheticRun":
         only(pylovo, set(cls.PYLOVO_KEYS), "grids.pylovo")
-        only(execution, set(cls.EXECUTION_KEYS), "execution")
         ags = optional_int(pylovo.get("ags"), "grids.pylovo.ags")
         if ags is None:
             raise ValueError("grids.pylovo.ags (the municipality key of the region) is required.")
@@ -241,30 +292,12 @@ class SyntheticRun:
             raise ValueError("grids.pylovo.kcid and grids.pylovo.bcid must be set together.")
         if kcid is not None and plz is None:
             raise ValueError("grids.pylovo.plz is required when kcid/bcid are set.")
-        cases = validate_cases(model_cases)
-        for case in cases:
-            if case in SYNTHETIC_UNSUPPORTED_CASES:
-                raise ValueError(
-                    f"model_cases: {case} is not available for the synthetic pipeline. "
-                    f"{SYNTHETIC_UNSUPPORTED_CASES[case]}"
-                )
-
-        def number(name: str, default: int, *, allow_zero: bool = False) -> int:
-            return positive_int(execution.get(name, default), f"execution.{name}", allow_zero=allow_zero)
-
-        def boolean(name: str, default: bool) -> bool:
-            return flag(execution.get(name, default), f"execution.{name}")
-
-        solver = execution.get("solver")
-        if solver is not None:
-            from gridexpand.optimization.solver import SUPPORTED_SOLVERS
-
-            solver = choice(solver, "execution.solver", SUPPORTED_SOLVERS)
         return cls(
             run_id=run_id,
             scenario_path=scenario_source,
             scenario_source=scenario_source,
             scenario_overrides=dict(scenario_overrides),
+            model_cases=_cases(model_cases),
             pylovo_version_id=_pylovo_version(pylovo),
             ags=ags,
             plz=plz,
@@ -272,106 +305,33 @@ class SyntheticRun:
             bcid=bcid,
             min_buildings=positive_int(pylovo.get("min_buildings", cls.min_buildings), "grids.pylovo.min_buildings"),
             start_index=optional_int(pylovo.get("start_index"), "grids.pylovo.start_index"),
-            limit=(
-                None if pylovo.get("limit") is None
-                else positive_int(pylovo["limit"], "grids.pylovo.limit")
-            ),
-            model_cases=cases,
-            profile_seed=_seed(execution),
-            timeframe_mode=choice(execution.get("timeframe_mode", cls.timeframe_mode), "execution.timeframe_mode",
-                                  TIMEFRAME_MODES),
-            demand_scope=choice(execution.get("demand_scope", cls.demand_scope), "execution.demand_scope",
-                                ("all", "residential")),
-            workers=number("workers", cls.workers),
-            step2_cpus=number("step2_cpus", cls.step2_cpus),
-            step2_timeseries_storage=choice(
-                execution.get("step2_timeseries_storage", cls.step2_timeseries_storage),
-                "execution.step2_timeseries_storage", ("db", "temp", "both"),
-            ),
-            step3_cpus=number("step3_cpus", cls.step3_cpus),
-            step3_max_cpus=number("step3_max_cpus", cls.step3_max_cpus),
-            step3_target_columns=number("step3_target_columns", cls.step3_target_columns),
-            step3_cluster_concurrency=_concurrency(execution),
-            dynamic_step3=boolean("dynamic_step3", cls.dynamic_step3),
-            step4_cpus=number("step4_cpus", cls.step4_cpus),
-            solver=solver,
-            optimizer=_optimizer(execution),
-            powerflow_output=choice(execution.get("powerflow_output", cls.powerflow_output),
-                                    "execution.powerflow_output", ("raw", "summary", "both")),
-            powerflow_grid_scope=_grid_scope(execution),
-            cleanup_intermediates=choice(execution.get("cleanup_intermediates", cls.cleanup_intermediates),
-                                         "execution.cleanup_intermediates", ("never", "success")),
-            materialize_expansion=boolean("materialize_expansion", cls.materialize_expansion),
-            pilot_gate=boolean("pilot_gate", cls.pilot_gate),
-            pilot_index=number("pilot_index", cls.pilot_index, allow_zero=True),
-            resume=boolean("resume", cls.resume),
-            rerun_failed=boolean("rerun_failed", cls.rerun_failed),
+            limit=None if pylovo.get("limit") is None else positive_int(pylovo["limit"], "grids.pylovo.limit"),
+            **_execution(execution),
         )
 
-    def scenario_raw(self) -> dict[str, Any]:
-        """The scenario mapping of the run: the named scenario with the overrides merged in."""
-        raw = _read_yaml(self.scenario_source or self.scenario_path)
-        return deep_merge(raw, self.scenario_overrides) if self.scenario_overrides else raw
-
     def identity(self) -> dict[str, Any]:
-        """What a resumed run must share with the recorded one (not resources or cases)."""
         return {
-            "pipeline": self.pipeline,
-            "run_id": self.run_id,
+            **self._identity(),
             "pylovo_version_id": self.pylovo_version_id,
             "region": {"ags": self.ags, "plz": self.plz, "kcid": self.kcid, "bcid": self.bcid},
             "min_buildings": self.min_buildings,
-            "demand_scope": self.demand_scope,
-            "timeframe_mode": self.timeframe_mode,
-            "profile_seed": self.profile_seed,
-            "powerflow_output": self.powerflow_output,
-            "powerflow_grid_scope": self.powerflow_grid_scope,
+            "start_index": self.start_index,
+            "limit": self.limit,
         }
 
 
-# Real ----------------------------------------------------------------------------------------
-
-REAL_DEFAULT_MODEL_CASES = ("post-inflex-heuristic", "post-hems-heuristic", "post-hems-optimized")
-
-
 @dataclass(frozen=True)
-class RealRun:
-    """Own grid files (``grids: files``): matching, scenario dataset, the per-grid runner and the expansion analyses.
+class RealRun(_GridRun):
+    """Own grid files (``grids: files``): matching, then the scenario method like pylovo grids."""
 
-    The first execution group also runs the ``pre`` stage, so ``model_cases`` lists post cases only.
-    """
-
-    run_id: str
-    scenario_path: Path
-    grid_dir: Path
-    model_cases: tuple[str, ...]
+    grid_dir: Path = Path()
     points: Path | None = None
     crs: str = "EPSG:25832"
     matching: dict[str, Any] = field(default_factory=dict)
-    profile_seed: int = DEFAULT_PROFILE_SEED
-    weather_year: int | None = None
-    workers: int = 1
-    step3_cpus: int = 16
-    step3_cluster_concurrency: int | None = None
-    step4_cpus: int = 4
-    heat_workers: int = 4
-    optimizer: str | None = None
-    powerflow_grid_scope: str = "full"
-    powerflow_max_timesteps: int | None = None
-    cleanup_intermediates: bool = False
-    materialize_expansion: bool = True
-    resume: bool = False
-    scenario_source: Path | None = None
-    scenario_overrides: dict[str, Any] = field(default_factory=dict)
     pipeline: str = "real"
     pylovo_version_id: str = "none"  # own grids read no pylovo result
 
     FILES_KEYS = frozenset({"dir", "points", "crs"})
-    EXECUTION_KEYS = frozenset({
-        "profile_seed", "weather_year", "workers", "step3_cpus", "step3_cluster_concurrency", "step4_cpus",
-        "heat_workers", "optimizer", "powerflow_grid_scope", "powerflow_max_timesteps", "cleanup_intermediates",
-        "materialize_expansion", "resume",
-    })
 
     @classmethod
     def from_blocks(cls, run_id: str, scenario_source: Path, scenario_overrides: dict[str, Any], files: Any,
@@ -391,60 +351,26 @@ class RealRun:
         from gridexpand.grids.matching import MatchingConfig
 
         MatchingConfig.from_dict(matching)  # validated here, applied by gridexpand match
-        only(execution, set(cls.EXECUTION_KEYS), "execution")
-        cases = validate_cases(model_cases, allowed=POST_MODEL_CASES)
-
-        def number(name: str, default: int) -> int:
-            return positive_int(execution.get(name, default), f"execution.{name}")
-
-        weather_year = execution.get("weather_year")
-        if weather_year is not None:
-            weather_year = positive_int(weather_year, "execution.weather_year")
-        max_timesteps = execution.get("powerflow_max_timesteps")
         return cls(
             run_id=run_id,
             scenario_path=scenario_source,
             scenario_source=scenario_source,
             scenario_overrides=dict(scenario_overrides),
+            model_cases=_cases(model_cases),
             grid_dir=grid_dir,
             points=points,
             crs=str(files.get("crs", cls.crs)),
             matching=dict(matching),
-            model_cases=cases,
-            profile_seed=_seed(execution),
-            weather_year=weather_year,
-            workers=number("workers", cls.workers),
-            step3_cpus=number("step3_cpus", cls.step3_cpus),
-            step3_cluster_concurrency=_concurrency(execution),
-            step4_cpus=number("step4_cpus", cls.step4_cpus),
-            heat_workers=number("heat_workers", cls.heat_workers),
-            optimizer=_optimizer(execution),
-            powerflow_grid_scope=_grid_scope(execution),
-            powerflow_max_timesteps=None if max_timesteps is None else positive_int(
-                max_timesteps, "execution.powerflow_max_timesteps"),
-            cleanup_intermediates=flag(execution.get("cleanup_intermediates", False),
-                                       "execution.cleanup_intermediates"),
-            materialize_expansion=flag(execution.get("materialize_expansion", True),
-                                       "execution.materialize_expansion"),
-            resume=flag(execution.get("resume", False), "execution.resume"),
+            **_execution(execution),
         )
-
-    def scenario_raw(self) -> dict[str, Any]:
-        raw = _read_yaml(self.scenario_source or self.scenario_path)
-        return deep_merge(raw, self.scenario_overrides) if self.scenario_overrides else raw
 
     def identity(self) -> dict[str, Any]:
         return {
-            "pipeline": self.pipeline,
-            "run_id": self.run_id,
+            **self._identity(),
             "grid_dir": str(self.grid_dir),
             "points": None if self.points is None else str(self.points),
             "crs": self.crs,
             "matching": self.matching,
-            "profile_seed": self.profile_seed,
-            "weather_year": self.weather_year,
-            "powerflow_grid_scope": self.powerflow_grid_scope,
-            "powerflow_max_timesteps": self.powerflow_max_timesteps,
         }
 
 
@@ -477,7 +403,7 @@ def run_config_from_dict(raw: dict[str, Any], *, base_dir: Path) -> RunConfig:
     matching = mapping(raw.get("matching") or {}, "matching")
     if "files" in grids:
         return RealRun.from_blocks(run_id, scenario_source, overrides, grids["files"], matching,
-                                   raw.get("model_cases", list(REAL_DEFAULT_MODEL_CASES)), execution, base_dir)
+                                   raw.get("model_cases", list(DEFAULT_MODEL_CASES)), execution, base_dir)
     if matching:
         raise ValueError("matching applies to own grid files (grids.files) only.")
     return SyntheticRun.from_blocks(run_id, scenario_source, overrides, mapping(grids["pylovo"], "grids.pylovo"),
@@ -492,11 +418,8 @@ def load_run_config(path: str | Path) -> tuple[RunConfig, str]:
 
 
 def with_cases(run: RunConfig, cases: tuple[str, ...]) -> RunConfig:
-    """``run`` restricted to ``cases`` (validated with the pipeline's rules)."""
-    allowed = POST_MODEL_CASES if run.pipeline != "synthetic" else None
-    cases = validate_cases(cases) if allowed is None else validate_cases(cases, allowed=allowed)
-    if run.pipeline == "synthetic":
-        for case in cases:
-            if case in SYNTHETIC_UNSUPPORTED_CASES:
-                raise ValueError(f"{case} is not available for the synthetic pipeline. {SYNTHETIC_UNSUPPORTED_CASES[case]}")
-    return dataclasses.replace(run, model_cases=cases)
+    """``run`` restricted to ``cases``. Grid runs: ``pre`` alone is a status-quo run, else implied. Other runs (the
+    validation): post cases only, the pre stage comes with the first group."""
+    if isinstance(run, _GridRun):
+        return dataclasses.replace(run, model_cases=_cases(list(cases)))
+    return dataclasses.replace(run, model_cases=validate_cases(cases, allowed=POST_MODEL_CASES))

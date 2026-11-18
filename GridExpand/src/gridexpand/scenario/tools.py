@@ -120,7 +120,6 @@ def check_config_file(path: Path) -> dict[str, Any]:
     """
     import yaml
 
-    from gridexpand.common.timeframe import scenario_key_for_timeframe
     from gridexpand.scenario.config_loader import configuration_hash, load_scenario_config, scenario_identity_key
     from gridexpand.scenario.model_cases import execution_groups
     from gridexpand.scenario.run_config import load_run_config
@@ -152,8 +151,6 @@ def check_config_file(path: Path) -> dict[str, Any]:
                 for g in execution_groups(run.model_cases)
             ],
         }
-        if run.pipeline == "synthetic":
-            info["pipeline_scenario_key"] = scenario_key_for_timeframe(run.timeframe_mode, base_key=base_key)
         return info
     scenario, scenario_hash = load_scenario_config(path)
     return {

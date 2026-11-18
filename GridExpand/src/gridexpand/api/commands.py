@@ -1,10 +1,10 @@
 """Build the ``gridexpand`` commands of a pipeline job.
 
 :func:`pipeline_steps` is the only place that knows how a pipeline request becomes command
-lines. A request becomes one ``pipeline: synthetic`` run YAML in the job's run directory,
-and every model case is one ``gridexpand run <run.yaml> --model-case <case>`` step in that
-directory: the steps share the run's identity, ``state.json`` and the regional
-electrification assignment; each case's batch writes ``<run dir>/<case>/``.
+lines. A request becomes one ``grids: pylovo`` run YAML in the job's run directory and one
+``gridexpand run <run.yaml>`` step in that directory (all model cases; the pre stage always
+runs). The request's ``timeframe_mode`` and ``powerflow_output`` are not written: the scenario
+method runs the full year and writes summaries (GridPlanner follow-up).
 """
 
 from __future__ import annotations
@@ -84,15 +84,9 @@ def run_yaml(spec: PipelineSpec, run_id: str, scenario: str | None = None) -> di
     if spec.kcid is not None:
         pylovo["kcid"] = int(spec.kcid)
         pylovo["bcid"] = int(spec.bcid)
-    execution: dict[str, Any] = {
-        "timeframe_mode": spec.timeframe_mode,
-        "powerflow_output": spec.powerflow_output,
-        "workers": int(spec.workers),
-    }
+    execution: dict[str, Any] = {"workers": int(spec.workers)}
     if spec.start_index is not None:
         pylovo["start_index"] = int(spec.start_index)
-        # The pilot grid (default: candidate 0) gates the batch; make it the first selected grid.
-        execution["pilot_index"] = int(spec.start_index)
     if spec.limit is not None:
         pylovo["limit"] = int(spec.limit)
     return {
@@ -145,23 +139,15 @@ def terminal_commands(run_yaml_path: Path, run_id: str, *, in_container: bool, p
     ]
 
 
-def run_command(run_yaml_path: Path, job_run_dir: Path, case: str, python: str = sys.executable) -> list[str]:
-    """``gridexpand run`` of one model case of the job's run YAML."""
-    return [python, "-m", "gridexpand", "run", str(run_yaml_path), "--run-dir", str(job_run_dir),
-            "--model-case", case]
+def run_command(run_yaml_path: Path, job_run_dir: Path, python: str = sys.executable) -> list[str]:
+    """``gridexpand run`` of the job's run YAML in the job's run directory."""
+    return [python, "-m", "gridexpand", "run", str(run_yaml_path), "--run-dir", str(job_run_dir)]
 
 
 def pipeline_steps(spec: PipelineSpec, job_run_dir: Path, python: str = sys.executable) -> list[JobStep]:
-    """One job step per model case; each follows the case's batch directory ``<job_run_dir>/<case>``.
-
-    Writes ``<job_run_dir>/run.yaml``.
-    """
+    """One job step: the whole run in ``<job_run_dir>``. Writes ``<job_run_dir>/run.yaml``."""
     yaml_path = write_run_yaml(spec, job_run_dir)
-    return [
-        JobStep(name=case, argv=run_command(yaml_path, job_run_dir, case, python),
-                run_dir=str(Path(job_run_dir) / case))
-        for case in spec.model_cases
-    ]
+    return [JobStep(name="run", argv=run_command(yaml_path, job_run_dir, python), run_dir=str(job_run_dir))]
 
 
 def contiguous_range(indexes: list[int]) -> tuple[int, int]:

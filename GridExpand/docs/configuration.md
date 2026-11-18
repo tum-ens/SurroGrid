@@ -160,8 +160,8 @@ scenario_overrides:               # optional: single values, merged into the sce
   electrification: {heat: {building_share: 0.9}}
 grids:
   pylovo: {version: "3", ags: 9184137}
-model_cases: [pre, post-hems-heuristic, post-hems-optimized]   # optional, the defaults
-execution: {workers: 2, powerflow_output: both}                # optional
+model_cases: [post-inflex-heuristic, post-hems-heuristic, post-hems-optimized]   # optional, the defaults
+execution: {workers: 2}                                                         # optional
 ```
 
 | key | meaning |
@@ -170,9 +170,9 @@ execution: {workers: 2, powerflow_output: both}                # optional
 | `scenario` | a name of `config/scenarios/<name>.yaml`, or a path (contains `/` or ends in `.yaml`) relative to the run YAML |
 | `scenario_overrides` | optional mapping merged into the scenario key by key; unknown scenario keys are refused. The run uses the merged scenario, written to `<run dir>/inputs/scenario.yaml` when the run starts |
 | `grids.pylovo` | the synthetic grids of a pylovo version (keys below) |
-| `grids.files` | own grid files (`pipeline: real`, keys below) |
+| `grids.files` | own grid files (`pipeline: real`, keys below); both grid sources run the same scenario method |
 | `matching` | optional, own grids only: rules and distances of the matcher ([matching.md](matching.md#configuration)) |
-| `model_cases` | default `pre`, `post-hems-heuristic`, `post-hems-optimized`; `post-inflex-heuristic` is refused for synthetic grids |
+| `model_cases` | default `post-inflex-heuristic`, `post-hems-heuristic`, `post-hems-optimized`; the `pre` stage always runs (listing it changes nothing), `[pre]` alone is a status-quo run |
 | `execution` | optional machine, solver and output settings (keys below) |
 
 A run YAML of the former format (`run`/`resources`/`execution` blocks) is refused with a hint; the validation
@@ -181,8 +181,16 @@ paths resolve against the YAML's directory; booleans must be YAML booleans (`"fa
 
 ### `grids.pylovo`
 
-Steps 2–4 and the expansion analyses for the synthetic pylovo grids of one region, one `gridexpand synthetic`
-batch per execution group (see [method.md](method.md#model-cases)). Outputs are always case-qualified.
+The synthetic pylovo grids of one region through the scenario method (see [method.md](method.md#model-cases)):
+
+- prepare: the selected grids (`python -m gridexpand.grids.pylovo`; every grid becomes a `surrogrid.grid_case`, every
+  building gets the bus pylovo connects it to), the scenario dataset of their buildings (`python -m
+  gridexpand.grids.dataset --network synthetic`; attributes from InfDB with pylovo's rules, as for own grids), weather,
+  heat and PV libraries, the dataset check;
+- execute: the per-grid runner once per execution group (target `synthetic`; the first group also runs `pre`);
+- postprocess: the expansion analyses `<run>_synthetic_<case>` (data source `Synthetic`) and one QGIS refresh.
+
+The electrification draw covers the buildings of the selected grids (with `start_index`/`limit`: of that range).
 
 | key | default | meaning |
 |---|---|---|
@@ -204,8 +212,8 @@ connection point (or the points as a CSV). `gridexpand run` matches the points t
 libraries, then runs the per-grid runner once per execution group (the first also runs the `pre` stage) and the
 expansion analyses (`<run>_real_<case>`, data source `Real`). Grids are numbered in the results: by their id when every
 id is an integer, else 1, 2, ... in the order of the ids (`real_grid_name` in the dataset keeps the file stem).
-Heat follows the scenario's `space_heat_source`: `internal` needs no heat library, `teaser` and `infdb_ro_heat` are
-computed building by building (`python -m gridexpand.grids.heat_sources`, see
+Heat follows the scenario's `space_heat_source` (pylovo grids alike): `internal` needs no heat library, `teaser` and
+`infdb_ro_heat` are computed building by building (`python -m gridexpand.grids.heat_sources`, see
 [method.md](method.md#own-grids-heat-per-building)). If a grid file holds the MV side (ext_grid at an MV bus behind
 the transformer), the simulation moves the ext_grid to the LV busbar and takes the transformer and MV bus out of
 service; the transformer rating stays the expansion input.
@@ -216,37 +224,31 @@ service; the transformer rating stays the expansion input.
 | `points` | null | CSV of connection points instead of the grid loads ([matching.md](matching.md#inputs)) |
 | `crs` | `EPSG:25832` | CRS of the grid and point coordinates |
 
-`model_cases` defaults to `post-inflex-heuristic`, `post-hems-heuristic`, `post-hems-optimized`. Execution keys of
-own-grid runs: `profile_seed`, `weather_year` (null: PVGIS TMY at the grids; a year: that real year), `workers`,
-`step3_cpus`, `step3_cluster_concurrency`, `step4_cpus`, `heat_workers`, `optimizer`, `powerflow_grid_scope`,
-`powerflow_max_timesteps` (caps Step 4, for smoke tests), `cleanup_intermediates`, `materialize_expansion`, `resume`.
-
 ### `execution`
 
-Synthetic grids (`grids.pylovo`):
+The same keys for both grid sources:
 
-| key | default | meaning (`gridexpand synthetic` flag) |
+| key | default | meaning |
 |---|---|---|
 | `profile_seed` | 481527 | realization seed; change it only for an independent stochastic realization |
-| `timeframe_mode` | `full_year` | `full_year`, `min_temperature_week`, `max_solar_radiation_week`, `max_base_electricity_demand_week` |
-| `demand_scope` | `all` | `all` or `residential` (household-only Step 2–4, `_hh_only` keys) |
-| `powerflow_grid_scope` | `full` | `full` or `backbone` (drops terminal service lines from the power-flow summaries and maps terminal voltages one bus upstream) |
-| `step2_cpus` | 4 | Step 2 processes (`--step2-cpus`) |
-| `step2_timeseries_storage` | `temp` | `db`, `temp` or `both`: also store the Step 2 hourly series in the database |
+| `weather_year` | null | null: PVGIS TMY at the buildings; a year: that real year |
 | `workers` | 1 | grids in parallel |
-| `step3_cpus` | 16 | minimum number of Step 3 building clusters (partitions; changes results) |
-| `step3_max_cpus` | 32 | maximum number of clusters |
-| `step3_target_columns` | 35 | demand/efficiency columns per cluster that the dynamic choice aims at |
-| `dynamic_step3` | true | choose the cluster count per grid from 4/8/12/16/24/32 (at least `step3_cpus`, at most `step3_max_cpus`); false: always `step3_cpus` |
+| `step3_cpus` | 16 | Step 3 building clusters (partitions; changes results) |
 | `step3_cluster_concurrency` | null | Step 3 models solved at the same time; null: 1 for urbs, automatic for pypsa (CPUs / 4, at most one per 2 GB of available memory: 8 on the development VM) |
 | `step4_cpus` | 4 | Step 4 time chunks in parallel |
+| `heat_workers` | 4 | processes of the heat preparation |
 | `solver` | null | `gurobi` or `appsi_highs` (null: `$GRIDEXPAND_SOLVER`, else `gurobi`) |
 | `optimizer` | null | Step 3 optimizer `urbs` or `pypsa` (null: `$GRIDEXPAND_OPTIMIZER`, else `urbs`); `pypsa` ignores the cluster keys above (one model per building), see [Step 3](steps/3_urbs.md#pypsa-optimizer) |
-| `powerflow_output` | `summary` | `summary`, `raw` or `both` |
-| `cleanup_intermediates` | `never` | `success`: delete a grid's hand-off HDF5 files after its Step 4 validation |
-| `materialize_expansion` | true | expansion analyses at the end of each batch |
-| `pilot_gate`, `pilot_index` | true, 0 | stop the batch if the pilot grid fails |
-| `resume`, `rerun_failed` | false | skip grids already done; with resume, retry failed ones |
+| `powerflow_grid_scope` | `full` | `full` or `backbone` (drops terminal service lines from the power-flow summaries and maps terminal voltages one bus upstream) |
+| `powerflow_max_timesteps` | null | caps Step 4 at the first n hours (smoke tests) |
+| `cleanup_intermediates` | false | true: delete a grid's hand-off HDF5 files after its Step 4 validation |
+| `materialize_expansion` | true | expansion analyses at the end of the run |
+| `resume` | false | skip jobs already done (also `--resume`) |
+
+The run is always a full year without TSAM, with power-flow summaries. The former synthetic keys (`timeframe_mode`,
+`demand_scope`, `step2_cpus`, `step2_timeseries_storage`, `step3_max_cpus`, `step3_target_columns`, `dynamic_step3`,
+`powerflow_output`, `pilot_gate`, `pilot_index`, `rerun_failed`) belong to `gridexpand synthetic` (the former Step 2)
+and are refused in a run YAML.
 
 ## Grid selection
 
@@ -257,11 +259,10 @@ candidate index directly:
 - `ags` + `plz`: all eligible grids of that postcode;
 - `ags` + `plz` + `kcid` + `bcid`: one exact grid.
 
-"Eligible" means at least `min_buildings` buildings (with `demand_scope: residential`, residential buildings)
-in the pylovo version `grids.pylovo.version`. The selected region is also the population of the regional
-electrification assignment. Candidate numbers stay those of the whole AGS (`uv run gridexpand grids --ags
-<AGS> --pylovo-version-id <V>` lists them); `start_index`/`limit` select a range of them without changing the
-assignment population. Internally a grid is named `<AGS>-<candidate index>_<PLZ>_<KCID>_<BCID>.h5`.
+"Eligible" means at least `min_buildings` buildings in the pylovo version `grids.pylovo.version`. Candidate numbers
+stay those of the whole AGS (`uv run gridexpand grids --ags <AGS> --pylovo-version-id <V>` lists them);
+`start_index`/`limit` select a range of them. The selected grids are the population of the electrification draw.
+Internally a grid is named `<AGS>-<candidate index>_<PLZ>_<KCID>_<BCID>` (its bridge name).
 
 ## Running a run YAML
 
@@ -278,12 +279,12 @@ runs a subset of the YAML's cases, and `--run-dir` overrides the run directory. 
 configuration, 143 cancelled (SIGTERM or Ctrl-C stops the running steps and marks their jobs cancelled).
 
 The run directory holds `inputs/run.yaml` and `inputs/scenario.yaml` (frozen copies), `identity.json` (what a
-resumed run must share: pipeline, run id, pylovo version, region or datasets, scope, timeframe, seed, output
+resumed run must share: pipeline, run id, pylovo version, region or grid files, seed, weather year, power-flow
 settings, scenario hash; a mismatch is refused), `state.json` (atomic snapshot: status, stage, jobs),
-`events.jsonl`, `plan.json`, `summary.json` and one directory per job group. Synthetic runs add `candidates.json`
-and `prepare/` (the regional electrification assignment `electrification_assignment.csv` with its sidecar and
-log); each synthetic group contains the batch's `status.tsv`, `events.jsonl`, `logs/candidate_<index>_<file>.log`
-and `summary.json`.
+`events.jsonl`, `summary.json`, `logs/prepare_<stage>.log`, `prepare/` (pylovo grids: `grids/building_supply.csv`
+and `grids/grids.csv`; own grids: `matching/`) and one runner directory per execution group (`heuristic-assets/`,
+`post-hems-optimized/`, or `pre-only/`) with its `status.tsv`, `events.jsonl` and `results.csv`. The dataset lives in
+`work/allocation/outputs/scenario_calibration/<run>_<synthetic|real>/`.
 
 ## Environment and `.env`
 

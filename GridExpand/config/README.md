@@ -18,7 +18,8 @@ regression-sandbox run) live in `tests/fixtures/`, the validation's method scena
 2. Scenario: keep `scenario: default_2045`, change single values with `scenario_overrides`, or copy
    `scenarios/default_2045.yaml` to `scenarios/<name>.yaml` with a new `scenario.id` and name it. Any changed value
    changes the scenario hash and therefore the scenario key of all results.
-3. Optional: `model_cases` (default `pre`, `post-hems-heuristic`, `post-hems-optimized`) and `execution`. Keep
+3. Optional: `model_cases` (default `post-inflex-heuristic`, `post-hems-heuristic`, `post-hems-optimized`; `pre`
+   always runs) and `execution`. Keep
    `execution.profile_seed` when cases or runs must be comparable.
 4. Check and launch:
 

@@ -1,4 +1,4 @@
-"""gridexpand run: plans and commands of the synthetic pipeline, run-directory state, CLI (no database)."""
+"""gridexpand run: plans and commands of pylovo-grid runs, run-directory state, CLI (no database)."""
 
 from __future__ import annotations
 
@@ -23,30 +23,38 @@ def context(path: Path, *extra: str, run_dir: Path | None = None):
     return run_module.load_context(run_module.build_parser().parse_args(argv))
 
 
-def test_synthetic_groups_match_the_harness_commands(tmp_path):
+def test_pylovo_grids_run_the_scenario_method(tmp_path):
+    from gridexpand.scenario import grid_run
+
     ctx = context(SANDBOX, run_dir=tmp_path)
-    groups = run_module.execution_groups(ctx.run.model_cases)
-    commands = [run_module.synthetic_equivalent_command(run_module.synthetic_settings(ctx, g)) for g in groups]
-    harness = ("--ags 9184137 --pylovo-version-id 1 --min-buildings 60 --workers 2 --step2-cpus 2 --step3-cpus 4 "
-               "--step3-max-cpus 8").split()
-    for argv, case, profiles in zip(commands, ("pre", "post-hems-heuristic", "post-hems-optimized"),
-                                    ("status_quo", "all", "all")):
-        joined = " ".join(argv)
-        assert " ".join(harness) in joined
-        for part in ("--step4-cpus 2", "--timeframe-mode max_base_electricity_demand_week", "--powerflow-output both",
-                     "--case-qualified-output", "--no-pilot-gate", "--profile-seed 481527",
-                     f"--model-case {case}", f"--profiles {profiles}", f"--run-dir {tmp_path / case}",
-                     f"--electrification-assignment {tmp_path / 'prepare' / 'electrification_assignment.csv'}"):
-            assert part in joined, part
+    stages = [stage for stage, _ in grid_run.preparation(ctx)]
+    assert stages[:2] == ["grids", "dataset"] and stages[-1] == "pv_library"
+    grids = " ".join(map(str, grid_run.preparation(ctx)[0][1]))
+    assert "-m gridexpand.grids.pylovo --version 1 --ags 9184137 --min-buildings 60" in grids
+    dataset = " ".join(map(str, grid_run.preparation(ctx)[1][1]))
+    assert "--network synthetic" in dataset and "--pylovo-version-id 1" in dataset and "--grids" not in dataset
+    jobs = grid_run.jobs(ctx)
+    assert [key for key, _, _ in jobs] == ["heuristic-assets", "post-hems-optimized"]
+    first = " ".join(jobs[0][1])
+    for part in ("--target synthetic", "--provider synthetic", "--paired-dataset-id sandbox_example_synthetic",
+                 "--workers 2", "--step3-cpus 4", "--step4-cpus 2", "--run-name-prefix sandbox_example"):
+        assert part in first, part
+    assert "--skip-pre" not in first and "--skip-pre" in " ".join(jobs[1][1])
+    expansion = [" ".join(argv) for argv in grid_run.expansion_commands(ctx)]
+    assert len(expansion) == 4 and "--run-name sandbox_example_synthetic_pre" in expansion[0]
+    assert all("--data-source synthetic" in argv and "--ags 9184137" in argv for argv in expansion)
     lines = run_module.plan_lines(ctx)
-    assert lines[2].startswith("[prepare] candidate grids of AGS 9184137") and "electrification" in lines[2]
+    assert lines[2].startswith("[prepare:grids]") and any(line.startswith("[postprocess]") for line in lines)
     assert not any(tmp_path.iterdir())  # planning writes nothing
 
 
-def test_until_execute_skips_the_expansion(tmp_path):
-    ctx = context(SANDBOX, "--until", "execute", run_dir=tmp_path)
-    (group,) = run_module.execution_groups(("pre",))
-    assert not run_module.synthetic_settings(ctx, group).materialize_expansion
+def test_a_pre_only_run(tmp_path):
+    from gridexpand.scenario import grid_run
+
+    ctx = context(SANDBOX, "--model-case", "pre", run_dir=tmp_path)
+    ((key, argv, _),) = grid_run.jobs(ctx)
+    assert key == "pre-only" and "--pre-only" in argv
+    assert len(grid_run.expansion_commands(ctx)) == 1
 
 
 @pytest.mark.parametrize("argv", [
@@ -57,12 +65,12 @@ def test_invalid_configuration_exit_code(argv, capsys):
     assert "invalid configuration" in capsys.readouterr().err
 
 
-def test_synthetic_run_refuses_inflex_before_database_access(tmp_path, capsys):
+def test_synthetic_run_offers_inflex(tmp_path, capsys):
     config = tmp_path / "synthetic_inflex.yaml"
     config.write_text(f"run: inflex\nscenario: {FIXTURE_SCENARIOS / 'teaser_2045.yaml'}\n"
                       "grids: {pylovo: {version: '1', ags: 9184137}}\nmodel_cases: [pre, post-inflex-heuristic]\n")
-    assert run_module.main([str(config)]) == run_module.EXIT_INVALID
-    assert "post-inflex-heuristic is not available for the synthetic pipeline" in capsys.readouterr().err
+    assert run_module.main([str(config), "--dry-run"]) == run_module.EXIT_OK
+    assert "--result-cases post-inflex-heuristic" in capsys.readouterr().out
 
 
 def test_scenario_overrides_are_merged_and_written_into_the_run_directory(tmp_path):
@@ -88,7 +96,7 @@ def test_the_default_run_yaml(tmp_path):
     config = tmp_path / "run.yaml"
     config.write_text("run: plain\nscenario: default_2045\ngrids: {pylovo: {version: '1', ags: 9184137}}\n")
     ctx = context(config, run_dir=tmp_path / "run")
-    assert ctx.run.model_cases == ("pre", "post-hems-heuristic", "post-hems-optimized")
+    assert ctx.run.model_cases == ("post-inflex-heuristic", "post-hems-heuristic", "post-hems-optimized")
     assert ctx.run.scenario_path == RUN_CONFIG_DIR.parent / "scenarios" / "default_2045.yaml"
     assert ctx.scenario_raw is None
 
@@ -111,7 +119,7 @@ def test_run_yaml_errors(tmp_path, text, message):
 
 def test_dry_run_exits_zero(capsys):
     assert run_module.main([str(SANDBOX), "--dry-run"]) == 0
-    assert "[execute:post-hems-optimized] gridexpand synthetic" in capsys.readouterr().out
+    assert "[execute:post-hems-optimized]" in capsys.readouterr().out
 
 
 def test_run_state_resume_and_stages(tmp_path):

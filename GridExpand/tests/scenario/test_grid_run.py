@@ -1,4 +1,4 @@
-"""``gridexpand run`` with ``grids: files``: configuration and plan (no database)."""
+"""``gridexpand run`` with ``grids: files``: configuration and plan (no database); pylovo grids in test_run.py."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def test_real_run_defaults(tmp_path):
 @pytest.mark.parametrize("text, message", [
     ("run: x\nscenario: default_2045\ngrids: {files: nowhere}\n", "no directory"),
     ("run: x\nscenario: default_2045\ngrids: {files: {dir: grids, points: p.csv}}\n", "points not found"),
-    ("run: x\nscenario: default_2045\ngrids: {files: grids}\nmodel_cases: [pre]\n", "not allowed"),
+    ("run: x\nscenario: default_2045\ngrids: {files: grids}\nmodel_cases: [post-flex]\n", "Unknown model cases"),
     ("run: x\nscenario: default_2045\ngrids: {files: grids}\nmatching: {radius: 3}\n", "Unknown matching keys"),
     ("run: x\nscenario: default_2045\ngrids: {pylovo: {version: '1', ags: 1}}\nmatching: {}\n", None),
     ("run: x\nscenario: default_2045\ngrids: {pylovo: {version: '1', ags: 1}}\nmatching: {facade_offset_m: 1}\n",

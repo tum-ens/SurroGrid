@@ -32,9 +32,9 @@ The controlled comparison of flexibility strategies is `post-inflex-heuristic` v
 battery, heat-pump, auxiliary-heater and buffer capacities are identical and only operation differs.
 `post-hems-optimized` versus a heuristic case compares assets and dispatch together.
 
-The synthetic pipeline cannot run `post-inflex-heuristic`: INFLEX needs the EV session table
-(`urbs_in/ev_sessions`), which only the paired pipeline writes; `gridexpand run`, `gridexpand
-synthetic` and the service refuse the case up front.
+`gridexpand run` runs every case on pylovo grids and own grids alike (the scenario method writes the EV
+session table `urbs_in/ev_sessions` that INFLEX needs). Only the former Step 2 (`gridexpand synthetic`)
+cannot run `post-inflex-heuristic` and refuses it up front.
 
 PV, stationary-battery and residential heat sizing exist in heuristic and optimized modes. The heat
 method compiles one central system per physical residential building; commercial heat-pump sizing is

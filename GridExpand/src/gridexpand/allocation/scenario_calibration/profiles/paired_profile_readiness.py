@@ -295,7 +295,9 @@ def main() -> None:
     parser.add_argument("--scenario-config",type=Path)
     args = parser.parse_args()
     paired_dir = args.paired_dir.resolve()
-    allocation = pd.read_csv(paired_dir / "paired_real_bus_allocation_plan.csv")
+    from gridexpand.runner.datasets import allocation_plan_path
+
+    allocation = pd.read_csv(allocation_plan_path(paired_dir))
     buildings = pd.read_csv(paired_dir / "paired_building_scenario_plan.csv")
     assignment = pd.read_csv(
         paired_dir / "paired_electrification_assignment.csv"

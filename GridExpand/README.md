@@ -84,15 +84,17 @@ cp config/runs/00_run_template.yaml config/runs/my_region.yaml           # edit:
 uv run gridexpand grids --ags 9184137 --pylovo-version-id 1               # candidate grids and their numbers
 uv run gridexpand config check config/runs/my_region.yaml                 # no database
 uv run gridexpand run config/runs/my_region.yaml --dry-run                # plan and commands
-uv run gridexpand run config/runs/my_region.yaml                          # Steps 2-4 + expansion per model case
+uv run gridexpand run config/runs/my_region.yaml                          # dataset, Steps 2-4, expansion
 uv run gridexpand status my_region                                        # work/runs/my_region/state.json
 ```
 
-`gridexpand run` prepares one regional electrification assignment, runs one `gridexpand synthetic` batch per
-execution group (`pre`, `heuristic-assets`, `post-hems-optimized`), materializes the expansion analyses and
-refreshes the QGIS views; `--resume` continues an interrupted run. The YAML keys are in
-[docs/configuration.md](docs/configuration.md), the model cases and scientific rules in
-[docs/method.md](docs/method.md). `gridexpand synthetic --help` runs one batch directly (same flags).
+`gridexpand run` builds the scenario dataset of the buildings of the selected grids (InfDB attributes, pylovo's
+bus per building), weather, heat and PV inputs, runs the per-grid runner per execution group (`heuristic-assets`,
+`post-hems-optimized`; the first also runs `pre`), materializes the expansion analyses `<run>_synthetic_<case>` and
+refreshes the QGIS views; `--resume` continues an interrupted run. Own grids run the same method (next section).
+The YAML keys are in [docs/configuration.md](docs/configuration.md), the model cases and scientific rules in
+[docs/method.md](docs/method.md). `gridexpand synthetic` (the former Step 2, one batch per model case, weekly
+timeframes) stays available for the GridForecast training data until that moves to `gridexpand run`.
 
 ## Quick start: own grids
 
@@ -164,7 +166,7 @@ repository, which runs both images behind one proxy.
 | `gridexpand grids --ags <AGS> --pylovo-version-id <V>` | candidate grids of an AGS with the runner's numbering |
 | `gridexpand config check <yaml...>` | validate run/scenario YAMLs, print hashes and keys (no database) |
 | `gridexpand match <grid files> --output <dir>` | match the connection points of your own grids to InfDB buildings ([docs](docs/matching.md)) |
-| `gridexpand synthetic --ags ... --pylovo-version-id ... --scenario-config ... --run-dir ...` | Steps 2-4 (+ expansion) for the synthetic grids of one AGS and one model case |
+| `gridexpand synthetic --ags ... --pylovo-version-id ... --scenario-config ... --run-dir ...` | the former Step 2 (one AGS, one model case; GridForecast data until it moves to `gridexpand run`) |
 | `gridexpand allocate <id> --scenario-config ...` | Step 2 for one grid ([docs](docs/steps/2_demand_allocation.md)) |
 | `gridexpand optimize <id> --scenario-config ...` | Step 3 for one Step 2 file ([docs](docs/steps/3_urbs.md)) |
 | `gridexpand powerflow <id>` | Step 4 for one scenario file ([docs](docs/steps/4_powerflow.md)) |

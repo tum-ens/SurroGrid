@@ -18,6 +18,16 @@ HEAT_LIBRARY_ROOT = PAIRED_DATASET_ROOT / "profile_libraries"
 WEATHER_RESULT_ROOT = ALLOCATION_RESULTS_DIR
 
 
+def allocation_plan_path(paired_dir: Path) -> Path:
+    """The building plan of a dataset: the real plan (own grids, the validation), else the synthetic plan (pylovo
+    grids only)."""
+    for network in ("real", "synthetic"):
+        path = Path(paired_dir) / f"paired_{network}_bus_allocation_plan.csv"
+        if path.exists():
+            return path
+    raise FileNotFoundError(f"{paired_dir} has no paired_<real|synthetic>_bus_allocation_plan.csv.")
+
+
 @dataclass(frozen=True)
 class PairedDataset:
     dataset_id: str
@@ -160,9 +170,13 @@ def validate_prepared_dataset(
         raise ValueError(f"{paired_dir} belongs to provider {metadata.get('provider')!r}.")
     if metadata.get("scenario_hash") != scenario_hash:
         raise ValueError(f"{paired_dir} was prepared with another scenario YAML (scenario hash differs).")
-    real = pd.read_csv(paired_dir / "paired_real_bus_allocation_plan.csv")
+    real_path = paired_dir / "paired_real_bus_allocation_plan.csv"
     synthetic_path = paired_dir / "paired_synthetic_bus_allocation_plan.csv"
-    synthetic = pd.read_csv(synthetic_path) if synthetic_path.exists() else None  # real-only datasets have none
+    # Own grids have only the real plan, pylovo grids only the synthetic plan, the validation both.
+    real = pd.read_csv(real_path) if real_path.exists() else None
+    synthetic = pd.read_csv(synthetic_path) if synthetic_path.exists() else None
+    if real is None and synthetic is None:
+        raise FileNotFoundError(f"{paired_dir} has no bus allocation plan.")
     heat = pd.read_csv(paired_dir / "paired_heat_profile_catalog.csv")
     assignment_path = paired_dir / "paired_electrification_assignment.csv"
     if not assignment_path.exists():
@@ -192,15 +206,15 @@ def validate_prepared_dataset(
         not_exact = ~(exact_fixed | exact_internal)
         if not_exact.any():
             raise ValueError(f"{int(not_exact.sum())} heat profiles are not exact library profiles.")
-    real_buildings = set(real["building_objectid"].astype(str))
-    if synthetic is not None and real_buildings != set(synthetic["building_objectid"].astype(str)):
+    buildings = set((real if real is not None else synthetic)["building_objectid"].astype(str))
+    if real is not None and synthetic is not None and buildings != set(synthetic["building_objectid"].astype(str)):
         raise ValueError("Prepared real and synthetic plans contain different buildings.")
     if weather_hdf is not None and dataset.weather_source_hdf.resolve() != Path(weather_hdf).resolve():
         raise ValueError(f"PV library was built from {dataset.weather_source_hdf}, not {weather_hdf}.")
     summary: dict[str, object] = {
         "paired_dataset_id": dataset.dataset_id,
-        "paired_buildings": len(real_buildings),
-        "real_grids": int(real["target_grid_id"].nunique()),
+        "paired_buildings": len(buildings),
+        "real_grids": 0 if real is None else int(real["target_grid_id"].nunique()),
         "synthetic_grids": 0 if synthetic is None else int(synthetic["target_grid_id"].nunique()),
         "heat_profiles": int(heat["building_objectid"].nunique()),
         "electrification_assignment_hash": assignment_hash,

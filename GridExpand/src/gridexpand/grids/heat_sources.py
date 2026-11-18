@@ -146,7 +146,9 @@ def build_heat_sources(paired_dir: Path, *, scenario_config: Path, weather_hdf: 
                                          output=library, profile_set_id=profile_set_id, source_mode="exact")
     # The final catalog with the validation's function; the allocation carries the sources in place of the
     # synthetic grids the validation takes its profiles from.
-    allocation = pd.read_csv(paired_dir / "paired_real_bus_allocation_plan.csv", dtype={"building_objectid": str})
+    from gridexpand.runner.datasets import allocation_plan_path
+
+    allocation = pd.read_csv(allocation_plan_path(paired_dir), dtype={"building_objectid": str})
     allocation = allocation.drop(columns=["synthetic_bridge_filename", "synthetic_bus"], errors="ignore").merge(
         sources, on="building_objectid", how="inner")
     catalog = build_heat_profile_catalog(allocation, plan, synthetic_input_dir=sources_dir,

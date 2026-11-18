@@ -25,23 +25,19 @@ grids:
     # limit: 10
   # files: ~/data/my_grids       # instead of pylovo: own grid files, see docs/configuration.md
 
-# Optional, these are the defaults. post-inflex-heuristic (rule-based INFLEX) needs EV charging sessions,
-# which the current synthetic Step 2 does not write; it returns when synthetic grids move to the new Step 2.
-# model_cases: [pre, post-hems-heuristic, post-hems-optimized]
+# Optional, these are the defaults. The pre stage (status quo) always runs; [pre] alone runs only it.
+# model_cases: [post-inflex-heuristic, post-hems-heuristic, post-hems-optimized]
 
-# Optional machine and output settings (defaults shown):
+# Optional machine settings (defaults shown):
 # execution:
 #   workers: 1                    # grids in parallel
-#   step2_cpus: 4
-#   step3_cpus: 16                # minimum Step 3 building clusters
-#   step3_max_cpus: 32
+#   step3_cpus: 16                # Step 3 building clusters
 #   step3_cluster_concurrency: 1  # Step 3 clusters solved at the same time
 #   step4_cpus: 4
+#   heat_workers: 4               # processes of the heat preparation
 #   solver: gurobi                # or appsi_highs; default $GRIDEXPAND_SOLVER
 #   optimizer: urbs               # or pypsa
-#   powerflow_output: summary     # summary, raw or both (raw = full time series)
 #   powerflow_grid_scope: full    # full or backbone
-#   timeframe_mode: full_year
+#   weather_year: null            # null: PVGIS TMY; a year: that real year
 #   profile_seed: 481527          # change only for an independent stochastic realization
-#   pilot_gate: true              # stop if the first grid fails
-#   resume: false                 # skip grids already done (also --resume)
+#   resume: false                 # skip jobs already done (also --resume)

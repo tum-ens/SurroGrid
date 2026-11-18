@@ -1,4 +1,4 @@
-"""Run YAML loading of the synthetic pipeline (no database); paired_aligned YAMLs point to the validation."""
+"""Run YAML loading of pylovo-grid runs (no database); paired_aligned YAMLs point to the validation."""
 
 from __future__ import annotations
 
@@ -20,9 +20,8 @@ SYNTHETIC = {
     "run": "demo",
     "scenario": str(FIXTURE_SCENARIOS / "teaser_2045.yaml"),
     "grids": {"pylovo": {"version": 1, "ags": 9184137, "plz": None, "kcid": None, "bcid": None}},
-    "model_cases": ["pre", "post-hems-heuristic"],
-    "execution": {"step2_cpus": 2, "demand_scope": "all", "timeframe_mode": "full_year",
-                  "powerflow_grid_scope": "full", "profile_seed": 481527},
+    "model_cases": ["post-hems-heuristic"],
+    "execution": {"step3_cpus": 2, "powerflow_grid_scope": "full", "profile_seed": 481527},
 }
 
 
@@ -59,16 +58,19 @@ def test_the_template_only_needs_its_change_me_values(tmp_path):
 def test_synthetic_defaults():
     run = synthetic()
     assert isinstance(run, SyntheticRun)
-    assert (run.ags, run.pylovo_version_id, run.step2_cpus, run.powerflow_output) == (9184137, "1", 2, "summary")
-    assert (run.min_buildings, run.workers, run.step3_cpus, run.pilot_gate) == (5, 1, 16, True)
+    assert (run.ags, run.pylovo_version_id, run.step3_cpus, run.step4_cpus) == (9184137, "1", 2, 4)
+    assert (run.min_buildings, run.workers, run.weather_year, run.solver) == (5, 1, None, None)
     one_grid = synthetic(pylovo__plz=85653, pylovo__kcid=1, pylovo__bcid=-1)
     assert (one_grid.plz, one_grid.kcid, one_grid.bcid) == (85653, 1, -1)
     assert synthetic(pylovo__plz="-").plz is None
     assert "region" in run.identity() and "model_cases" not in run.identity()
     raw = copy.deepcopy(SYNTHETIC)
     del raw["model_cases"], raw["execution"]
-    assert run_config_from_dict(raw, base_dir=Path("/")).model_cases == ("pre", "post-hems-heuristic",
-                                                                           "post-hems-optimized")
+    assert run_config_from_dict(raw, base_dir=Path("/")).model_cases == (
+        "post-inflex-heuristic", "post-hems-heuristic", "post-hems-optimized")
+    # pre always runs: listed with post cases it is implied, alone it is a status-quo run
+    assert synthetic(model_cases=["pre", "post-inflex-heuristic"]).model_cases == ("post-inflex-heuristic",)
+    assert synthetic(model_cases=["pre"]).model_cases == ("pre",)
 
 
 @pytest.mark.parametrize("changes, message", [
@@ -77,11 +79,13 @@ def test_synthetic_defaults():
     ({"pylovo__kcid": 1}, "kcid and grids.pylovo.bcid"),
     ({"pylovo__version": ""}, "grids.pylovo.version"),
     ({"pylovo__storage": "db"}, "Unknown"),
-    ({"model_cases": ["pre", "post-inflex-heuristic"]}, "not available for the synthetic"),
+    ({"model_cases": []}, "cannot be empty"),
+    ({"model_cases": "pre"}, "list"),
     ({"execution__n_cpu": 3}, "Unknown"),
     ({"execution__resume": "false"}, "true or false"),
     ({"execution__workers": 0}, "positive"),
-    ({"execution__timeframe_mode": "winter"}, "timeframe_mode"),
+    ({"execution__timeframe_mode": "full_year"}, "Unknown"),
+    ({"execution__solver": "cplex"}, "execution.solver"),
     ({"execution__unknown": 1}, "Unknown"),
     ({"scenario_overrides": [1]}, "scenario_overrides"),
 ])
@@ -93,8 +97,9 @@ def test_synthetic_rejects(changes, message):
 def test_with_cases():
     run = synthetic()
     assert with_cases(run, ("pre",)).model_cases == ("pre",)
+    assert with_cases(run, ("post-inflex-heuristic",)).model_cases == ("post-inflex-heuristic",)
     with pytest.raises(ValueError):
-        with_cases(run, ("post-inflex-heuristic",))
+        with_cases(run, ("post-flex",))
 
 
 def test_former_and_validation_formats_point_to_the_right_tool(tmp_path):

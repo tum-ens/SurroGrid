@@ -1,14 +1,16 @@
 """Scenario dataset of given grids: the demand, assets and electrification of every supplied building.
 
-Input: the building supply of the matcher (``building_objectid, grid_id, bus``, :mod:`gridexpand.grids.matching`)
-and the grid file of every grid. Every building takes its attributes from InfDB, derived with pylovo's rules
+Input: the building supply (``building_objectid, grid_id, bus``) of own grids (the matcher,
+:mod:`gridexpand.grids.matching`, plus the grid file of every grid; ``network`` ``real``) or of pylovo grids
+(:mod:`gridexpand.grids.pylovo`; ``network`` ``synthetic``, ``grid_id`` = grid case id, no grid files). Every building takes its attributes from InfDB, derived with pylovo's rules
 (:mod:`gridexpand.grids.attributes`); no pylovo result is read. Electricity components, GHD rules,
 household sampling, LoD2 roofs, vehicles and the electrification assignment follow the method of the
 real-vs-synthetic validation, building by building with stable seeds, so a building gets the same scenario in a
 given grid as in a pylovo grid. The outputs are the dataset contract of the per-grid runner, the URBS input and the
-real-grid power flow (one network side):
+power flow of one network side:
 
-``paired_real_bus_allocation_plan.csv`` (one scenario unit per building, its grid, bus and grid file),
+``paired_real_bus_allocation_plan.csv`` or ``paired_synthetic_bus_allocation_plan.csv`` (one scenario unit per
+building, its grid and bus, the grid file or the pylovo grid),
 ``paired_component_scenario_plan.csv``, ``paired_building_scenario_plan.csv``,
 ``paired_electrification_assignment.csv`` (+ ``_summary``), ``paired_pv_roof_assignments.csv``,
 ``paired_roof_sections.csv``, ``paired_ghd_policy_audit.csv``, ``paired_scope_audit.csv``,
@@ -16,7 +18,8 @@ real-grid power flow (one network side):
 register ``pylovo.municipal_register``.
 
 ``uv run python -m gridexpand.grids.dataset --supply <building_supply.csv> --grids <dir> --scenario-config <yaml>
---output-dir <dir>`` (read-only database access).
+--output-dir <dir>`` (read-only database access); pylovo grids: ``--network synthetic --pylovo-version-id <id>``
+instead of ``--grids``.
 """
 
 from __future__ import annotations
@@ -121,7 +124,11 @@ def pv_scenario_unit_assignments(real_plan: pd.DataFrame) -> pd.DataFrame:
     ].reset_index(drop=True)
 
 
-def _supply(supply: pd.DataFrame, grid_files: Mapping[str, Path]) -> pd.DataFrame:
+SYNTHETIC_SUPPLY_COLUMNS = ("synthetic_bridge_filename", "synthetic_kcid", "synthetic_bcid", "pylovo_grid_result_id")
+
+
+def _supply(supply: pd.DataFrame, grid_files: Mapping[str, Path] | None) -> pd.DataFrame:
+    """The supply with its grid number (and grid file); ``grid_files`` None: pylovo grids (no files)."""
     missing = [name for name in ("building_objectid", "grid_id", "bus") if name not in supply.columns]
     if missing:
         raise ValueError(f"The building supply lacks the columns {missing}.")
@@ -131,10 +138,16 @@ def _supply(supply: pd.DataFrame, grid_files: Mapping[str, Path]) -> pd.DataFram
     result["bus"] = pd.to_numeric(result["bus"], errors="raise").astype(int)
     if result["building_objectid"].duplicated().any():
         raise ValueError("A building has two supplies; the matcher gives every building one bus.")
-    unknown = sorted(set(result["grid_id"]) - set(grid_files))
-    if unknown:
-        raise ValueError(f"Grids without a grid file: {unknown[:5]}")
-    result["grid_file"] = result["grid_id"].map(lambda grid_id: str(Path(grid_files[grid_id]).resolve()))
+    if grid_files is None:
+        missing = [name for name in SYNTHETIC_SUPPLY_COLUMNS if name not in supply.columns]
+        if missing:
+            raise ValueError(f"The supply of pylovo grids lacks the columns {missing}.")
+        result["grid_file"] = pd.NA
+    else:
+        unknown = sorted(set(result["grid_id"]) - set(grid_files))
+        if unknown:
+            raise ValueError(f"Grids without a grid file: {unknown[:5]}")
+        result["grid_file"] = result["grid_id"].map(lambda grid_id: str(Path(grid_files[grid_id]).resolve()))
     result["grid_number"] = result["grid_id"].map(grid_numbers(result["grid_id"]))
     return result
 
@@ -190,7 +203,7 @@ def _grid_components(physical: pd.DataFrame, *, profile_seed: int, ghd_config, g
 
 def build_dataset(
     supply: pd.DataFrame,
-    grid_files: Mapping[str, Path],
+    grid_files: Mapping[str, Path] | None,
     *,
     engine,
     scenario_config_path: Path,
@@ -198,14 +211,23 @@ def build_dataset(
     output_dir: Path,
     network: str = "real",
     selection_scope_id: str | None = None,
+    pylovo_version_id: str = "none",
 ) -> dict[str, Any]:
     """Write the scenario dataset of the supplied buildings and return its metadata.
 
-    ``selection_scope_id`` names the population of the electrification draw (default: scenario, network and
-    grids); the same id and seed select the same buildings.
+    ``network`` ``synthetic``: pylovo grids (no grid files; ``pylovo_version_id`` of the grids). Other labels are
+    real grids (``real``; the validation's ``real_<provider>``). ``selection_scope_id`` names the population of the
+    electrification draw (default: scenario, network and grids); the same id and seed select the same buildings.
     """
+    synthetic = network == "synthetic"
+    if synthetic == (grid_files is not None):
+        raise ValueError("Grid files belong to real grids; pylovo grids (network synthetic) have none.")
+    if synthetic and pylovo_version_id == "none":
+        raise ValueError("A dataset of pylovo grids needs their pylovo version.")
     scenario, scenario_hash = load_scenario_config(scenario_config_path)
     grid_config.apply_scenario(scenario)
+    pylovo_keys = (supply.assign(building_objectid=supply["building_objectid"].astype(str))
+                   .set_index("building_objectid")[list(SYNTHETIC_SUPPLY_COLUMNS)] if synthetic else None)
     supply = _supply(supply, grid_files)
     ids = sorted(supply["building_objectid"])
     physical = attributes.building_attributes(engine, ids)
@@ -324,16 +346,26 @@ def build_dataset(
     # PV roof assignment: every eligible roof belongs to its only scenario unit.
     plan_base = buildings.assign(
         lv_id=buildings["grid_number"], source_lv_id=buildings["grid_number"], source_allocation_bus=buildings["bus"],
-        real_grid_id=buildings["grid_number"], real_bus=buildings["bus"], real_grid_file=buildings["grid_file"],
-        real_grid_name=buildings["grid_id"],
         include_full_local_demand_scenario=True, scenario_scope="paired_full_local_demand", provider=network,
     )
+    if synthetic:
+        keys = pylovo_keys.loc[plan_base["building_objectid"]].reset_index(drop=True)
+        plan_base = plan_base.assign(
+            real_grid_id=pd.NA, real_bus=pd.NA, real_grid_file=pd.NA, real_grid_name=pd.NA,
+            synthetic_grid_case_id=plan_base["grid_number"], synthetic_bus=plan_base["bus"],
+            synthetic_bridge_filename=keys["synthetic_bridge_filename"].to_numpy(),
+            synthetic_kcid=keys["synthetic_kcid"].to_numpy(), synthetic_bcid=keys["synthetic_bcid"].to_numpy(),
+            pylovo_grid_result_id=keys["pylovo_grid_result_id"].to_numpy(),
+        )
+    else:
+        plan_base = plan_base.assign(
+            real_grid_id=plan_base["grid_number"], real_bus=plan_base["bus"], real_grid_file=plan_base["grid_file"],
+            real_grid_name=plan_base["grid_id"], synthetic_grid_case_id=pd.NA, synthetic_bus=pd.NA,
+            synthetic_bridge_filename=pd.NA, synthetic_kcid=pd.NA, synthetic_bcid=pd.NA,
+        )
     pv_assignments = pv_scenario_unit_assignments(plan_base[plan_base["pv_roof_capacity_kw"].gt(0.0)])
     plan_base = plan_base.merge(pv_assignments, on=["building_objectid", "scenario_unit_id"], how="left")
     plan_base["pv_roof_eligible"] = plan_base["pv_roof_assignment_method"].notna()
-    for column in ("synthetic_grid_case_id", "synthetic_bus", "synthetic_bridge_filename", "synthetic_kcid",
-                   "synthetic_bcid"):
-        plan_base[column] = pd.NA
     real_plan = plan_base.assign(target_network=network, target_grid_id=plan_base["grid_number"],
                                  allocation_bus=plan_base["bus"])[[*PLAN_COLUMNS, "real_grid_name"]]
 
@@ -342,6 +374,7 @@ def build_dataset(
     for component in components.to_dict("records"):
         object_id = str(component["building_objectid"])
         target = unit.loc[object_id]
+        grid_number, bus = int(target["grid_number"]), int(target["bus"])
         category = str(component["component_category"])
         annual_kwh = float(component["annual_energy_kwh"])
         if bool(component["mv_direct"]):
@@ -360,13 +393,14 @@ def build_dataset(
             "source_component_category": category,
             "source_pylovo_grid_result_id": component.get("pylovo_grid_result_id"),
             "source_pylovo_version_id": component.get("pylovo_version_id"),
-            "source_lv_id": int(target["grid_number"]),
-            "source_allocation_bus": int(target["bus"]),
-            "real_target_grid_id": int(target["grid_number"]),
-            "real_target_bus": int(target["bus"]),
-            "synthetic_target_grid_case_id": None,
-            "synthetic_target_bus": None,
-            "synthetic_bridge_filename": None,
+            "source_lv_id": grid_number,
+            "source_allocation_bus": bus,
+            "real_target_grid_id": None if synthetic else grid_number,
+            "real_target_bus": None if synthetic else bus,
+            "synthetic_target_grid_case_id": grid_number if synthetic else None,
+            "synthetic_target_bus": bus if synthetic else None,
+            "synthetic_bridge_filename": (pylovo_keys.at[object_id, "synthetic_bridge_filename"]
+                                          if synthetic else None),
             "included_in_lv": included,
             "annual_energy_kwh": annual_kwh if included else 0.0,
             "profile_method": method,
@@ -400,7 +434,8 @@ def build_dataset(
         "postcodes": postcodes,
         "grids": {name: int(number) for name, number in grid_numbers(grids).items()},
         "attribute_source": "infdb_basedata_pylovo_rules",
-        "pylovo_version_id": "none",  # own grids read no pylovo result; the runner records this label
+        # Own grids read no pylovo result ("none"); pylovo grids record their version (power flow, expansion).
+        "pylovo_version_id": str(pylovo_version_id),
         "scenario_scope": "paired_full_local_demand",
         "scenario_id": scenario.scenario_id,
         "scenario_hash": scenario_hash,
@@ -415,11 +450,12 @@ def build_dataset(
         "electrification_assignment_summary": summary.to_dict("records"),
         "component_contract": "physical_building_component_v1",
         "paired_contract": "physical_building_component_paired_v2",
-        "source_connection_policy": "matched_connection_points_one_bus_per_building",
+        "source_connection_policy": ("pylovo_bus_one_bus_per_building" if synthetic
+                                     else "matched_connection_points_one_bus_per_building"),
         "demand_source": "modelled_pylovo_components",
         "component_rows": int(len(component_plan)),
         "included_component_rows": int(component_plan["included_in_lv"].astype(bool).sum()),
-        "real_grids": int(real_plan["target_grid_id"].nunique()),
+        f"{'synthetic' if synthetic else 'real'}_grids": int(real_plan["target_grid_id"].nunique()),
         "ghd_policy": {
             "activity_gating": scenario.ghd.activity_gating,
             "single_volume_one_storey": scenario.ghd.single_volume_one_storey,
@@ -431,7 +467,7 @@ def build_dataset(
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     outputs = {
-        "paired_real_bus_allocation_plan": real_plan,
+        f"paired_{'synthetic' if synthetic else 'real'}_bus_allocation_plan": real_plan,
         "paired_component_scenario_plan": component_plan,
         "paired_building_scenario_plan": plan_base[BUILDING_PLAN_COLUMNS],
         "paired_scope_audit": scope_audit,
@@ -471,27 +507,32 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m gridexpand.grids.dataset", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--supply", type=Path, required=True, help="building_supply.csv of gridexpand match")
-    parser.add_argument("--grids", type=Path, nargs="+", required=True, help="the grid files or their directories")
+    parser.add_argument("--grids", type=Path, nargs="+", help="the grid files or their directories (real grids)")
     parser.add_argument("--scenario-config", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--profile-seed", type=int, default=DEFAULT_PROFILE_SEED)
-    parser.add_argument("--network", default="real", help="label of the grids in the dataset (default: real)")
+    parser.add_argument("--network", default="real",
+                        help="label of the grids in the dataset: real (default) or synthetic (pylovo grids)")
+    parser.add_argument("--pylovo-version-id", default="none", help="pylovo version of the grids (synthetic)")
     parser.add_argument("--selection-scope-id", default=None,
                         help="population id of the electrification draw (default: scenario, network, grids, version)")
     args = parser.parse_args(argv)
+    if (args.network == "synthetic") == bool(args.grids):
+        parser.error("--grids for real grids; pylovo grids (--network synthetic) have no files")
     engine = read_only_engine()
     metadata = build_dataset(
         pd.read_csv(args.supply, dtype={"building_objectid": str, "grid_id": str}),
-        sources.grid_files(args.grids),
+        None if args.network == "synthetic" else sources.grid_files(args.grids),
         engine=engine,
         scenario_config_path=args.scenario_config.resolve(),
         profile_seed=args.profile_seed,
         output_dir=args.output_dir.resolve(),
         network=args.network,
         selection_scope_id=args.selection_scope_id,
+        pylovo_version_id=args.pylovo_version_id,
     )
-    print(json.dumps({key: metadata[key] for key in ("real_grids", "component_rows", "attribute_source",
-                                                     "scenario_key")}, indent=2))
+    print(json.dumps({key: value for key, value in metadata.items() if key in (
+        "real_grids", "synthetic_grids", "component_rows", "attribute_source", "scenario_key")}, indent=2))
     return 0
 
 

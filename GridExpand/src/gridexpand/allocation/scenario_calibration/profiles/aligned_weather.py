@@ -25,7 +25,9 @@ import gridexpand.common.weather as weather_functions
 def write_aligned_weather(
     paired_dir: Path, output: Path, reference_year: int, weather_year: int | None = None
 ) -> Path:
-    plan = pd.read_csv(paired_dir / "paired_real_bus_allocation_plan.csv")
+    from gridexpand.runner.datasets import allocation_plan_path
+
+    plan = pd.read_csv(allocation_plan_path(paired_dir))
     plz = int(plan["postcode"].mode().iloc[0])
     database = SurroGridDatabase()
     version = _version(paired_dir)

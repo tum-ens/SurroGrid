@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """``gridexpand run <run.yaml>``: prepare, execute and postprocess one run YAML.
 
-``grids: pylovo`` (synthetic grids): prepare = candidate grids + one regional
-electrification assignment; execute = one ``gridexpand synthetic`` batch per
-execution group (:func:`gridexpand.scenario.synthetic_ags_runner.run_batch`,
-including its expansion analyses); postprocess = one QGIS view refresh.
-``grids: files`` (own grids): :mod:`gridexpand.scenario.real_run`. The
-real-vs-synthetic validation (``GridExpand/validation``) reuses the run
-context, :func:`execute` and :func:`plan_header` for ``pipeline:
+``grids: pylovo`` (synthetic grids) and ``grids: files`` (own grids) run the same
+scenario method (:mod:`gridexpand.scenario.grid_run`): prepare = the buildings of
+the grids, the scenario dataset, weather, heat and PV libraries; execute = the
+per-grid runner per execution group; postprocess = the expansion analyses and one
+QGIS view refresh. The real-vs-synthetic validation (``GridExpand/validation``)
+reuses the run context, :func:`execute` and :func:`plan_header` for ``pipeline:
 paired_aligned``.
 
 The run directory (default ``WORK_DIR/runs/<run.id>``) holds frozen inputs,
@@ -30,15 +29,10 @@ from pathlib import Path
 from typing import Any
 
 from gridexpand.common.orchestration import CANCEL, Cancelled, install_cancel_handlers, utc_now
-from gridexpand.optimization.solver import OPTIMIZER_ENV
+from gridexpand.optimization.solver import OPTIMIZER_ENV, SOLVER_ENV
 from gridexpand.paths import RUNS_DIR
 from gridexpand.scenario.config_loader import _read_yaml, configuration_hash, scenario_identity_key
-from gridexpand.scenario.model_cases import MODEL_CASES, ExecutionGroup, execution_groups
-from gridexpand.scenario.run_config import (
-    SyntheticRun,
-    load_run_config,
-    with_cases,
-)
+from gridexpand.scenario.run_config import load_run_config, with_cases
 from gridexpand.scenario.rundir import (
     IdentityMismatch,
     RunState,
@@ -99,198 +93,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-# Synthetic ------------------------------------------------------------------------------
-
-
-def synthetic_settings(ctx: RunContext, group: ExecutionGroup):
-    """The :class:`BatchSettings` of one synthetic execution group."""
-    from gridexpand.scenario.synthetic_ags_runner import BatchSettings
-
-    run: SyntheticRun = ctx.run  # type: ignore[assignment]
-    case = MODEL_CASES[group.materialization_case]
-    return BatchSettings(
-        ags=str(run.ags),
-        pylovo_version_id=run.pylovo_version_id,
-        scenario_config=run.scenario_path,
-        scenario=ctx.scenario,
-        scenario_hash=ctx.scenario_hash,
-        run_dir=ctx.run_dir / group.materialization_case,
-        model_case=group.materialization_case,
-        profiles=case.profiles,
-        min_buildings=run.min_buildings,
-        demand_scope=run.demand_scope,
-        timeframe_mode=run.timeframe_mode,
-        plz=run.plz,
-        kcid=run.kcid,
-        bcid=run.bcid,
-        start_index=run.start_index,
-        limit=run.limit,
-        workers=run.workers,
-        step2_cpus=run.step2_cpus,
-        step2_timeseries_storage=run.step2_timeseries_storage,
-        step3_cpus=run.step3_cpus,
-        step3_max_cpus=run.step3_max_cpus,
-        step3_target_columns=run.step3_target_columns,
-        step3_cluster_concurrency=run.step3_cluster_concurrency,
-        dynamic_step3=run.dynamic_step3,
-        step4_cpus=run.step4_cpus,
-        solver=run.solver,
-        optimizer=run.optimizer,
-        powerflow_output=run.powerflow_output,
-        powerflow_grid_scope=run.powerflow_grid_scope,
-        case_qualified_output=True,
-        profile_seed=run.profile_seed,
-        electrification_assignment=ctx.run_dir / "prepare" / "electrification_assignment.csv",
-        pilot_index=run.pilot_index,
-        pilot_gate=run.pilot_gate,
-        resume=ctx.resume,
-        rerun_failed=run.rerun_failed,
-        cleanup_intermediates=run.cleanup_intermediates,
-        materialize_expansion=run.materialize_expansion and ctx.wants("postprocess"),
-    )
-
-
-def synthetic_equivalent_command(settings) -> list[str]:
-    """The ``gridexpand synthetic`` command line that runs the same batch."""
-    argv = [
-        "gridexpand", "synthetic",
-        "--ags", settings.ags, "--pylovo-version-id", settings.pylovo_version_id,
-        "--min-buildings", settings.min_buildings,
-        "--workers", settings.workers, "--step2-cpus", settings.step2_cpus,
-        "--step3-cpus", settings.step3_cpus, "--step3-max-cpus", settings.step3_max_cpus,
-        "--step3-target-columns", settings.step3_target_columns,
-        "--step4-cpus", settings.step4_cpus,
-        "--scenario-config", settings.scenario_config,
-        "--timeframe-mode", settings.timeframe_mode,
-        "--demand-scope", settings.demand_scope,
-        "--step2-timeseries-storage", settings.step2_timeseries_storage,
-        "--powerflow-output", settings.powerflow_output,
-        "--powerflow-grid-scope", settings.powerflow_grid_scope,
-        "--case-qualified-output",
-        "--profile-seed", settings.profile_seed,
-        "--model-case", settings.model_case, "--profiles", settings.profiles,
-        "--cleanup-intermediates", settings.cleanup_intermediates,
-        "--pilot-index", settings.pilot_index,
-        "--electrification-assignment", settings.assignment_path,
-        "--run-dir", settings.run_dir,
-    ]
-    for name in ("plz", "kcid", "bcid", "start_index", "limit", "step3_cluster_concurrency", "solver", "optimizer"):
-        value = getattr(settings, name)
-        if value is not None:
-            argv += [f"--{name.replace('_', '-')}", value]
-    for enabled, name in ((not settings.pilot_gate, "--no-pilot-gate"), (not settings.dynamic_step3, "--no-dynamic-step3"),
-                          (not settings.materialize_expansion, "--no-materialize-expansion"),
-                          (settings.resume, "--resume"), (settings.rerun_failed, "--rerun-failed")):
-        if enabled:
-            argv.append(name)
-    return [str(value) for value in argv]
-
-
-def _mirrored(event: dict[str, Any]) -> dict[str, Any]:
-    """A batch event for the run-level log: no command lines, the batch's job as ``grid``."""
-    payload = {k: v for k, v in event.items() if k not in ("ts", "cmd", "env_extra", "group")}
-    payload["grid"] = payload.pop("job", None)
-    return {**payload, "source": "batch"}
-
-
-def _synthetic_listener(state: RunState, group: str, keys: dict[int, str]) -> Callable[[dict[str, Any]], None]:
-    """Mirror a batch's events into the run state (job key ``<group>/<bridge stem>``)."""
-
-    def listener(event: dict[str, Any]) -> None:
-        index = event.get("candidate_index")
-        key = keys.get(int(index)) if index is not None else None
-        state.event(**_mirrored(event), group=group, job=key)
-        if key is None:
-            return
-        kind = event.get("event")
-        if kind == "start":
-            state.job(key, status="running", step=event.get("stage"))
-        elif kind == "candidate_done" or (kind == "pilot_finish" and event.get("status") == "done"):
-            state.job(key, status="done", step="complete", seconds=event.get("seconds"))
-        elif kind == "candidate_failed":
-            state.job(key, status="failed", step=event.get("stage"), message=event.get("message"),
-                      seconds=event.get("seconds"))
-        elif kind == "candidate_cancelled":
-            state.job(key, status="cancelled", step=event.get("stage"))
-        elif kind == "candidate_skipped_resume_done":
-            state.job(key, status="done", message="done in an earlier invocation")
-        elif kind == "candidate_skipped_resume_failed":
-            state.job(key, status="failed", message="failed in an earlier invocation (use rerun_failed)")
-
-    return listener
-
-
-def run_synthetic(ctx: RunContext) -> int:
-    from gridexpand.scenario import synthetic_ags_runner as runner
-
-    run: SyntheticRun = ctx.run  # type: ignore[assignment]
-    state = ctx.state
-    groups = execution_groups(run.model_cases)
-    settings = {group.materialization_case: synthetic_settings(ctx, group) for group in groups}
-    for group_settings in settings.values():
-        runner.check_settings(group_settings)
-    with state.stage_context("prepare"):
-        first = next(iter(settings.values()))
-        candidates = runner.load_candidates(first)
-        write_json_atomic(ctx.run_dir / "candidates.json", candidates)
-        if not candidates:
-            raise ValueError(f"No candidate grids for AGS {run.ags} (filters plz={run.plz}, kcid={run.kcid}, "
-                             f"bcid={run.bcid}, min_buildings={run.min_buildings}, pylovo {run.pylovo_version_id}).")
-        post = [s for s in settings.values() if s.profiles != "status_quo"]
-        if post:
-            prepare_settings = post[0].replace(run_dir=ctx.run_dir / "prepare", resume=True)
-            (prepare_settings.run_dir / "logs").mkdir(parents=True, exist_ok=True)
-            status = runner.StatusLog(prepare_settings.run_dir,
-                                      listener=lambda event: state.event(**_mirrored(event), group="prepare"))
-            runner.ensure_electrification_assignment(prepare_settings, candidates, status)
-        selected = candidates
-        if run.start_index is not None:
-            selected = [c for c in selected if int(c["candidate_index"]) >= run.start_index]
-        if run.limit is not None:
-            selected = selected[: run.limit]
-        jobs = [
-            {"job": f"{group}/{runner.job_key(c)}", "group": group, "candidate_index": int(c["candidate_index"]),
-             "plz": c["plz"], "kcid": c["kcid"], "bcid": c["bcid"], "n_buildings": c["n_buildings"],
-             "log": f"{group}/logs/candidate_{int(c['candidate_index']):03d}_{runner.step2_filename(c, s)}.log"}
-            for group, s in settings.items() for c in selected
-        ]
-        # The batches resume by grid themselves (status.tsv of each group); the state keeps done records.
-        state.plan(jobs, resume=ctx.resume)
-        write_json_atomic(ctx.run_dir / "plan.json", {
-            "pipeline": run.pipeline, "groups": [g.__dict__ for g in groups],
-            "commands": {group: synthetic_equivalent_command(s) for group, s in settings.items()},
-            "jobs": [job["job"] for job in jobs],
-        })
-    if not ctx.wants("execute"):
-        return EXIT_OK
-
-    codes: dict[str, int] = {}
-    with state.stage_context("execute") as record:
-        for group, group_settings in settings.items():
-            keys = {int(c["candidate_index"]): f"{group}/{runner.job_key(c)}" for c in candidates}
-            print(f"[execute] {group}: {' '.join(synthetic_equivalent_command(group_settings))}", flush=True)
-            codes[group] = runner.run_batch(
-                group_settings, candidates=candidates, listener=_synthetic_listener(state, group, keys),
-                refresh_qgis_views=False,
-            )
-            ctx.groups[group] = _read_json(group_settings.run_dir / "summary.json")
-            if CANCEL.is_set() or codes[group] == runner.EXIT_CANCELLED:
-                raise Cancelled(f"cancelled during {group}")
-            if codes[group] == 1:
-                record["result"] = "failed"
-                break
-    if any(code == 1 for code in codes.values()):
-        return EXIT_FAILED
-    if ctx.wants("postprocess"):
-        with state.stage_context("postprocess"):
-            if any((summary or {}).get("materialized_expansion") for summary in ctx.groups.values()):
-                from gridexpand.db import refresh_qgis_views
-
-                refresh_qgis_views()
-                state.event(event="qgis_views_refreshed")
-    return EXIT_JOB_FAILURES if any(code == 2 for code in codes.values()) else EXIT_OK
-
-
 # Dry run ----------------------------------------------------------------------------------
 
 
@@ -306,23 +108,9 @@ def plan_header(ctx: RunContext) -> list[str]:
 
 def plan_lines(ctx: RunContext) -> list[str]:
     """Human-readable plan: groups and the commands each stage would run (no DB, no files)."""
-    if ctx.run.pipeline == "real":
-        from gridexpand.scenario import real_run
+    from gridexpand.scenario import grid_run
 
-        return plan_header(ctx) + real_run.plan_lines(ctx)
-    run: SyntheticRun = ctx.run
-    lines = plan_header(ctx)
-    groups = execution_groups(run.model_cases)
-    region = f"AGS {run.ags}" + (f", PLZ {run.plz}" if run.plz is not None else "") + (
-        f", grid {run.kcid}/{run.bcid}" if run.kcid is not None else "")
-    lines.append(f"[prepare] candidate grids of {region} (min {run.min_buildings} buildings); "
-                 "regional electrification assignment" if any(g.materialization_case != "pre" for g in groups)
-                 else f"[prepare] candidate grids of {region} (min {run.min_buildings} buildings)")
-    for group in groups:
-        lines.append(f"[execute:{group.materialization_case}] "
-                     + " ".join(synthetic_equivalent_command(synthetic_settings(ctx, group))))
-    lines.append("[postprocess] refresh the QGIS views")
-    return lines
+    return plan_header(ctx) + grid_run.plan_lines(ctx)
 
 
 # Main ---------------------------------------------------------------------------------------
@@ -384,7 +172,7 @@ def run_identity(ctx: RunContext) -> dict[str, Any]:
 
 
 def execute(ctx: RunContext, runner: Callable[[RunContext], int] | None = None) -> int:
-    """Run the stages of ``ctx`` in its run directory with ``runner`` (default: the synthetic pipeline)."""
+    """Run the stages of ``ctx`` in its run directory with ``runner`` (default: :func:`grid_run.run_grids`)."""
     ctx.run_dir.mkdir(parents=True, exist_ok=True)
     check_identity(ctx.run_dir, run_identity(ctx), info={"run_hash": ctx.run_hash, "git": git_revision()})
     if ctx.scenario_raw is not None:
@@ -392,16 +180,18 @@ def execute(ctx: RunContext, runner: Callable[[RunContext], int] | None = None) 
     freeze_inputs(ctx.run_dir, ctx.run_yaml, ctx.run.scenario_path)
     ctx.state = RunState(ctx.run_dir, ctx.run.run_id, ctx.run.pipeline)
     if ctx.run.optimizer:
-        # Every Step 3 job of the run inherits the optimizer (like GRIDEXPAND_SOLVER).
+        # Every Step 3 job of the run inherits the optimizer and the solver.
         os.environ[OPTIMIZER_ENV] = ctx.run.optimizer
+    if getattr(ctx.run, "solver", None):
+        os.environ[SOLVER_ENV] = ctx.run.solver
     ctx.state.event(event="run_start", run_hash=ctx.run_hash, scenario_hash=ctx.scenario_hash,
                     model_cases=list(ctx.run.model_cases), resume=ctx.resume, until=ctx.until,
                     optimizer=os.environ.get(OPTIMIZER_ENV) or "urbs")
     try:
         if runner is None:
-            from gridexpand.scenario.real_run import run_real
+            from gridexpand.scenario.grid_run import run_grids
 
-            runner = run_real if ctx.run.pipeline == "real" else run_synthetic
+            runner = run_grids
         code = runner(ctx)
         status = {EXIT_OK: "done", EXIT_JOB_FAILURES: "completed_with_failures"}.get(code, "failed")
     except Cancelled:

@@ -86,16 +86,13 @@ def test_commands(tmp_path):
                         min_buildings=60, start_index=3, limit=1)
     job_dir = tmp_path / "runs" / "abc123"
     steps = pipeline_steps(spec, job_dir, python="py")
-    assert [s.name for s in steps] == ["pre", "post-hems-optimized"]
-    assert steps[0].argv == ["py", "-m", "gridexpand", "run", str(job_dir / "run.yaml"), "--run-dir", str(job_dir),
-                             "--model-case", "pre"]
-    assert steps[1].argv[-1] == "post-hems-optimized" and steps[1].run_dir == str(job_dir / "post-hems-optimized")
+    assert [s.name for s in steps] == ["run"] and steps[0].run_dir == str(job_dir)
+    assert steps[0].argv == ["py", "-m", "gridexpand", "run", str(job_dir / "run.yaml"), "--run-dir", str(job_dir)]
     # the generated run YAML is a valid synthetic run with the request's selection
     run, _ = load_run_config(job_dir / "run.yaml")
     assert (run.pipeline, run.run_id, run.ags, run.pylovo_version_id) == ("synthetic", "service_abc123", 9184137, "1")
-    assert (run.min_buildings, run.start_index, run.limit, run.pilot_index) == (60, 3, 1, 3)
-    assert run.model_cases == ("pre", "post-hems-optimized") and run.powerflow_output == "summary"
-    assert run.scenario_path == scenario and run.timeframe_mode == "full_year"
+    assert (run.min_buildings, run.start_index, run.limit) == (60, 3, 1)
+    assert run.model_cases == ("post-hems-optimized",) and run.scenario_path == scenario
     assert run_yaml(spec, "x")["execution"]["workers"] == 1
     assert contiguous_range([5, 3, 4]) == (3, 3)
     with pytest.raises(ValueError):
