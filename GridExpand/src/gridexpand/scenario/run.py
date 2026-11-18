@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """``gridexpand run <run.yaml>``: prepare, execute and postprocess one run YAML.
 
-``pipeline: synthetic``: prepare = candidate grids + one regional
+``grids: pylovo`` (synthetic grids): prepare = candidate grids + one regional
 electrification assignment; execute = one ``gridexpand synthetic`` batch per
 execution group (:func:`gridexpand.scenario.synthetic_ags_runner.run_batch`,
-including its expansion analyses); postprocess = one QGIS view refresh. The
+including its expansion analyses); postprocess = one QGIS view refresh.
+``grids: files`` (own grids): :mod:`gridexpand.scenario.real_run`. The
 real-vs-synthetic validation (``GridExpand/validation``) reuses the run
 context, :func:`execute` and :func:`plan_header` for ``pipeline:
 paired_aligned``.
@@ -305,6 +306,10 @@ def plan_header(ctx: RunContext) -> list[str]:
 
 def plan_lines(ctx: RunContext) -> list[str]:
     """Human-readable plan: groups and the commands each stage would run (no DB, no files)."""
+    if ctx.run.pipeline == "real":
+        from gridexpand.scenario import real_run
+
+        return plan_header(ctx) + real_run.plan_lines(ctx)
     run: SyntheticRun = ctx.run
     lines = plan_header(ctx)
     groups = execution_groups(run.model_cases)
@@ -393,7 +398,11 @@ def execute(ctx: RunContext, runner: Callable[[RunContext], int] | None = None) 
                     model_cases=list(ctx.run.model_cases), resume=ctx.resume, until=ctx.until,
                     optimizer=os.environ.get(OPTIMIZER_ENV) or "urbs")
     try:
-        code = (runner or run_synthetic)(ctx)
+        if runner is None:
+            from gridexpand.scenario.real_run import run_real
+
+            runner = run_real if ctx.run.pipeline == "real" else run_synthetic
+        code = runner(ctx)
         status = {EXIT_OK: "done", EXIT_JOB_FAILURES: "completed_with_failures"}.get(code, "failed")
     except Cancelled:
         code, status = EXIT_CANCELLED, "cancelled"

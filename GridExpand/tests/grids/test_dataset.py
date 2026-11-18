@@ -70,7 +70,9 @@ def test_dataset_of_two_given_grids(offline, tmp_path):
                                      output_dir=tmp_path / "out")
     plan = pd.read_csv(tmp_path / "out" / "paired_real_bus_allocation_plan.csv")
     assert plan[["building_objectid", "target_grid_id", "allocation_bus", "scenario_unit_id"]].values.tolist() == [
-        ["MFH", "g1", 1, 0], ["SHOP", "g1", 2, 1], ["SFH", "g1", 3, 2], ["HALL", "g2", 5, 3]]
+        ["MFH", 1, 1, 0], ["SHOP", 1, 2, 1], ["SFH", 1, 3, 2], ["HALL", 2, 5, 3]]
+    assert plan["real_grid_name"].tolist() == ["g1", "g1", "g1", "g2"]
+    assert dataset.grid_numbers(["7", "12"]) == {"7": 7, "12": 12}
     assert plan["target_network"].eq("real").all() and plan["real_grid_file"].iloc[0].endswith("g1.json")
     components = pd.read_csv(tmp_path / "out" / "paired_component_scenario_plan.csv").set_index("component_id")
     hall = components.loc["HALL::commercial"]
@@ -82,7 +84,7 @@ def test_dataset_of_two_given_grids(offline, tmp_path):
     assert pv["SFH"] and not pv["MFH"]
     assignment = pd.read_csv(tmp_path / "out" / "paired_electrification_assignment.csv")
     assert len(assignment) == 12
-    assert metadata["real_grids"] == 2 and metadata["attribute_source"] == "infdb_basedata_pylovo_rules"
+    assert metadata["grids"] == {"g1": 1, "g2": 2} and metadata["real_grids"] == 2 and metadata["attribute_source"] == "infdb_basedata_pylovo_rules"
     assert metadata["selection_scope_id"].endswith("|real|grids=g1,g2")
     stored = json.loads((tmp_path / "out" / "paired_scenario_metadata.json").read_text())
     assert stored["electrification_assignment_hash"] == metadata["electrification_assignment_hash"]

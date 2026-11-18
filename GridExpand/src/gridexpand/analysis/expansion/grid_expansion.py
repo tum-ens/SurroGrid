@@ -35,6 +35,7 @@ SQL_DIR = Path(__file__).with_name("sql")
 DEFAULT_ASSUMPTION_KEY = "de_lv_staged_2026"
 DATA_SOURCE_LABELS = {
     "synthetic": "Synthetic",
+    "real": "Real",
     "real_dso_a": "Real DSO A",
     "real_dso_b": "Real DSO B",
 }

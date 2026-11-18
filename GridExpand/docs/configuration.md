@@ -143,7 +143,8 @@ ghd:
 
 The PostGIS source reads with the pipeline's database connection (`DB_*`; the validation's status-quo test takes `--db-env-prefix`).
 
-Shipped scenario: `default_2045.yaml` (central 2045 assumptions, InfDB `ro_heat` space heat, TSAM on). Copy it to
+Shipped scenario: `default_2045.yaml` (the method of the pylovo validation paper: internal 1R1C space heat from InfDB's
+building RC parameters with HEMS preheating, full year without TSAM). Copy it to
 `config/scenarios/<name>.yaml` with a new `scenario.id` for a scenario of your own. The real-vs-synthetic validation
 has its own method scenario in `validation/config/scenarios/`. Test scenarios live in `tests/fixtures/scenarios/`.
 
@@ -169,7 +170,8 @@ execution: {workers: 2, powerflow_output: both}                # optional
 | `scenario` | a name of `config/scenarios/<name>.yaml`, or a path (contains `/` or ends in `.yaml`) relative to the run YAML |
 | `scenario_overrides` | optional mapping merged into the scenario key by key; unknown scenario keys are refused. The run uses the merged scenario, written to `<run dir>/inputs/scenario.yaml` when the run starts |
 | `grids.pylovo` | the synthetic grids of a pylovo version (keys below) |
-| `grids.files` | own grid files (`pipeline: real`), in preparation; until then [matching.md](matching.md) |
+| `grids.files` | own grid files (`pipeline: real`, keys below) |
+| `matching` | optional, own grids only: rules and distances of the matcher ([matching.md](matching.md#configuration)) |
 | `model_cases` | default `pre`, `post-hems-heuristic`, `post-hems-optimized`; `post-inflex-heuristic` is refused for synthetic grids |
 | `execution` | optional machine, solver and output settings (keys below) |
 
@@ -193,7 +195,30 @@ batch per execution group (see [method.md](method.md#model-cases)). Outputs are 
 
 `null`, `""` and `"-"` mean "any" for `plz`, `kcid`, `bcid`, `start_index`.
 
+### `grids.files`
+
+Own LV grids as pandapower JSON files, one per grid (the file stem is the grid id): bus coordinates (`bus.geo`), the
+ext_grid at the station busbar, the transformer rating as `trafo` row(s) (in service or not) and one load per
+connection point (or the points as a CSV). `gridexpand run` matches the points to InfDB buildings
+(`gridexpand match`), builds the scenario dataset (`python -m gridexpand.grids.dataset`), weather, heat and PV
+libraries, then runs the per-grid runner once per execution group (the first also runs the `pre` stage) and the
+expansion analyses (`<run>_real_<case>`, data source `Real`). Grids are numbered in the results: by their id when every
+id is an integer, else 1, 2, ... in the order of the ids (`real_grid_name` in the dataset keeps the file stem).
+
+| key | default | meaning |
+|---|---|---|
+| `dir` | required | directory of the grid files (a plain string `files: <dir>` is the same) |
+| `points` | null | CSV of connection points instead of the grid loads ([matching.md](matching.md#inputs)) |
+| `crs` | `EPSG:25832` | CRS of the grid and point coordinates |
+
+`model_cases` defaults to `post-inflex-heuristic`, `post-hems-heuristic`, `post-hems-optimized`. Execution keys of
+own-grid runs: `profile_seed`, `weather_year` (null: PVGIS TMY at the grids; a year: that real year), `workers`,
+`step3_cpus`, `step3_cluster_concurrency`, `step4_cpus`, `heat_workers`, `optimizer`, `powerflow_grid_scope`,
+`powerflow_max_timesteps` (caps Step 4, for smoke tests), `cleanup_intermediates`, `materialize_expansion`, `resume`.
+
 ### `execution`
+
+Synthetic grids (`grids.pylovo`):
 
 | key | default | meaning (`gridexpand synthetic` flag) |
 |---|---|---|

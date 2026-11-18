@@ -2,8 +2,8 @@
 
 A grid you bring yourself usually has no consumers in it: it holds connection points (the buses its loads hang on,
 often with an address), not buildings. `gridexpand match` decides for every connection point which InfDB building it
-supplies, so that the scenario can model the demand of exactly those buildings. It is the first part of
-`pipeline: real`; for now it runs on its own and writes its decisions for inspection.
+supplies, so that the scenario can model the demand of exactly those buildings. It is the first step of a run with
+`grids: files` ([configuration.md](configuration.md#gridsfiles)); on its own it writes its decisions for inspection.
 
 Code: `src/gridexpand/grids/` (`matching.py` rules, `sources.py` inputs, `match.py` command).
 
@@ -80,14 +80,8 @@ uv run gridexpand match ~/data/my_grids --points points.csv --crs EPSG:31468 --c
 
 ## Next: the scenario dataset
 
-```bash
-uv run python -m gridexpand.grids.dataset --supply <output>/building_supply.csv --grids ~/data/my_grids \
-    --scenario-config config/scenarios/<scenario>.yaml --output-dir work/datasets/my_grids
-```
-
-builds the demand, assets and electrification of every supplied building with the method of the real-vs-synthetic
-validation (read-only database access; the outputs are the dataset contract of the per-grid runner). Every
-building takes its attributes from InfDB; households for buildings without them, the non-residential use, peaks and
-the MV-direct share follow pylovo's rules, so a building gets the same attributes as in a pylovo grid without a
-pylovo result being read. `gridexpand run` with `pipeline: real` will run matching, dataset and model in one go (in
-preparation).
+`gridexpand run` continues with the scenario dataset (`python -m gridexpand.grids.dataset`, also callable on its own):
+the demand, assets and electrification of every supplied building with the method of the real-vs-synthetic
+validation. Every building takes its attributes from InfDB; households for buildings without them, the
+non-residential use, peaks and the MV-direct share follow pylovo's rules, so a building gets the same attributes as
+in a pylovo grid without a pylovo result being read.

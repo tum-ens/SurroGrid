@@ -3,7 +3,7 @@
 GridExpand simulates low-voltage (LV) distribution grids of a region before and after electrification (heat
 pumps, EVs, rooftop PV, batteries) and estimates the grid reinforcement they need. It runs on synthetic grids of a
 [pylovo](https://github.com/tum-ens/pylovo) database (usually an InfDB) or, being built, on grid files of your own,
-whose connection points it matches to InfDB buildings ([own grids](#own-grids-in-preparation)). The comparison with
+whose connection points it matches to InfDB buildings ([own grids](#quick-start-own-grids)). The comparison with
 real DSO grids, the validation of the pylovo paper, is a separate directory: [validation/](validation/README.md).
 
 | step | package | does |
@@ -94,19 +94,29 @@ refreshes the QGIS views; `--resume` continues an interrupted run. The YAML keys
 [docs/configuration.md](docs/configuration.md), the model cases and scientific rules in
 [docs/method.md](docs/method.md). `gridexpand synthetic --help` runs one batch directly (same flags).
 
-## Own grids (in preparation)
+## Quick start: own grids
 
-Bring LV grids as pandapower JSON files (one per grid, loads at the connection points). Two steps exist and only
-read the database; `pipeline: real` in `gridexpand run` will chain them with Steps 3-5:
+Bring LV grids as pandapower JSON files: one file per grid (the file stem is the grid id), bus coordinates, the
+ext_grid at the station busbar, the transformer as `trafo` row(s) and one load per connection point. GridExpand
+matches the connection points to InfDB buildings and runs the same scenario method as for synthetic grids:
 
-```bash
-uv run gridexpand match ~/data/my_grids --output work/matching/my_grids        # connection points -> buildings
-uv run python -m gridexpand.grids.dataset --supply work/matching/my_grids/building_supply.csv \
-    --grids ~/data/my_grids --scenario-config config/scenarios/<scenario>.yaml --output-dir work/datasets/my_grids
+```yaml
+# config/runs/my_grids.yaml
+run: my_grids
+scenario: default_2045
+grids:
+  files: ~/data/my_grids               # or {dir: ..., points: points.csv, crs: EPSG:31468}
+# matching: {nearest_residential_m: 15}   # optional: rules and distances of the matcher
 ```
 
-Rules, inputs and outputs: [docs/matching.md](docs/matching.md). Building attributes come from InfDB, derived with
-pylovo's rules; no pylovo grid is read.
+```bash
+uv run gridexpand run config/runs/my_grids.yaml --dry-run
+uv run gridexpand run config/runs/my_grids.yaml
+uv run gridexpand match ~/data/my_grids --output work/matching/my_grids   # the matching alone, to inspect it
+```
+
+Matching rules and outputs: [docs/matching.md](docs/matching.md). Building attributes come from InfDB, derived with
+pylovo's rules; no pylovo grid is read. Results: expansion analyses `<run>_real_<case>` with data source `Real`.
 
 ## Results
 

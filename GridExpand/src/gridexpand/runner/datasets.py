@@ -161,7 +161,8 @@ def validate_prepared_dataset(
     if metadata.get("scenario_hash") != scenario_hash:
         raise ValueError(f"{paired_dir} was prepared with another scenario YAML (scenario hash differs).")
     real = pd.read_csv(paired_dir / "paired_real_bus_allocation_plan.csv")
-    synthetic = pd.read_csv(paired_dir / "paired_synthetic_bus_allocation_plan.csv")
+    synthetic_path = paired_dir / "paired_synthetic_bus_allocation_plan.csv"
+    synthetic = pd.read_csv(synthetic_path) if synthetic_path.exists() else None  # real-only datasets have none
     heat = pd.read_csv(paired_dir / "paired_heat_profile_catalog.csv")
     assignment_path = paired_dir / "paired_electrification_assignment.csv"
     if not assignment_path.exists():
@@ -192,7 +193,7 @@ def validate_prepared_dataset(
         if not_exact.any():
             raise ValueError(f"{int(not_exact.sum())} heat profiles are not exact library profiles.")
     real_buildings = set(real["building_objectid"].astype(str))
-    if real_buildings != set(synthetic["building_objectid"].astype(str)):
+    if synthetic is not None and real_buildings != set(synthetic["building_objectid"].astype(str)):
         raise ValueError("Prepared real and synthetic plans contain different buildings.")
     if weather_hdf is not None and dataset.weather_source_hdf.resolve() != Path(weather_hdf).resolve():
         raise ValueError(f"PV library was built from {dataset.weather_source_hdf}, not {weather_hdf}.")
@@ -200,7 +201,7 @@ def validate_prepared_dataset(
         "paired_dataset_id": dataset.dataset_id,
         "paired_buildings": len(real_buildings),
         "real_grids": int(real["target_grid_id"].nunique()),
-        "synthetic_grids": int(synthetic["target_grid_id"].nunique()),
+        "synthetic_grids": 0 if synthetic is None else int(synthetic["target_grid_id"].nunique()),
         "heat_profiles": int(heat["building_objectid"].nunique()),
         "electrification_assignment_hash": assignment_hash,
         "electrification_selected": assignment.groupby("technology")["selected"].sum().astype(int).to_dict(),

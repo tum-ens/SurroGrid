@@ -135,7 +135,20 @@ def _supply(supply: pd.DataFrame, grid_files: Mapping[str, Path]) -> pd.DataFram
     if unknown:
         raise ValueError(f"Grids without a grid file: {unknown[:5]}")
     result["grid_file"] = result["grid_id"].map(lambda grid_id: str(Path(grid_files[grid_id]).resolve()))
+    result["grid_number"] = result["grid_id"].map(grid_numbers(result["grid_id"]))
     return result
+
+
+def grid_numbers(grid_ids) -> dict[str, int]:
+    """The number of every grid: its id when every id is an integer, else 1, 2, ... in the order of the ids.
+
+    The per-grid runner, the power flow and the result tables key real grids by number; the file stem stays in
+    ``real_grid_name`` and the database keeps the grid file.
+    """
+    names = sorted({str(value) for value in grid_ids})
+    if all(name.isdigit() for name in names):
+        return {name: int(name) for name in names}
+    return {name: index for index, name in enumerate(names, start=1)}
 
 
 def _regio7(engine, buildings: pd.DataFrame) -> pd.Series:
@@ -207,7 +220,7 @@ def build_dataset(
     ghd_evidence = ghd.load_evidence(scenario.ghd, ids, engine=engine)
     component_frames, ghd_audits = [], []
     for _, group in physical.groupby("grid_id", sort=True):
-        components, audit = _grid_components(group.drop(columns=["grid_id", "grid_file"]).reset_index(drop=True),
+        components, audit = _grid_components(group.drop(columns=["grid_id", "grid_file", "grid_number"]).reset_index(drop=True),
                                              profile_seed=profile_seed, ghd_config=scenario.ghd,
                                              ghd_evidence=ghd_evidence)
         component_frames.append(components)
@@ -221,7 +234,7 @@ def build_dataset(
     buildings["regio7"] = _regio7(engine, buildings)
 
     # One scenario unit per building, ordered by its connection.
-    buildings = buildings.sort_values(["grid_id", "bus", "building_objectid"]).reset_index(drop=True)
+    buildings = buildings.sort_values(["grid_number", "bus", "building_objectid"]).reset_index(drop=True)
     buildings["scenario_unit_id"] = np.arange(len(buildings), dtype=int)
     unit = buildings.set_index("building_objectid")
 
@@ -310,8 +323,9 @@ def build_dataset(
 
     # PV roof assignment: every eligible roof belongs to its only scenario unit.
     plan_base = buildings.assign(
-        lv_id=buildings["grid_id"], source_lv_id=buildings["grid_id"], source_allocation_bus=buildings["bus"],
-        real_grid_id=buildings["grid_id"], real_bus=buildings["bus"], real_grid_file=buildings["grid_file"],
+        lv_id=buildings["grid_number"], source_lv_id=buildings["grid_number"], source_allocation_bus=buildings["bus"],
+        real_grid_id=buildings["grid_number"], real_bus=buildings["bus"], real_grid_file=buildings["grid_file"],
+        real_grid_name=buildings["grid_id"],
         include_full_local_demand_scenario=True, scenario_scope="paired_full_local_demand", provider=network,
     )
     pv_assignments = pv_scenario_unit_assignments(plan_base[plan_base["pv_roof_capacity_kw"].gt(0.0)])
@@ -320,8 +334,8 @@ def build_dataset(
     for column in ("synthetic_grid_case_id", "synthetic_bus", "synthetic_bridge_filename", "synthetic_kcid",
                    "synthetic_bcid"):
         plan_base[column] = pd.NA
-    real_plan = plan_base.assign(target_network=network, target_grid_id=plan_base["grid_id"],
-                                 allocation_bus=plan_base["bus"])[PLAN_COLUMNS]
+    real_plan = plan_base.assign(target_network=network, target_grid_id=plan_base["grid_number"],
+                                 allocation_bus=plan_base["bus"])[[*PLAN_COLUMNS, "real_grid_name"]]
 
     # Component plan in the dataset contract.
     rows = []
@@ -346,9 +360,9 @@ def build_dataset(
             "source_component_category": category,
             "source_pylovo_grid_result_id": component.get("pylovo_grid_result_id"),
             "source_pylovo_version_id": component.get("pylovo_version_id"),
-            "source_lv_id": target["grid_id"],
+            "source_lv_id": int(target["grid_number"]),
             "source_allocation_bus": int(target["bus"]),
-            "real_target_grid_id": target["grid_id"],
+            "real_target_grid_id": int(target["grid_number"]),
             "real_target_bus": int(target["bus"]),
             "synthetic_target_grid_case_id": None,
             "synthetic_target_bus": None,
@@ -384,8 +398,9 @@ def build_dataset(
         "ags_list": sorted(int(value) for value in buildings["ags"].unique()),
         "plz": int(buildings["postcode"].mode().iloc[0]),
         "postcodes": postcodes,
-        "grids": grids,
+        "grids": {name: int(number) for name, number in grid_numbers(grids).items()},
         "attribute_source": "infdb_basedata_pylovo_rules",
+        "pylovo_version_id": "none",  # own grids read no pylovo result; the runner records this label
         "scenario_scope": "paired_full_local_demand",
         "scenario_id": scenario.scenario_id,
         "scenario_hash": scenario_hash,

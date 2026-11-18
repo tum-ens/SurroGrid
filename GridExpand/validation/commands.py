@@ -10,8 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
-from gridexpand.scenario.commands import PROFILES, module_command, pv_profile_library_command
-from gridexpand.scenario.config_loader import load_scenario_config
+from gridexpand.scenario.commands import dataset_preparation_commands, module_command
 
 ALIGNED_ALLOCATION = "validation.aligned_allocation"
 ALIGNED_EXPANSION = "validation.aligned_expansion"
@@ -72,53 +71,8 @@ def aligned_preparation_commands(
         allocation += ["--dso-b-grids-dir", str(dso_b_grids_dir)]
     if bundle_name and bundle_name != provider:
         allocation += ["--bundle-name", bundle_name]
-    readiness = f"{PROFILES}.paired_profile_readiness"
-    weather = module_command(
-        f"{PROFILES}.aligned_weather", "--paired-dir", paired_dir, "--output", weather_hdf, python=python,
-    )
-    if weather_year is not None:
-        weather += ["--weather-year", str(weather_year)]
-    stages = [
-        ("allocation", allocation),
-        ("weather", weather),
-        ("heat_regeneration", module_command(
-            f"{PROFILES}.paired_heat_profile_regeneration",
-            "--paired-dir", paired_dir, "--refresh-catalog", "--resume",
-            "--workers", heat_workers, "--n-cpu", 1,
-            "--scenario-config", scenario_config,
-            "--output-directory", paired_dir / "heat_regeneration",
-            "--synthetic-library", heat_sources,
-            "--weather-hdf", weather_hdf,
-            python=python,
-        )),
-        ("heat_readiness_sources", module_command(
-            readiness, "--paired-dir", paired_dir, "--synthetic-input-dir", heat_sources, python=python,
-        )),
-        ("heat_library", module_command(
-            f"{PROFILES}.physical_heat_profile_library",
-            "--source-catalog", paired_dir / "paired_heat_profile_catalog.csv",
-            "--source-hdf-dir", heat_sources, "--source-mode", "exact",
-            "--output", heat_library,
-            "--profile-set-id", heat_profile_set_id,
-            python=python,
-        )),
-        ("heat_readiness_library", module_command(
-            readiness, "--paired-dir", paired_dir, "--synthetic-input-dir", heat_sources,
-            "--heat-profile-library", heat_library,
-            python=python,
-        )),
-        ("pv_library", pv_profile_library_command(
-            roof_catalog=paired_dir / "paired_roof_sections.csv",
-            weather_source_hdf=weather_hdf,
-            output=paired_dir / "paired_pv_profile_library.h5",
-            reference_year=reference_year,
-            python=python,
-        )),
-    ]
-    if Path(scenario_config).exists():
-        scenario, _ = load_scenario_config(scenario_config)
-        if scenario.heat.space_heat_source == "internal":
-            stages = [stage for stage in stages if stage[0] in {"allocation", "weather", "pv_library"}]
-            stages.insert(2, ("internal_heat_readiness", module_command(
-                readiness, "--paired-dir", paired_dir, "--scenario-config", scenario_config, python=python)))
-    return stages
+    return [("allocation", allocation), *dataset_preparation_commands(
+        paired_dir=paired_dir, scenario_config=scenario_config, weather_hdf=weather_hdf, heat_sources=heat_sources,
+        heat_library=heat_library, heat_profile_set_id=heat_profile_set_id, heat_workers=heat_workers,
+        reference_year=reference_year, weather_year=weather_year, python=python,
+    )]

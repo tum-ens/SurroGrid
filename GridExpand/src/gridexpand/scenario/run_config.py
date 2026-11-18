@@ -12,7 +12,7 @@ A run YAML is one short file::
 
 The scenario is the scientific part: it is shared by many runs and its hash names the results. With
 ``scenario_overrides`` the run uses the merged scenario, written to ``<run dir>/inputs/scenario.yaml``; its hash
-is taken after the merge. ``grids: files`` (own grid files, ``pipeline: real``) is in preparation.
+is taken after the merge. ``grids: files`` runs own grid files (:class:`RealRun`, ``pipeline: real``).
 
 Parsing never touches a database. Relative paths resolve against the YAML's directory. :func:`load_run_config`
 returns the run and the SHA-256 of the parsed YAML (``run_hash``). The real-vs-synthetic validation has its own
@@ -41,7 +41,7 @@ from gridexpand.scenario.scenario_config import _mapping as mapping
 from gridexpand.scenario.scenario_config import _only as only
 from gridexpand.scenario.scenario_config import _positive
 
-PIPELINES = ("synthetic",)
+PIPELINES = ("synthetic", "real")
 DEFAULT_MODEL_CASES = ("pre", "post-hems-heuristic", "post-hems-optimized")
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
@@ -329,12 +329,131 @@ class SyntheticRun:
         }
 
 
+# Real ----------------------------------------------------------------------------------------
+
+REAL_DEFAULT_MODEL_CASES = ("post-inflex-heuristic", "post-hems-heuristic", "post-hems-optimized")
+
+
+@dataclass(frozen=True)
+class RealRun:
+    """Own grid files (``grids: files``): matching, scenario dataset, the per-grid runner and the expansion analyses.
+
+    The first execution group also runs the ``pre`` stage, so ``model_cases`` lists post cases only.
+    """
+
+    run_id: str
+    scenario_path: Path
+    grid_dir: Path
+    model_cases: tuple[str, ...]
+    points: Path | None = None
+    crs: str = "EPSG:25832"
+    matching: dict[str, Any] = field(default_factory=dict)
+    profile_seed: int = DEFAULT_PROFILE_SEED
+    weather_year: int | None = None
+    workers: int = 1
+    step3_cpus: int = 16
+    step3_cluster_concurrency: int | None = None
+    step4_cpus: int = 4
+    heat_workers: int = 4
+    optimizer: str | None = None
+    powerflow_grid_scope: str = "full"
+    powerflow_max_timesteps: int | None = None
+    cleanup_intermediates: bool = False
+    materialize_expansion: bool = True
+    resume: bool = False
+    scenario_source: Path | None = None
+    scenario_overrides: dict[str, Any] = field(default_factory=dict)
+    pipeline: str = "real"
+    pylovo_version_id: str = "none"  # own grids read no pylovo result
+
+    FILES_KEYS = frozenset({"dir", "points", "crs"})
+    EXECUTION_KEYS = frozenset({
+        "profile_seed", "weather_year", "workers", "step3_cpus", "step3_cluster_concurrency", "step4_cpus",
+        "heat_workers", "optimizer", "powerflow_grid_scope", "powerflow_max_timesteps", "cleanup_intermediates",
+        "materialize_expansion", "resume",
+    })
+
+    @classmethod
+    def from_blocks(cls, run_id: str, scenario_source: Path, scenario_overrides: dict[str, Any], files: Any,
+                    matching: dict[str, Any], model_cases: Any, execution: dict[str, Any], base_dir: Path) -> "RealRun":
+        if isinstance(files, str):
+            files = {"dir": files}
+        files = mapping(files, "grids.files")
+        only(files, set(cls.FILES_KEYS), "grids.files")
+        if not files.get("dir"):
+            raise ValueError("grids.files.dir (the directory of the pandapower JSON grid files) is required.")
+        grid_dir = _resolve(files["dir"], base_dir)
+        if not grid_dir.is_dir():
+            raise FileNotFoundError(f"grids.files.dir is no directory: {grid_dir}")
+        points = None if files.get("points") in (None, "") else _resolve(files["points"], base_dir)
+        if points is not None and not points.is_file():
+            raise FileNotFoundError(f"grids.files.points not found: {points}")
+        from gridexpand.grids.matching import MatchingConfig
+
+        MatchingConfig.from_dict(matching)  # validated here, applied by gridexpand match
+        only(execution, set(cls.EXECUTION_KEYS), "execution")
+        cases = validate_cases(model_cases, allowed=POST_MODEL_CASES)
+
+        def number(name: str, default: int) -> int:
+            return positive_int(execution.get(name, default), f"execution.{name}")
+
+        weather_year = execution.get("weather_year")
+        if weather_year is not None:
+            weather_year = positive_int(weather_year, "execution.weather_year")
+        max_timesteps = execution.get("powerflow_max_timesteps")
+        return cls(
+            run_id=run_id,
+            scenario_path=scenario_source,
+            scenario_source=scenario_source,
+            scenario_overrides=dict(scenario_overrides),
+            grid_dir=grid_dir,
+            points=points,
+            crs=str(files.get("crs", cls.crs)),
+            matching=dict(matching),
+            model_cases=cases,
+            profile_seed=_seed(execution),
+            weather_year=weather_year,
+            workers=number("workers", cls.workers),
+            step3_cpus=number("step3_cpus", cls.step3_cpus),
+            step3_cluster_concurrency=_concurrency(execution),
+            step4_cpus=number("step4_cpus", cls.step4_cpus),
+            heat_workers=number("heat_workers", cls.heat_workers),
+            optimizer=_optimizer(execution),
+            powerflow_grid_scope=_grid_scope(execution),
+            powerflow_max_timesteps=None if max_timesteps is None else positive_int(
+                max_timesteps, "execution.powerflow_max_timesteps"),
+            cleanup_intermediates=flag(execution.get("cleanup_intermediates", False),
+                                       "execution.cleanup_intermediates"),
+            materialize_expansion=flag(execution.get("materialize_expansion", True),
+                                       "execution.materialize_expansion"),
+            resume=flag(execution.get("resume", False), "execution.resume"),
+        )
+
+    def scenario_raw(self) -> dict[str, Any]:
+        raw = _read_yaml(self.scenario_source or self.scenario_path)
+        return deep_merge(raw, self.scenario_overrides) if self.scenario_overrides else raw
+
+    def identity(self) -> dict[str, Any]:
+        return {
+            "pipeline": self.pipeline,
+            "run_id": self.run_id,
+            "grid_dir": str(self.grid_dir),
+            "points": None if self.points is None else str(self.points),
+            "crs": self.crs,
+            "matching": self.matching,
+            "profile_seed": self.profile_seed,
+            "weather_year": self.weather_year,
+            "powerflow_grid_scope": self.powerflow_grid_scope,
+            "powerflow_max_timesteps": self.powerflow_max_timesteps,
+        }
+
+
 # Loader --------------------------------------------------------------------------------------
 
-RunConfig = SyntheticRun
+RunConfig = SyntheticRun | RealRun
 
 
-TOP_LEVEL_KEYS = {"run", "scenario", "scenario_overrides", "grids", "model_cases", "execution"}
+TOP_LEVEL_KEYS = {"run", "scenario", "scenario_overrides", "grids", "matching", "model_cases", "execution"}
 
 
 def run_config_from_dict(raw: dict[str, Any], *, base_dir: Path) -> RunConfig:
@@ -354,12 +473,13 @@ def run_config_from_dict(raw: dict[str, Any], *, base_dir: Path) -> RunConfig:
     only(grids, {"pylovo", "files"}, "grids")
     if len(grids) != 1:
         raise ValueError("grids needs exactly one source: pylovo (synthetic grids) or files (own grid files).")
-    if "files" in grids:
-        raise ValueError(
-            "grids.files (own grid files, pipeline real) is in preparation; until then use gridexpand match and "
-            "python -m gridexpand.grids.dataset (docs/matching.md)."
-        )
     execution = mapping(raw.get("execution") or {}, "execution")
+    matching = mapping(raw.get("matching") or {}, "matching")
+    if "files" in grids:
+        return RealRun.from_blocks(run_id, scenario_source, overrides, grids["files"], matching,
+                                   raw.get("model_cases", list(REAL_DEFAULT_MODEL_CASES)), execution, base_dir)
+    if matching:
+        raise ValueError("matching applies to own grid files (grids.files) only.")
     return SyntheticRun.from_blocks(run_id, scenario_source, overrides, mapping(grids["pylovo"], "grids.pylovo"),
                                     raw.get("model_cases", list(DEFAULT_MODEL_CASES)), execution)
 

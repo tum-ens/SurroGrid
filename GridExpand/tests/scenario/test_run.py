@@ -96,7 +96,7 @@ def test_the_default_run_yaml(tmp_path):
 @pytest.mark.parametrize("text, message", [
     ("run: {id: x, scenario: s.yaml, pipeline: synthetic}\nresources: {}\nexecution: {}\n", "former format"),
     ("run: x\nscenario: nope\ngrids: {pylovo: {version: '1', ags: 1}}\n", "not found"),
-    ("run: x\nscenario: default_2045\ngrids: {files: grids}\n", "in preparation"),
+    ("run: x\nscenario: default_2045\ngrids: {files: grids}\n", "no directory"),
     ("run: x\nscenario: default_2045\ngrids: {pylovo: {ags: 1}}\n", "grids.pylovo.version"),
     ("run: x\nscenario: default_2045\ngrids: {pylovo: {version: '1', ags: 1}}\nresources: {}\n", "former format"),
 ])

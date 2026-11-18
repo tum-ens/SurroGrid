@@ -7,7 +7,7 @@ quoted below are those of every repository scenario YAML unless a table says oth
 
 | Scenario YAML | used by | heat source | adoption (heat / mobility / PV+battery) | TSAM |
 |---|---|---|---|---|
-| `config/scenarios/default_2045.yaml` | default of every run | `infdb_ro_heat` | deterministic 1.0 / 1.0 / 1.0 | on |
+| `config/scenarios/default_2045.yaml` | default of every run (the paper's final method) | `internal` (1R1C, HEMS preheating 2 K) | deterministic 0.8 / 0.5 (by type) / 0.7 | off |
 | `validation/config/scenarios/joint_2045_full_year.yaml` | the real-vs-synthetic validation (paper) | `teaser` (level 1) | deterministic 0.8 / 1.0 / 0.8 | off |
 
 The test fixtures in `tests/fixtures/scenarios/` vary these settings (`ro_heat_2045_synthetic.yaml`,

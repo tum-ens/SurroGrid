@@ -42,7 +42,7 @@ CORRIDOR_LENGTH_RELATIVE_TOLERANCE = 0.05
 # Below this share of failed power-flow timesteps a real grid is costed from its converged
 # timesteps (lower bound); the analysis notebooks exclude grids at the same share.
 MAX_FAILED_SHARE = 0.01
-REAL_GRID_SOURCES = {"real_dso_a": "dso_a", "real_dso_b": "dso_b"}
+REAL_GRID_SOURCES = {"real": "real", "real_dso_a": "dso_a", "real_dso_b": "dso_b"}
 
 
 def _finite(value: Any, default: float | None = None) -> float | None:
@@ -525,6 +525,8 @@ def _pylovo_version(args, runs: pd.DataFrame) -> str | None:
 
 
 def _real_grid_label(run: dict[str, Any], lv_id: str) -> str:
+    if run["source"] == "real":
+        return Path(str(run["source_file"])).stem  # own grids: the grid file's name
     if run["source"] == "dso_b":
         return f"DSO B area-{str(lv_id).zfill(4)}"
     return f"{str(run['source']).upper()} LV_{str(lv_id).zfill(3)}"

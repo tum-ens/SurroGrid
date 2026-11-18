@@ -23,7 +23,7 @@ grids:
     # min_buildings: 5           # minimum buildings per grid (changes the candidate numbering)
     # start_index: 0             # a candidate range, like `gridexpand grids` numbers it
     # limit: 10
-  # files: ~/data/my_grids       # own grid files (pipeline: real), in preparation
+  # files: ~/data/my_grids       # instead of pylovo: own grid files, see docs/configuration.md
 
 # Optional, these are the defaults. post-inflex-heuristic (rule-based INFLEX) needs EV charging sessions,
 # which the current synthetic Step 2 does not write; it returns when synthetic grids move to the new Step 2.

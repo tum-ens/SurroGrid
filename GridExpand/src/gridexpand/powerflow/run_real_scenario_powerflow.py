@@ -93,18 +93,18 @@ def _grid_ref(row: dict[str, Any]) -> dict[str, Any]:
 def load_real_net(source_file: Path) -> tuple[pp.pandapowerNet, float]:
     """Load one real LV grid and its station rating in MVA.
 
-    DSO A workbooks keep an out-of-service trafo row for the rating. DSO B nets
-    have no trafo; their bank rating is the root row of ``dso_b_roots``.
+    Own grid files (pandapower JSON) and DSO A workbooks: the rating is the sum of the ``trafo`` rows (in service or
+    not; the ext_grid sits on the station LV busbar). DSO B nets have no trafo; their bank rating is the root row of
+    ``dso_b_roots``.
     """
-    if source_file.suffix == ".json":
-        net = pp.from_json(source_file)
+    net = pp.from_json(source_file) if source_file.suffix == ".json" else pp.from_excel(source_file)
+    if "dso_b_roots" in net and len(net["dso_b_roots"]):
         roots = net["dso_b_roots"]
         root = roots[roots["disposition"].astype(str).eq("root")]
         if len(root) != 1:
             raise ValueError(f"{source_file} must have exactly one dso_b_roots root row.")
         rating_kva = pd.to_numeric(root["rating_kva_total"], errors="coerce").iloc[0]
         return net, float(rating_kva) / 1000.0
-    net = pp.from_excel(source_file)
     return net, network.transformer_rating_mva(net)
 
 
@@ -337,8 +337,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--lv-id", default=None, help="Real grid id (default: from raw_data/allocation_plan).")
     parser.add_argument(
         "--provider",
-        choices=["dso_a", "dso_b"],
-        default="dso_a",
+        choices=["real", "dso_a", "dso_b"],
+        default="real",
         help="Real-grid source recorded in real_grid_case.source.",
     )
     parser.add_argument(
