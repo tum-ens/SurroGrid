@@ -19,11 +19,10 @@ Code: `src/gridexpand/grids/` (`matching.py` rules, `sources.py` inputs, `match.
   Use it when the load buses of a grid are street nodes rather than the points where the service cables reach the
   buildings.
 - **Coordinates:** `--crs` (default EPSG:25832, the CRS of InfDB); other CRS are transformed.
-- **Buildings:** InfDB `basedata.buildings` around the points (footprint, address, use, households, residential
-  floor area) and, for the pylovo version (`--pylovo-version-id`, default `PYLOVO_VERSION_ID` of the `.env`), the
-  buildings pylovo connects straight to MV (`pylovo.building_exclusion`, reason `mv_direct`). Generate the region
-  with pylovo first; postcodes without a pylovo result are named in the report, and their MV-direct buildings
-  count as LV. All queries run in read-only transactions.
+- **Buildings:** InfDB `basedata.buildings` around the points (footprint, address, use, households, floor
+  areas). A building is MV-direct when its whole load is a non-residential share above 100 kW (floor area x the W/m²
+  of its use, pylovo's rule); a building with flats keeps them on LV. No pylovo grid or result is read, and all
+  queries run in read-only transactions.
 
 ## Rules
 
@@ -36,7 +35,7 @@ The rules are tried in this order; a stronger rule wins when two points name the
 | `unique_address` | has the normalised address (`str.` written out, first house number with a letter directly after it) of exactly one building within `candidate_radius_m` |
 | `covering_footprint` | lies in exactly one footprint, which is residential or carries the wall-mounted point |
 | `building_without_demand` | names a building without a demand model (use not in `demand_uses`, or a use id in `non_demand_use_ids`, small utility buildings): no load |
-| `mv_direct_building` | names a building that pylovo connects to MV: no LV load |
+| `mv_direct_building` | names an MV-direct building: no LV load |
 | `second_supply` | names a building that a stronger match already supplies from another bus: no load (several points on one bus may share a building, e.g. the meters of an apartment house) |
 | `nearest_residential` | takes the nearest residential building within `nearest_residential_m` that no other bus supplies; closest points first; never a garage or shed |
 | `no_residential_in_reach` | finds no such building: no load (`unmatched` when the fallback is switched off) |
@@ -56,7 +55,7 @@ real-grid dataset.
 | `nearest_residential_m` | 20 | fallback distance in metres; `null` switches the fallback off |
 | `candidate_radius_m` | 30 | buildings considered around a point (the fallback distance must not exceed it) |
 | `facade_offset_m` | 2 | how far outside its building a wall-mounted point may lie |
-| `exclude_mv_direct` | `true` | leave pylovo's MV-direct buildings without LV load |
+| `exclude_mv_direct` | `true` | leave MV-direct buildings without LV load |
 | `demand_uses` | Residential, Commercial, Public, Mixed | InfDB uses with a demand model |
 | `non_demand_use_ids` | `31001_2523` | InfDB use ids without a demand model (an ALKIS utility-building function) |
 | `suspect_pattern` | none | regular expression over address and remark; a point it finds never gets the exact-address rule |
@@ -72,9 +71,23 @@ real-grid dataset.
 | `building_supply.csv` | per supplied building: grid, bus, strongest rule, its points |
 | `unconnected_buildings.csv` | demand buildings near the grid lines without a supply: `residential_without_a_point`, `outbuilding` or `mv_direct_building` |
 | `grid_quality.csv` | per grid: points by evidence (`strong` address, `weak` geometry only, the exclusion reasons) and the weak and excluded shares |
-| `matching_report.json` | configuration, inputs, counts per rule, pylovo coverage |
+| `matching_report.json` | configuration, inputs, counts per rule |
 
 ```bash
-uv run gridexpand match ~/data/my_grids --output work/matching/my_grids --pylovo-version-id 3
+uv run gridexpand match ~/data/my_grids --output work/matching/my_grids
 uv run gridexpand match ~/data/my_grids --points points.csv --crs EPSG:31468 --config my_run.yaml --output out/
 ```
+
+## Next: the scenario dataset
+
+```bash
+uv run python -m gridexpand.grids.dataset --supply <output>/building_supply.csv --grids ~/data/my_grids \
+    --scenario-config config/scenarios/<scenario>.yaml --output-dir work/datasets/my_grids
+```
+
+builds the demand, assets and electrification of every supplied building with the method of the real-vs-synthetic
+validation (read-only database access; the outputs are the dataset contract of the per-grid runner). Every
+building takes its attributes from InfDB; households for buildings without them, the non-residential use, peaks and
+the MV-direct share follow pylovo's rules, so a building gets the same attributes as in a pylovo grid without a
+pylovo result being read. `gridexpand run` with `pipeline: real` will run matching, dataset and model in one go (in
+preparation).

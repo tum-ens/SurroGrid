@@ -95,6 +95,18 @@ class _Result:
     def __iter__(self):
         return iter(self.rows)
 
+    def scalar(self):
+        return self.rows[0][0] if self.rows else None
+
+
+def _row(objectid, x, use, residential, nonresidential, households, street=None):
+    return {"objectid": objectid, "postcode": 80331, "street": street, "house_number": "1" if street else None,
+            "building_use": use, "building_use_id": "31001_1010", "building_type": None, "floor_area": 100.0,
+            "floor_number": 2, "residential_floor_area": residential, "nonresidential_floor_area": nonresidential,
+            "households": households, "occupants": None, "type": use,
+            "nonresidential_use": "Commercial" if nonresidential else None, "srid": 25832,
+            "wkb": box(x, 0, x + 10, 10).wkb}
+
 
 class _Connection:
     def __init__(self, log):
@@ -111,17 +123,10 @@ class _Connection:
         self.log.append(sql.strip().split("\n")[0])
         if "basedata.buildings" in sql:
             return _Result([
-                {"objectid": "a", "postcode": 80331, "street": "Hauptstraße", "house_number": "1",
-                 "building_use": "Residential", "building_use_id": "31001_1010", "households": 2,
-                 "residential_floor_area": 120.0, "srid": 25832, "wkb": box(0, 0, 10, 10).wkb},
-                {"objectid": "b", "postcode": 80333, "street": None, "house_number": None,
-                 "building_use": "Commercial", "building_use_id": "31001_2000", "households": 0,
-                 "residential_floor_area": 0.0, "srid": 25832, "wkb": box(20, 0, 30, 10).wkb},
+                _row("a", 0, "Residential", 120.0, 0.0, 2, street="Hauptstraße"),
+                _row("b", 20, "Commercial", 0.0, 2000.0, None),   # 158 kW non-residential, nothing else
+                _row("c", 40, "Mixed", 300.0, 2000.0, 3),         # its flats stay on LV
             ])
-        if "building_exclusion" in sql:
-            return _Result([("b",)])
-        if "postcode_result" in sql:
-            return _Result([(80331,)])
         return _Result([])
 
     def rollback(self):
@@ -136,10 +141,12 @@ class _Engine:
         return _Connection(self.log)
 
 
-def test_read_buildings_is_read_only_and_flags_mv_direct():
+def test_read_buildings_is_read_only_and_flags_mv_direct_from_infdb():
     engine = _Engine()
-    frame, note = sources.read_buildings(engine, (0, 0, 50, 50), pylovo_version_id="3")
+    frame, note = sources.read_buildings(engine, (0, 0, 60, 50))
     assert engine.log[0] == "SET TRANSACTION READ ONLY" and engine.log[-1] == "ROLLBACK"
-    assert frame.set_index("objectid")["mv_direct"].to_dict() == {"a": False, "b": True}
+    assert not any("pylovo" in line for line in engine.log)
+    assert frame.set_index("objectid")["mv_direct"].to_dict() == {"a": False, "b": True, "c": False}
+    assert frame["households"].isna().tolist() == [False, True, False]  # InfDB's own value, no fallback
     assert frame.at[0, "geometry"].equals(box(0, 0, 10, 10))
-    assert note == {"pylovo_version_id": "3", "postcodes_without_pylovo_result": [80333]}
+    assert "100 kW" in note["mv_direct_rule"]

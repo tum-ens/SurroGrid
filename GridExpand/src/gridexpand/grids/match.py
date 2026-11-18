@@ -1,7 +1,7 @@
 """``gridexpand match``: match the connection points of given grid files to InfDB buildings.
 
 Reads the grids (pandapower JSON, one file per LV grid), takes their loads as connection points (or the points of
-``--points``), reads the buildings around them from InfDB and pylovo (read-only), applies the rules of
+``--points``), reads the buildings around them from InfDB (read-only), applies the rules of
 :mod:`gridexpand.grids.matching` and writes to ``--output``:
 
 - ``point_matches.csv``: one row per point with the deciding rule and the supplied building;
@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -55,9 +54,6 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"CRS of the grid and point coordinates (default {sources.TARGET_CRS})")
     parser.add_argument("--config", type=Path, default=None,
                         help="YAML file with a matching: block (rules and distances); default: the built-in rules")
-    parser.add_argument("--pylovo-version-id", default=None,
-                        help="pylovo version whose MV-direct buildings carry no LV load "
-                             "(default: PYLOVO_VERSION_ID of the .env)")
     return parser
 
 
@@ -95,11 +91,11 @@ def _box(points: pd.DataFrame, lines: dict[str, list], margin: float) -> tuple[f
     return xmin, ymin, xmax, ymax
 
 
-def _database_reader(version: str | None) -> BuildingReader:
+def _database_reader() -> BuildingReader:
     from gridexpand.db.engine import get_engine
 
     def read(box: tuple[float, float, float, float]) -> tuple[pd.DataFrame, dict[str, Any]]:
-        return sources.read_buildings(get_engine(), box, pylovo_version_id=version)
+        return sources.read_buildings(get_engine(), box)
 
     return read
 
@@ -112,7 +108,7 @@ def run(args: argparse.Namespace, *, read_buildings: BuildingReader | None = Non
         from gridexpand.db.engine import load_env
 
         load_env()
-        read_buildings = _database_reader(args.pylovo_version_id or os.getenv("PYLOVO_VERSION_ID") or None)
+        read_buildings = _database_reader()
     buildings, note = read_buildings(_box(points, lines, max(config.candidate_radius_m, config.unconnected_radius_m)))
     if buildings.empty:
         raise ValueError("No InfDB buildings around the connection points (check --crs and the database).")
@@ -144,11 +140,5 @@ def main(argv: list[str] | None = None) -> int:
     if report["unconnected_buildings"]:
         print("Buildings near the lines without a point:",
               ", ".join(f"{count} {reason}" for reason, count in report["unconnected_buildings"].items()))
-    inputs = report["inputs"]
-    if inputs.get("pylovo_version_id") is None:
-        print("No pylovo version: MV-direct buildings are not known and count as LV.")
-    elif inputs.get("postcodes_without_pylovo_result"):
-        print(f"pylovo version {inputs['pylovo_version_id']} has no result for the postcodes "
-              f"{inputs['postcodes_without_pylovo_result']}: their MV-direct buildings count as LV.")
     print(f"Written to {args.output}")
     return 0

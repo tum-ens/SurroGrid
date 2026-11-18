@@ -35,7 +35,7 @@ def buildings(_box):
          "building_use": "Residential", "building_use_id": "31001_1010", "households": 2,
          "residential_floor_area": 150.0, "mv_direct": False},
     ])
-    return frame, {"pylovo_version_id": "1", "postcodes_without_pylovo_result": []}
+    return frame, {"mv_direct_rule": "test"}
 
 
 def test_match_writes_the_tables_and_the_report(tmp_path):

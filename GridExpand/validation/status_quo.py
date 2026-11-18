@@ -29,7 +29,7 @@ Inputs: the alignment bundle gives the real grid, bus and grid file per building
 attributes come read-only from InfDB ``basedata.buildings`` (``--db-env-prefix`` names the
 connection variables). The pylovo derivations GridExpand's model needs before pylovo has run
 (non-residential use, household fallback, peaks, MV-direct) mirror pylovo 8afedcc
-(``infdb_client`` and ``preprocessing_mixin``; constants below). With ``--dataset`` the demand
+(:mod:`gridexpand.grids.attributes`). With ``--dataset`` the demand
 comes from a prepared paired dataset instead (the persisted component plan of a paired run),
 which reproduces that run's ``pre`` stage.
 
@@ -53,6 +53,7 @@ import pandas as pd
 from gridexpand.common import ghd
 from gridexpand.common.building_components import build_building_components
 from gridexpand.common.reproducibility import DEFAULT_PROFILE_SEED, stable_seed
+from gridexpand.grids.attributes import pylovo_equivalent_buildings, read_infdb_buildings
 
 PROVIDERS = ("dso_a", "dso_b")
 REASONS = ("transformer_overload", "cable_overload", "undervoltage", "nonconvergence")
@@ -63,30 +64,6 @@ PLAN_COLUMNS = (
 LOADING_LIMIT_PERCENT = 100.0
 EXTRA_PEAK_HOURS = 24
 
-# pylovo 8afedcc values (config_generation.yaml, preprocessing_mixin._household_fallback_parameters).
-PYLOVO_PEAK_LOAD_HOUSEHOLD_KW = 16.825
-PYLOVO_PEAK_W_PER_M2 = {"Commercial": 79.0, "Public": 29.0, "Unknown": 29.0}
-PYLOVO_MV_DIRECT_THRESHOLD_KW = 100.0
-PYLOVO_AREA_PER_HOUSEHOLD_M2 = {"MFH": 181.0, "untyped": 181.0, "AB": 146.0}
-PYLOVO_MINIMUM_HOUSEHOLDS = {"MFH": 2, "untyped": 1, "AB": 5}
-
-BASEDATA_SQL = """
-SELECT objectid, floor_area, floor_number, building_use, building_use_id, building_type,
-       residential_floor_area, nonresidential_floor_area, mix_rule, occupants, households,
-       CASE
-         WHEN COALESCE(nonresidential_floor_area, 0) <= 0 THEN NULL
-         WHEN building_use = 'Residential' THEN 'Commercial'
-         WHEN building_use = 'Mixed' THEN
-           CASE {schema}.classify_building_use(building_use_id)
-             WHEN 'Residential' THEN 'Commercial'
-             ELSE {schema}.classify_building_use(building_use_id)
-           END
-         WHEN building_use IN ('Commercial', 'Public', 'Unknown') THEN building_use
-       END AS nonresidential_use,
-       COALESCE(building_type, building_use) AS type
-FROM {schema}.buildings
-WHERE objectid = ANY(:ids)
-"""
 
 
 # ---------------------------------------------------------------------------------------
@@ -119,60 +96,6 @@ def read_only_engine(prefix: str = "DB_"):
         database=name,
     )
     return create_engine(url, pool_pre_ping=True, connect_args={"options": "-c default_transaction_read_only=on"})
-
-
-def read_basedata(engine, objectids: list[str], schema: str = "basedata") -> pd.DataFrame:
-    """InfDB building rows with pylovo 8afedcc's ``nonresidential_use`` and ``type``."""
-    from sqlalchemy import text
-
-    if not schema.isidentifier():
-        raise ValueError(f"Invalid schema name {schema!r}.")
-    with engine.connect() as conn:
-        rows = pd.read_sql_query(text(BASEDATA_SQL.format(schema=schema)), conn, params={"ids": list(objectids)})
-    missing = sorted(set(objectids) - set(rows["objectid"].astype(str)))
-    if missing:
-        raise ValueError(f"{len(missing)} bundle buildings are missing from {schema}.buildings: {missing[:10]}")
-    return rows
-
-
-def pylovo_equivalent_buildings(rows: pd.DataFrame) -> pd.DataFrame:
-    """Fill what pylovo derives before GridExpand reads a building (8afedcc rules).
-
-    Missing households by type, the non-residential use of plain Residential/typed
-    buildings, component peaks, MV-direct above 100 kW and missing occupants
-    (households x 2.03, as ``gridexpand.db.grids.read_buildings``).
-    """
-    from gridexpand.sampling.db_read import impute_missing_occupants
-
-    b = rows.copy()
-    b["objectid"] = b["objectid"].astype(str)
-    kind = b["type"].astype(str)
-    res = pd.to_numeric(b["residential_floor_area"], errors="coerce")
-    nonres = pd.to_numeric(b["nonresidential_floor_area"], errors="coerce").fillna(0.0)
-    gross = pd.to_numeric(b["floor_area"], errors="coerce") * pd.to_numeric(b["floor_number"], errors="coerce").fillna(1)
-    fallback = pd.Series(np.nan, index=b.index)
-    fallback[kind.isin(["SFH", "TH"])] = 1
-    for name, label in (("MFH", "MFH"), ("AB", "AB")):
-        mask = kind.eq(name)
-        fallback[mask] = np.maximum(PYLOVO_MINIMUM_HOUSEHOLDS[label], np.rint(res.fillna(gross)[mask] / PYLOVO_AREA_PER_HOUSEHOLD_M2[label]))
-    untyped = kind.isin(["Residential", "Mixed"]) & res.fillna(0).gt(0)
-    fallback[untyped] = np.maximum(PYLOVO_MINIMUM_HOUSEHOLDS["untyped"], np.rint(res[untyped] / PYLOVO_AREA_PER_HOUSEHOLD_M2["untyped"]))
-    fallback[kind.isin(["Commercial", "Public", "Unknown"])] = 1
-    b["households"] = pd.to_numeric(b["households"], errors="coerce").where(b["households"].notna(), fallback)
-    use = b["nonresidential_use"].where(b["nonresidential_use"].isin(list(PYLOVO_PEAK_W_PER_M2)))
-    use = use.where(use.notna(), kind.where(kind.isin(list(PYLOVO_PEAK_W_PER_M2))))
-    use = use.where(use.notna() | ~b["building_use"].eq("Residential"), "Commercial")
-    b["nonresidential_use"] = use.where(nonres.gt(0))
-    b["residential_peak_load_in_kw"] = np.where(res.fillna(0).gt(0), b["households"] * PYLOVO_PEAK_LOAD_HOUSEHOLD_KW, 0.0)
-    b["nonresidential_peak_load_in_kw"] = np.where(
-        nonres.gt(0), nonres * b["nonresidential_use"].map(PYLOVO_PEAK_W_PER_M2).fillna(0.0) / 1000.0, 0.0
-    )
-    direct = pd.Series(b["nonresidential_peak_load_in_kw"] > PYLOVO_MV_DIRECT_THRESHOLD_KW, index=b.index)
-    b["nonresidential_mv_direct"] = [bool(value) if area > 0 else None for value, area in zip(direct, nonres)]
-    b["peak_load_in_kw"] = b["residential_peak_load_in_kw"] + np.where(direct, 0.0, b["nonresidential_peak_load_in_kw"])
-    for column in ("mix_score", "mix_confidence"):
-        b[column] = np.nan
-    return impute_missing_occupants(b)
 
 
 def bundle_buildings(
@@ -512,7 +435,7 @@ def main(argv: list[str] | None = None) -> int:
         engine = read_only_engine(args.db_env_prefix)
         mapping = bundle_buildings(args.provider, args.alignment_dir, args.dso_b_grids_dir, args.bundle_name)
         objectids = sorted(mapping["building_objectid"].astype(str).unique())
-        buildings = pylovo_equivalent_buildings(read_basedata(engine, objectids, args.basedata_schema))
+        buildings = pylovo_equivalent_buildings(read_infdb_buildings(engine, objectids, args.basedata_schema))
         evidence = ghd.load_evidence(scenario.ghd, objectids, engine=engine)
         jobs, audit = jobs_from_buildings(
             args.provider, mapping, buildings, scenario.ghd, evidence, profile_seed=args.profile_seed,

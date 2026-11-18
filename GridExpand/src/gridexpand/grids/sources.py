@@ -1,4 +1,4 @@
-"""Inputs of the matcher: connection points from grid files or a CSV, buildings from InfDB and pylovo.
+"""Inputs of the matcher: connection points from grid files or a CSV, buildings from InfDB.
 
 Grid files are pandapower JSON, one per LV grid; the file stem is the grid id. Every row of ``net.load`` is a
 connection point at the coordinates of its bus (``net.bus.geo``); the optional load columns ``address``,
@@ -6,8 +6,9 @@ connection point at the coordinates of its bus (``net.bus.geo``); the optional l
 points should sit where the service cable reaches the building; when the load buses of a grid are street nodes,
 give the connection points as a CSV instead (:func:`points_from_csv`).
 
-Buildings are read from InfDB ``basedata.buildings`` in the bounding box of the points, MV-direct buildings from
-pylovo's ``building_exclusion`` of the given pylovo version. Every query runs in a read-only transaction.
+Buildings are read from InfDB ``basedata.buildings`` in the bounding box of the points; a building whose whole load
+pylovo's rules put on MV (:func:`gridexpand.grids.attributes.mv_direct_buildings`) is flagged ``mv_direct``. Every
+query runs in a read-only transaction.
 """
 
 from __future__ import annotations
@@ -24,24 +25,14 @@ from shapely import from_wkb
 from shapely.geometry import LineString, shape
 from shapely.geometry.base import BaseGeometry
 
+from gridexpand.grids import attributes
+
 TARGET_CRS = "EPSG:25832"
 OPTIONAL_LOAD_COLUMNS = ("address", "on_building", "exclude", "exclude_reason")
 
-BUILDINGS_SQL = """
-SELECT objectid::text AS objectid, postcode, street, house_number, building_use, building_use_id,
-       households, residential_floor_area, ST_SRID(geom) AS srid, ST_AsBinary(geom) AS wkb
-FROM basedata.buildings
-WHERE geom && ST_MakeEnvelope(:xmin, :ymin, :xmax, :ymax, 25832)
-ORDER BY objectid
-"""
-MV_DIRECT_SQL = """
-SELECT objectid FROM pylovo.building_exclusion
-WHERE version_id = :version AND reason = 'mv_direct' AND objectid = ANY(:ids)
-"""
-GENERATED_POSTCODES_SQL = """
-SELECT postcode_result_plz FROM pylovo.postcode_result
-WHERE version_id = :version AND postcode_result_plz = ANY(:postcodes)
-"""
+BUILDINGS_SQL = attributes.INFDB_SELECT.replace(
+    "FROM {schema}.buildings", ", ST_SRID(geom) AS srid, ST_AsBinary(geom) AS wkb\nFROM {schema}.buildings"
+) + "WHERE geom && ST_MakeEnvelope(:xmin, :ymin, :xmax, :ymax, 25832)\nORDER BY objectid\n"
 
 
 def grid_files(paths: Iterable[Path]) -> dict[str, Path]:
@@ -163,40 +154,34 @@ def bounds(points: pd.DataFrame, margin: float) -> tuple[float, float, float, fl
             float(points["x"].max()) + margin, float(points["y"].max()) + margin)
 
 
-def read_buildings(engine, box: tuple[float, float, float, float], *, pylovo_version_id: str | None
+def read_buildings(engine, box: tuple[float, float, float, float], *, schema: str = "basedata"
                    ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """InfDB buildings in ``box`` (EPSG:25832) with pylovo's MV-direct flag, and a coverage note.
+    """InfDB buildings in ``box`` (EPSG:25832) with the MV-direct flag, and a note on the rule.
 
-    The note lists the postcodes of the buildings that pylovo has not generated for the version: for them the
-    MV-direct flag is unknown (every building counts as LV).
+    ``households`` stays InfDB's own value (the matcher tells houses from outbuildings by it); pylovo's household
+    fallback only enters the MV-direct derivation.
     """
     from sqlalchemy import text
 
+    if not schema.isidentifier():
+        raise ValueError(f"Invalid schema name {schema!r}.")
     xmin, ymin, xmax, ymax = box
     with engine.connect() as conn:
         conn.execute(text("SET TRANSACTION READ ONLY"))
-        rows = conn.execute(text(BUILDINGS_SQL), {"xmin": xmin, "ymin": ymin, "xmax": xmax,
-                                                  "ymax": ymax}).mappings().all()
-        frame = pd.DataFrame([dict(row) for row in rows])
-        if frame.empty:
-            conn.rollback()
-            return frame, {"pylovo_version_id": pylovo_version_id, "postcodes_without_pylovo_result": []}
-        if not frame["srid"].eq(25832).all():
-            raise ValueError("basedata.buildings must be in EPSG:25832.")
-        frame["geometry"] = [from_wkb(bytes(value)) for value in frame.pop("wkb")]
-        frame = frame.drop(columns="srid")
-        ids = frame["objectid"].tolist()
-        postcodes = sorted({int(value) for value in pd.to_numeric(frame["postcode"], errors="coerce").dropna()})
-        mv_direct, generated = set(), set()
-        if pylovo_version_id is not None:
-            mv_direct = {row[0] for row in conn.execute(text(MV_DIRECT_SQL),
-                                                        {"version": str(pylovo_version_id), "ids": ids})}
-            generated = {int(row[0]) for row in conn.execute(text(GENERATED_POSTCODES_SQL),
-                                                             {"version": str(pylovo_version_id),
-                                                              "postcodes": postcodes})}
+        rows = conn.execute(text(BUILDINGS_SQL.format(schema=schema)),
+                            {"xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax}).mappings().all()
         conn.rollback()
-    frame["mv_direct"] = frame["objectid"].isin(mv_direct)
-    note = {"pylovo_version_id": pylovo_version_id,
-            "postcodes_without_pylovo_result": sorted(set(postcodes) - generated)}
+    frame = pd.DataFrame([dict(row) for row in rows])
+    note = {"mv_direct_rule": "InfDB non-residential share above "
+                              f"{attributes.PYLOVO_MV_DIRECT_THRESHOLD_KW:g} kW and no residential floor area "
+                              "(pylovo 8afedcc rules)"}
+    if frame.empty:
+        return frame, note
+    if not frame["srid"].eq(25832).all():
+        raise ValueError(f"{schema}.buildings must be in EPSG:25832.")
+    frame["geometry"] = [from_wkb(bytes(value)) for value in frame.pop("wkb")]
+    frame = frame.drop(columns="srid")
+    frame["objectid"] = frame["objectid"].astype(str)
+    derived = attributes.pylovo_equivalent_buildings(frame.drop(columns="geometry"))
+    frame["mv_direct"] = attributes.mv_direct_buildings(derived).to_numpy()
     return frame, note
-

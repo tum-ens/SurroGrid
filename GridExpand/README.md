@@ -1,9 +1,10 @@
 # GridExpand
 
 GridExpand simulates low-voltage (LV) distribution grids of a region before and after electrification (heat
-pumps, EVs, rooftop PV, batteries) and estimates the grid reinforcement they need. It reads synthetic grids and
-buildings from a [pylovo](https://github.com/tum-ens/pylovo) database (usually an InfDB). The comparison with real
-DSO grids, the validation of the pylovo paper, is a separate directory: [validation/](validation/README.md).
+pumps, EVs, rooftop PV, batteries) and estimates the grid reinforcement they need. It runs on synthetic grids of a
+[pylovo](https://github.com/tum-ens/pylovo) database (usually an InfDB) or, being built, on grid files of your own,
+whose connection points it matches to InfDB buildings ([own grids](#own-grids-in-preparation)). The comparison with
+real DSO grids, the validation of the pylovo paper, is a separate directory: [validation/](validation/README.md).
 
 | step | package | does |
 |---|---|---|
@@ -12,6 +13,7 @@ DSO grids, the validation of the pylovo paper, is a separate directory: [validat
 | 3 optimization | `gridexpand.optimization` | building model (urbs or PyPSA optimizer): dispatch (and sizing for the optimized case) |
 | 4 power flow | `gridexpand.powerflow` | pandapower time series before and after electrification |
 | 5 analysis | `gridexpand.analysis` | cable and transformer expansion costs, loaders, plots |
+| own grids | `gridexpand.grids` | connection points of grid files to InfDB buildings, their scenario dataset |
 | API | `gridexpand.api` | HTTP API for the GridPlanner UI: jobs, results, scenario files |
 
 Everything is one Python package (`src/gridexpand/`) with one uv environment and one command, `gridexpand`.
@@ -45,10 +47,11 @@ Not tracked; copy or symlink them into place (the `*_required.txt` files mark th
 |---|---|
 | `inhabited_buildings/elec_lps.h5` | Step 2 residential load profiles (all runs) |
 | `general/mobility_profile_pool_old/mobility_demand_pool.csv`, `mobility_availability_pool.csv` | synthetic runs (legacy pool `emobpy_pool_v1`) |
-| `general/mobility_profile_pool/` | paired runs of the validation (session pool with `mobility_pool_manifest.json`) |
+| `general/mobility_profile_pool/` | own grids and the validation (session pool with `mobility_pool_manifest.json`) |
 
-The database must provide the `pylovo` schema (grids, buildings), `citydb` LoD2 roof surfaces for PV (without
-them every building gets the PV fallback) and, for `infdb_ro_heat` scenarios, the INFDB `ro_heat` schema.
+The database must provide the `pylovo` schema (synthetic grids and buildings; own grids only need its municipal
+register), InfDB `basedata.buildings` (own grids), `citydb` LoD2 roof surfaces for PV (without them every building
+gets the PV fallback) and, for `infdb_ro_heat` scenarios, the InfDB `ro_heat` schema.
 
 ## Database
 
@@ -80,6 +83,20 @@ execution group (`pre`, `heuristic-assets`, `post-hems-optimized`), materializes
 refreshes the QGIS views; `--resume` continues an interrupted run. The YAML keys are in
 [docs/configuration.md](docs/configuration.md), the model cases and scientific rules in
 [docs/method.md](docs/method.md). `gridexpand synthetic --help` runs one batch directly (same flags).
+
+## Own grids (in preparation)
+
+Bring LV grids as pandapower JSON files (one per grid, loads at the connection points). Two steps exist and only
+read the database; `pipeline: real` in `gridexpand run` will chain them with Steps 3-5:
+
+```bash
+uv run gridexpand match ~/data/my_grids --output work/matching/my_grids        # connection points -> buildings
+uv run python -m gridexpand.grids.dataset --supply work/matching/my_grids/building_supply.csv \
+    --grids ~/data/my_grids --scenario-config config/scenarios/<scenario>.yaml --output-dir work/datasets/my_grids
+```
+
+Rules, inputs and outputs: [docs/matching.md](docs/matching.md). Building attributes come from InfDB, derived with
+pylovo's rules; no pylovo grid is read.
 
 ## Results
 

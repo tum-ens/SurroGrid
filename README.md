@@ -3,7 +3,7 @@
 
 SurroGrid is a research codebase that combines two workflows:
 
-1) **GridExpand**: one Python package (`gridexpand`) that simulates low-voltage (LV) distribution grids before and after electrification in five steps (grid sampling, demand allocation, urbs optimization, power flow, expansion analysis), backed by an InfDB/pylovo PostgreSQL database, plus an HTTP API for the GridPlanner UI. The comparison of real DSO grids with synthetic pylovo grids (the validation of the pylovo paper) is a separate directory, [GridExpand/validation/](GridExpand/validation/README.md).
+1) **GridExpand**: one Python package (`gridexpand`) that simulates low-voltage (LV) distribution grids before and after electrification in five steps (grid sampling, demand allocation, urbs optimization, power flow, expansion analysis), backed by an InfDB/pylovo PostgreSQL database, plus an HTTP API for the GridPlanner UI. It runs on synthetic pylovo grids or, being built, on grid files of your own (`gridexpand match` connects their connection points to InfDB buildings). The comparison of real DSO grids with synthetic pylovo grids (the validation of the pylovo paper) is a separate directory, [GridExpand/validation/](GridExpand/validation/README.md).
 2) **GridForecast**: preprocessing + machine learning models (MLP and Transformer) to train **surrogate forecasters** on the GridExpand outputs.
 
 In short: **GridExpand produces grid-level results (in the `surrogrid` database schema and, in HDF5 mode, one `.h5` file per grid/scenario with inputs, optimization and power-flow results), and GridForecast turns those HDF5 files into ML-ready time-series tables and trains forecasting models.**
