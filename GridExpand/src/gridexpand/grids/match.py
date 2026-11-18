@@ -142,3 +142,7 @@ def main(argv: list[str] | None = None) -> int:
               ", ".join(f"{count} {reason}" for reason, count in report["unconnected_buildings"].items()))
     print(f"Written to {args.output}")
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

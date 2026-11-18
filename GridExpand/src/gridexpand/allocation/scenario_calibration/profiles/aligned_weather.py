@@ -28,21 +28,26 @@ def write_aligned_weather(
     plan = pd.read_csv(paired_dir / "paired_real_bus_allocation_plan.csv")
     plz = int(plan["postcode"].mode().iloc[0])
     database = SurroGridDatabase()
+    version = _version(paired_dir)
+    # Own grids (pylovo version "none") take the building centroids from InfDB, the validation from pylovo.
+    source = "basedata.buildings WHERE" if version == "none" else (
+        "pylovo.buildings_result WHERE version_id::text = :version AND")
     with database.engine.connect() as conn:
         centroid = conn.execute(
             text(
-                """
+                f"""
                 SELECT AVG(ST_Y(ST_Transform(centroid, 4326))) AS lat,
                        AVG(ST_X(ST_Transform(centroid, 4326))) AS lon
-                FROM pylovo.buildings_result
-                WHERE version_id::text = :version AND objectid = ANY(:ids)
+                FROM {source} objectid = ANY(:ids)
                 """
             ),
             {
-                "version": _version(paired_dir),
+                "version": version,
                 "ids": plan["building_objectid"].astype(str).tolist(),
             },
         ).mappings().one()
+    if centroid["lat"] is None:
+        raise ValueError(f"No building centroids for the dataset {paired_dir}.")
     if weather_year is None:
         weather, altitude = weather_functions.get_pvgis_tmy_sarah3_dataframe(
             float(centroid["lat"]), float(centroid["lon"]), reference_year=int(reference_year)

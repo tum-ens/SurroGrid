@@ -120,3 +120,11 @@ def test_real_target_takes_network_and_provider_from_the_plan(tmp_path):
         ("real_dso_b", "dso_b", 7, "/g/area-7.json"), ("real_dso_b", "dso_b", 9, "/g/area-9.json")]
     assert real.input_name(jobs[0], "s") == "paired_real_dso_b_7_s.h5"
     assert adapter_for("real_dso_b") is real and adapter_for("real") is real and adapter_for("synthetic") is synthetic
+
+
+def test_real_input_names_match_the_urbs_input():
+    from gridexpand.allocation.scenario_calibration.pipeline.paired_urbs_input import _output_name
+
+    for network in ("real", "real_dso_a"):
+        job = {"target_network": network, "target_grid_id": 7}
+        assert real.input_name(job, "lab") == _output_name(pd.DataFrame(), network, 7, "lab")

@@ -99,10 +99,12 @@ def _point_wkt(net: pp.pandapowerNet) -> str | None:
 def _cached_real_net(path: str, mtime_ns: int) -> pp.pandapowerNet:
     import pandapower as pp
 
+    from gridexpand.powerflow.run_real_scenario_powerflow import _ext_grid_to_lv_busbar
+
     source_file = Path(path)
-    if source_file.suffix == ".json":
-        return pp.from_json(source_file)
-    return pp.from_excel(source_file)
+    net = pp.from_json(source_file) if source_file.suffix == ".json" else pp.from_excel(source_file)
+    _ext_grid_to_lv_busbar(net)  # the same station as the power flow
+    return net
 
 
 def load_real_net(source_file: Path) -> pp.pandapowerNet:

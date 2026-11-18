@@ -150,3 +150,21 @@ def test_read_buildings_is_read_only_and_flags_mv_direct_from_infdb():
     assert frame["households"].isna().tolist() == [False, True, False]  # InfDB's own value, no fallback
     assert frame.at[0, "geometry"].equals(box(0, 0, 10, 10))
     assert "100 kW" in note["mv_direct_rule"]
+
+
+def test_an_mv_external_grid_moves_to_the_lv_busbar(tmp_path):
+    from gridexpand.powerflow.run_real_scenario_powerflow import load_real_net
+
+    net = pp.create_empty_network()
+    mv = pp.create_bus(net, vn_kv=20.0)
+    lv = pp.create_bus(net, vn_kv=0.4, geodata=(0.0, 0.0))
+    house = pp.create_bus(net, vn_kv=0.4, geodata=(50.0, 0.0))
+    pp.create_ext_grid(net, mv)
+    pp.create_transformer(net, mv, lv, std_type="0.4 MVA 20/0.4 kV")
+    pp.create_line_from_parameters(net, lv, house, length_km=0.05, r_ohm_per_km=0.2, x_ohm_per_km=0.08,
+                                   c_nf_per_km=0.0, max_i_ka=0.2)
+    pp.create_load(net, house, p_mw=0.01)
+    pp.to_json(net, tmp_path / "g.json")
+    loaded, rating = load_real_net(tmp_path / "g.json")
+    assert int(loaded.ext_grid.at[0, "bus"]) == lv and not loaded.bus.at[mv, "in_service"]
+    assert not loaded.trafo["in_service"].any() and rating == pytest.approx(0.4)

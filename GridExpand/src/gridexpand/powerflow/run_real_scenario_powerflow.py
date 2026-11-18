@@ -90,14 +90,35 @@ def _grid_ref(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _ext_grid_to_lv_busbar(net: pp.pandapowerNet) -> None:
+    """Own grid files may include the transformer and its MV bus: the external grid moves to the LV busbar.
+
+    The station is then represented by its rating (the ``trafo`` rows, switched off), as in the DSO files; the MV
+    bus is switched off. A grid whose external grid already sits on an LV bus is unchanged.
+    """
+    if net.ext_grid.empty or net.trafo.empty:
+        return
+    voltage = net.bus["vn_kv"]
+    for index, row in net.ext_grid.iterrows():
+        if float(voltage.at[int(row["bus"])]) <= 1.0:
+            continue
+        station = net.trafo[net.trafo["hv_bus"].eq(int(row["bus"]))]
+        if station.empty:
+            raise ValueError(f"The external grid on bus {int(row['bus'])} feeds no transformer.")
+        net.bus.at[int(row["bus"]), "in_service"] = False
+        net.ext_grid.at[index, "bus"] = int(station["lv_bus"].iloc[0])
+        net.trafo.loc[station.index, "in_service"] = False
+
+
 def load_real_net(source_file: Path) -> tuple[pp.pandapowerNet, float]:
     """Load one real LV grid and its station rating in MVA.
 
     Own grid files (pandapower JSON) and DSO A workbooks: the rating is the sum of the ``trafo`` rows (in service or
-    not; the ext_grid sits on the station LV busbar). DSO B nets have no trafo; their bank rating is the root row of
+    not); an external grid on the MV side moves to the LV busbar (:func:`_ext_grid_to_lv_busbar`). DSO B nets have no trafo; their bank rating is the root row of
     ``dso_b_roots``.
     """
     net = pp.from_json(source_file) if source_file.suffix == ".json" else pp.from_excel(source_file)
+    _ext_grid_to_lv_busbar(net)
     if "dso_b_roots" in net and len(net["dso_b_roots"]):
         roots = net["dso_b_roots"]
         root = roots[roots["disposition"].astype(str).eq("root")]

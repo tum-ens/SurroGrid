@@ -48,10 +48,15 @@ from gridexpand.allocation.scenario_calibration.profiles.profile_contract import
 DEFAULT_OUTPUT_DIR = SYNTHETIC_INPUT_DIR
 
 
+def _is_real(target_network: str) -> bool:
+    """``real`` (own grids) and ``real_<provider>`` (the validation's DSO grids)."""
+    return target_network == "real" or target_network.startswith("real_")
+
+
 def _plan_path(paired_dir: Path, target_network: str) -> Path:
     filename = (
         "paired_real_bus_allocation_plan.csv"
-        if target_network.startswith("real_")
+        if _is_real(target_network)
         else "paired_synthetic_bus_allocation_plan.csv"
     )
     return paired_dir / filename
@@ -74,7 +79,7 @@ def _target_component_plan(
         )
     combined = pd.read_csv(path)
     assert_paired_component_plan_equivalence(combined)
-    if target_network.startswith("real_"):
+    if _is_real(target_network):
         mask = pd.to_numeric(
             combined["real_target_grid_id"], errors="coerce"
         ).eq(int(target_grid_id))
@@ -125,10 +130,9 @@ def _output_name(
     target_grid_id: int,
     scenario_label: str,
 ) -> str:
-    if target_network == "real_dso_a":
-        prefix = f"paired_real_dso_a_LV_{int(target_grid_id):03d}"
-    elif target_network == "real_dso_b":
-        prefix = f"paired_real_dso_b_area_{int(target_grid_id):04d}"
+    if _is_real(target_network):
+        # The name the per-grid runner expects (gridexpand.runner.targets.real.input_name).
+        prefix = f"paired_{target_network}_{int(target_grid_id)}"
     else:
         bridge_names = (
             allocation["synthetic_bridge_filename"].dropna().astype(str).unique()
@@ -659,7 +663,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument(
         "--target-network",
-        choices=["real_dso_a", "real_dso_b", "synthetic"],
+        choices=["real", "real_dso_a", "real_dso_b", "synthetic"],
         required=True,
     )
     parser.add_argument("--target-grid-id", type=int, required=True)
