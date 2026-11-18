@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one prepared paired dataset (one provider) on its real grids and their synthetic counterparts.
+"""Run the grids of one prepared dataset: its real grids, its synthetic (pylovo) grids, or both.
 
 The runner uses one stable scenario-unit profile contract for real and
 synthetic targets. TSAM methodology comes from the scenario YAML. A canonical
@@ -34,14 +34,15 @@ from gridexpand.common.orchestration import (
 from gridexpand.common.reproducibility import DEFAULT_PROFILE_SEED
 from gridexpand.common.timeframe import FULL_YEAR_HOURS, read_hdf_metadata
 from gridexpand.optimization.solver import step3_concurrency
-from gridexpand.paired.comparison import (
+from gridexpand.runner.result_checks import (
     read_tsam_signature,
     validate_full_year_result,
     validate_shared_tsam,
 )
-from gridexpand.paired.datasets import resolve_paired_dataset
-from gridexpand.paired.sources import (
+from gridexpand.runner.datasets import resolve_paired_dataset
+from gridexpand.runner.targets import (
     TARGET_ADAPTERS,
+    adapter_for,
     adapters_for_scope,
 )
 from gridexpand.paths import (
@@ -98,10 +99,9 @@ def _load_jobs(
     paired_dir: Path,
     target: str,
     target_grid_id: int | None,
-    provider: str = "dso_a",
 ) -> list[dict[str, Any]]:
     jobs: list[dict[str, Any]] = []
-    for adapter in adapters_for_scope(target, provider):
+    for adapter in adapters_for_scope(target):
         jobs.extend(adapter.load_jobs(paired_dir, target_grid_id))
     return _number_jobs(jobs)
 
@@ -114,7 +114,7 @@ def _number_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _input_name(job: dict[str, Any], scenario_label: str) -> str:
-    return TARGET_ADAPTERS[str(job["target_network"])].input_name(
+    return adapter_for(job["target_network"]).input_name(
         job, scenario_label
     )
 
@@ -339,7 +339,7 @@ def _run_powerflows(
     log_path: Path,
     status: StatusLog,
 ) -> None:
-    TARGET_ADAPTERS[str(job["target_network"])].run_powerflows(
+    adapter_for(job["target_network"]).run_powerflows(
         job=job,
         args=args,
         result_hdf=result_hdf,
@@ -495,9 +495,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--target", choices=TARGET_CHOICES, default="both")
     parser.add_argument(
         "--provider",
-        choices=("dso_a", "dso_b"),
-        default="dso_a",
-        help="DSO whose real grids 'both' pairs with the synthetic grids.",
+        default=None,
+        help="Provider label of the dataset (default: its allocation plan); recorded in the run identity.",
     )
     parser.add_argument(
         "--job-subset",
@@ -716,7 +715,6 @@ def main(argv: list[str] | None = None) -> None:
         args.paired_dir,
         args.target,
         args.target_grid_id,
-        args.provider,
     )
     if args.job_subset is not None:
         subset = json.loads(args.job_subset.read_text(encoding="utf-8"))

@@ -98,7 +98,7 @@ def test_paired_runner_command():
         **common, materialization_case="post-hems-heuristic",
         result_cases=("post-inflex-heuristic", "post-hems-heuristic"), skip_pre=False, resume=True,
     )
-    assert argv[:3] == [PY, "-m", "gridexpand.paired.runner"]
+    assert argv[:3] == [PY, "-m", "gridexpand.runner.grid_runner"]
     assert argv[argv.index("--result-cases") + 1:argv.index("--result-cases") + 3] == [
         "post-inflex-heuristic", "post-hems-heuristic"]
     assert "--resume" in argv and "--skip-pre" not in argv and argv[-2:] == ["--run-dir", "/w/runs/run/heuristic-assets"]

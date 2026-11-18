@@ -67,7 +67,7 @@ GridExpand Steps 2-4 hand over a **single `.h5` file per grid/scenario**: each s
   - [GridExpand/src/gridexpand/optimization/](GridExpand/src/gridexpand/optimization): run the urbs optimization + write `/urbs_out/*`
   - [GridExpand/src/gridexpand/powerflow/](GridExpand/src/gridexpand/powerflow): run the pandapower power flow + write `/pwrflw/*`
   - [GridExpand/src/gridexpand/analysis/](GridExpand/src/gridexpand/analysis): expansion costs, loaders, plots
-  - [GridExpand/src/gridexpand/scenario/](GridExpand/src/gridexpand/scenario), [paired/](GridExpand/src/gridexpand/paired), [api/](GridExpand/src/gridexpand/api): run YAMLs and orchestration, the paired runner, HTTP API
+  - [GridExpand/src/gridexpand/scenario/](GridExpand/src/gridexpand/scenario), [runner/](GridExpand/src/gridexpand/runner), [api/](GridExpand/src/gridexpand/api): run YAMLs and orchestration, the per-grid runner, HTTP API
   - [GridExpand/validation/](GridExpand/validation/README.md): real-vs-synthetic validation (not part of the package)
   - [GridExpand/docs/](GridExpand/docs): documentation ([index](GridExpand/docs/README.md), one document per step in [GridExpand/docs/steps/](GridExpand/docs/steps))
 

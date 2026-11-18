@@ -1,4 +1,4 @@
-"""Network-independent equivalence checks for paired validation."""
+"""Result checks of a run, independent of the network: one shared TSAM mapping, full-year results."""
 
 from __future__ import annotations
 

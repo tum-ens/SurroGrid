@@ -1,4 +1,4 @@
-"""Synthetic-grid adapter for paired validation."""
+"""pylovo grids as runner targets (``pipeline: synthetic``, validation)."""
 
 from __future__ import annotations
 

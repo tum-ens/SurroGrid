@@ -19,7 +19,7 @@ OPTIMIZATION = "gridexpand.optimization.run_urbs_cluster"
 POWERFLOW = "gridexpand.powerflow.run_pwrflw"
 REAL_POWERFLOW = "gridexpand.powerflow.run_real_scenario_powerflow"
 GRID_EXPANSION = "gridexpand.analysis.expansion.grid_expansion"
-PAIRED_RUNNER = "gridexpand.paired.runner"
+PAIRED_RUNNER = "gridexpand.runner.grid_runner"
 PAIRED_URBS_INPUT = "gridexpand.allocation.scenario_calibration.pipeline.paired_urbs_input"
 PROFILES = "gridexpand.allocation.scenario_calibration.profiles"
 

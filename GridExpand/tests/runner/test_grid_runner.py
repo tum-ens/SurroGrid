@@ -8,8 +8,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from gridexpand.paired import runner
-from gridexpand.paired.sources import dso_a, synthetic
+from gridexpand.runner import grid_runner as runner
+from gridexpand.runner.targets import adapter_for, real, synthetic
 
 
 def test_job_keys_and_legacy_rows(tmp_path):
@@ -56,12 +56,13 @@ def _capture(monkeypatch, module):
 
 
 def test_real_adapter_commands(tmp_path, monkeypatch):
-    calls = _capture(monkeypatch, dso_a)
+    calls = _capture(monkeypatch, real)
     args = argparse.Namespace(result_cases=("post-inflex-heuristic", "post-hems-heuristic"), skip_pre=False, plz=99999,
                               powerflow_grid_scope="full", tsam=False, pre_only=False, max_timesteps=None,
                               run_name_prefix="run")
-    job = {"target_network": "real_dso_a", "target_grid_id": 80, "job": "real_dso_a:80", "grid_file": "/g/LV_080.xlsx"}
-    dso_a.run_powerflows(job=job, args=args, result_hdf=Path("/r.h5"), log_path=tmp_path / "x.log", status=None)
+    job = {"target_network": "real_dso_a", "target_grid_id": 80, "job": "real_dso_a:80", "grid_file": "/g/LV_080.xlsx",
+           "provider": "dso_a"}
+    real.run_powerflows(job=job, args=args, result_hdf=Path("/r.h5"), log_path=tmp_path / "x.log", status=None)
     assert [stage for stage, _, _ in calls] == ["step4_real_dso_a_pre", "step4_real_dso_a_post-inflex-heuristic",
                                                 "step4_real_dso_a_post-hems-heuristic"]
     modes = [cmd[cmd.index("--post-demand-mode") + 1] for _, _, cmd in calls]
@@ -107,3 +108,15 @@ def test_synthetic_adapter_jobs(tmp_path):
         {"target_network": "synthetic", "target_grid_id": 7, "bridge_filename": "a.h5"},
     ]
     assert [job["target_grid_id"] for job in synthetic.load_jobs(tmp_path, 7)] == [7]
+
+
+def test_real_target_takes_network_and_provider_from_the_plan(tmp_path):
+    pd.DataFrame({
+        "target_network": ["real_dso_b"] * 3, "provider": ["dso_b"] * 3, "target_grid_id": [7, 7, 9],
+        "real_grid_file": ["/g/area-7.json", "/g/area-7.json", "/g/area-9.json"], "postcode": [1, 1, 2],
+    }).to_csv(tmp_path / real.ALLOCATION_PLAN_FILENAME, index=False)
+    jobs = real.load_jobs(tmp_path, None)
+    assert [(j["target_network"], j["provider"], j["target_grid_id"], j["grid_file"]) for j in jobs] == [
+        ("real_dso_b", "dso_b", 7, "/g/area-7.json"), ("real_dso_b", "dso_b", 9, "/g/area-9.json")]
+    assert real.input_name(jobs[0], "s") == "paired_real_dso_b_7_s.h5"
+    assert adapter_for("real_dso_b") is real and adapter_for("real") is real and adapter_for("synthetic") is synthetic

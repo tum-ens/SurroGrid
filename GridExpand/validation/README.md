@@ -7,7 +7,7 @@ scientific contract (scenario units, shared layers, status-quo test, publication
 [METHOD.md](METHOD.md).
 
 The validation is not part of the `gridexpand` package: it is not installed, not in the Docker image, and
-`gridexpand` never imports it (a test checks this). It imports `gridexpand` and uses its paired runner, profile
+`gridexpand` never imports it (a test checks this). It imports `gridexpand` and uses its per-grid runner, profile
 libraries and real-grid power flow. Run it from `GridExpand/` with the GridExpand environment (`uv sync`).
 
 | path | content |
@@ -54,7 +54,7 @@ Stages:
    parallel jobs), readiness, `profiles.physical_heat_profile_library`, readiness against the library,
    `profiles.pv_profile_library` (the profile modules are below `gridexpand.allocation.scenario_calibration`);
    with `execution.grid_subset` a subset of overlap components.
-2. **execute**: one `gridexpand.paired.runner` process per execution group and provider: `heuristic-assets`
+2. **execute**: one `gridexpand.runner.grid_runner` process per execution group and provider: `heuristic-assets`
    (materializes `post-hems-heuristic`, emits the requested heuristic cases and the `pre` stage) and
    `post-hems-optimized`.
 3. **postprocess** (only when every job succeeded and `execution.materialize_expansion`):
@@ -128,9 +128,9 @@ grid; a pylovo alignment option consumes it to drop these grids and their buildi
 
 | module | content |
 |---|---|
-| `gridexpand.paired.runner` | the paired runner: scenario-unit materialization, urbs, canonical temporal mapping, Step 4 per target; status keyed `<target>:<grid id>` for resume |
-| `gridexpand.paired.sources.{dso_a,dso_b,synthetic}` | network adapters: allocation-plan discovery, HDF naming, Step 4 commands (real grids: `powerflow.run_real_scenario_powerflow --provider`) |
-| `gridexpand.paired.comparison`, `gridexpand.paired.datasets` | network-independent equivalence checks; resolving and validating a prepared dataset |
+| `gridexpand.runner.grid_runner` | the per-grid runner: scenario-unit materialization, urbs, canonical temporal mapping, Step 4 per target; status keyed `<target>:<grid id>` for resume |
+| `gridexpand.runner.targets.{real,synthetic}` | network targets: allocation-plan discovery, HDF naming, Step 4 commands; `real` takes the network label (`real_dso_a`, `real_dso_b`) and provider from the dataset (real grids: `powerflow.run_real_scenario_powerflow --provider`) |
+| `gridexpand.runner.result_checks`, `gridexpand.runner.datasets` | run-wide result checks (shared TSAM mapping, full-year results); resolving and validating a prepared dataset |
 | `gridexpand.allocation.scenario_calibration.profiles`, `.pipeline` | shared electricity, PV, mobility and heat profiles, readiness, libraries, aligned weather; paired urbs-input materialization |
 | `gridexpand.analysis.expansion.real_materialization` | expansion rows of the real grids |
 
@@ -151,7 +151,7 @@ of a grid; the result-case runs hold only their post stage (Step 4 `--post-only`
 for every case. Analysis keys: `<run.id>_<provider>_<real|synthetic>_<pre|post_inflex|post|post_hems_optimized>`
 ([Step 5](../docs/steps/5_postprocessing.md#expansion-materialization)).
 
-The runner (`uv run python -m gridexpand.paired.runner --help`) is started by `python -m validation run`; direct use
+The runner (`uv run python -m gridexpand.runner.grid_runner --help`) is started by `python -m validation run`; direct use
 is for diagnostics. Important options: `--paired-dataset-id`, `--pylovo-version-id` (must match the dataset),
 `--scenario-config`, `--target real_dso_a|real_dso_b|synthetic|both` with `--provider dso_a|dso_b`, `--model-case`
 (materialized case) and `--result-cases`, `--skip-pre`, `--pre-only`, `--job-subset` (JSON `{target: [grid ids]}`),

@@ -1,4 +1,8 @@
-"""DSO A real-grid adapter for paired validation."""
+"""Real grids as runner targets: given grid files with their scenario dataset (``pipeline: real``, validation).
+
+The network label (``target_network``) and the provider come from the dataset's bus allocation plan, so every real
+dataset (own grids, the DSO grids of the validation) runs through this one target.
+"""
 
 from __future__ import annotations
 
@@ -12,23 +16,26 @@ from gridexpand.common.orchestration import StatusLog, run_command
 from gridexpand.scenario import commands
 from gridexpand.scenario.model_cases import MODEL_CASES
 
-TARGET_NETWORK = "real_dso_a"
+TARGET_NETWORK = "real"
 ALLOCATION_PLAN_FILENAME = "paired_real_bus_allocation_plan.csv"
 
 
-def load_real_jobs(
-    paired_dir: Path, target_grid_id: int | None, target_network: str
-) -> list[dict[str, Any]]:
-    """One job per real grid; aligned plans also name the grid file and PLZ."""
+def load_jobs(paired_dir: Path, target_grid_id: int | None) -> list[dict[str, Any]]:
+    """One job per real grid of the dataset, with its network label, provider, grid file and PLZ."""
     plan = pd.read_csv(paired_dir / ALLOCATION_PLAN_FILENAME)
     plan["target_grid_id"] = pd.to_numeric(plan["target_grid_id"], errors="coerce")
     plan = plan.dropna(subset=["target_grid_id"])
     plan["target_grid_id"] = plan["target_grid_id"].astype(int)
     if target_grid_id is not None:
         plan = plan[plan["target_grid_id"].eq(int(target_grid_id))]
+    networks = plan["target_network"].dropna().astype(str).unique() if "target_network" in plan else []
+    if len(networks) > 1:
+        raise ValueError(f"{paired_dir} mixes real networks {sorted(networks)}.")
+    network = str(networks[0]) if len(networks) else TARGET_NETWORK
+    provider = str(plan["provider"].dropna().iloc[0]) if "provider" in plan and plan["provider"].notna().any() else None
     jobs = []
     for grid_id, grid_plan in plan.groupby("target_grid_id", sort=True):
-        job = {"target_network": target_network, "target_grid_id": int(grid_id)}
+        job = {"target_network": network, "target_grid_id": int(grid_id), "provider": provider}
         if "real_grid_file" in grid_plan:
             files = grid_plan["real_grid_file"].dropna().astype(str).unique()
             if len(files) != 1:
@@ -40,13 +47,8 @@ def load_real_jobs(
     return jobs
 
 
-def load_jobs(paired_dir: Path, target_grid_id: int | None) -> list[dict[str, Any]]:
-    return load_real_jobs(paired_dir, target_grid_id, TARGET_NETWORK)
-
-
 def input_name(job: dict[str, Any], scenario_label: str) -> str:
-    grid_id = int(job["target_grid_id"])
-    return f"paired_real_dso_a_LV_{grid_id:03d}_{scenario_label}.h5"
+    return f"paired_{job['target_network']}_{int(job['target_grid_id'])}_{scenario_label}.h5"
 
 
 def run_powerflows(
@@ -60,7 +62,7 @@ def run_powerflows(
     run_real_powerflows(
         job=job, args=args, result_hdf=result_hdf,
         log_path=log_path, status=status,
-        target_network=TARGET_NETWORK, provider="dso_a",
+        target_network=str(job["target_network"]), provider=job.get("provider") or args.provider,
     )
 
 

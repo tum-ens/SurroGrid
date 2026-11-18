@@ -3,7 +3,7 @@
 Every provider (DSO A, DSO B) of a pylovo alignment bundle against its synthetic counterpart:
 
 - prepare: build (unless ``resume``/``--skip-prepare``) and validate the paired dataset of each provider;
-- execute: one paired-runner process (:mod:`gridexpand.paired.runner`) per execution group and provider;
+- execute: one paired-runner process (:mod:`gridexpand.runner.grid_runner`) per execution group and provider;
 - postprocess: the expansion analyses of every provider group when every job succeeded.
 
 Run directories, state, resume, cancellation and exit codes are those of ``gridexpand run``
@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from gridexpand.common.orchestration import Cancelled, install_cancel_handlers, run_step
-from gridexpand.paired.datasets import HEAT_LIBRARY_ROOT, PAIRED_DATASET_ROOT, WEATHER_RESULT_ROOT
+from gridexpand.runner.datasets import HEAT_LIBRARY_ROOT, PAIRED_DATASET_ROOT, WEATHER_RESULT_ROOT
 from gridexpand.paths import RUNS_DIR
 from gridexpand.scenario import commands as core_commands
 from gridexpand.scenario import run as core_run
@@ -202,7 +202,7 @@ class AlignedRun:
 
     def target_for(self, provider: ProviderResources) -> str:
         """Paired-runner ``--target`` of one provider."""
-        return {"both": "both", "synthetic": "synthetic", "real": f"real_{provider.provider}"}[self.target_network]
+        return self.target_network  # both, synthetic or real (the dataset names the real network)
 
     def identity(self) -> dict[str, Any]:
         return {
@@ -358,7 +358,7 @@ def aligned_jobs(ctx: AlignedContext, provider: ProviderResources, subset_path: 
 
 
 def run_aligned(ctx: AlignedContext) -> int:
-    from gridexpand.paired.datasets import validate_prepared_dataset
+    from gridexpand.runner.datasets import validate_prepared_dataset
 
     run: AlignedRun = ctx.run  # type: ignore[assignment]
     state = ctx.state

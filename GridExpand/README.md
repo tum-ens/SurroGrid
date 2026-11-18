@@ -154,7 +154,7 @@ repository, which runs both images behind one proxy.
 `gridexpand <command> --help` lists the options. Module entry points without a command:
 `python -m gridexpand.sampling.export_single_grid` (Step 1),
 `gridexpand.allocation.electrification_preparation`, `gridexpand.allocation.generate_mobility_profile_pool`,
-`gridexpand.paired.runner` (all with `uv run python -m ... --help`).
+`gridexpand.runner.grid_runner` (all with `uv run python -m ... --help`).
 
 ## Layout
 
@@ -163,7 +163,7 @@ GridExpand/
   pyproject.toml, uv.lock   one environment (Python 3.12)
   .env.example              database credentials template (copy to .env)
   src/gridexpand/           cli.py, paths.py (the only module that knows directories), common/, db/ (+ sql/),
-                            sampling/, allocation/, optimization/, powerflow/, analysis/, scenario/, paired/, grids/, api/
+                            sampling/, allocation/, optimization/, powerflow/, analysis/, scenario/, runner/, grids/, api/
   config/                   scenarios/ and runs/ YAMLs
   data/                     static inputs: sampling/, statistics/
   notebooks/                sampling/ (Step 1)
