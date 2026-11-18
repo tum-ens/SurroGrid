@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from deterministic_fixture import read_prepared, write_input
 
+from tests.fixture_paths import FIXTURE_SCENARIOS
 from gridexpand.optimization.pypsa_model import RESULT_KEYS, run_pypsa_opt
 from gridexpand.optimization.pypsa_model.building_model import build_building_model
 from gridexpand.optimization.pypsa_model.runfunctions import building_groups, default_concurrency
@@ -141,11 +142,10 @@ def test_runner_concurrency_default(monkeypatch):
 
 def test_cli_rejects_tsam_with_pypsa(monkeypatch):
     from gridexpand.optimization.run_urbs_cluster import parse_args
-    from gridexpand.paths import SCENARIO_CONFIG_DIR
 
     monkeypatch.delenv(OPTIMIZER_ENV, raising=False)
-    full_year = str(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")  # time_aggregation off
-    with_tsam = str(SCENARIO_CONFIG_DIR / "ro_heat_2045_synthetic.yaml")  # time_aggregation.enabled
+    full_year = str(FIXTURE_SCENARIOS / "joint_2045_full_year.yaml")  # time_aggregation off
+    with_tsam = str(FIXTURE_SCENARIOS / "ro_heat_2045_synthetic.yaml")  # time_aggregation.enabled
     assert parse_args(["x.h5", "--scenario-config", full_year]).optimizer == "urbs"
     assert parse_args(["x.h5", "--optimizer", "pypsa", "--scenario-config", full_year]).optimizer == "pypsa"
     assert parse_args(["x.h5", "--scenario-config", with_tsam]).optimizer == "urbs"

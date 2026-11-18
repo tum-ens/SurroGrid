@@ -7,14 +7,15 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.fixture_paths import FIXTURE_SCENARIOS
 from gridexpand.paths import SCENARIO_CONFIG_DIR
 from gridexpand.scenario.config_loader import configuration_hash, load_scenario_config
 from gridexpand.scenario.scenario_config import ADOPTION_MODES
 from gridexpand.api import scenario_form as sf
 
 SHIPPED = sorted(SCENARIO_CONFIG_DIR.glob("*.yaml"))
-SCHWEINFURT = SCENARIO_CONFIG_DIR / "schweinfurt_2045.yaml"
-RO_HEAT = SCENARIO_CONFIG_DIR / "ro_heat_2045_synthetic.yaml"  # infdb_ro_heat, no teaser_retrofit_level
+TEASER = FIXTURE_SCENARIOS / "teaser_2045.yaml"
+RO_HEAT = FIXTURE_SCENARIOS / "ro_heat_2045_synthetic.yaml"  # infdb_ro_heat, no teaser_retrofit_level
 
 
 def text_of(path: Path) -> str:
@@ -26,8 +27,7 @@ def comments(text: str) -> list[str]:
 
 
 def test_shipped_scenarios_exist():
-    assert {p.name for p in SHIPPED} >= {"schweinfurt_2045.yaml", "ro_heat_2045_synthetic.yaml",
-                                         "joint_2045_full_year.yaml"}
+    assert {p.name for p in SHIPPED} == {"default_2045.yaml"}
 
 
 @pytest.mark.parametrize("path", SHIPPED, ids=lambda p: p.name)
@@ -61,12 +61,12 @@ def test_catalogue_is_well_formed():
 
 @pytest.mark.parametrize("key", [k for k, f in sf.FIELDS.items() if f["type"] == "enum"])
 def test_every_enum_option_is_accepted_by_the_loader(key):
-    base = text_of(SCHWEINFURT)
+    base = text_of(TEASER)
     for option in sf.FIELDS[key]["options"]:
         changes = {key: option["value"]}
         if key.endswith("adoption_mode") and option["value"] == "deterministic_share":
             changes[key.replace("adoption_mode", "building_share")] = 0.5
-        result = sf.preview(base, base_name="schweinfurt_2045.yaml", changes=changes)
+        result = sf.preview(base, base_name="teaser_2045.yaml", changes=changes)
         assert result["ok"], (key, option, result["issues"])
 
 
@@ -85,7 +85,7 @@ def _other_value(key: str, field: dict, current):
 
 
 def test_every_non_enum_field_can_be_changed_within_the_loader_rules():
-    base = text_of(SCHWEINFURT)
+    base = text_of(TEASER)
     data = yaml.safe_load(base)
     for key, field in sf.FIELDS.items():
         if field["type"] == "enum" or field.get("requires"):
@@ -110,16 +110,16 @@ def test_no_op_changes_keep_the_text_and_the_hash(path):
 
 
 def test_an_equal_number_is_no_change():
-    text = text_of(SCHWEINFURT)  # demand_multiplier: 2.0, hours_per_period: 168
+    text = text_of(TEASER)  # demand_multiplier: 2.0, hours_per_period: 168
     assert sf.apply_changes(text, {"asset_sizing.pv.demand_multiplier": 2, "time_aggregation.hours_per_period": 168.0}) == text
 
 
 def test_a_change_changes_hash_and_key_and_keeps_comments_and_layout():
-    text = text_of(SCHWEINFURT)
+    text = text_of(TEASER)
     before = sf.preview(text, base_name="s")
     result = sf.preview(text, base_name="s", changes={"asset_sizing.pv.demand_multiplier": 2.5})
     assert result["ok"] and result["configuration_hash"] != before["configuration_hash"]
-    assert result["scenario_key"] != before["scenario_key"] and result["id"] == "schweinfurt_2045"
+    assert result["scenario_key"] != before["scenario_key"] and result["id"] == "teaser_2045"
     old_lines, new_lines = text.splitlines(), result["text"].splitlines()
     assert len(old_lines) == len(new_lines)
     assert [(a, b) for a, b in zip(old_lines, new_lines) if a != b] == [
@@ -127,10 +127,10 @@ def test_a_change_changes_hash_and_key_and_keeps_comments_and_layout():
     assert result["changes"] == [{"key": "asset_sizing.pv.demand_multiplier", "label": "Demand multiplier",
                                   "kind": "changed", "old": 2.0, "new": 2.5}]
     assert result["diff"].startswith("--- s (base)\n+++ new scenario\n")
-    renamed = sf.preview(text, base_name="s", scenario_id="schweinfurt_2045_custom")
-    assert renamed["id"] == "schweinfurt_2045_custom"
-    assert renamed["scenario_key"].startswith("scenario_schweinfurt_2045_custom_")
-    assert "  id: schweinfurt_2045_custom\n" in renamed["text"]
+    renamed = sf.preview(text, base_name="s", scenario_id="teaser_2045_custom")
+    assert renamed["id"] == "teaser_2045_custom"
+    assert renamed["scenario_key"].startswith("scenario_teaser_2045_custom_")
+    assert "  id: teaser_2045_custom\n" in renamed["text"]
 
 
 def test_optional_keys_keep_the_comments_around_them():
@@ -154,7 +154,7 @@ def test_optional_keys_keep_the_comments_around_them():
 
 
 def test_small_and_large_floats_stay_floats_for_the_loader():
-    text = text_of(SCHWEINFURT)
+    text = text_of(TEASER)
     new = sf.apply_changes(text, {"economics.electricity.pv_feed_in_tariff_eur_per_kwh": 1e-05,
                                   "asset_sizing.pv.fallback_capacity_kwp": 2e16})
     assert "pv_feed_in_tariff_eur_per_kwh: 1.0e-05\n" in new and "fallback_capacity_kwp: 2.0e+16\n" in new
@@ -163,7 +163,7 @@ def test_small_and_large_floats_stay_floats_for_the_loader():
 
 
 def test_the_home_charger_power_writes_both_capacities():
-    text = text_of(SCHWEINFURT)
+    text = text_of(TEASER)
     new = yaml.safe_load(sf.apply_changes(text, {"technologies.processes.home_charger.installed_capacity_kw": 7.4}))
     charger = new["technologies"]["processes"]["home_charger"]
     assert charger["installed_capacity_kw"] == charger["capacity_upper_kw"] == 7.4
@@ -185,19 +185,19 @@ def test_the_home_charger_power_writes_both_capacities():
     ({"asset_sizing.pv.tilt_bin_degrees": 3.0}, "asset_sizing.pv.tilt_bin_degrees", "not an editable field", False),
 ])
 def test_invalid_values_give_readable_issues(changes, key, needle, has_line):
-    result = sf.preview(text_of(SCHWEINFURT), base_name="s", changes=changes)
+    result = sf.preview(text_of(TEASER), base_name="s", changes=changes)
     assert not result["ok"]
     issue = result["issues"][0]
     assert issue["level"] == "error" and needle in issue["message"]
     assert issue.get("key") == key
     assert ("line" in issue) == has_line
     if has_line:
-        line = text_of(SCHWEINFURT).splitlines()[issue["line"] - 1]
+        line = text_of(TEASER).splitlines()[issue["line"] - 1]
         assert line.strip().startswith(issue["key"].rsplit(".", 1)[1] + ":")
 
 
 def test_text_issues_carry_line_numbers():
-    text = text_of(SCHWEINFURT)
+    text = text_of(TEASER)
     broken = sf.preview(text, base_name="s", text="scenario:\n  id: [1, 2\n")
     assert not broken["ok"] and broken["issues"][0]["message"].startswith("YAML syntax error") and broken["issues"][0]["line"]
     missing = sf.preview(text, base_name="s", text=text.replace("    fallback_capacity_kwp: 14.5\n", ""))
@@ -216,23 +216,23 @@ def test_text_issues_carry_line_numbers():
 
 
 def test_template_ids_are_warnings():
-    result = sf.preview(text_of(SCHWEINFURT), base_name="f", scenario_id="CHANGE_ME_x")
+    result = sf.preview(text_of(TEASER), base_name="f", scenario_id="CHANGE_ME_x")
     assert result["ok"]
     messages = [i["message"] for i in result["issues"] if i["level"] == "warning"]
     assert any("CHANGE_ME" in m for m in messages)
-    bad_id = sf.preview(text_of(SCHWEINFURT), base_name="s", scenario_id="../x")
+    bad_id = sf.preview(text_of(TEASER), base_name="s", scenario_id="../x")
     assert not bad_id["ok"] and bad_id["issues"][0]["key"] == "scenario.id"
 
 
 def test_help_texts_are_the_yaml_comments_above_the_key():
-    helps = sf.help_texts(text_of(SCHWEINFURT))
+    helps = sf.help_texts(text_of(TEASER))
     assert helps["asset_sizing.pv.demand_multiplier"].startswith("Central compromise across public recommendations")
     assert "P_PV = min(" in helps["asset_sizing.pv.demand_multiplier"]
     assert helps["asset_sizing.pv.maximum_fallback_share"] == ("Publication-quality runs fail if more than this share "
                                                               "uses the fallback.")
     assert "asset_sizing.pv.flat_roof_utilization" not in helps  # no comment directly above
     assert "electrification.heat.adoption_mode" not in helps  # the inline comment belongs to ``electrification``
-    sections, _ = sf.form_sections(text_of(SCHWEINFURT))
+    sections, _ = sf.form_sections(text_of(TEASER))
     fields = {f["key"]: f for s in sections for f in s["fields"]}
     assert set(fields) == set(sf.FIELDS)
     assert fields["asset_sizing.heat.teaser_retrofit_level"]["present"] is False
@@ -248,7 +248,7 @@ def test_fields_a_file_does_not_have_are_skipped():
 
 
 def test_other_indentation_is_kept():
-    data = yaml.safe_load(text_of(SCHWEINFURT))
+    data = yaml.safe_load(text_of(TEASER))
     four = yaml.safe_dump(data, indent=4, sort_keys=False)
     four = "# four spaces\n" + four
     new = sf.apply_changes(four, {"asset_sizing.pv.demand_multiplier": 3.0})
@@ -267,10 +267,10 @@ def test_changed_values_lists_added_and_removed_leaves():
 
 
 def test_internal_heat_controls_create_and_remove_the_nested_block():
-    base = text_of(SCHWEINFURT)
+    base = text_of(TEASER)
     result = sf.preview(
         base,
-        base_name="schweinfurt_2045.yaml",
+        base_name="teaser_2045.yaml",
         changes={
             "asset_sizing.heat.space_heat_source": "internal",
             "asset_sizing.heat.internal.hems_preheat_uplift_k": 1.0,
@@ -286,7 +286,7 @@ def test_internal_heat_controls_create_and_remove_the_nested_block():
     )
     back = sf.preview(
         text,
-        base_name="schweinfurt_2045.yaml",
+        base_name="teaser_2045.yaml",
         changes={"asset_sizing.heat.space_heat_source": "teaser"},
     )
     assert back["ok"], back["issues"]

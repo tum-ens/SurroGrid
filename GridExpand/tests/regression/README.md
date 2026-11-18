@@ -12,7 +12,7 @@ and refuses unless host, port and database-name prefix match the sandbox setting
 
 - Region: AGS 9184137 / PLZ 85653 (Aying, © OpenStreetMap contributors, ODbL), pylovo version 1, 4 grids
   with 63-171 buildings each (`--min-buildings 60`).
-- Scenario: `scenario_sandbox.yaml` (Schweinfurt 2045 assumptions, TEASER heat, see its header).
+- Scenario: `scenario_sandbox.yaml` (2045 assumptions with TEASER heat, see its header).
 - Three model runs: `pre`, `post-hems-heuristic`, `post-hems-optimized`; timeframe
   `max_base_electricity_demand_week` (168 h); `--powerflow-output both`.
 - Runtime on a 32-core workstation: about 12 min (`HARNESS_QUICK=1`: one grid, about 3 min).

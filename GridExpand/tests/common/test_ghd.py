@@ -9,9 +9,9 @@ import pytest
 import yaml
 from shapely.geometry import Point, box
 
+from tests.fixture_paths import FIXTURE_SCENARIOS
 from gridexpand.common import ghd
 from gridexpand.common.building_components import build_building_components
-from gridexpand.paths import SCENARIO_CONFIG_DIR
 from gridexpand.scenario.scenario_config import ScenarioConfig
 
 
@@ -173,8 +173,8 @@ def test_file_evidence_source(tmp_path):
 
 
 def test_ghd_block_parsing():
-    assert ScenarioConfig.from_dict(yaml.safe_load((SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml").read_text())).ghd == ghd.GhdConfig()
-    raw = yaml.safe_load((SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml").read_text(encoding="utf-8"))
+    assert ScenarioConfig.from_dict(yaml.safe_load((FIXTURE_SCENARIOS / "joint_2045_full_year.yaml").read_text())).ghd == ghd.GhdConfig()
+    raw = yaml.safe_load((FIXTURE_SCENARIOS / "joint_2045_full_year.yaml").read_text(encoding="utf-8"))
     raw["ghd"] = {
         "activity_gating": True, "single_volume_one_storey": True,
         "osm": {"source": "postgis", "activity_layers": [

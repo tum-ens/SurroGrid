@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixture_paths import FIXTURE_SCENARIOS
 from gridexpand.api.commands import (
     PipelineSpec,
     contiguous_range,
@@ -79,7 +80,7 @@ def test_format_and_classify_events():
 def test_commands(tmp_path):
     from gridexpand.scenario.run_config import load_run_config
 
-    scenario = Path(__file__).resolve().parents[2] / "config" / "scenarios" / "schweinfurt_2045.yaml"
+    scenario = FIXTURE_SCENARIOS / "teaser_2045.yaml"
     spec = PipelineSpec(ags=9184137, pylovo_version_id="1", scenario_config=scenario,
                         model_cases=("pre", "post-hems-optimized"), timeframe_mode="full_year",
                         min_buildings=60, start_index=3, limit=1)
@@ -107,7 +108,7 @@ def test_single_grid_run_yaml_and_terminal_commands(tmp_path):
     from gridexpand.scenario.run_config import load_run_config
     from gridexpand.api.commands import run_yaml_text, terminal_commands
 
-    scenario = Path(__file__).resolve().parents[2] / "config" / "scenarios" / "schweinfurt_2045.yaml"
+    scenario = FIXTURE_SCENARIOS / "teaser_2045.yaml"
     spec = PipelineSpec(ags=9184137, pylovo_version_id="1", scenario_config=scenario, model_cases=("pre",),
                         timeframe_mode="max_base_electricity_demand_week", min_buildings=1, plz=85653, kcid=1, bcid=-1)
     path = tmp_path / "grid.yaml"
@@ -115,7 +116,7 @@ def test_single_grid_run_yaml_and_terminal_commands(tmp_path):
     assert path.read_text().startswith("# Grid 1/-1\n#\n# second line\n")
     run, _ = load_run_config(path)
     assert (run.plz, run.kcid, run.bcid, run.min_buildings, run.start_index) == (85653, 1, -1, 1, None)
-    assert run_yaml(spec, "x", scenario="../scenarios/s.yaml")["run"]["scenario"] == "../scenarios/s.yaml"
+    assert run_yaml(spec, "x", scenario="s")["scenario"] == "s" and run_yaml(spec, "x")["run"] == "x"
     local = terminal_commands(path, "ui_grid", in_container=False, project_dir=tmp_path)
     assert local[0]["command"] == f"tmux new-session -d -s ui_grid 'uv run gridexpand run {path}; exec bash'"
     assert local[-1]["command"].endswith("--resume")

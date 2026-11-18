@@ -1,11 +1,10 @@
-# Copy to config/scenarios/<name>.yaml and replace CHANGE_ME_scenario_id.
-# UPDATE for every new scenario:
-#   - scenario.id must be a unique, stable scientific-case identifier.
-#   - Review all scientific values below; milestone_year and assumptions may
-#     need to change for the modeled region, year, or sensitivity case.
-# The values below are a valid central 2045 starting point, not universal facts.
+# Default 2045 scenario: the scientific assumptions of a run (economics, sizing, electrification shares,
+# mobility, technologies, time aggregation). Run YAMLs name it with `scenario: default_2045`.
+# The values are a central 2045 starting point, not universal facts. To change a few of them, use
+# `scenario_overrides:` in the run YAML; to change many, copy this file to config/scenarios/<name>.yaml,
+# give it a new scenario.id and name it in the run YAML. Keys: docs/configuration.md.
 scenario:
-  id: CHANGE_ME_scenario_id
+  id: default_2045
   milestone_year: 2045
 
 economics:

@@ -1,0 +1,38 @@
+# Validation run (pipeline: paired_aligned): one scenario on the real DSO grids and on the synthetic pylovo
+# grids generated from the same buildings. Copy to validation/config/<name>.yaml, replace the CHANGE_ME
+# values and run `uv run python -m validation run validation/config/<name>.yaml` from GridExpand/.
+# The data (alignment bundle, population, DSO B delivery) stay outside the repository.
+run:
+  id: CHANGE_ME_run_id
+  scenario: scenarios/joint_2045_full_year.yaml   # the paper's method scenario
+  pipeline: paired_aligned
+
+resources:
+  pylovo_version_id: CHANGE_ME           # the aligned pylovo version (the paper used a5)
+  alignment_dir: ~/data/alignment        # pylovo alignment bundle
+  population: ~/data/CHANGE_ME/comparison.json   # frozen pylovo comparison.json (its metric cohort)
+  dso_b_grids_dir: ~/data/CHANGE_ME      # frozen, fingerprint-checked DSO B delivery
+  # weather_year: 2016                   # real weather year for both providers; null = PVGIS TMY per provider
+  providers:
+    dso_a:
+      paired_dataset_id: CHANGE_ME_dso_a
+      weather_source_hdf: weather_CHANGE_ME_dso_a.h5
+    dso_b:
+      paired_dataset_id: CHANGE_ME_dso_b
+      weather_source_hdf: weather_CHANGE_ME_dso_b.h5
+  target_network: both                   # both, real or synthetic
+
+execution:
+  model_cases:
+    - post-inflex-heuristic
+    - post-hems-heuristic
+  powerflow_grid_scope: full
+  workers: 4
+  step3_cpus: 40
+  step3_cluster_concurrency: 1
+  step4_cpus: 2
+  heat_workers: 6
+  powerflow_max_timesteps: null          # a number caps Step 4 (smoke tests)
+  profile_seed: 481527
+  parallel_providers: true
+  materialize_expansion: true

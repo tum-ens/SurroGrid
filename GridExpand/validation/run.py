@@ -31,13 +31,11 @@ from gridexpand.scenario.run_config import (
     _concurrency,
     _grid_scope,
     _optimizer,
-    _pylovo_version,
     _resolve,
     _seed,
     choice,
     directory_safe,
     flag,
-    parse_run_blocks,
     positive_int,
     with_cases,
 )
@@ -229,6 +227,34 @@ def _grid_subset(raw: Any) -> dict[str, Any] | None:
         "seed": positive_int(raw["seed"], "grid_subset.seed", allow_zero=True),
         "real_grids_per_provider": None if limit is None else positive_int(limit, "grid_subset.real_grids_per_provider"),
     }
+
+
+def _pylovo_version(resources: dict[str, Any]) -> str:
+    version = str(resources.get("pylovo_version_id", "") or "").strip()
+    if not version:
+        raise ValueError("resources.pylovo_version_id must be set explicitly.")
+    return version
+
+
+def parse_run_blocks(raw: dict[str, Any], *, base_dir: Path) -> tuple[str, str, Path, dict[str, Any], dict[str, Any]]:
+    """``(run id, pipeline, scenario path, resources, execution)`` of a validation run YAML (run/resources/execution)."""
+    raw = mapping(raw, "run configuration")
+    only(raw, {"run", "resources", "execution"}, "top-level run")
+    for block in ("run", "resources", "execution"):
+        if block not in raw:
+            raise ValueError(f"The run YAML needs a {block!r} block.")
+    run = mapping(raw["run"], "run")
+    resources = mapping(raw["resources"], "resources")
+    execution = mapping(raw["execution"], "execution")
+    only(run, {"id", "scenario", "pipeline"}, "run")
+    run_id = directory_safe(run.get("id"), "run.id")
+    pipeline = str(run.get("pipeline"))
+    if not run.get("scenario"):
+        raise ValueError("run.scenario (the scenario YAML) is required.")
+    scenario_path = _resolve(run["scenario"], base_dir)
+    if not scenario_path.is_file():
+        raise FileNotFoundError(f"Scenario YAML not found: {scenario_path}")
+    return run_id, pipeline, scenario_path, resources, execution
 
 
 def aligned_run_from_dict(raw: dict[str, Any], *, base_dir: Path) -> AlignedRun:
@@ -445,7 +471,7 @@ def plan_lines(ctx: AlignedContext) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     parser = core_run.build_parser()
     parser.prog = "python -m validation run"
-    parser.description = "Run one paired_aligned run YAML (validation/config/*.yaml): prepare, execute and postprocess."
+    parser.description = "Run one validation run YAML (validation/config/<run>.yaml, pipeline paired_aligned): prepare, execute and postprocess."
     parser.add_argument("--skip-prepare", action="store_true",
                         help="Use the prepared datasets as they are (validated).")
     parser.add_argument("--provider", choices=("dso_a", "dso_b"), help="One provider only.")

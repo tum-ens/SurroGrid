@@ -19,6 +19,7 @@ SIGTERM/SIGINT cancel the running steps. Exit codes: 0 done, 1 failed,
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import sys
@@ -30,7 +31,7 @@ from typing import Any
 from gridexpand.common.orchestration import CANCEL, Cancelled, install_cancel_handlers, utc_now
 from gridexpand.optimization.solver import OPTIMIZER_ENV
 from gridexpand.paths import RUNS_DIR
-from gridexpand.scenario.config_loader import load_scenario_config, scenario_identity_key
+from gridexpand.scenario.config_loader import _read_yaml, configuration_hash, scenario_identity_key
 from gridexpand.scenario.model_cases import MODEL_CASES, ExecutionGroup, execution_groups
 from gridexpand.scenario.run_config import (
     SyntheticRun,
@@ -70,6 +71,8 @@ class RunContext:
     state: RunState | None = None
     readiness: dict[str, Any] = field(default_factory=dict)
     groups: dict[str, Any] = field(default_factory=dict)
+    # The merged scenario of a run with scenario_overrides (written to run.scenario_path by execute).
+    scenario_raw: dict[str, Any] | None = None
 
     def wants(self, stage: str) -> bool:
         return STAGES.index(stage) <= STAGES.index(self.until)
@@ -335,18 +338,35 @@ def load_context(args: argparse.Namespace) -> RunContext:
     run, run_hash = load_run_config(run_yaml)
     if args.model_case:
         run = with_cases(run, tuple(args.model_case))
-    scenario, scenario_hash = load_scenario_config(run.scenario_path)
+    run_dir = (args.run_dir or RUNS_DIR / run.run_id).resolve()
+    raw = run.scenario_raw()
+    scenario, scenario_hash = ScenarioConfig.from_dict(raw), configuration_hash(raw)
+    if run.scenario_overrides:
+        # Steps 2-4 read the merged scenario from the run directory (written by execute).
+        run = dataclasses.replace(run, scenario_path=run_dir / "inputs" / "scenario.yaml")
     ctx = RunContext(
         run=run,
         run_hash=run_hash,
         run_yaml=Path(run_yaml).resolve(),
         scenario=scenario,
         scenario_hash=scenario_hash,
-        run_dir=(args.run_dir or RUNS_DIR / run.run_id).resolve(),
+        run_dir=run_dir,
         resume=bool(args.resume or run.resume),
         until="prepare" if args.prepare_only else args.until,
+        scenario_raw=raw if run.scenario_overrides else None,
     )
     return ctx
+
+
+def write_merged_scenario(path: Path, raw: dict[str, Any], scenario_hash: str) -> None:
+    """Write the merged scenario of a run with overrides; its hash must stay the one the run was planned with."""
+    import yaml
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = "# The run's scenario: the named scenario with the run YAML's scenario_overrides merged in.\n"
+    path.write_text(header + yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    if configuration_hash(_read_yaml(path)) != scenario_hash:
+        raise ValueError(f"The merged scenario {path} does not reproduce its hash; check scenario_overrides.")
 
 
 def run_identity(ctx: RunContext) -> dict[str, Any]:
@@ -362,6 +382,8 @@ def execute(ctx: RunContext, runner: Callable[[RunContext], int] | None = None) 
     """Run the stages of ``ctx`` in its run directory with ``runner`` (default: the synthetic pipeline)."""
     ctx.run_dir.mkdir(parents=True, exist_ok=True)
     check_identity(ctx.run_dir, run_identity(ctx), info={"run_hash": ctx.run_hash, "git": git_revision()})
+    if ctx.scenario_raw is not None:
+        write_merged_scenario(ctx.run.scenario_path, ctx.scenario_raw, ctx.scenario_hash)
     freeze_inputs(ctx.run_dir, ctx.run_yaml, ctx.run.scenario_path)
     ctx.state = RunState(ctx.run_dir, ctx.run.run_id, ctx.run.pipeline)
     if ctx.run.optimizer:

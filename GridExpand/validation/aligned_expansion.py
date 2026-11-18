@@ -9,7 +9,7 @@ keys ``{run_id}_{provider}_{real|synthetic}_{pre|post_inflex|post}``.
 Example::
 
     uv run python -m validation.aligned_expansion \\
-        --run-id joint_2045_v1_smoke24 --providers dso_a dso_b \\
+        --run-id <run id> --providers dso_a dso_b \\
         --cases pre post-inflex-heuristic post-hems-heuristic
 
 All groups are materialized (one transaction each) and the QGIS views are

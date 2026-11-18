@@ -121,14 +121,17 @@ def check_config_file(path: Path) -> dict[str, Any]:
     import yaml
 
     from gridexpand.common.timeframe import scenario_key_for_timeframe
-    from gridexpand.scenario.config_loader import load_scenario_config, scenario_identity_key
+    from gridexpand.scenario.config_loader import configuration_hash, load_scenario_config, scenario_identity_key
     from gridexpand.scenario.model_cases import execution_groups
     from gridexpand.scenario.run_config import load_run_config
+    from gridexpand.scenario.scenario_config import ScenarioConfig
 
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     if isinstance(raw, dict) and "run" in raw:
         run, run_hash = load_run_config(path)
-        scenario, scenario_hash = load_scenario_config(run.scenario_path)
+        scenario_raw = run.scenario_raw()
+        scenario = ScenarioConfig.from_dict(scenario_raw)
+        scenario_hash = configuration_hash(scenario_raw)
         base_key = scenario_identity_key(scenario.scenario_id, scenario_hash)
         info: dict[str, Any] = {
             "file": str(path),
@@ -136,7 +139,8 @@ def check_config_file(path: Path) -> dict[str, Any]:
             "run_id": run.run_id,
             "pipeline": run.pipeline,
             "run_hash": run_hash,
-            "scenario": str(run.scenario_path),
+            "scenario": str(run.scenario_source),
+            "scenario_overrides": bool(run.scenario_overrides),
             "scenario_id": scenario.scenario_id,
             "scenario_hash": scenario_hash,
             "scenario_key": base_key,

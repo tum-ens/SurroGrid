@@ -1,0 +1,46 @@
+# Run YAML: what to run, on which grids, with which scenario. Copy to config/runs/<name>.yaml and
+# replace the CHANGE_ME values. Check it with `uv run gridexpand config check config/runs/<name>.yaml`
+# (no database), then `uv run gridexpand run config/runs/<name>.yaml`. Keys: docs/configuration.md.
+
+run: CHANGE_ME_run_id            # directory-safe id; the run directory is work/runs/<id>/
+
+# The scientific assumptions: a scenario of config/scenarios/ by name, or a path to your own copy.
+scenario: default_2045
+# Optional: change single scenario values without copying the scenario (merged into it; the
+# results get the hash of the merged scenario).
+# scenario_overrides:
+#   electrification:
+#     heat:
+#       building_share: 0.9
+
+grids:
+  pylovo:                        # the synthetic grids of a pylovo version
+    version: "CHANGE_ME"         # pylovo version id, never inferred
+    ags: 9999999                 # municipality key of the region
+    # plz: null                  # one postcode only
+    # kcid: null                 # one grid only (with plz and bcid)
+    # bcid: null
+    # min_buildings: 5           # minimum buildings per grid (changes the candidate numbering)
+    # start_index: 0             # a candidate range, like `gridexpand grids` numbers it
+    # limit: 10
+  # files: ~/data/my_grids       # own grid files (pipeline: real), in preparation
+
+# Optional, these are the defaults. post-inflex-heuristic is not available for synthetic grids yet.
+# model_cases: [pre, post-hems-heuristic, post-hems-optimized]
+
+# Optional machine and output settings (defaults shown):
+# execution:
+#   workers: 1                    # grids in parallel
+#   step2_cpus: 4
+#   step3_cpus: 16                # minimum Step 3 building clusters
+#   step3_max_cpus: 32
+#   step3_cluster_concurrency: 1  # Step 3 clusters solved at the same time
+#   step4_cpus: 4
+#   solver: gurobi                # or appsi_highs; default $GRIDEXPAND_SOLVER
+#   optimizer: urbs               # or pypsa
+#   powerflow_output: summary     # summary, raw or both (raw = full time series)
+#   powerflow_grid_scope: full    # full or backbone
+#   timeframe_mode: full_year
+#   profile_seed: 481527          # change only for an independent stochastic realization
+#   pilot_gate: true              # stop if the first grid fails
+#   resume: false                 # skip grids already done (also --resume)

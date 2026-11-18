@@ -13,7 +13,7 @@ import pytest
 import gridexpand.allocation.functions.electricity as electricity
 import gridexpand.allocation.functions.mobility as mobility
 from gridexpand.allocation.assets.urbs_rows import process_row, storage_parameter_fields
-from gridexpand.paths import SCENARIO_CONFIG_DIR
+from tests.fixture_paths import FIXTURE_SCENARIOS
 from gridexpand.scenario.config_loader import load_scenario_config
 
 PROCESS_FIELDS = (
@@ -30,9 +30,9 @@ STORAGE_FIELDS = (
 )
 
 
-@pytest.fixture(scope="module", params=["ro_heat_2045_synthetic.yaml", "schweinfurt_2045.yaml"])
+@pytest.fixture(scope="module", params=["ro_heat_2045_synthetic.yaml", "teaser_2045.yaml"])
 def technologies(request):
-    scenario, _ = load_scenario_config(SCENARIO_CONFIG_DIR / request.param)
+    scenario, _ = load_scenario_config(FIXTURE_SCENARIOS / request.param)
     return scenario.technologies
 
 

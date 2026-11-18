@@ -48,7 +48,7 @@ delete renames the file to a backup; there is no other destructive endpoint.
 
 ## Jobs
 
-A pipeline job is one generated run YAML (`pipeline: synthetic`, written to
+A pipeline job is one generated run YAML (synthetic grids, written to
 `WORK_DIR/runs/<job>/run.yaml`) and one `gridexpand run` step per selected model case, one after
 another (`gridexpand.api.commands.pipeline_steps`, the only place that builds the command lines):
 
@@ -56,9 +56,9 @@ another (`gridexpand.api.commands.pipeline_steps`, the only place that builds th
 python -m gridexpand run WORK_DIR/runs/<job>/run.yaml --run-dir WORK_DIR/runs/<job> --model-case <case>
 ```
 
-The run YAML holds the region (`ags`, `pylovo_version_id`, `min_buildings`, optional `start_index`
-/ `limit`), the scenario file and the execution settings (`model_cases`, `timeframe_mode`,
-`powerflow_output: summary`, `workers`, `pilot_index`). The steps share the run identity,
+The run YAML ([format](configuration.md#run-yaml)) holds the scenario file, the grids (`grids.pylovo`:
+`version`, `ags`, `min_buildings`, optional `plz`/`kcid`/`bcid` or `start_index`/`limit`), the `model_cases` and
+the execution settings (`timeframe_mode`, `powerflow_output: summary`, `workers`, `pilot_index`). The steps share the run identity,
 `state.json` and one regional electrification assignment; each case's batch writes
 `WORK_DIR/runs/<job>/<case>/` (`events.jsonl`, `status.tsv`, grid logs).
 

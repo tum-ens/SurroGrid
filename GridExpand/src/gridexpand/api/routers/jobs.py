@@ -187,7 +187,7 @@ def prepare_terminal_run(body: PipelineBody, request: Request) -> dict[str, Any]
     path = directory / f"{run_id}.yaml"
     path.write_text(run_yaml_text(plan.spec, run_id, header), encoding="utf-8")
     portable = run_yaml_text(plan.spec, run_id, header + "\nCopy to config/runs/ of a GridExpand checkout; the scenario "
-                             f"file {body.scenario} must be in config/scenarios/.", scenario=f"../scenarios/{body.scenario}")
+                             f"file {body.scenario} must be in config/scenarios/.", scenario=Path(body.scenario).stem)
     in_container = Path("/.dockerenv").exists()
     return {"run_id": run_id, "path": str(path), "title": plan.title, "grids": len(plan.selected),
             "model_cases": list(body.model_cases), "run_yaml": path.read_text(encoding="utf-8"),

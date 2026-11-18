@@ -7,6 +7,7 @@ import copy
 import pytest
 import yaml
 
+from tests.fixture_paths import FIXTURE_SCENARIOS
 from gridexpand.paths import SCENARIO_CONFIG_DIR
 from gridexpand.scenario.config_loader import load_scenario_config
 from gridexpand.scenario.scenario_config import ScenarioConfig
@@ -21,7 +22,7 @@ def test_every_scenario_yaml_loads(path):
 
 
 def test_sizing_methods_by_asset_plan():
-    scenario, _ = load_scenario_config(SCENARIO_CONFIG_DIR / "schweinfurt_2045.yaml")
+    scenario, _ = load_scenario_config(FIXTURE_SCENARIOS / "teaser_2045.yaml")
     assert scenario.pv_sizing_method("pre") == "none"
     assert scenario.pv_sizing_method("post-hems-optimized") == scenario.pv.optimized_method
     assert scenario.pv_sizing_method("post-inflex-heuristic") == scenario.pv.heuristic_method
@@ -32,7 +33,7 @@ def test_sizing_methods_by_asset_plan():
 
 
 def test_reference_year_must_be_2009():
-    raw = yaml.safe_load((SCENARIO_CONFIG_DIR / "schweinfurt_2045.yaml").read_text(encoding="utf-8"))
+    raw = yaml.safe_load((FIXTURE_SCENARIOS / "teaser_2045.yaml").read_text(encoding="utf-8"))
     ScenarioConfig.from_dict(copy.deepcopy(raw))
     raw["mobility"]["reference_year"] = 2010
     with pytest.raises(ValueError, match="reference_year must be 2009"):

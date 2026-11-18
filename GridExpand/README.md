@@ -69,8 +69,18 @@ before it opens a database connection, so `--help` is safe; everything else writ
 
 ## Quick start: one synthetic region
 
+A run is one short YAML file; the scientific assumptions come from a named scenario (`config/scenarios/`):
+
+```yaml
+# config/runs/my_region.yaml
+run: my_region
+scenario: default_2045                 # or your own copy; single values via scenario_overrides
+grids:
+  pylovo: {version: "1", ags: 9184137}
+```
+
 ```bash
-cp config/runs/00_run_scenario_template.yaml config/runs/my_region.yaml   # edit: run.id, run.scenario, ags, pylovo version, cases
+cp config/runs/00_run_template.yaml config/runs/my_region.yaml           # edit: run id, pylovo version, AGS
 uv run gridexpand grids --ags 9184137 --pylovo-version-id 1               # candidate grids and their numbers
 uv run gridexpand config check config/runs/my_region.yaml                 # no database
 uv run gridexpand run config/runs/my_region.yaml --dry-run                # plan and commands
@@ -138,7 +148,7 @@ repository, which runs both images behind one proxy.
 
 | command | does |
 |---|---|
-| `gridexpand run <run.yaml>` | one run YAML (`pipeline: synthetic`) |
+| `gridexpand run <run.yaml>` | one run YAML (scenario, grids, model cases) |
 | `gridexpand status <run>` | state of a run directory (no database) |
 | `gridexpand grids --ags <AGS> --pylovo-version-id <V>` | candidate grids of an AGS with the runner's numbering |
 | `gridexpand config check <yaml...>` | validate run/scenario YAMLs, print hashes and keys (no database) |

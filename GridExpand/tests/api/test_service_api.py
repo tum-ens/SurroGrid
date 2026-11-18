@@ -56,18 +56,18 @@ def test_no_ui_is_served(client):
 
 def test_scenarios(client):
     items = {item["name"]: item for item in client.get("/api/scenarios").json()}
-    assert items["schweinfurt_2045.yaml"]["valid"] and items["schweinfurt_2045.yaml"]["id"] == "schweinfurt_2045"
-    assert items["schweinfurt_2045.yaml"]["heat_source"] == "teaser"
-    assert items["schweinfurt_2045.yaml"]["adoption"]["heat"]["building_share"] == 0.75
-    assert items["schweinfurt_2045.yaml"]["scenario_key"].startswith("scenario_schweinfurt_2045_")
+    assert items["teaser_2045.yaml"]["valid"] and items["teaser_2045.yaml"]["id"] == "teaser_2045"
+    assert items["teaser_2045.yaml"]["heat_source"] == "teaser"
+    assert items["teaser_2045.yaml"]["adoption"]["heat"]["building_share"] == 0.75
+    assert items["teaser_2045.yaml"]["scenario_key"].startswith("scenario_teaser_2045_")
     assert items["broken.yaml"]["valid"] is False and items["broken.yaml"]["error"]
-    assert "milestone_year" in client.get("/api/scenarios/schweinfurt_2045.yaml").text
+    assert "milestone_year" in client.get("/api/scenarios/teaser_2045.yaml").text
     assert client.get("/api/scenarios/other.yaml").status_code == 404
     assert client.get("/api/scenarios/..%2F..%2F.env").status_code == 404
 
 
 def test_pipeline_validation(client):
-    base = {"plz": 85653, "pylovo_version_id": "1", "scenario": "schweinfurt_2045.yaml"}
+    base = {"plz": 85653, "pylovo_version_id": "1", "scenario": "teaser_2045.yaml"}
     assert client.post("/api/jobs/pipeline", json=base | {"model_cases": ["post-inflex-heuristic"]}).status_code == 422
     assert client.post("/api/jobs/pipeline", json=base | {"timeframe_mode": "one_day"}).status_code == 422
     assert client.post("/api/jobs/pipeline", json=base | {"unknown": 1}).status_code == 422
@@ -128,15 +128,15 @@ def test_terminal_run_for_one_grid(client, monkeypatch):
     grid = {"grid_result_id": 7, "plz": 85653, "kcid": 1, "bcid": 3, "candidate_index": 2, "n_buildings": 3, "results": []}
     monkeypatch.setattr(queries, "ags_for_plz", lambda plz: [9184137])
     monkeypatch.setattr(queries, "grid_candidates", lambda ags, version, min_buildings, plz=None: [grid])
-    body = {"plz": 85653, "pylovo_version_id": "1", "scenario": "schweinfurt_2045.yaml", "model_cases": ["pre"],
+    body = {"plz": 85653, "pylovo_version_id": "1", "scenario": "teaser_2045.yaml", "model_cases": ["pre"],
             "grid_result_id": 7}
     response = client.post("/api/jobs/terminal", json=body)
     assert response.status_code == 201, response.text
     data = response.json()
     assert data["title"].startswith("Grid 1/3 · PLZ 85653") and data["grids"] == 1
     assert "kcid: 1" in data["run_yaml"] and "bcid: 3" in data["run_yaml"] and "min_buildings: 1" in data["run_yaml"]
-    assert "scenario: ../scenarios/schweinfurt_2045.yaml" in data["portable_run_yaml"]
-    assert data["commands"][0]["command"].startswith("tmux new-session -d -s ui_85653-1-3_schweinfurt_2045_")
+    assert "scenario: teaser_2045\n" in data["portable_run_yaml"]
+    assert data["commands"][0]["command"].startswith("tmux new-session -d -s ui_85653-1-3_teaser_2045_")
     runs = client.get("/api/jobs/terminal").json()
     assert [r["run_id"] for r in runs] == [data["run_id"]] and runs[0]["status"] == "not started"
     assert client.post("/api/jobs/terminal", json=body | {"grid_result_id": 8}).status_code == 400

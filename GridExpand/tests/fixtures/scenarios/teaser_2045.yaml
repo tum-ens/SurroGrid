@@ -1,6 +1,6 @@
-# Scientific and methodological assumptions for the Schweinfurt 2045 scenario.
+# Scientific and methodological assumptions of a 2045 scenario with TEASER space heat (test fixture).
 scenario:
-  id: schweinfurt_2045
+  id: teaser_2045
   milestone_year: 2045
 
 economics:

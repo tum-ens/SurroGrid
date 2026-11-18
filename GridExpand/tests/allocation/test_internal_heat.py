@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from tests.fixture_paths import FIXTURE_SCENARIOS
 from gridexpand.allocation.assets.heat.internal import (
     normalized_parameters,
     service_cops,
@@ -138,10 +139,9 @@ def test_internal_heat_rejects_the_cop_curve_charge_efficiency():
 
 def test_internal_tank_has_no_second_charging_penalty():
     from gridexpand.allocation.assets.heat.internal import materialize_internal_assets
-    from gridexpand.paths import SCENARIO_CONFIG_DIR
     from gridexpand.scenario.config_loader import load_scenario_config
 
-    scenario, _ = load_scenario_config(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")
+    scenario, _ = load_scenario_config(FIXTURE_SCENARIOS / "joint_2045_full_year.yaml")
     plan = pd.DataFrame([dict(
         building_objectid="A", Site=1,
         heat_pump_installed_kw_el=1.0, heat_pump_capacity_upper_kw_el=1.0,

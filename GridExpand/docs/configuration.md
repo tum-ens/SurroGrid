@@ -5,15 +5,16 @@ unknown model cases and missing required fields fail while loading):
 
 | file | directory | owns | fingerprint |
 |---|---|---|---|
-| scenario YAML | `config/scenarios/` | scientific and policy assumptions that change results | `scenario_hash` |
-| run YAML | `config/runs/` | the input (region, pylovo version, prepared datasets), model cases, seed, resources | `run_hash` |
+| scenario YAML | `config/scenarios/` | scientific and policy assumptions that change results; shared by many runs | `scenario_hash` |
+| run YAML | `config/runs/` | one run: the scenario by name (plus optional overrides), the grids, model cases, machine settings | `run_hash` |
 
 Both hashes are the SHA-256 of the parsed YAML (sorted-key JSON): every key and value counts, comments and
 formatting do not. The scenario identity (scenario key) is `scenario_<scenario.id>_<scenario_hash[:12]>`, with
 `_<timeframe_mode>` appended for the one-week timeframes. It names the Step 2/3 result directories
 (`work/allocation/results/<key>/`, `work/optimization/result/<key>/`), the database `scenario` row and the
 power-flow and expansion run names. Step 3 refuses a Step 2 file of another scenario hash. The profile seed is a
-run-YAML value: it is recorded in every run (and guarded on resume) but is not part of the scenario key.
+run-YAML value: it is recorded in every run (and guarded on resume) but is not part of the scenario key. With
+`scenario_overrides` the scenario hash is taken from the merged scenario, so a changed value gets its own key.
 
 ```bash
 uv run gridexpand config check config/scenarios config/runs     # no database: validity, hashes, keys, groups
@@ -142,49 +143,65 @@ ghd:
 
 The PostGIS source reads with the pipeline's database connection (`DB_*`; the validation's status-quo test takes `--db-env-prefix`).
 
-Repository scenarios: `ro_heat_2045_synthetic.yaml` and `schweinfurt_2045.yaml` (synthetic runs),
-`joint_2045_full_year.yaml` (full year without TSAM; the scenario of the real-vs-synthetic validation in `../validation`), `00_scenario_template.yaml`; their differences are tabulated at the top of [method.md](method.md).
+Shipped scenario: `default_2045.yaml` (central 2045 assumptions, InfDB `ro_heat` space heat, TSAM on). Copy it to
+`config/scenarios/<name>.yaml` with a new `scenario.id` for a scenario of your own. The real-vs-synthetic validation
+has its own method scenario in `validation/config/scenarios/`. Test scenarios live in `tests/fixtures/scenarios/`.
 
 ## Run YAML
 
-Three blocks, all required: `run`, `resources`, `execution`.
+One short file; only `run`, `scenario` and `grids` are required
+([template](../config/runs/00_run_template.yaml)):
+
+```yaml
+run: my_town_2045                 # run id
+scenario: default_2045            # a scenario of config/scenarios/ by name, or a path to a scenario YAML
+scenario_overrides:               # optional: single values, merged into the scenario
+  electrification: {heat: {building_share: 0.9}}
+grids:
+  pylovo: {version: "3", ags: 9184137}
+model_cases: [pre, post-hems-heuristic, post-hems-optimized]   # optional, the defaults
+execution: {workers: 2, powerflow_output: both}                # optional
+```
 
 | key | meaning |
 |---|---|
-| `run.id` | directory-safe identifier (`[A-Za-z0-9][A-Za-z0-9._-]*`); default run directory `work/runs/<run.id>/` |
-| `run.scenario` | scenario YAML, relative to the run YAML's directory |
-| `run.pipeline` | `synthetic` (the old name `scenario` is refused with a hint; `paired_aligned` runs with `python -m validation run`, see [validation/README.md](../validation/README.md)) |
+| `run` | directory-safe identifier (`[A-Za-z0-9][A-Za-z0-9._-]*`); default run directory `work/runs/<run>/` |
+| `scenario` | a name of `config/scenarios/<name>.yaml`, or a path (contains `/` or ends in `.yaml`) relative to the run YAML |
+| `scenario_overrides` | optional mapping merged into the scenario key by key; unknown scenario keys are refused. The run uses the merged scenario, written to `<run dir>/inputs/scenario.yaml` when the run starts |
+| `grids.pylovo` | the synthetic grids of a pylovo version (keys below) |
+| `grids.files` | own grid files (`pipeline: real`), in preparation; until then [matching.md](matching.md) |
+| `model_cases` | default `pre`, `post-hems-heuristic`, `post-hems-optimized`; `post-inflex-heuristic` is refused for synthetic grids |
+| `execution` | optional machine, solver and output settings (keys below) |
 
-Relative paths resolve against the YAML's directory; booleans must be YAML booleans (`"false"` is an error).
-`execution.profile_seed` (all pipelines, default 481527) is the realization seed, and
-`execution.powerflow_grid_scope` (`full` default, or `backbone`) selects the assets of the power-flow summary
-statistics (`backbone` drops terminal service lines and maps terminal voltages one bus upstream).
+A run YAML of the former format (`run`/`resources`/`execution` blocks) is refused with a hint; the validation
+keeps that format (`python -m validation run`, see [validation/README.md](../validation/README.md)). Relative
+paths resolve against the YAML's directory; booleans must be YAML booleans (`"false"` is an error).
 
-### `pipeline: synthetic`
+### `grids.pylovo`
 
 Steps 2–4 and the expansion analyses for the synthetic pylovo grids of one region, one `gridexpand synthetic`
 batch per execution group (see [method.md](method.md#model-cases)). Outputs are always case-qualified.
 
-| `resources` key | default | meaning |
+| key | default | meaning |
 |---|---|---|
-| `pylovo_version_id` | required | exact pylovo topology version (never taken from `.env`) |
+| `version` | required | exact pylovo topology version (never taken from `.env`) |
 | `ags` | required | municipality key, e.g. `9184137` |
 | `plz` | null | only the grids of this postcode |
 | `kcid`, `bcid` | null | one exact grid (both together, and `plz`) |
 | `min_buildings` | 5 | minimum buildings per candidate grid (changes the candidate numbering) |
 | `start_index`, `limit` | null | a range of candidate numbers |
-| `storage` | `db` | must be `db` |
-| `output_directory` | null | must be null |
 
 `null`, `""` and `"-"` mean "any" for `plz`, `kcid`, `bcid`, `start_index`.
 
-| `execution` key | default | meaning (`gridexpand synthetic` flag) |
+### `execution`
+
+| key | default | meaning (`gridexpand synthetic` flag) |
 |---|---|---|
-| `model_cases` | required | `pre`, `post-hems-heuristic`, `post-hems-optimized` (`post-inflex-heuristic` is refused) |
+| `profile_seed` | 481527 | realization seed; change it only for an independent stochastic realization |
 | `timeframe_mode` | `full_year` | `full_year`, `min_temperature_week`, `max_solar_radiation_week`, `max_base_electricity_demand_week` |
 | `demand_scope` | `all` | `all` or `residential` (household-only Step 2–4, `_hh_only` keys) |
-| `mobility_source` | `pool` | must be `pool` |
-| `step2_cpus` (alias `n_cpu`) | 4 | Step 2 processes (`--step2-cpus`) |
+| `powerflow_grid_scope` | `full` | `full` or `backbone` (drops terminal service lines from the power-flow summaries and maps terminal voltages one bus upstream) |
+| `step2_cpus` | 4 | Step 2 processes (`--step2-cpus`) |
 | `step2_timeseries_storage` | `temp` | `db`, `temp` or `both`: also store the Step 2 hourly series in the database |
 | `workers` | 1 | grids in parallel |
 | `step3_cpus` | 16 | minimum number of Step 3 building clusters (partitions; changes results) |
@@ -211,7 +228,7 @@ candidate index directly:
 - `ags` + `plz` + `kcid` + `bcid`: one exact grid.
 
 "Eligible" means at least `min_buildings` buildings (with `demand_scope: residential`, residential buildings)
-in pylovo version `pylovo_version_id`. The selected region is also the population of the regional
+in the pylovo version `grids.pylovo.version`. The selected region is also the population of the regional
 electrification assignment. Candidate numbers stay those of the whole AGS (`uv run gridexpand grids --ags
 <AGS> --pylovo-version-id <V>` lists them); `start_index`/`limit` select a range of them without changing the
 assignment population. Internally a grid is named `<AGS>-<candidate index>_<PLZ>_<KCID>_<BCID>.h5`.
@@ -222,7 +239,7 @@ assignment population. Internally a grid is named `<AGS>-<candidate index>_<PLZ>
 uv run gridexpand config check config/runs/<run>.yaml                # validity, hashes, groups; no database
 uv run gridexpand run config/runs/<run>.yaml --dry-run               # plan and commands; no database, no files
 uv run gridexpand run config/runs/<run>.yaml                         # prepare -> execute -> postprocess
-uv run gridexpand status <run.id>                                    # reads work/runs/<run.id>/state.json
+uv run gridexpand status <run>                                       # reads work/runs/<run>/state.json
 uv run gridexpand run config/runs/<run>.yaml --resume                # skip jobs recorded as done
 ```
 

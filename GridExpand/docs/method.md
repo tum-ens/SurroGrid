@@ -7,10 +7,11 @@ quoted below are those of every repository scenario YAML unless a table says oth
 
 | Scenario YAML | used by | heat source | adoption (heat / mobility / PV+battery) | TSAM |
 |---|---|---|---|---|
-| `ro_heat_2045_synthetic.yaml` | synthetic runs | `infdb_ro_heat` | deterministic 1.0 / 1.0 / 1.0 | on |
-| `schweinfurt_2045.yaml` | synthetic runs | `teaser` (level 0) | deterministic 0.75 / 0.75 / 0.75 | on |
-| `joint_2045_full_year.yaml` | aligned DSO A + DSO B runs | `teaser` (level 1) | deterministic 0.8 / 1.0 / 0.8 | off |
-| `00_scenario_template.yaml` | template | `infdb_ro_heat` | deterministic 1.0 / 1.0 / 1.0 | on |
+| `config/scenarios/default_2045.yaml` | default of every run | `infdb_ro_heat` | deterministic 1.0 / 1.0 / 1.0 | on |
+| `validation/config/scenarios/joint_2045_full_year.yaml` | the real-vs-synthetic validation (paper) | `teaser` (level 1) | deterministic 0.8 / 1.0 / 0.8 | off |
+
+The test fixtures in `tests/fixtures/scenarios/` vary these settings (`ro_heat_2045_synthetic.yaml`,
+`teaser_2045.yaml` with `teaser` level 0 and 0.75 shares, a copy of the validation scenario).
 
 ## Model cases
 

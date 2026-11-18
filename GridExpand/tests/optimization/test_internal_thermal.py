@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from lp_fixture import write_input
+from tests.fixture_paths import FIXTURE_SCENARIOS
 from gridexpand.common.thermal import thermostat_reference, dispatch_heat_services
 
 
@@ -203,7 +204,6 @@ def test_preheating_needs_earlier_heating_headroom(tmp_path):
 
 def test_shared_bus_keeps_two_temperatures_and_one_hp_investment(tmp_path):
     from gridexpand.scenario.config_loader import load_scenario_config
-    from gridexpand.paths import SCENARIO_CONFIG_DIR
     from gridexpand.allocation.assets.heat.internal import materialize_internal_assets
     from gridexpand.optimization.urbs.input import read_input_h5
     from gridexpand.optimization.urbs.scenarios import insert_scenario
@@ -216,7 +216,7 @@ def test_shared_bus_keeps_two_temperatures_and_one_hp_investment(tmp_path):
     path = tmp_path / "shared.h5"
     thermal_fixture(path, uplift=0)
     scenario, _ = load_scenario_config(
-        SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml"
+        FIXTURE_SCENARIOS / "joint_2045_full_year.yaml"
     )
     plan = pd.DataFrame(
         [

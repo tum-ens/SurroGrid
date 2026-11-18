@@ -69,36 +69,37 @@ def profiles_for_case(case: str) -> str:
 
 
 def run_yaml(spec: PipelineSpec, run_id: str, scenario: str | None = None) -> dict[str, Any]:
-    """The ``pipeline: synthetic`` run YAML of a request.
+    """The run YAML of a request (synthetic grids of a pylovo version).
 
-    ``scenario`` replaces the absolute scenario path (e.g. ``../scenarios/<file>`` for a
-    run YAML that is copied to another checkout's ``config/runs/``).
+    ``scenario`` replaces the absolute scenario path (e.g. the scenario name for a run YAML that is copied to
+    another checkout's ``config/runs/``).
     """
-    resources: dict[str, Any] = {
-        "pylovo_version_id": str(spec.pylovo_version_id),
+    pylovo: dict[str, Any] = {
+        "version": str(spec.pylovo_version_id),
         "ags": int(spec.ags),
         "min_buildings": int(spec.min_buildings),
     }
     if spec.plz is not None:
-        resources["plz"] = int(spec.plz)
+        pylovo["plz"] = int(spec.plz)
     if spec.kcid is not None:
-        resources["kcid"] = int(spec.kcid)
-        resources["bcid"] = int(spec.bcid)
+        pylovo["kcid"] = int(spec.kcid)
+        pylovo["bcid"] = int(spec.bcid)
     execution: dict[str, Any] = {
-        "model_cases": list(spec.model_cases),
         "timeframe_mode": spec.timeframe_mode,
         "powerflow_output": spec.powerflow_output,
         "workers": int(spec.workers),
     }
     if spec.start_index is not None:
-        resources["start_index"] = int(spec.start_index)
+        pylovo["start_index"] = int(spec.start_index)
         # The pilot grid (default: candidate 0) gates the batch; make it the first selected grid.
         execution["pilot_index"] = int(spec.start_index)
     if spec.limit is not None:
-        resources["limit"] = int(spec.limit)
+        pylovo["limit"] = int(spec.limit)
     return {
-        "run": {"id": run_id, "scenario": scenario or str(Path(spec.scenario_config).resolve()), "pipeline": "synthetic"},
-        "resources": resources,
+        "run": run_id,
+        "scenario": scenario or str(Path(spec.scenario_config).resolve()),
+        "grids": {"pylovo": pylovo},
+        "model_cases": list(spec.model_cases),
         "execution": execution,
     }
 

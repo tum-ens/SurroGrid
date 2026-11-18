@@ -26,7 +26,7 @@ from validation.notebook_workflow import (
 from gridexpand.paths import ANALYSIS_OUTPUT_DIR, SCENARIO_CALIBRATION_OUTPUT_DIR
 from validation import CONFIG_DIR
 
-RUN_ID = "joint_2045_v1_full_year"  # the aligned run to analyse: validation/config/<RUN_ID>.yaml
+RUN_ID = "CHANGE_ME"  # the aligned run to analyse: validation/config/<RUN_ID>.yaml (from 00_aligned_run_template.yaml)
 PROVIDERS = ("dso_a", "dso_b")
 EXPECTED_GRID_COUNTS = None  # optional, e.g. {"Real DSO A": 10, "Synthetic DSO A": 12}: fail on another count
 MIN_FAILED_SHARE = 0.01  # 1 % of the hours of one case (88 h of 8,760)

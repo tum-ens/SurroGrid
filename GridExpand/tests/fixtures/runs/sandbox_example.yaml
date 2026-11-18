@@ -1,0 +1,17 @@
+# Run YAML of the regression sandbox (tests/regression): four demo grids, one week.
+run: sandbox_example
+scenario: ../../regression/scenario_sandbox.yaml
+grids:
+  pylovo:
+    version: "1"
+    ags: 9184137
+    min_buildings: 60
+execution:
+  timeframe_mode: max_base_electricity_demand_week
+  workers: 2
+  step2_cpus: 2
+  step3_cpus: 4
+  step3_max_cpus: 8
+  step4_cpus: 2
+  powerflow_output: both
+  pilot_gate: false

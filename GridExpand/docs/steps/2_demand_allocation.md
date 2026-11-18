@@ -50,7 +50,7 @@ stages of `STAGES[profile]` on a `Grid` (`classes/grid.py`) and writes the keys 
 
 ```bash
 uv run gridexpand allocate 9184137 --storage db --pylovo-version-id 1 --candidate-index 0 \
-  --scenario-config config/scenarios/ro_heat_2045_synthetic.yaml \
+  --scenario-config config/scenarios/default_2045.yaml \
   --profiles status_quo --model-case pre --mobility-source pool
 ```
 
@@ -117,7 +117,7 @@ The orchestrators prepare one assignment per region before the grid jobs start:
 
 ```bash
 uv run python -m gridexpand.allocation.electrification_preparation --ags 9184137 --pylovo-version-id 1 \
-  --scenario-config config/scenarios/ro_heat_2045_synthetic.yaml --mobility-source pool \
+  --scenario-config config/scenarios/default_2045.yaml --mobility-source pool \
   --output work/runs/<run>/electrification_assignment.csv
 ```
 
@@ -135,9 +135,9 @@ availability CSVs). Paired runs use the session pool in `data/statistics/general
 
 ```bash
 uv run python -m gridexpand.allocation.generate_mobility_profile_pool --mode session \
-  --scenario-config config/scenarios/joint_2045_full_year.yaml --n_cpu 8 --dry-run
+  --scenario-config validation/config/scenarios/joint_2045_full_year.yaml --n_cpu 8 --dry-run
 uv run python -m gridexpand.allocation.generate_mobility_profile_pool --mode session --freeze-manifest \
-  --scenario-config config/scenarios/joint_2045_full_year.yaml
+  --scenario-config validation/config/scenarios/joint_2045_full_year.yaml
 ```
 
 (`--mode deadline` reproduces the legacy clipped v1 pool; `--append`, `--profiles-per-stratum`, `--models`,

@@ -1,10 +1,13 @@
-# SMOKE TEST (24 power-flow timesteps, not for publication) of the joint paired DSO A + DSO B comparison on pylovo v1 aligned grids.
+# Test fixture of the validation run format (pylovo v1 aligned grids, island subset); not for runs.
+# TEST SUBSET of the joint paired DSO A + DSO B full-year comparison on pylovo v1:
+# only the one-real-one-synthetic "islands" (identical building sets), to
+# validate the complete pipeline before the full region is run.
 # One scenario YAML and one pylovo version for both providers; each provider
 # gets its own paired dataset (weather, PV and TEASER heat libraries, adoption
 # selection) built from its alignment bundle. Launch with
-#   uv run python -m validation run validation/config/joint_2045_v1_smoke24.yaml
+#   uv run python -m validation run validation/config/joint_2045_v1_islands.yaml
 run:
-  id: joint_2045_v1_smoke24
+  id: joint_2045_v1_islands
   scenario: ../../config/scenarios/joint_2045_full_year.yaml
   pipeline: paired_aligned
 
@@ -20,9 +23,11 @@ resources:
     dso_a:
       paired_dataset_id: joint_2045_v1_dso_a
       weather_source_hdf: weather_joint_dso_a_v1.h5
+      workers: 1
     dso_b:
       paired_dataset_id: joint_2045_v1_dso_b
       weather_source_hdf: weather_joint_dso_b_v1.h5
+      workers: 2
   target_network: both # both, real, or synthetic
 
 execution:
@@ -30,17 +35,22 @@ execution:
   model_cases:
     - post-inflex-heuristic
     - post-hems-heuristic
-  workers: 4
+  workers: 2
   step3_cpus: 40
   step3_cluster_concurrency: 1
   step4_cpus: 2
   heat_workers: 6
   # null = the full 8760 h year; a number caps Step-4 power flow (smoke tests).
-  powerflow_max_timesteps: 24
+  powerflow_max_timesteps: null
   profile_seed: 481527
-  cleanup_intermediates: false
+  cleanup_intermediates: true
   resume: false
   # Run both providers' runners at the same time (each with `workers`).
   parallel_providers: true
   # Expansion tables for all four groups after both providers finished.
   materialize_expansion: true
+  # All 1:1 overlap components (6 DSO A, 13 DSO B; 38 jobs). Assignments stay the
+  # full-population ones, so these results equal the full run's for these grids.
+  grid_subset:
+    method: islands
+    seed: 20260924

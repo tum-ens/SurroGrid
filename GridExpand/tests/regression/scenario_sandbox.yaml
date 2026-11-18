@@ -1,7 +1,7 @@
-# REGRESSION SANDBOX ONLY: copy of config/scenarios/schweinfurt_2045.yaml with id sandbox_2045,
+# REGRESSION SANDBOX ONLY: copy of tests/fixtures/scenarios/teaser_2045.yaml with id sandbox_2045,
 # maximum_fallback_share 1.0 (the sandbox has synthetic LoD2 roofs) and time_aggregation disabled
 # (TSAM cannot run on the one-week horizon). Not a scientific scenario.
-# Scientific and methodological assumptions for the Schweinfurt 2045 scenario.
+# Scientific and methodological assumptions of a 2045 scenario with TEASER space heat.
 scenario:
   id: sandbox_2045
   milestone_year: 2045

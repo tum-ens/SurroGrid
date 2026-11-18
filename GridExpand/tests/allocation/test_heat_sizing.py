@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tests.fixture_paths import FIXTURE_SCENARIOS
 from gridexpand.allocation.assets.heat.materialization import materialize_heat_urbs_inputs
 from gridexpand.allocation.assets.heat.sizing import (
     WATER_HEAT_CAPACITY_WH_PER_L_K,
@@ -12,7 +13,6 @@ from gridexpand.allocation.assets.heat.sizing import (
     calculate_full_load_hours,
 )
 from gridexpand.allocation.config import config
-from gridexpand.paths import SCENARIO_CONFIG_DIR
 from gridexpand.scenario.config_loader import load_scenario_config
 
 HOURS = 8760
@@ -114,7 +114,7 @@ def test_one_hour_buffer_volume_stores_one_hour_of_thermal_output():
 
 
 def test_charge_efficiency_method_sets_the_storage_row():
-    scenario, _ = load_scenario_config(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")
+    scenario, _ = load_scenario_config(FIXTURE_SCENARIOS / "joint_2045_full_year.yaml")
     technologies = scenario.technologies
     technology, _ = _plan()
     curve, _ = _plan(buffer_charge_efficiency_method="cop_curve")

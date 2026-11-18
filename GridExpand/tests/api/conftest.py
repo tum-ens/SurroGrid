@@ -14,6 +14,7 @@ import os
 import shutil
 from pathlib import Path
 
+from tests.fixture_paths import FIXTURE_SCENARIOS
 import pytest
 from dotenv import dotenv_values
 
@@ -23,12 +24,11 @@ REAL_DATABASE_PORT = "54327"  # the user's InfDB: never used by tests
 
 @pytest.fixture()
 def settings(tmp_path: Path):
-    from gridexpand.paths import SCENARIO_CONFIG_DIR
     from gridexpand.api.settings import ServiceSettings
 
     scenarios = tmp_path / "scenarios"
     scenarios.mkdir()
-    shutil.copy(SCENARIO_CONFIG_DIR / "schweinfurt_2045.yaml", scenarios / "schweinfurt_2045.yaml")
+    shutil.copy(FIXTURE_SCENARIOS / "teaser_2045.yaml", scenarios / "teaser_2045.yaml")
     (scenarios / "broken.yaml").write_text("scenario: [1, 2\n", encoding="utf-8")
     return ServiceSettings(port=18766, allowed_hosts=frozenset({"testserver"}), scenario_dirs=(scenarios,),
                            user_scenario_dir=tmp_path / "user_scenarios", state_dir=tmp_path / "state",

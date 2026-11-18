@@ -145,7 +145,7 @@ def test_write_outputs_order_and_empty_rules():
 
 
 def test_parse_args_rejects_inconsistent_cases():
-    scenario = ["--scenario-config", "config/scenarios/schweinfurt_2045.yaml"]
+    scenario = ["--scenario-config", "tests/fixtures/scenarios/teaser_2045.yaml"]
     with pytest.raises(SystemExit):
         main.parse_args(["1", "--model-case", "pre", "--profiles", "all", *scenario])
     with pytest.raises(SystemExit):

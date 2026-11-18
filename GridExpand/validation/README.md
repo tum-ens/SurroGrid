@@ -19,7 +19,7 @@ libraries and real-grid power flow. Run it from `GridExpand/` with the GridExpan
 | `aligned_expansion.py` | expansion analyses of every provider group of a run |
 | `notebook_workflow.py`, `comparison_data.py` | loaders of the comparison notebooks (four groups: real/synthetic × DSO A/DSO B) |
 | `powerflow_asset_plots.py`, `cutoff_data.py`, `geoplotting.py`, `feeder_structure.py`, `feeder_structure_plots.py` | comparison plots and the feeder-structure audit |
-| `config/` | run YAMLs of the joint DSO A + DSO B comparison (scenario: `../config/scenarios/joint_2045_full_year.yaml`) |
+| `config/` | `00_aligned_run_template.yaml` (run YAML template) and `scenarios/joint_2045_full_year.yaml` (the paper's method scenario) |
 | `notebooks/` | `analysis_powerflow.ipynb`, `analysis_expansion.ipynb`, `grid_area_envelope_comparison.ipynb`, `joint_setup.py` |
 | `tests/` | unit tests (part of `uv run pytest`) |
 
@@ -32,14 +32,17 @@ exports below `GRID_DATA_PATH` of `GridExpand/.env`.
 
 ## Running
 
+Copy `validation/config/00_aligned_run_template.yaml` to `validation/config/<run>.yaml`, fill in the CHANGE_ME
+values (the paper ran pylovo `a5` with `weather_year: 2016`), then:
+
 ```bash
-uv run python -m validation run validation/config/joint_2045_v1_smoke24.yaml --dry-run         # plan and commands
-uv run python -m validation run validation/config/joint_2045_v1_smoke24.yaml --prepare-only    # build and validate datasets
-uv run python -m validation run validation/config/joint_2045_v1_smoke24.yaml --skip-prepare    # execute + postprocess
-uv run gridexpand status joint_2045_v1_smoke24
+uv run python -m validation run validation/config/<run>.yaml --dry-run         # plan and commands
+uv run python -m validation run validation/config/<run>.yaml --prepare-only    # build and validate datasets
+uv run python -m validation run validation/config/<run>.yaml --skip-prepare    # execute + postprocess
+uv run gridexpand status <run id>
 ```
 
-`--dry-run` also validates the YAML (`gridexpand config check` accepts only `pipeline: synthetic`). The options of
+`--dry-run` also validates the YAML (`gridexpand config check` reads only GridExpand run YAMLs). The options of
 `gridexpand run` apply (`--resume`, `--until`, `--prepare-only`, `--model-case`, `--run-dir`), plus
 `--skip-prepare` (use the prepared datasets as they are, validated), `--provider dso_a|dso_b`, `--pre-only` (Step 2
 and the Step-4 pre stage, no urbs) and `--target-grid-id` (one real grid for diagnosis: own run sub-directory, no
@@ -62,7 +65,8 @@ Stages:
 
 ## Run YAML (`pipeline: paired_aligned`)
 
-The `run` block is that of every GridExpand run YAML (`id`, `scenario`, `pipeline`).
+The validation keeps the block format `run` (`id`, `scenario`, `pipeline: paired_aligned`), `resources`,
+`execution`; GridExpand's own run YAMLs use the short format of [docs/configuration.md](../docs/configuration.md#run-yaml).
 
 | key | default | meaning |
 |---|---|---|
@@ -98,7 +102,7 @@ before pylovo generation ([METHOD.md](METHOD.md#status-quo-test)); read-only on 
 
 ```bash
 uv run python -m validation status-quo-test --provider dso_a --alignment-dir <bundle root> \
-    --scenario-config config/scenarios/joint_2045_full_year.yaml --output-dir <dir> --jobs 4
+    --scenario-config validation/config/scenarios/joint_2045_full_year.yaml --output-dir <dir> --jobs 4
 uv run python -m validation status-quo-test --provider dso_b --alignment-dir <bundle root> --dso-b-grids-dir <delivery> \
     --scenario-config <scenario.yaml> --db-env-prefix INFDB_ --output-dir <dir>
 uv run python -m validation status-quo-test --provider dso_a --dataset work/allocation/outputs/scenario_calibration/<dataset> \

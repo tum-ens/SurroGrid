@@ -7,12 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixture_paths import FIXTURE_SCENARIOS, FIXTURE_RUNS
 from gridexpand.paths import RUN_CONFIG_DIR
 from gridexpand.scenario import run as run_module
 from gridexpand.scenario.rundir import IdentityMismatch, RunState, check_identity, load_state
 from gridexpand.scenario.tools import config_main, status_lines
 
-SANDBOX = RUN_CONFIG_DIR / "sandbox_example.yaml"
+SANDBOX = FIXTURE_RUNS / "sandbox_example.yaml"
 
 
 def context(path: Path, *extra: str, run_dir: Path | None = None):
@@ -57,15 +58,55 @@ def test_invalid_configuration_exit_code(argv, capsys):
 
 
 def test_synthetic_run_refuses_inflex_before_database_access(tmp_path, capsys):
-    source = RUN_CONFIG_DIR / "schweinfurt_2045_synthetic.yaml"
-    text = source.read_text().replace(
-        "scenario: ../scenarios/", f"scenario: {(RUN_CONFIG_DIR.parent / 'scenarios').as_posix()}/"
-    ).replace("    - post-hems-optimized\n", "    - post-hems-optimized\n    - post-inflex-heuristic\n")
-    assert "post-inflex-heuristic\n" in text
     config = tmp_path / "synthetic_inflex.yaml"
-    config.write_text(text)
+    config.write_text(f"run: inflex\nscenario: {FIXTURE_SCENARIOS / 'teaser_2045.yaml'}\n"
+                      "grids: {pylovo: {version: '1', ags: 9184137}}\nmodel_cases: [pre, post-inflex-heuristic]\n")
     assert run_module.main([str(config)]) == run_module.EXIT_INVALID
     assert "post-inflex-heuristic is not available for the synthetic pipeline" in capsys.readouterr().err
+
+
+def test_scenario_overrides_are_merged_and_written_into_the_run_directory(tmp_path):
+    import yaml
+
+    from gridexpand.scenario.config_loader import load_scenario_config
+
+    config = tmp_path / "run.yaml"
+    config.write_text("run: tweak\nscenario: default_2045\ngrids: {pylovo: {version: '1', ags: 9184137}}\n"
+                      "scenario_overrides: {electrification: {heat: {building_share: 0.9}}}\n")
+    _, default_hash = load_scenario_config(RUN_CONFIG_DIR.parent / "scenarios" / "default_2045.yaml")
+    ctx = context(config, run_dir=tmp_path / "run")
+    assert ctx.scenario.electrification.for_technology("heat").building_share == 0.9
+    assert ctx.scenario_hash != default_hash and ctx.run.scenario_path == tmp_path / "run" / "inputs" / "scenario.yaml"
+    assert not (tmp_path / "run").exists()  # planning writes nothing
+    run_module.write_merged_scenario(ctx.run.scenario_path, ctx.scenario_raw, ctx.scenario_hash)
+    written, written_hash = load_scenario_config(ctx.run.scenario_path)
+    assert written_hash == ctx.scenario_hash and yaml.safe_load(ctx.run.scenario_path.read_text())["scenario"]["id"] \
+        == "default_2045"
+
+
+def test_the_default_run_yaml(tmp_path):
+    config = tmp_path / "run.yaml"
+    config.write_text("run: plain\nscenario: default_2045\ngrids: {pylovo: {version: '1', ags: 9184137}}\n")
+    ctx = context(config, run_dir=tmp_path / "run")
+    assert ctx.run.model_cases == ("pre", "post-hems-heuristic", "post-hems-optimized")
+    assert ctx.run.scenario_path == RUN_CONFIG_DIR.parent / "scenarios" / "default_2045.yaml"
+    assert ctx.scenario_raw is None
+
+
+@pytest.mark.parametrize("text, message", [
+    ("run: {id: x, scenario: s.yaml, pipeline: synthetic}\nresources: {}\nexecution: {}\n", "former format"),
+    ("run: x\nscenario: nope\ngrids: {pylovo: {version: '1', ags: 1}}\n", "not found"),
+    ("run: x\nscenario: default_2045\ngrids: {files: grids}\n", "in preparation"),
+    ("run: x\nscenario: default_2045\ngrids: {pylovo: {ags: 1}}\n", "grids.pylovo.version"),
+    ("run: x\nscenario: default_2045\ngrids: {pylovo: {version: '1', ags: 1}}\nresources: {}\n", "former format"),
+])
+def test_run_yaml_errors(tmp_path, text, message):
+    from gridexpand.scenario.run_config import load_run_config
+
+    config = tmp_path / "run.yaml"
+    config.write_text(text)
+    with pytest.raises((ValueError, FileNotFoundError), match=message):
+        load_run_config(config)
 
 
 def test_dry_run_exits_zero(capsys):
@@ -107,10 +148,10 @@ def test_identity_guard(tmp_path):
 
 
 def test_config_check(tmp_path, capsys):
-    assert config_main(["check", str(SANDBOX), str(RUN_CONFIG_DIR.parent / "scenarios" / "schweinfurt_2045.yaml")]) == 0
+    assert config_main(["check", str(SANDBOX), str(FIXTURE_SCENARIOS / "teaser_2045.yaml")]) == 0
     out = capsys.readouterr().out
     assert "run sandbox_example (synthetic)" in out and "scenario_sandbox_2045_7669656db28a" in out
     bad = tmp_path / "bad.yaml"
-    bad.write_text("run: {id: x, scenario: nope.yaml, pipeline: synthetic}\nresources: {}\nexecution: {}\n")
+    bad.write_text("run: x\nscenario: nope.yaml\ngrids: {pylovo: {version: '1', ags: 1}}\n")
     assert config_main(["check", str(bad), "--json"]) == 3
     assert json.loads(capsys.readouterr().out)[0]["valid"] is False

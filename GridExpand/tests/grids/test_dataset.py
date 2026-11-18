@@ -10,12 +10,12 @@ import pytest
 
 import gridexpand.allocation.functions.electricity as electricity
 import gridexpand.allocation.functions.mobility as mobility
+from tests.fixture_paths import FIXTURE_SCENARIOS
 from gridexpand.allocation.config import config
 from gridexpand.common import ghd
 from gridexpand.grids import attributes, dataset
-from gridexpand.paths import SCENARIO_CONFIG_DIR
 
-SCENARIO = SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml"
+SCENARIO = FIXTURE_SCENARIOS / "joint_2045_full_year.yaml"
 
 
 def buildings():

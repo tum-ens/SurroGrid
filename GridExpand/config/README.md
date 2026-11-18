@@ -1,32 +1,30 @@
 # Scenario and run YAMLs
 
-`scenarios/` holds scenario YAMLs (scientific assumptions), `runs/` holds run YAMLs (input, model cases,
-resources). Every key, default and the grid selection are documented in
-[docs/configuration.md](../docs/configuration.md); the reasoning behind the values in
-[docs/method.md](../docs/method.md).
+- `scenarios/` holds the scenario library: the scientific assumptions, shared by many runs. `default_2045.yaml`
+  is the shipped default.
+- `runs/` holds run YAMLs: one short file per run that names a scenario, the grids, the model cases and the
+  machine settings. `00_run_template.yaml` is the template.
 
-| `run.pipeline` | template | what `gridexpand run` does |
-|---|---|---|
-| `synthetic` | `runs/00_run_scenario_template.yaml` | Steps 2-4 and the expansion analyses for the synthetic grids of one region |
+Every key, default and the grid selection are documented in [docs/configuration.md](../docs/configuration.md); the
+reasoning behind the scenario values in [docs/method.md](../docs/method.md). Test fixtures (scenarios and the
+regression-sandbox run) live in `tests/fixtures/`, the validation's method scenario in
+`validation/config/scenarios/`.
 
-`runs/sandbox_example.yaml` is the regression-harness run (sandbox database only).
+## A new run
 
-## Checklist for a new scenario or run
-
-1. Copy `scenarios/00_scenario_template.yaml` and the run template of the pipeline; replace every `CHANGE_ME`.
-2. Scenario: set a unique, stable `scenario.id` and review every value; changing any value changes the scenario
-   hash and therefore the scenario key of all results.
-3. Run: set a unique directory-safe `run.id`, `run.scenario` (relative to the run YAML) and the exact
-   `resources.pylovo_version_id` (never taken from `.env`).
-4. Synthetic runs: `resources.ags`, optionally `plz` or `plz` + `kcid` + `bcid`; choose `execution.model_cases`
-   (remove `post-inflex-heuristic` from the template: the synthetic pipeline refuses it).
-5. Keep `execution.profile_seed` when cases or runs must be comparable; change it only for a deliberately
-   independent realization.
-6. Check and launch:
+1. Copy `runs/00_run_template.yaml` to `runs/<name>.yaml`; set `run` (directory-safe id), `grids.pylovo.version`
+   (the exact pylovo version, never taken from `.env`) and `grids.pylovo.ags`, optionally `plz` or
+   `plz` + `kcid` + `bcid`.
+2. Scenario: keep `scenario: default_2045`, change single values with `scenario_overrides`, or copy
+   `scenarios/default_2045.yaml` to `scenarios/<name>.yaml` with a new `scenario.id` and name it. Any changed value
+   changes the scenario hash and therefore the scenario key of all results.
+3. Optional: `model_cases` (default `pre`, `post-hems-heuristic`, `post-hems-optimized`) and `execution`. Keep
+   `execution.profile_seed` when cases or runs must be comparable.
+4. Check and launch:
 
 ```bash
-uv run gridexpand config check config/runs/<run>.yaml
-uv run gridexpand run config/runs/<run>.yaml --dry-run
-uv run gridexpand run config/runs/<run>.yaml
-uv run gridexpand status <run.id>
+uv run gridexpand config check config/runs/<name>.yaml
+uv run gridexpand run config/runs/<name>.yaml --dry-run
+uv run gridexpand run config/runs/<name>.yaml
+uv run gridexpand status <run>
 ```

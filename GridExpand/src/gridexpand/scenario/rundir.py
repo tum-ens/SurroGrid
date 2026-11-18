@@ -88,7 +88,8 @@ def freeze_inputs(run_dir: Path, run_yaml: Path, scenario_yaml: Path) -> None:
     inputs = run_dir / "inputs"
     inputs.mkdir(parents=True, exist_ok=True)
     shutil.copy2(run_yaml, inputs / "run.yaml")
-    shutil.copy2(scenario_yaml, inputs / "scenario.yaml")
+    if Path(scenario_yaml).resolve() != (inputs / "scenario.yaml").resolve():  # a merged scenario is there already
+        shutil.copy2(scenario_yaml, inputs / "scenario.yaml")
 
 
 class RunState:

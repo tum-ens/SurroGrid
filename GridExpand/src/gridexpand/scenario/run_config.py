@@ -1,28 +1,36 @@
-"""Run YAMLs (``config/runs/*.yaml``): the loader of ``pipeline: synthetic``.
+"""Run YAMLs (``config/runs/*.yaml``): what to run, on which grids, with which scenario.
 
-A run YAML has three blocks: ``run`` (``id``, ``scenario``, ``pipeline``),
-``resources`` (what to run on) and ``execution`` (how). ``pipeline: synthetic``
-runs Steps 2-4 and the expansion analyses for the synthetic grids of one AGS
-(optionally one PLZ or one grid), one batch per execution group
-(:class:`SyntheticRun`). The real-vs-synthetic validation (``pipeline:
-paired_aligned``) has its own loader in ``GridExpand/validation``, built on
-:func:`parse_run_blocks` and the helpers here.
+A run YAML is one short file::
 
-Parsing never touches a database. Relative paths resolve against the YAML's
-directory. :func:`load_run_config` returns the run and the SHA-256 of the
-parsed YAML (``run_hash``).
+    run: my_town_2045                 # run id (directory-safe)
+    scenario: default_2045            # config/scenarios/<name>.yaml, or a path to a scenario YAML
+    scenario_overrides: {...}         # optional: single scenario values, merged into the scenario
+    grids:
+      pylovo: {version: "3", ags: 9184137}   # synthetic grids of a pylovo version (optional plz, kcid/bcid, ...)
+    model_cases: [pre, post-hems-heuristic, post-hems-optimized]   # optional, these are the defaults
+    execution: {...}                  # optional: CPUs, solver, outputs, seed (keys in docs/configuration.md)
+
+The scenario is the scientific part: it is shared by many runs and its hash names the results. With
+``scenario_overrides`` the run uses the merged scenario, written to ``<run dir>/inputs/scenario.yaml``; its hash
+is taken after the merge. ``grids: files`` (own grid files, ``pipeline: real``) is in preparation.
+
+Parsing never touches a database. Relative paths resolve against the YAML's directory. :func:`load_run_config`
+returns the run and the SHA-256 of the parsed YAML (``run_hash``). The real-vs-synthetic validation has its own
+run format in ``GridExpand/validation``.
 """
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from gridexpand.common.reproducibility import DEFAULT_PROFILE_SEED
 from gridexpand.common.timeframe import TIMEFRAME_MODES
+from gridexpand.paths import SCENARIO_CONFIG_DIR
 from gridexpand.scenario.config_loader import _read_yaml, configuration_hash
 from gridexpand.scenario.model_cases import (
     POST_MODEL_CASES,
@@ -34,6 +42,7 @@ from gridexpand.scenario.scenario_config import _only as only
 from gridexpand.scenario.scenario_config import _positive
 
 PIPELINES = ("synthetic",)
+DEFAULT_MODEL_CASES = ("pre", "post-hems-heuristic", "post-hems-optimized")
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
@@ -100,11 +109,36 @@ def _resolve(value: Any, base_dir: Path) -> Path:
     return (path if path.is_absolute() else base_dir / path).resolve()
 
 
-def _pylovo_version(resources: dict[str, Any]) -> str:
-    version = str(resources.get("pylovo_version_id", "") or "").strip()
+def _pylovo_version(pylovo: dict[str, Any]) -> str:
+    version = str(pylovo.get("version", "") or "").strip()
     if not version:
-        raise ValueError("resources.pylovo_version_id must be set explicitly.")
+        raise ValueError("grids.pylovo.version (the pylovo version id) must be set explicitly.")
     return version
+
+
+def resolve_scenario(value: Any, base_dir: Path) -> Path:
+    """A shipped scenario by name (``config/scenarios/<name>.yaml``) or a path to a scenario YAML."""
+    if not value:
+        raise ValueError("scenario is required: a scenario name of config/scenarios/ or a path to a scenario YAML.")
+    text = str(value)
+    if "/" in text or text.endswith((".yaml", ".yml")):
+        path = _resolve(text, base_dir)
+    else:
+        path = SCENARIO_CONFIG_DIR / f"{text}.yaml"
+    if not path.is_file():
+        names = sorted(item.stem for item in SCENARIO_CONFIG_DIR.glob("*.yaml"))
+        raise FileNotFoundError(f"Scenario {text!r} not found ({path}); shipped scenarios: {names}.")
+    return path
+
+
+def deep_merge(base: Any, overrides: Any) -> Any:
+    """``base`` with ``overrides`` merged in: mappings key by key, everything else replaced."""
+    if not isinstance(base, dict) or not isinstance(overrides, dict):
+        return copy.deepcopy(overrides)
+    merged = copy.deepcopy(base)
+    for key, value in overrides.items():
+        merged[key] = deep_merge(merged[key], value) if key in merged else copy.deepcopy(value)
+    return merged
 
 
 def _grid_scope(execution: dict[str, Any]) -> str:
@@ -136,13 +170,13 @@ def _seed(execution: dict[str, Any]) -> int:
 
 @dataclass(frozen=True)
 class SyntheticRun:
-    """``pipeline: synthetic``: the synthetic grids of one region, Steps 2-4 + expansion.
+    """The synthetic grids of one region (``grids: pylovo``): Steps 2-4 and the expansion analyses.
 
-    Resources select the region (``ags``; optional ``plz`` or ``plz/kcid/bcid``,
-    which is also the scope of the electrification assignment) and optionally a
-    candidate range (``start_index``/``limit``, like ``gridexpand synthetic``).
-    Execution keys are the ``gridexpand synthetic`` flags; output is always
-    case-qualified.
+    ``grids.pylovo`` selects the region (``ags``; optional ``plz`` or ``plz/kcid/bcid``, which is also the scope
+    of the electrification assignment) and optionally a candidate range (``start_index``/``limit``, like
+    ``gridexpand synthetic``). Execution keys are the ``gridexpand synthetic`` flags; output is always
+    case-qualified. ``scenario_path`` is the scenario file Steps 2-4 read: the named scenario, or with overrides
+    the merged copy in the run directory (set by ``gridexpand run``).
     """
 
     run_id: str
@@ -178,54 +212,42 @@ class SyntheticRun:
     pilot_index: int = 0
     resume: bool = False
     rerun_failed: bool = False
+    scenario_source: Path | None = None
+    scenario_overrides: dict[str, Any] = field(default_factory=dict)
     pipeline: str = "synthetic"
 
-    RESOURCE_KEYS = frozenset({
-        "pylovo_version_id", "ags", "plz", "kcid", "bcid", "min_buildings", "start_index", "limit",
-        "storage", "output_directory",
-    })
+    PYLOVO_KEYS = frozenset({"version", "ags", "plz", "kcid", "bcid", "min_buildings", "start_index", "limit"})
     EXECUTION_KEYS = frozenset({
-        "model_cases", "profile_seed", "timeframe_mode", "demand_scope", "mobility_source", "n_cpu",
-        "workers", "step2_cpus", "step2_timeseries_storage", "step3_cpus", "step3_max_cpus",
-        "step3_target_columns", "step3_cluster_concurrency", "dynamic_step3", "step4_cpus", "solver",
-        "optimizer", "powerflow_output", "powerflow_grid_scope", "cleanup_intermediates", "materialize_expansion",
-        "pilot_gate", "pilot_index", "resume", "rerun_failed",
+        "profile_seed", "timeframe_mode", "demand_scope", "workers", "step2_cpus", "step2_timeseries_storage",
+        "step3_cpus", "step3_max_cpus", "step3_target_columns", "step3_cluster_concurrency", "dynamic_step3",
+        "step4_cpus", "solver", "optimizer", "powerflow_output", "powerflow_grid_scope", "cleanup_intermediates",
+        "materialize_expansion", "pilot_gate", "pilot_index", "resume", "rerun_failed",
     })
 
     @classmethod
     def from_blocks(
-        cls, run_id: str, scenario_path: Path, resources: dict[str, Any], execution: dict[str, Any]
+        cls, run_id: str, scenario_source: Path, scenario_overrides: dict[str, Any], pylovo: dict[str, Any],
+        model_cases: Any, execution: dict[str, Any],
     ) -> "SyntheticRun":
-        only(resources, set(cls.RESOURCE_KEYS), "synthetic resources")
-        only(execution, set(cls.EXECUTION_KEYS), "synthetic execution")
-        if str(resources.get("storage", "db")) != "db":
-            raise ValueError("The synthetic pipeline reads grids from the database: resources.storage must be db.")
-        if resources.get("output_directory") not in (None, ""):
-            raise ValueError("resources.output_directory is not supported by the synthetic pipeline; use null.")
-        if str(execution.get("mobility_source", "pool")) != "pool":
-            raise ValueError("The synthetic pipeline uses the mobility profile pool: execution.mobility_source must be pool.")
-        ags = optional_int(resources.get("ags"), "resources.ags")
+        only(pylovo, set(cls.PYLOVO_KEYS), "grids.pylovo")
+        only(execution, set(cls.EXECUTION_KEYS), "execution")
+        ags = optional_int(pylovo.get("ags"), "grids.pylovo.ags")
         if ags is None:
-            raise ValueError("resources.ags is required for the synthetic pipeline.")
-        plz = optional_int(resources.get("plz"), "resources.plz")
-        kcid = optional_int(resources.get("kcid"), "resources.kcid")
-        bcid = signed_optional_int(resources.get("bcid"), "resources.bcid")
+            raise ValueError("grids.pylovo.ags (the municipality key of the region) is required.")
+        plz = optional_int(pylovo.get("plz"), "grids.pylovo.plz")
+        kcid = optional_int(pylovo.get("kcid"), "grids.pylovo.kcid")
+        bcid = signed_optional_int(pylovo.get("bcid"), "grids.pylovo.bcid")
         if (kcid is None) != (bcid is None):
-            raise ValueError("resources.kcid and resources.bcid must be set together.")
+            raise ValueError("grids.pylovo.kcid and grids.pylovo.bcid must be set together.")
         if kcid is not None and plz is None:
-            raise ValueError("resources.plz is required when kcid/bcid are set.")
-        if "model_cases" not in execution:
-            raise ValueError("execution.model_cases is required.")
-        cases = validate_cases(execution["model_cases"])
+            raise ValueError("grids.pylovo.plz is required when kcid/bcid are set.")
+        cases = validate_cases(model_cases)
         for case in cases:
             if case in SYNTHETIC_UNSUPPORTED_CASES:
                 raise ValueError(
-                    f"execution.model_cases: {case} is not available for the synthetic pipeline. "
+                    f"model_cases: {case} is not available for the synthetic pipeline. "
                     f"{SYNTHETIC_UNSUPPORTED_CASES[case]}"
                 )
-        if "n_cpu" in execution and "step2_cpus" in execution:
-            raise ValueError("Use execution.step2_cpus or its alias execution.n_cpu, not both.")
-        step2_cpus = execution.get("step2_cpus", execution.get("n_cpu", cls.step2_cpus))
 
         def number(name: str, default: int, *, allow_zero: bool = False) -> int:
             return positive_int(execution.get(name, default), f"execution.{name}", allow_zero=allow_zero)
@@ -240,17 +262,19 @@ class SyntheticRun:
             solver = choice(solver, "execution.solver", SUPPORTED_SOLVERS)
         return cls(
             run_id=run_id,
-            scenario_path=scenario_path,
-            pylovo_version_id=_pylovo_version(resources),
+            scenario_path=scenario_source,
+            scenario_source=scenario_source,
+            scenario_overrides=dict(scenario_overrides),
+            pylovo_version_id=_pylovo_version(pylovo),
             ags=ags,
             plz=plz,
             kcid=kcid,
             bcid=bcid,
-            min_buildings=positive_int(resources.get("min_buildings", cls.min_buildings), "resources.min_buildings"),
-            start_index=optional_int(resources.get("start_index"), "resources.start_index"),
+            min_buildings=positive_int(pylovo.get("min_buildings", cls.min_buildings), "grids.pylovo.min_buildings"),
+            start_index=optional_int(pylovo.get("start_index"), "grids.pylovo.start_index"),
             limit=(
-                None if resources.get("limit") is None
-                else positive_int(resources["limit"], "resources.limit")
+                None if pylovo.get("limit") is None
+                else positive_int(pylovo["limit"], "grids.pylovo.limit")
             ),
             model_cases=cases,
             profile_seed=_seed(execution),
@@ -259,7 +283,7 @@ class SyntheticRun:
             demand_scope=choice(execution.get("demand_scope", cls.demand_scope), "execution.demand_scope",
                                 ("all", "residential")),
             workers=number("workers", cls.workers),
-            step2_cpus=positive_int(step2_cpus, "execution.step2_cpus"),
+            step2_cpus=number("step2_cpus", cls.step2_cpus),
             step2_timeseries_storage=choice(
                 execution.get("step2_timeseries_storage", cls.step2_timeseries_storage),
                 "execution.step2_timeseries_storage", ("db", "temp", "both"),
@@ -284,6 +308,11 @@ class SyntheticRun:
             rerun_failed=boolean("rerun_failed", cls.rerun_failed),
         )
 
+    def scenario_raw(self) -> dict[str, Any]:
+        """The scenario mapping of the run: the named scenario with the overrides merged in."""
+        raw = _read_yaml(self.scenario_source or self.scenario_path)
+        return deep_merge(raw, self.scenario_overrides) if self.scenario_overrides else raw
+
     def identity(self) -> dict[str, Any]:
         """What a resumed run must share with the recorded one (not resources or cases)."""
         return {
@@ -305,42 +334,34 @@ class SyntheticRun:
 RunConfig = SyntheticRun
 
 
-def parse_run_blocks(raw: dict[str, Any], *, base_dir: Path) -> tuple[str, str, Path, dict[str, Any], dict[str, Any]]:
-    """``(run id, pipeline, scenario path, resources, execution)`` of a run YAML mapping; the pipeline is not checked."""
-    raw = mapping(raw, "run configuration")
-    only(raw, {"run", "resources", "execution"}, "top-level run")
-    for block in ("run", "resources", "execution"):
-        if block not in raw:
-            raise ValueError(f"The run YAML needs a {block!r} block.")
-    run = mapping(raw["run"], "run")
-    resources = mapping(raw["resources"], "resources")
-    execution = mapping(raw["execution"], "execution")
-    only(run, {"id", "scenario", "pipeline"}, "run")
-    run_id = directory_safe(run.get("id"), "run.id")
-    pipeline = str(run.get("pipeline"))
-    if not run.get("scenario"):
-        raise ValueError("run.scenario (the scenario YAML) is required.")
-    scenario_path = _resolve(run["scenario"], base_dir)
-    if not scenario_path.is_file():
-        raise FileNotFoundError(f"Scenario YAML not found: {scenario_path}")
-    return run_id, pipeline, scenario_path, resources, execution
+TOP_LEVEL_KEYS = {"run", "scenario", "scenario_overrides", "grids", "model_cases", "execution"}
 
 
 def run_config_from_dict(raw: dict[str, Any], *, base_dir: Path) -> RunConfig:
     """Parse a run YAML mapping (``base_dir``: directory of relative paths)."""
-    run_id, pipeline, scenario_path, resources, execution = parse_run_blocks(raw, base_dir=base_dir)
-    if pipeline == "scenario":
+    raw = mapping(raw, "run configuration")
+    if "resources" in raw or isinstance(raw.get("run"), dict):
         raise ValueError(
-            "run.pipeline 'scenario' was renamed to 'synthetic', which runs Steps 2-4 and the "
-            "expansion analyses (not Step 2 only). Rename it in the run YAML."
+            "This is a run YAML of the former format (run/resources/execution blocks). The current format is "
+            "one short file: run, scenario, grids (pylovo: version, ags, ...), optional model_cases and execution; "
+            "see config/runs/00_run_template.yaml. Validation runs use 'python -m validation run'."
         )
-    if pipeline == "paired_aligned":
+    only(raw, TOP_LEVEL_KEYS, "run YAML")
+    run_id = directory_safe(raw.get("run"), "run")
+    scenario_source = resolve_scenario(raw.get("scenario"), base_dir)
+    overrides = mapping(raw.get("scenario_overrides") or {}, "scenario_overrides")
+    grids = mapping(raw.get("grids"), "grids") if raw.get("grids") is not None else {}
+    only(grids, {"pylovo", "files"}, "grids")
+    if len(grids) != 1:
+        raise ValueError("grids needs exactly one source: pylovo (synthetic grids) or files (own grid files).")
+    if "files" in grids:
         raise ValueError(
-            "run.pipeline paired_aligned is the real-vs-synthetic validation: run it with "
-            "'uv run python -m validation run <run.yaml>' (GridExpand/validation)."
+            "grids.files (own grid files, pipeline real) is in preparation; until then use gridexpand match and "
+            "python -m gridexpand.grids.dataset (docs/matching.md)."
         )
-    choice(pipeline, "run.pipeline", PIPELINES)
-    return SyntheticRun.from_blocks(run_id, scenario_path, resources, execution)
+    execution = mapping(raw.get("execution") or {}, "execution")
+    return SyntheticRun.from_blocks(run_id, scenario_source, overrides, mapping(grids["pylovo"], "grids.pylovo"),
+                                    raw.get("model_cases", list(DEFAULT_MODEL_CASES)), execution)
 
 
 def load_run_config(path: str | Path) -> tuple[RunConfig, str]:

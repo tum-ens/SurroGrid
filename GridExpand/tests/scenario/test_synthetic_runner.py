@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
+from tests.fixture_paths import FIXTURE_SCENARIOS
 from gridexpand.common.orchestration import StatusLog
-from gridexpand.paths import SCENARIO_CONFIG_DIR
 from gridexpand.scenario import synthetic_ags_runner as runner
 from gridexpand.scenario.config_loader import load_scenario_config
 
-SCENARIO_PATH = SCENARIO_CONFIG_DIR / "schweinfurt_2045.yaml"
+SCENARIO_PATH = FIXTURE_SCENARIOS / "teaser_2045.yaml"
 SCENARIO, SCENARIO_HASH = load_scenario_config(SCENARIO_PATH)
-SID = f"scenario_schweinfurt_2045_{SCENARIO_HASH[:12]}"
+SID = f"scenario_teaser_2045_{SCENARIO_HASH[:12]}"
 KEY = f"{SID}_max_base_electricity_demand_week"
 
 
@@ -85,7 +85,7 @@ def test_names():
     s = settings()
     assert runner.step2_filename(candidate(), s) == "9184137-03_85653_1_4_max_base_electricity_demand_week_post-hems-heuristic.h5"
     assert runner.job_key(candidate()) == "9184137-03_85653_1_4"
-    assert SCENARIO.time_aggregation.enabled  # schweinfurt_2045 uses TSAM
+    assert SCENARIO.time_aggregation.enabled  # teaser_2045 uses TSAM
     assert runner.expansion_analysis_prefix(s) == (
         f"09184137_{SID}_max_base_electricity_demand_week_post_electrification_tsam_post-hems-heuristic")
     assert runner.expansion_analysis_prefix(settings(case_qualified_output=False, demand_scope="residential")) == (

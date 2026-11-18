@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-BASE = "schweinfurt_2045.yaml"
+BASE = "teaser_2045.yaml"
 CHANGE = {"asset_sizing.pv.demand_multiplier": 2.5}
 
 
@@ -44,9 +44,9 @@ def test_serve_option_for_the_user_directory(capsys):
 def test_form(client, settings):
     form = client.get(f"/api/scenarios/{BASE}/form").json()
     assert form["name"] == BASE and form["user"] is False and form["writable"] is False
-    assert form["id"] == "schweinfurt_2045" and form["scenario_key"].startswith("scenario_schweinfurt_2045_")
+    assert form["id"] == "teaser_2045" and form["scenario_key"].startswith("scenario_teaser_2045_")
     assert form["text"].startswith("# Scientific and methodological assumptions") and len(form["text_sha256"]) == 64
-    assert form["proposal"] == {"file_name": "schweinfurt_2045_custom.yaml", "scenario_id": "schweinfurt_2045_custom"}
+    assert form["proposal"] == {"file_name": "teaser_2045_custom.yaml", "scenario_id": "teaser_2045_custom"}
     assert form["user_dir"] == {"path": str(settings.user_scenario_dir), "exists": False, "writable": True, "reason": None}
     sections = {s["id"]: {f["key"]: f for f in s["fields"]} for s in form["editable_fields"]}
     assert list(sections) == ["electrification", "economics", "pv", "battery", "heat", "mobility", "time_aggregation"]
@@ -86,7 +86,7 @@ def test_save_writes_a_user_file_and_lists_it(client, settings):
     assert entry["id"] == "mine" and entry["scenario_key"].startswith("scenario_mine_") and entry["backup"] is None
     text = path.read_text(encoding="utf-8")
     shipped = (settings.shipped_scenario_dirs[0] / BASE).read_text(encoding="utf-8")
-    assert text == shipped.replace("id: schweinfurt_2045\n", "id: mine\n").replace(
+    assert text == shipped.replace("id: teaser_2045\n", "id: mine\n").replace(
         "demand_multiplier: 2.0", "demand_multiplier: 2.5")
     items = {item["name"]: item for item in client.get("/api/scenarios").json()}
     assert items["mine.yaml"]["user"] is True and items[BASE]["user"] is False
@@ -113,7 +113,7 @@ def test_save_needs_overwrite_for_an_own_file_and_keeps_a_backup(client, setting
 
 
 @pytest.mark.parametrize(("file_name", "status"), [
-    ("schweinfurt_2045.yaml", 409),  # shipped
+    ("teaser_2045.yaml", 409),  # shipped
     ("../escape.yaml", 400), ("sub/dir.yaml", 400), (".hidden.yaml", 400), ("-x.yaml", 400),
     ("notes.txt", 400), ("ümlaut.yaml", 400), ("x" * 120 + ".yaml", 422),
 ])
@@ -163,7 +163,7 @@ def test_delete_only_user_files(client, settings):
     assert (settings.user_scenario_dir / deleted.json()["backup"]).exists()
     assert "mine.yaml" not in {item["name"] for item in client.get("/api/scenarios").json()}
     assert client.delete("/api/scenarios/mine.yaml").status_code == 404
-    assert client.delete("/api/scenarios/..%2Fscenarios%2Fschweinfurt_2045.yaml").status_code in (403, 404)
+    assert client.delete("/api/scenarios/..%2Fscenarios%2Fteaser_2045.yaml").status_code in (403, 404)
 
 
 def test_state_changing_scenario_calls_need_the_ui_header(settings, fake_solvers):

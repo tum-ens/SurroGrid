@@ -7,15 +7,16 @@ from pathlib import Path
 import pytest
 import yaml
 
-from gridexpand.paths import RUN_CONFIG_DIR, SCENARIO_CONFIG_DIR
+from tests.fixture_paths import FIXTURE_RUNS
 from gridexpand.scenario import run as core_run
 from gridexpand.scenario.run_config import with_cases
 from validation import CONFIG_DIR, commands
 from validation import run as run_module
 from validation.run import AlignedRun, aligned_run_from_dict, load_aligned_run
 
-ISLANDS = CONFIG_DIR / "joint_2045_v1_islands.yaml"
-SANDBOX = RUN_CONFIG_DIR / "sandbox_example.yaml"
+ISLANDS = Path(__file__).resolve().parent / "fixtures" / "aligned_islands.yaml"
+METHOD_SCENARIO = CONFIG_DIR / "scenarios" / "joint_2045_full_year.yaml"
+SANDBOX = FIXTURE_RUNS / "sandbox_example.yaml"
 SC = Path("/s/scenario.yaml")
 PY = "py"
 
@@ -29,6 +30,8 @@ def context(path: Path, *extra: str, run_dir: Path | None = None):
 
 @pytest.mark.parametrize("path", sorted(CONFIG_DIR.glob("*.yaml")), ids=lambda p: p.name)
 def test_repository_run_yamls(path):
+    if path.name.startswith("00_"):
+        pytest.skip("template")
     run, run_hash = load_aligned_run(path)
     assert run.pipeline == "paired_aligned" and len(run_hash) == 64
     assert run.scenario_path.is_file()
@@ -44,7 +47,7 @@ def test_aligned_run(tmp_path):
     tag = run.providers[0].scenario_tag
     assert len(tag) == 12 and run.providers[0].heat_profile_set_id == f"joint_2045_v1_dso_a_teaser_heat_{tag}"
     raw = yaml.safe_load(ISLANDS.read_text(encoding="utf-8"))
-    raw["run"]["scenario"] = str(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")
+    raw["run"]["scenario"] = str(METHOD_SCENARIO)
     raw["resources"]["alignment_dir"] = "alignment"  # relative: next to the YAML, not the working directory
     assert aligned_run_from_dict(raw, base_dir=tmp_path).alignment_dir == tmp_path / "alignment"
     assert run.weather_year is None  # PVGIS TMY per provider
@@ -64,7 +67,7 @@ def test_post_cases_and_optimizer(tmp_path):
     with pytest.raises(ValueError, match="not allowed"):
         with_cases(run, ("pre",))  # pre is added to the first group; asking for it again is refused
     raw = yaml.safe_load(ISLANDS.read_text(encoding="utf-8"))
-    raw["run"]["scenario"] = str(SCENARIO_CONFIG_DIR / "joint_2045_full_year.yaml")
+    raw["run"]["scenario"] = str(METHOD_SCENARIO)
     assert aligned_run_from_dict(raw, base_dir=tmp_path).optimizer is None
     raw["execution"]["optimizer"] = "pypsa"
     assert aligned_run_from_dict(raw, base_dir=tmp_path).optimizer == "pypsa"

@@ -7,6 +7,7 @@ import math
 import pandas as pd
 import pytest
 
+from tests.fixture_paths import FIXTURE_SCENARIOS
 from gridexpand.optimization.identity import resolve_input_file, validate_step2_input
 from gridexpand.optimization.solver import (
     DEFAULT_SOLVER,
@@ -17,13 +18,12 @@ from gridexpand.optimization.solver import (
 )
 from gridexpand.optimization.urbs.runfunctions import final_result_path, temporal_audit
 from gridexpand.optimization.urbs.saveload import merge_cluster_results
-from gridexpand.paths import SCENARIO_CONFIG_DIR
 from gridexpand.scenario.config_loader import load_scenario_config, scenario_identity_key
 
 
 @pytest.fixture(scope="module")
 def scenario():
-    return load_scenario_config(SCENARIO_CONFIG_DIR / "ro_heat_2045_synthetic.yaml")
+    return load_scenario_config(FIXTURE_SCENARIOS / "ro_heat_2045_synthetic.yaml")
 
 
 def _pre_metadata(scenario_config, config_hash, overrides=None):

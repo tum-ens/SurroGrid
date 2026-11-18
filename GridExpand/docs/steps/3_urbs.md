@@ -48,7 +48,7 @@ uv run gridexpand optimize <inputfile_id> --scenario-config config/scenarios/<sc
 **Partition.** The buildings (sites) are split into `n_cpu` contiguous, equally sized clusters in site order (the
 first `len % n_cpu` clusters get one more building; empty clusters are dropped). The synthetic runner chooses
 `n_cpu` per grid (`--step3-cpus`, `--step3-max-cpus`, `--step3-target-columns`, see
-[configuration.md](../configuration.md#pipeline-synthetic)).
+[configuration.md](../configuration.md#execution)).
 
 **Solver.** `gurobi` is Pyomo's LP-file interface to Gurobi with `Method=4` (deterministic concurrent),
 `MIPFocus=2`, `MIPGap=0.05`, `Presolve=2`, `Threads=4` per cluster (so up to `4 × concurrency` threads);
