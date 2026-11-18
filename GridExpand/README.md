@@ -116,7 +116,8 @@ uv run gridexpand match ~/data/my_grids --output work/matching/my_grids   # the 
 ```
 
 Matching rules and outputs: [docs/matching.md](docs/matching.md). Building attributes come from InfDB, derived with
-pylovo's rules; no pylovo grid is read. Results: expansion analyses `<run>_real_<case>` with data source `Real`.
+pylovo's rules; no pylovo grid is read. Heat follows the scenario: `internal` (default), or `teaser` / `infdb_ro_heat`
+computed per building. Results: expansion analyses `<run>_real_<case>` with data source `Real`.
 
 ## Results
 

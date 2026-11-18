@@ -204,6 +204,11 @@ connection point (or the points as a CSV). `gridexpand run` matches the points t
 libraries, then runs the per-grid runner once per execution group (the first also runs the `pre` stage) and the
 expansion analyses (`<run>_real_<case>`, data source `Real`). Grids are numbered in the results: by their id when every
 id is an integer, else 1, 2, ... in the order of the ids (`real_grid_name` in the dataset keeps the file stem).
+Heat follows the scenario's `space_heat_source`: `internal` needs no heat library, `teaser` and `infdb_ro_heat` are
+computed building by building (`python -m gridexpand.grids.heat_sources`, see
+[method.md](method.md#own-grids-heat-per-building)). If a grid file holds the MV side (ext_grid at an MV bus behind
+the transformer), the simulation moves the ext_grid to the LV busbar and takes the transformer and MV bus out of
+service; the transformer rating stays the expansion input.
 
 | key | default | meaning |
 |---|---|---|

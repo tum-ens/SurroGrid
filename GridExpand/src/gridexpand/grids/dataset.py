@@ -11,8 +11,8 @@ real-grid power flow (one network side):
 ``paired_real_bus_allocation_plan.csv`` (one scenario unit per building, its grid, bus and grid file),
 ``paired_component_scenario_plan.csv``, ``paired_building_scenario_plan.csv``,
 ``paired_electrification_assignment.csv`` (+ ``_summary``), ``paired_pv_roof_assignments.csv``,
-``paired_roof_sections.csv``, ``paired_ghd_policy_audit.csv``, ``paired_scope_audit.csv`` and
-``paired_scenario_metadata.json``. The RegioStaR class of the mobility statistics comes from the municipal
+``paired_roof_sections.csv``, ``paired_ghd_policy_audit.csv``, ``paired_scope_audit.csv``,
+``paired_physical_buildings.csv`` (the building attributes) and ``paired_scenario_metadata.json``. The RegioStaR class of the mobility statistics comes from the municipal
 register ``pylovo.municipal_register``.
 
 ``uv run python -m gridexpand.grids.dataset --supply <building_supply.csv> --grids <dir> --scenario-config <yaml>
@@ -440,6 +440,10 @@ def build_dataset(
         "paired_electrification_assignment": assignment,
         "paired_electrification_assignment_summary": summary,
         "paired_ghd_policy_audit": ghd_audit,
+        # The building attributes of the dataset, read again by the per-building heat sources.
+        "paired_physical_buildings": buildings.drop(
+            columns=[column for column in buildings.columns if buildings[column].map(type).eq(list).any()]
+        ),
     }
     for name, frame in outputs.items():
         frame.to_csv(output_dir / f"{name}.csv", index=False)

@@ -277,6 +277,18 @@ The space-heat source is `asset_sizing.heat.space_heat_source`:
   See [Internal space heat and building preheating](#internal-space-heat-and-building-preheating)
   for the effective heated zone, source provenance and boundaries.
 
+#### Own grids: heat per building
+
+Own grids (`grids: files`) have no synthetic grid to regenerate heat on, so `teaser` and `infdb_ro_heat` are computed
+building by building (`gridexpand.grids.heat_sources`) with the functions and seeds of the synthetic path: building
+statistics, space heat, hot water (`infdb_ro_heat`: OpenDHW, `teaser`: DistrictGenerator), daylight-saving shifts and
+the air-source COP. Each heat-eligible residential building is its own pseudo bus (its scenario unit). TEASER takes
+the building's own sampled residential electricity as internal gains and its sampled occupants per household. The
+profiles go into one source HDF per grid, the exact physical heat-profile library and
+`paired_heat_profile_catalog.csv`, written by the catalog function of the validation. `infdb_ro_heat` reads the
+InfDB series `ro_heat.entise_ts_metadata` / `ro_heat.entise_ts_data`; a database without them fails at this stage.
+`internal` needs none of this.
+
 #### TEASER envelope and assumptions
 
 `asset_sizing.heat.teaser` (read only by `space_heat_source: teaser`) sets the assumptions of the TEASER path.

@@ -403,12 +403,14 @@ def dataset_preparation_commands(
     heat_workers: int,
     reference_year: int,
     weather_year: int | None = None,
+    per_building_heat: bool = False,
     python: str | None = None,
 ) -> list[tuple[str, list[str]]]:
     """``(stage, argv)`` that complete a scenario dataset after its building plan: weather, heat and PV libraries.
 
     ``internal`` space heat needs only a readiness check of the RC inputs; the other heat sources build a physical
-    heat library from per-building source profiles.
+    heat library from per-building source profiles: the validation regenerates them on the synthetic grids of its
+    buildings, own grids (``per_building_heat``) compute them building by building (:mod:`gridexpand.grids.heat_sources`).
     """
     from gridexpand.scenario.config_loader import load_scenario_config
 
@@ -460,4 +462,11 @@ def dataset_preparation_commands(
             stages = [stage for stage in stages if stage[0] in {"weather", "pv_library"}]
             stages.insert(1, ("internal_heat_readiness", module_command(
                 readiness, "--paired-dir", paired_dir, "--scenario-config", scenario_config, python=python)))
+            return stages
+    if per_building_heat:
+        stages = [stage for stage in stages if stage[0] in {"weather", "pv_library"}]
+        stages.insert(1, ("heat_sources", module_command(
+            "gridexpand.grids.heat_sources", "--paired-dir", paired_dir, "--scenario-config", scenario_config,
+            "--weather-hdf", weather_hdf, "--sources-dir", heat_sources, "--library", heat_library,
+            "--profile-set-id", heat_profile_set_id, python=python)))
     return stages

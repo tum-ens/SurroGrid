@@ -67,6 +67,7 @@ def preparation(ctx) -> list[tuple[str, list[str]]]:
         heat_sources=where["heat_sources"], heat_library=where["heat_library"],
         heat_profile_set_id=str(where["heat_set"]), heat_workers=run.heat_workers,
         reference_year=ctx.scenario.mobility.reference_year, weather_year=run.weather_year,
+        per_building_heat=True,
     )]
 
 
@@ -133,15 +134,25 @@ def run_real(ctx) -> int:
     run: RealRun = ctx.run
     state = ctx.state
     where = paths(ctx)
-    with state.stage_context("prepare"):
-        if not ctx.resume or not (where["paired_dir"] / "paired_scenario_metadata.json").exists():
-            for stage, argv in preparation(ctx):
-                if _step(ctx, "prepare", stage, argv, ctx.run_dir / "logs" / f"prepare_{stage}.log") != 0:
-                    raise RuntimeError(f"Preparation step {stage} failed; see logs/prepare_{stage}.log.")
-        ctx.readiness[NETWORK] = validate_prepared_dataset(
+    def check() -> dict:
+        return validate_prepared_dataset(
             dataset_id(run), pylovo_version_id=run.pylovo_version_id, scenario_hash=ctx.scenario_hash,
             provider=NETWORK, require_exact_heat=True, weather_hdf=where["weather"],
         )
+
+    with state.stage_context("prepare"):
+        ready = None
+        if ctx.resume:  # a prepared dataset that passes the check is reused
+            try:
+                ready = check()
+            except (ValueError, FileNotFoundError, KeyError, OSError):
+                ready = None
+        if ready is None:
+            for stage, argv in preparation(ctx):
+                if _step(ctx, "prepare", stage, argv, ctx.run_dir / "logs" / f"prepare_{stage}.log") != 0:
+                    raise RuntimeError(f"Preparation step {stage} failed; see logs/prepare_{stage}.log.")
+            ready = check()
+        ctx.readiness[NETWORK] = ready
         print(f"[prepare:check] {json.dumps(ctx.readiness[NETWORK], sort_keys=True)}", flush=True)
         planned = jobs(ctx)
         todo = set(state.plan([{"job": key, "group": key, "run_dir": str(run_dir)} for key, _, run_dir in planned],
