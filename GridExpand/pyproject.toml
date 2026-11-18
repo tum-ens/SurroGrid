@@ -43,6 +43,8 @@ dependencies = [
   "pandapower>=3.1,<3.2",
   "matplotlib>=3.10,<3.11",
   "plotly>=5.24,<6",
+  # Extrapolation of the reinforcement cost (clustered OLS)
+  "statsmodels>=0.14,<0.15",
 ]
 
 [project.optional-dependencies]
