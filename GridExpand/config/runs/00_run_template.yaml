@@ -25,7 +25,8 @@ grids:
     # limit: 10
   # files: ~/data/my_grids       # own grid files (pipeline: real), in preparation
 
-# Optional, these are the defaults. post-inflex-heuristic is not available for synthetic grids yet.
+# Optional, these are the defaults. post-inflex-heuristic (rule-based INFLEX) needs EV charging sessions,
+# which the current synthetic Step 2 does not write; it returns when synthetic grids move to the new Step 2.
 # model_cases: [pre, post-hems-heuristic, post-hems-optimized]
 
 # Optional machine and output settings (defaults shown):
