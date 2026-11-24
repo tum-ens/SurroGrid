@@ -254,16 +254,22 @@ def station_decision(
             rated_kva, peak_kva, limit, "exchange", size,
             exchange_cost_eur=cost, cost_basis=f"exchange_to_{int(size)}kva{suffix}",
         )
-    excess = peak_kva - tau * ceiling
-    if rated_kva + KVA_EPSILON < limit:
-        size = max(kva for kva in STANDARD_KVA if kva <= limit + KVA_EPSILON)
-        cost, suffix = _station_exchange(size, params)
+    # Over the limit: stage 4 adds a transfer or new substations anyway, so the own unit is exchanged only up
+    # to the largest size without a station replacement, and the excess counts from that size.
+    top = max(
+        (kva for kva in STANDARD_KVA
+         if kva <= limit + KVA_EPSILON and kva + KVA_EPSILON < params.station_replacement_from_kva),
+        default=0.0,
+    )
+    own = max(rated_kva, top)
+    excess = peak_kva - tau * own
+    if rated_kva + KVA_EPSILON < own:
         return StationResult(
-            rated_kva, peak_kva, limit, "over_limit", size, excess_kva=excess,
-            exchange_cost_eur=cost, cost_basis=f"exchange_to_{int(size)}kva_limit{suffix}",
+            rated_kva, peak_kva, limit, "over_limit", own, excess_kva=excess,
+            exchange_cost_eur=_exchange_cost(own, params), cost_basis=f"exchange_to_{int(own)}kva_limit",
         )
-    return StationResult(rated_kva, peak_kva, limit, "over_limit", rated_kva, excess_kva=excess,
-                         cost_basis="at_limit")
+    basis = "at_limit" if rated_kva + KVA_EPSILON >= limit else "kept_below_station_replacement"
+    return StationResult(rated_kva, peak_kva, limit, "over_limit", rated_kva, excess_kva=excess, cost_basis=basis)
 
 
 # Stage 2: routes ----------------------------------------------------------------------------------

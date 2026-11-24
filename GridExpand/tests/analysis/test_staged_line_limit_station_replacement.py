@@ -52,16 +52,32 @@ def test_station_replacement_from_1000_kva(staged_assumption):
     large = staged.station_decision(630, 900, 2, params)
     assert (large.required_kva, large.exchange_cost_eur) == (1000, 15000 + 55000)
     assert large.cost_basis == "exchange_to_1000kva_station_replaced"
+    # over the limit: stage 4 adds stations anyway, so the own unit stops below the replacement (800 kVA)
     over = staged.station_decision(630, 1100, 1, params)
-    assert (over.measure, over.exchange_cost_eur) == ("over_limit", 15000 + 55000)
+    assert (over.measure, over.required_kva, over.exchange_cost_eur) == ("over_limit", 800, 12500)
+    assert over.excess_kva == pytest.approx(300.0) and over.cost_basis == "exchange_to_800kva_limit"
+    kept = staged.station_decision(800, 1100, 1, params)
+    assert (kept.required_kva, kept.exchange_cost_eur, kept.cost_basis) == (800, 0.0, "kept_below_station_replacement")
+    at_limit = staged.station_decision(1000, 1100, 1, params)
+    assert (at_limit.excess_kva, at_limit.cost_basis) == (pytest.approx(100.0), "at_limit")
 
 
 def test_migration_rows_document_their_parameters():
     keys = re.findall(r"'assumption_key', '(de_lv_staged_2026_\w+)'", SQL)
-    assert keys == ["de_lv_staged_2026_line60", "de_lv_staged_2026_station_replacement",
-                    "de_lv_staged_2026_station_replacement_line60"]
+    assert keys == ["de_lv_staged_2026_no_station_replacement", "de_lv_staged_2026_line60",
+                    "de_lv_staged_2026_line80"]
     names = "line_planning_limit|station_replacement_from_kva|station_replacement_eur"
     for block in SQL.split("INSERT INTO surrogrid.expansion_cost_assumption\nSELECT")[1:]:
         set_values = {k: float(v) for k, v in re.findall(rf"'({names})', ([\d.]+)", block)}
         documented = {k: float(v) for k, v in re.findall(r'"(\w+)": \{"value": ([\d.]+)', block)}
         assert set_values and all(documented[name] == value for name, value in set_values.items())
+
+
+def test_staged_rows_replace_the_station_from_1000_kva():
+    update = SQL[SQL.index("UPDATE surrogrid.expansion_cost_assumption"):SQL.index("INSERT INTO")]
+    assert "WHERE rule_set = 'staged_2026'" in update
+    set_values = dict(re.findall(r"(station_replacement_\w+) = ([\d.]+)", update))
+    documented = dict(re.findall(r'"(station_replacement_\w+)": \{"value": ([\d.]+)', update))
+    assert set_values == {"station_replacement_from_kva": "1000.0", "station_replacement_eur": "70000.0"}
+    assert {k: float(v) for k, v in documented.items()} == {k: float(v) for k, v in set_values.items()}
+    assert '"line_planning_limit": {"value": 1.0' in update

@@ -33,7 +33,7 @@ in order and recorded in `surrogrid.schema_migration`, plus the re-runnable
 | `0007_staged_expansion.sql` | staged expansion rules: `rule_set`, the `staged_2026` parameters and `parameter_provenance` in `expansion_cost_assumption` (rows `de_lv_staged_2026` and five sensitivities); measure and cost-breakdown columns of the line and transformer results; table `expansion_grid_result` |
 | `0008_provider_names.sql` | anonymised provider names: `real_grid_case.source` `dso_a`/`dso_b`, `expansion_analysis_run.data_source` `Real DSO A`/`Real DSO B`, `demand_component_audit.matched_dso_asset_count` |
 | `0009_real_data_source.sql` | own grids: `expansion_analysis_run.data_source` also allows `Real` (`real_grid_case.source` `real`) |
-| `0010_line_limit_station_replacement.sql` | `line_planning_limit`, `station_replacement_from_kva`, `station_replacement_eur` in `expansion_cost_assumption` (defaults keep the existing rows unchanged); rows `de_lv_staged_2026_line60`, `_station_replacement`, `_station_replacement_line60` |
+| `0010_line_limit_station_replacement.sql` | `line_planning_limit`, `station_replacement_from_kva`, `station_replacement_eur` in `expansion_cost_assumption`; the `staged_2026` rows replace the station from 1000 kVA for 70 k€; rows `de_lv_staged_2026_no_station_replacement`, `_line60`, `_line80` |
 | `views.sql` | `grid_building_bus`, `grid_building_component`, the two QGIS materialized views |
 
 0002–0004 only change databases created by the pre-migration code; on a

@@ -56,13 +56,15 @@ within 5 %).
 - S_P100 ≤ τ·S_max: exchange for the smallest standard size (100, 160, 250, 400, 630, 800, 1000 kVA) that carries
   the load. S_max is 1000 kVA in every settlement type (the columns per settlement type allow other limits in
   sensitivity rows).
-- Otherwise the grid is **over the limit** by S_P100 − τ·S_max:
-  - its transformer is exchanged up to S_max;
-  - the rest goes to stage 4.
+- Otherwise the grid is **over the limit**:
+  - its transformer is exchanged up to the largest size without a station replacement (800 kVA with the
+    replacement from 1000 kVA, S_max without it), because stage 4 adds a transfer or new substations anyway;
+  - the rest, S_P100 − τ·(that size), goes to stage 4.
 - A station whose unit is already above S_max keeps it as its ceiling.
-- **Station replacement** (`station_replacement_*`, off by default): an exchange to a unit of
-  `station_replacement_from_kva` or larger also costs `station_replacement_eur` for the station (housing and
-  switchgear for the larger unit). The cost basis ends in `_station_replaced`.
+- **Station replacement** (`station_replacement_*`): an exchange to a unit of `station_replacement_from_kva`
+  (1000 kVA) or larger also costs `station_replacement_eur` (70 k€) for a new station, i.e. the housing and
+  switchgear of the larger unit (Candas 2024: DSO experience). This also applies to neighbours that receive
+  transferred load. The cost basis ends in `_station_replaced`.
 
 **2. Routes.** Each overloaded route gets the least-cost combination of parallel NAYY 4×150/185/240 cables, with at
 most `line_max_added_cables`.
@@ -92,7 +94,7 @@ most `line_max_added_cables`.
     needs (its row keeps its own P100; the cost basis ends in `_with_transfer_in`).
   - *Order:* grids by descending excess; the largest spare is used first, and each kVA only once.
   - *Partial transfers:* as much of the excess as the neighbours can take moves to them, for `load_transfer_eur`
-    plus the own exchange to S_max. This is the shift of feeders or feeder sections to less loaded stations of
+    plus the own exchange of stage 1. This is the shift of feeders or feeder sections to less loaded stations of
     Niederle et al. (2026), combined with an exchange at the receiving station.
 - **(b) Whole new substations** for the excess that no neighbour can take.
   - The remaining neighbouring grids form a cluster that shares ⌈Σ remaining excess / (τ·S_new)⌉ new substations.
@@ -126,7 +128,7 @@ base of their source; nothing is inflation-adjusted.
 | Parameter (column) | Value | Method | Sources |
 |---|---:|---|---|
 | `transformer_planning_limit` | 1.0 × Sr | decision D4, DSO practice (all studies agree) | Niederle et al. 2026, p. 7–8; PuBStadt 2021 §7.5.2, p. 50 (100 % of Sr); dena 2012, p. 89–90; BW 2017, p. 37; FfE/Agora 2023, p. 53, 111 (reinforced even after short overloads); Nobis 2016 (no (n-1) in LV). IEC 60076-7 allows up to 1.5 p.u. normal cyclic loading, so 1.1/1.2 are sensitivities |
-| `station_max_kva_rural` / `_suburban` / `_urban` | 1000 kVA | decision D2, revised 2026-09-29: as FfE/Agora 2023 | FfE/Agora 2023, p. 85, 111 (1000 kVA in every settlement type, after PuBStadt and DSO feedback; above that an additional station); PuBStadt 2021, p. 157 (1000 kVA or 2 × 630 kVA in urban grids); dena 2012, BW 2017, Agora 2019 / NRW 2021 (a second or more parallel units); Schneider Planungskompendium (MV fuse-switch protection up to about 1000 kVA, VDE 0670-402); Schneider EIG (urban substations with one or two 1000 kVA units). Stricter: PuBLIK 2016 / Harnisch 2019 (rural: new station from 800 kVA), Kerber 2011 (630 kVA), Munich (630/800 kVA). The exchange cost has no larger station housing, which small rural stations may need |
+| `station_max_kva_rural` / `_suburban` / `_urban` | 1000 kVA | decision D2, revised 2026-09-29: as FfE/Agora 2023 | FfE/Agora 2023, p. 85, 111 (1000 kVA in every settlement type, after PuBStadt and DSO feedback; above that an additional station); PuBStadt 2021, p. 157 (1000 kVA or 2 × 630 kVA in urban grids); dena 2012, BW 2017, Agora 2019 / NRW 2021 (a second or more parallel units); Schneider Planungskompendium (MV fuse-switch protection up to about 1000 kVA, VDE 0670-402); Schneider EIG (urban substations with one or two 1000 kVA units). Stricter: PuBLIK 2016 / Harnisch 2019 (rural: new station from 800 kVA), Kerber 2011 (630 kVA), Munich (630/800 kVA). From 1000 kVA the station replacement adds the larger housing (`station_replacement_*`) |
 | `transformer_replace_100_eur` / `_160_eur` | 8,000 € | conservative: no 100 kVA source; the 250 kVA value, above Kerber's 160 kVA value | Kerber 2011, p. 142: 160 kVA 6.5 k€ (2007) |
 | `transformer_replace_250_eur` | 8,000 € | upper value of the size-specific sources | Kerber 2011: 8.0 k€ (2007); FfE MONA 2030: 7.0 k€ (2015); Verteilnetzstudie Hessen 2018: 7 k€ (2015). FfE/Agora 2023 charges 15 k€ per exchange whatever the size (upper bound) |
 | `transformer_replace_400_eur` | 10,000 € | upper range, rounded | Kerber 2011: 10.5 k€; MONA: 8.5 k€; Hessen 2018: 9 k€; BMWi 2014: 8 (6–10) k€; FfE/Agora 2023: 15 k€ per exchange (upper bound) |
@@ -151,8 +153,9 @@ base of their source; nothing is inflation-adjusted.
 | `ront_premium_eur` | 12,000 € | central value (median of twelve derived premiums, 5.5–30 k€) | MR/BUW 2023: 5.5; IEE/BWP 2022: 8; PuBLIK 2016: 8.5; Arnold 2019: 10–11; MONA: 10–11.5; PuBStadt 2021, p. 213: 11–12.5; Schlömer 2017: 12; FfE/Agora 2023: 13; BMWi 2014: 15; Hessen 2018: 16–17; dena 2012, p. 169: about 20 (30 k€ conversion incl. measurement, derived); BW 2017: 30 k€. Where the rONT replaces a kept transformer, stage 5 adds the conventional price of its size |
 | `ront_control_range_percent` | ±10 % | product value | Schneider Minera SGrid (2015): 5 positions ±5 % or 9 positions ±10 % |
 | `service_lines_in_total` | no | decision D9 | NAV § 9: the connectee usually reimburses changes of the house connection |
-| `line_planning_limit` | 1.0 | nominal ratings (0010; behaviour of 0007) | PuBStadt 2021 §7.5.2, p. 50 (LV cables up to 100 %) |
-| `station_replacement_from_kva` / `_eur` | none / 0 € | no station replacement (0010; behaviour of 0007) | see the note on `station_max_kva_*` |
+| `line_planning_limit` | 1.0 | nominal ratings, as `transformer_planning_limit` (decision D4) | PuBStadt 2021 §7.5.2, p. 50; dena 2012, p. 89–90; BW 2017, p. 37 (LV cables up to 100 % of their rating). Stricter: Arnold 2019, Table 4, p. 45 (80 %); IEE/BWP 2022 (Spalthoff et al.) and ef.Ruhr/EWI 2024 (Probst et al.): 60 % as a planning premise (sensitivity rows) |
+| `station_replacement_from_kva` | 1000 kVA | DSO experience | Candas 2024, Table 3.8: a transformer replaced by one of 1000 kVA or more needs a new station (rONT 800 kVA 40.3 k€, 1000 kVA 191.4 k€ incl. the station) |
+| `station_replacement_eur` | 70,000 € | derived: `new_station_eur` (85 k€, station incl. transformer) minus `transformer_replace_1000_eur` (15 k€), which the exchange already pays | see `new_station_eur`. Cross-checks: PuBStadt 2021: station replacement 55 k€, new station 45 k€ (2021 prices, via Lee 2026, Table 3.17); Candas 2024: about 151 k€ between the 800 and 1000 kVA rONT |
 
 The baseline columns `transformer_station_rebuild_boundary_eur` and `transformer_capacity_step_kva` belong to the
 retired rule set; the staged rows keep their defaults and do not use them.
@@ -174,22 +177,23 @@ which have the most parallel cables.
 | `de_lv_staged_2026_trafo_allin` | transformer exchange at the all-in bins of `heuristic_2026` (28–48 k€; source not verifiable) |
 | `de_lv_staged_2026_station_800` | station limit 800 kVA in every settlement type (PuBLIK/Harnisch rural 800 kVA, Kerber 630 kVA, Munich 630/800 kVA); also covers small rural stations that need a new housing for 1000 kVA |
 | `de_lv_staged_2026_no_transfer` | no load transfer (`load_transfer_adjacency_m` = 0): whole new substations only |
-| `de_lv_staged_2026_line60` | cables reinforced above 60 % of their rating (`line_planning_limit` = 0.6; planning premises of Spalthoff et al. 2022) |
-| `de_lv_staged_2026_station_replacement` | an exchange to 1000 kVA also replaces the station for 55 k€ (Wintzek et al. 2021, 2021 prices; threshold of Candas 2024) |
-| `de_lv_staged_2026_station_replacement_line60` | both of the above |
+| `de_lv_staged_2026_no_station_replacement` | no station replacement: an exchange to 1000 kVA pays the transformer only (the rules before 0010) |
+| `de_lv_staged_2026_line60` | cables reinforced above 60 % of their rating (`line_planning_limit` = 0.6; IEE/BWP 2022, ef.Ruhr/EWI 2024) |
+| `de_lv_staged_2026_line80` | cables reinforced above 80 % of their rating (`line_planning_limit` = 0.8; Arnold 2019, the feeder planning utilization of pylovo) |
 
-**Cost cases A1/B1/A2/B2.** Cables laid in parallel in a spare conduit (A) or separately (B), with a cable limit
-of 100 % (1) or 60 % (2), and the station replaced from 1000 kVA. In these rules A and B are the existing-duct share:
+**Cost cases A1/B1/A2/B2 of Lee (2026).** Cables laid in parallel in a spare conduit (A) or separately (B), with a
+cable limit of 100 % (1) or 60 % (2). In these rules A and B are the existing-duct share:
 
 | Case | Assumption row | `--line-existing-duct-share` |
 |---|---|---|
-| A1 | `de_lv_staged_2026_station_replacement` | 1.0 (all routes in existing ducts: parallel price only) |
-| B1 | `de_lv_staged_2026_station_replacement` | 0 (every route trenched) |
-| A2 | `de_lv_staged_2026_station_replacement_line60` | 1.0 |
-| B2 | `de_lv_staged_2026_station_replacement_line60` | 0 |
+| A1 | `de_lv_staged_2026` | 1.0 (all routes in existing ducts: parallel price only) |
+| B1 | `de_lv_staged_2026` | 0 (every route trenched) |
+| A2 | `de_lv_staged_2026_line60` | 1.0 |
+| B2 | `de_lv_staged_2026_line60` | 0 |
 
-The other stages (station limit, load transfer, new substations, residual voltage) and the unit costs remain those
-of `staged_2026`.
+These are analogues of the thesis cases, not a reproduction of its numbers. The thesis adds cables without a cap,
+prices units up to 1600 kVA at the same site instead of the station limit, load transfer and new substations,
+includes service lines and indexes its prices to 2026.
 
 Further sensitivities: `--line-existing-duct-share`, or new rows with another planning limit, station limit or
 cable cap.
@@ -294,6 +298,12 @@ received its cost.
   planning simultaneity, expected thermal and voltage problems, rONT use, LV budgets).
 - Verteilnetzstudie Hessen (2018); Gutachten Verteilnetze NRW (2021); Agora Verkehrswende/Energiewende (2019):
   Verteilnetzausbau für die Energiewende – Elektromobilität im Fokus.
+- Candas, S. (2024): Optimization and data acquisition framework for low-voltage distribution systems in
+  transformation. Dissertation, TU München. https://mediatum.ub.tum.de/doc/1728543/1728543.pdf
+- Lee, J. (2026): Quantifying Future Grid Reinforcement Needs Using Synthetic Low-Voltage Networks. Master's
+  thesis, TU München (cable planning limit, station replacement and the cost cases A1–B2).
+- Spalthoff, C. et al. (2022): Flexible Wärmepumpen im Verteilnetz. Fraunhofer IEE for BWP (IEE/BWP 2022).
+  https://www.waermepumpe.de/fileadmin/user_upload/Kurzstudie_FlexWP.pdf
 - Arnold (2019), Schlömer (2017), Samweber (2018): dissertations with LV unit costs; MR/BUW (2023): rONT
   meta-study.
 - DSO network expansion plans under § 14d EnWG (2024): enercity, SWM, Netze BW, e-netz Südhessen (derived unit

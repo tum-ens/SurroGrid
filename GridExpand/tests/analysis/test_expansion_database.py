@@ -155,7 +155,8 @@ def test_synthetic_materialization(sandbox_db):
     assert grid1["estimated_cost_eur"].round(2).tolist() == [0.0, 12750.0, 0.0, 0.0]
     assert grid1["service_cost_eur"].round(2).tolist() == [0.0, 0.0, 0.0, 1700.0]
     # 1100 kVA > 1000 kVA limit; the neighbour is about 90 m away (> 50 m): one new substation
-    # (85 + 0.2 x 250 + 0.1 x 100 = 145 kEUR) plus the exchange to 1000 kVA (15 kEUR).
+    # (85 + 0.2 x 250 + 0.1 x 100 = 145 kEUR) plus the exchange to 800 kVA (12.5 kEUR), the largest
+    # unit without a station replacement (0010).
     assert trafos["station_measure"].tolist() == ["new_station", "none"]
-    assert trafos["estimated_cost_eur"].tolist() == [160000.0, 0.0]
-    assert grids["total_cost_eur"].round(2).tolist() == [172750.0, 0.0]
+    assert trafos["estimated_cost_eur"].tolist() == [157500.0, 0.0]
+    assert grids["total_cost_eur"].round(2).tolist() == [170250.0, 0.0]
