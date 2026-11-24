@@ -84,6 +84,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="How TSAM should include cold and solar extreme weeks.",
     )
     parser.add_argument(
+        "--p14a-ref", type=Path, default=None,
+        help=(
+            "urbs only: Section 14a EnWG control. Step 3 result of the same input without control; its import, "
+            "capacities and device draws give the setpoints of this run (written as <result>_p14a.h5)."
+        ),
+    )
+    parser.add_argument(
+        "--p14a-rating-kva", type=float, default=None,
+        help="Transformer rating for --p14a-ref (default: the grid in raw_data/net of the input).",
+    )
+    parser.add_argument(
         "--reduce-only",
         action="store_true",
         help="Run preprocessing and TSAM reduction, write reduced_data/tsam outputs, and skip the URBS optimization solve.",
@@ -100,6 +111,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args.reduce_only and not (args.tsam or scenario.time_aggregation.enabled):
         parser.error("--reduce-only requires time_aggregation.enabled in the scenario YAML.")
     args.optimizer = resolve_optimizer_name(args.optimizer)
+    if args.p14a_ref is not None and args.optimizer != "urbs":
+        parser.error("--p14a-ref is implemented for the urbs optimizer only.")
+    if args.p14a_rating_kva is not None and args.p14a_ref is None:
+        parser.error("--p14a-rating-kva requires --p14a-ref.")
     if args.optimizer == "pypsa" and (args.tsam or scenario.time_aggregation.enabled):
         parser.error("The pypsa optimizer supports full-year chronological inputs only (no TSAM).")
     args.scenario, args.scenario_hash = scenario, scenario_hash
@@ -154,6 +169,10 @@ def main(argv: list[str] | None = None) -> None:
         global_settings = build_global_settings(
             args, input_path.name, scenario, scenario_hash, identity, metadata
         )
+        if args.p14a_ref is not None:
+            global_settings["p14a_ref"] = os.fspath(args.p14a_ref)
+            if args.p14a_rating_kva is not None:
+                global_settings["p14a_rating_kva"] = float(args.p14a_rating_kva)
 
         print("Following global settings are applied:")
         for key, value in global_settings.items():

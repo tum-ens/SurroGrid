@@ -12,6 +12,7 @@ import pandas as pd
 from pyomo.opt import check_optimal_termination
 
 from ..solver import audit_record, make_solver, resolve_solver_name, solver_log_folder
+from .features.section14a import apply_setpoints
 from .features.typeperiod import run_tsam, select_predefined_timesteps
 from .identify import get_parallel_building_clusters, identify_mode
 from .input import get_cluster_data, read_input_h5
@@ -307,6 +308,32 @@ def temporal_audit(mode, data, global_settings):
     )
 
 
+def transformer_rating_kva(input_path):
+    """Transformer rating of the grid stored in ``raw_data/net`` of a Step 2 input."""
+    import h5py
+    import pandapower as pp
+
+    from gridexpand.powerflow.network import transformer_rating_mva
+
+    with h5py.File(input_path, "r") as hdf_file:
+        if "raw_data/net" not in hdf_file:
+            raise ValueError(
+                f"{input_path} has no raw_data/net; pass the transformer rating with --p14a-rating-kva."
+            )
+        net = pp.from_json_string(hdf_file["raw_data/net"][()])
+    return transformer_rating_mva(net) * 1000
+
+
+def apply_section_14a(data, input_path, global_settings):
+    """Section 14a setpoints from the first run ``global_settings['p14a_ref']`` (see ``features.section14a``)."""
+    from gridexpand.powerflow.config import config
+
+    rating = global_settings.get("p14a_rating_kva") or transformer_rating_kva(input_path)
+    data, diagnostics = apply_setpoints(data, global_settings["p14a_ref"], rating, config.PF_ELC)
+    print(f"Section 14a: {diagnostics}", flush=True)
+    return data
+
+
 def final_result_path(result_dir, input_file, scenario_name):
     """``<result_dir>/<input stem>_<scenario key>.h5``."""
     stem = os.path.splitext(os.path.basename(input_file))[0]
@@ -336,6 +363,9 @@ def run_lvds_opt(input_path, result_dir, global_settings, *, log_dir, solver=Non
 
     data, tsam_data = apply_temporal_method(data, mode, global_settings)
     audit = temporal_audit(mode, data, global_settings)
+    if global_settings.get("p14a_ref"):
+        data = apply_section_14a(data, input_path, global_settings)
+        scenario_name = f"{scenario_name}_p14a"
 
     final_path = final_result_path(result_dir, global_settings["input_file"], scenario_name)
     partial_path = final_path.with_name(final_path.name + ".partial")
