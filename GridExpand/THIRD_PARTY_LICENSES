@@ -46,5 +46,11 @@ File: data/sampling/regiostar-referenzdateien.xlsx
 Source: Bundesministerium für Digitales und Verkehr (BMDV), RegioStaR regional statistical spatial typology
 License: to be checked
 
+### Destatis price indices
+File: data/expansion_costs/price_indices.csv
+Source: Statistisches Bundesamt (Destatis), GENESIS-Online tables 61261-0003 and 61241-0003 and the statistical report
+"Indizes der Erzeugerpreise (Inlandsabsatz)"; © Statistisches Bundesamt (Destatis), 2026
+License: Datenlizenz Deutschland – Namensnennung – Version 2.0 (Destatis open-data terms; to be confirmed)
+
 The statistics in data/statistics/ (household sizes, load profiles, trip and vehicle statistics,
 climate zones) have no per-file provenance record either; their sources should be documented as well.

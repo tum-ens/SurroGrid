@@ -48,7 +48,7 @@ uv run gridexpand expansion summary <analysis key> [--by-plz] [--csv out.csv]   
 | `--scenario-id` | the single scenario of the selected runs | scenario recorded with the analysis |
 | `--pylovo-version-id` | run assumptions | synthetic grid-case filter; real-grid settlement type |
 | `--exclude-real-lv-id` | none | real grid kept in coverage but not costed (repeatable) |
-| `--assumption-key` | `de_lv_staged_2026` | cost row of `expansion_cost_assumption`; its `rule_set` picks the rules. Sensitivity rows: `_low`, `_high`, `_trafo_allin`, `_station_800`, `_no_transfer`, `_no_station_replacement`, `_line60`, `_line80` ([expansion_costs.md](../expansion_costs.md)) |
+| `--assumption-key` | `de_lv_staged_2026` | cost row of `expansion_cost_assumption`; its `rule_set` picks the rules. Sensitivity rows: `_low`, `_high`, `_trafo_allin`, `_station_800`, `_no_transfer`, `_no_station_replacement`, `_line60`, `_line80`, `_nominal` (prices before 0011) ([expansion_costs.md](../expansion_costs.md)) |
 | `--line-existing-duct-share` | from the assumption | existing-duct share override |
 | `--analysis-key` | `<ags or all>_<run>_<stage>_<UTC stamp>` | readable key |
 | `--note` | empty | free text |

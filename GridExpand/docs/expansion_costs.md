@@ -25,7 +25,8 @@ column, and a test (`tests/analysis/test_staged_assumption.py`) keeps both in st
   it.
 - **Assumption:** no source found; the derivation is stated and a sensitivity row covers it.
 
-All prices keep the price base of their sources (2007–2025); nothing is inflation-adjusted.
+All prices are at **2025 price level** (migration 0011, see [Price level](#price-level-2025)). The source values in the
+tables below keep the price base of their source; the row `de_lv_staged_2026_nominal` keeps the unindexed values.
 
 **What the result is.** A transparent screening estimate for spatial postprocessing, not a construction offer or a
 DSO work order. Flexibility costs are excluded: flexibility is represented by the model cases (`post-hems-*`,
@@ -62,7 +63,7 @@ within 5 %).
   - the rest, S_P100 − τ·(that size), goes to stage 4.
 - A station whose unit is already above S_max keeps it as its ceiling.
 - **Station replacement** (`station_replacement_*`): an exchange to a unit of `station_replacement_from_kva`
-  (1000 kVA) or larger also costs `station_replacement_eur` (70 k€) for a new station, i.e. the housing and
+  (1000 kVA) or larger also costs `station_replacement_eur` (62 k€) for a new station, i.e. the housing and
   switchgear of the larger unit (Candas 2024: DSO experience). This also applies to neighbours that receive
   transferred load. The cost basis ends in `_station_replaced`.
 
@@ -122,40 +123,41 @@ Runs solved before the station voltage existed (no `lv_busbar_vm_pu`) get `not_a
 
 ### Parameters of `de_lv_staged_2026`
 
-PuBStadt 2021 and dena 2012 are cited by printed page (their PDF pages are 21 and 22 higher). Prices keep the price
-base of their source; nothing is inflation-adjusted.
+PuBStadt 2021 and dena 2012 are cited by printed page (their PDF pages are 21 and 22 higher). The values are at
+2025 prices; the Method column names the rule that `scripts/expansion_price_index.py` applies to the indexed source
+values, the Sources column lists the source values at their own price base.
 
 | Parameter (column) | Value | Method | Sources |
 |---|---:|---|---|
 | `transformer_planning_limit` | 1.0 × Sr | decision D4, DSO practice (all studies agree) | Niederle et al. 2026, p. 7–8; PuBStadt 2021 §7.5.2, p. 50 (100 % of Sr); dena 2012, p. 89–90; BW 2017, p. 37; FfE/Agora 2023, p. 53, 111 (reinforced even after short overloads); Nobis 2016 (no (n-1) in LV). IEC 60076-7 allows up to 1.5 p.u. normal cyclic loading, so 1.1/1.2 are sensitivities |
 | `station_max_kva_rural` / `_suburban` / `_urban` | 1000 kVA | decision D2, revised 2026-09-29: as FfE/Agora 2023 | FfE/Agora 2023, p. 85, 111 (1000 kVA in every settlement type, after PuBStadt and DSO feedback; above that an additional station); PuBStadt 2021, p. 157 (1000 kVA or 2 × 630 kVA in urban grids); dena 2012, BW 2017, Agora 2019 / NRW 2021 (a second or more parallel units); Schneider Planungskompendium (MV fuse-switch protection up to about 1000 kVA, VDE 0670-402); Schneider EIG (urban substations with one or two 1000 kVA units). Stricter: PuBLIK 2016 / Harnisch 2019 (rural: new station from 800 kVA), Kerber 2011 (630 kVA), Munich (630/800 kVA). From 1000 kVA the station replacement adds the larger housing (`station_replacement_*`) |
-| `transformer_replace_100_eur` / `_160_eur` | 8,000 € | conservative: no 100 kVA source; the 250 kVA value, above Kerber's 160 kVA value | Kerber 2011, p. 142: 160 kVA 6.5 k€ (2007) |
-| `transformer_replace_250_eur` | 8,000 € | upper value of the size-specific sources | Kerber 2011: 8.0 k€ (2007); FfE MONA 2030: 7.0 k€ (2015); Verteilnetzstudie Hessen 2018: 7 k€ (2015). FfE/Agora 2023 charges 15 k€ per exchange whatever the size (upper bound) |
-| `transformer_replace_400_eur` | 10,000 € | upper range, rounded | Kerber 2011: 10.5 k€; MONA: 8.5 k€; Hessen 2018: 9 k€; BMWi 2014: 8 (6–10) k€; FfE/Agora 2023: 15 k€ per exchange (upper bound) |
-| `transformer_replace_630_eur` | 12,000 € | central value (median of ten sources) | BMWi 2014, MONA, Hessen 2018: 12 k€; PuBStadt 2021, p. 213: 10 k€; dena 2012, p. 147: 10 k€ (2011); Kerber 2011: 14 k€; Schlömer 2017: 11.25 k€; Arnold 2019: 8.6 k€; FfE/Agora 2023 (any size) and BW 2017: 15 k€ |
-| `transformer_replace_800_eur` | 12,500 € | central value (median of three sources) | PuBStadt 2021, p. 213: 12.5 k€; Arnold 2019: 9.8 k€ (2014); FfE/Agora 2023: 15 k€ (any size) |
-| `transformer_replace_1000_eur` | 15,000 € | upper value of four sources | PuBStadt 2021, p. 213 and FfE/Agora 2023: 15 k€; Schlömer 2017: 13.25 k€; Arnold 2019: 10.9 k€ |
-| `line_parallel_150/185/240_eur_per_km` | 25/45/70 k€/km | PuBStadt value rounded up by 5/5/10 k€/km (kept from `heuristic_2026`) | PuBStadt 2021, p. 212: +20/40/60 k€/km for a parallel cable in the same trench, cable and installation (2021). Lower bound: FfE/Agora 2023, p. 112–113: 28 k€/km material for NAYY 4×240. Upper bound: dena 2012 and BW 2017 price every added cable at the full trench rate |
+| `transformer_replace_100_eur` / `_160_eur` | 12,500 € | conservative: no 100 kVA source; the 250 kVA value, above Kerber's 160 kVA value | Kerber 2011, p. 142: 160 kVA 6.5 k€ (2007) |
+| `transformer_replace_250_eur` | 12,500 € | upper value of the size-specific sources | Kerber 2011: 8.0 k€ (2007); FfE MONA 2030: 7.0 k€ (2015); Verteilnetzstudie Hessen 2018: 7 k€ (2015). FfE/Agora 2023 charges 15 k€ per exchange whatever the size (upper bound) |
+| `transformer_replace_400_eur` | 16,500 € | upper value of the four sources | Kerber 2011: 10.5 k€; MONA: 8.5 k€; Hessen 2018: 9 k€; BMWi 2014: 8 (6–10) k€; FfE/Agora 2023: 15 k€ per exchange (upper bound) |
+| `transformer_replace_630_eur` | 18,500 € | central value (median of ten sources) | BMWi 2014, MONA, Hessen 2018: 12 k€; PuBStadt 2021, p. 213: 10 k€; dena 2012, p. 147: 10 k€ (2011); Kerber 2011: 14 k€; Schlömer 2017: 11.25 k€; Arnold 2019: 8.6 k€; FfE/Agora 2023 (any size) and BW 2017: 15 k€ |
+| `transformer_replace_800_eur` | 18,500 € | central value (median of three sources) | PuBStadt 2021, p. 213: 12.5 k€; Arnold 2019: 9.8 k€ (2014); FfE/Agora 2023: 15 k€ (any size) |
+| `transformer_replace_1000_eur` | 23,000 € | upper value of four sources | PuBStadt 2021, p. 213 and FfE/Agora 2023: 15 k€; Schlömer 2017: 13.25 k€; Arnold 2019: 10.9 k€ |
+| `line_parallel_150/185/240_eur_per_km` | 27/54/81 k€/km | PuBStadt value indexed to 2025 (the +5/+5/+10 k€/km margin of `heuristic_2026` is dropped: the index covers the price increase since 2021) | PuBStadt 2021, p. 212: +20/40/60 k€/km for a parallel cable in the same trench, cable and installation (2021). Lower bound: FfE/Agora 2023, p. 112–113: 28 k€/km material for NAYY 4×240. Upper bound: dena 2012 and BW 2017 price every added cable at the full trench rate |
 | `line_reinforcement_150/185/240_max_i_ka` | 0.270/0.313/0.357 kA | kept for consistency with the grid data | SimBench/pandapower (270/357 A); DIN VDE 0276-603 via Siemens TIP 12 (2023): 275/313/364 A at m = 0.7 |
-| `line_reopen_rural_eur_per_km` | 80 k€/km | BW 2017, the only source with rural, semi-urban and urban values (80/100/120) | BW 2017, p. 91: 80; dena 2012, p. 147: 60 (≤ 500 inhabitants/km², 2011); FfE/Agora 2023, p. 113: 67 (39 laying + 28 material). Median of the three rural sources: 67 |
-| `line_reopen_suburban_eur_per_km` | 100 k€/km | central value: the two sources with a semi-urban class | BW 2017, p. 91: 100; Gutachten NRW 2021, Tab. 7-3: 100; dena 2012: 60/100 (≤/> 500 inhabitants/km², 2011); FfE/Agora 2023: 67 (rural and suburban) |
-| `line_reopen_urban_eur_per_km` | 165 k€/km | central value: median of the six sources with 2021–2025 prices (115, 139, 150, 182, 250, 312) = 166, rounded | FfE/Agora 2023: 115; ef.Ruhr/EWI 2024: 139; PuBStadt 2021, p. 212: 150/175/200 (NAYY 150/185/240); dena VNS II 2025, p. 276: 182 (80–380); NAP 2024 (derived): SWM about 250, enercity about 312. Older: BW 2017: 120; dena 2012: 100 |
+| `line_reopen_rural_eur_per_km` | 135 k€/km | BW 2017, the only source with rural, semi-urban and urban values (80/100/120) | BW 2017, p. 91: 80; dena 2012, p. 147: 60 (≤ 500 inhabitants/km², 2011); FfE/Agora 2023, p. 113: 67 (39 laying + 28 material). Median of the three rural sources: 67 |
+| `line_reopen_suburban_eur_per_km` | 155 k€/km | central value: the two sources with a semi-urban class | BW 2017, p. 91: 100; Gutachten NRW 2021, Tab. 7-3: 100; dena 2012: 60/100 (≤/> 500 inhabitants/km², 2011); FfE/Agora 2023: 67 (rural and suburban) |
+| `line_reopen_urban_eur_per_km` | 195 k€/km | central value: median of the six sources with 2021–2025 prices (115, 139, 150, 182, 250, 312) = 166, rounded | FfE/Agora 2023: 115; ef.Ruhr/EWI 2024: 139; PuBStadt 2021, p. 212: 150/175/200 (NAYY 150/185/240); dena VNS II 2025, p. 276: 182 (80–380); NAP 2024 (derived): SWM about 250, enercity about 312. Older: BW 2017: 120; dena 2012: 100 |
 | `line_existing_duct_share` | 0.20 | assumption (no source) | PuBStadt recommends empty ducts but gives no share; `--line-existing-duct-share` for 0 / 0.5 |
 | `line_max_added_cables` | 3 | decision D6 (revised 2026-09-29: nominal ratings, no derating) | Kerber 2011 (at most 3 parallel cables per street side); Agora 2019 / NRW 2021 (at most 4 parallel LV cables). No other German study caps the number: PuBStadt usually needs one more cable; BW 2017 and FfE/Agora 2023 allow any number (FfE: 1.0–1.3 cables per reinforced trench-km on average, derived) |
 | `panel_max`, `panel_trigger` | 12, off | catalogue practice; decision D5 | Niederle 2026, p. 17 (8 or 12 panels); Jean Müller 2012 (8/10/12 NH2 ways); Kenter (12 NH2); no standard limits panels |
 | `new_station_eur` | 85,000 € | central value: median of the eight German sources with 2020–2025 prices (51, 57.5, 83.5, 84, 86.5, 101, 150.5, 225 k€) | dena VNS II 2025, Gutachten p. 276: 101 k€ (80–140); ef.Ruhr/EWI 2024: 86.5 k€; NAP 2024 (derived): Netze BW 77–91, e-netz Südhessen 74–93, enercity about 150 k€, Munich 200–250 k€ per site; PuBStadt 2021, p. 213: 45 k€ building + 10–15 k€ transformer; FfE/Agora 2023: 51 k€ (probably incl. connection cables); BW 2017: 60 k€ incl. transformer; Langfristszenarien 3: 50 k€ (2018 prices); dena 2012: 30/40 k€ (2011). Sources with 2006–2018 prices give 18–60 k€ |
 | `new_station_mv_loop_in_km` | 0.2 km | assumption (no source) | Two MV cables of 100 m to the nearest ring cable. No study gives a length; FfE counts connection cables in its station price, dena 2012 names their cost only qualitatively |
-| `mv_cable_eur_per_km` | 250,000 €/km | central value: median of the three study values with 2021–2025 prices | ef.Ruhr/EWI 2024: 230 k€/km; PuBStadt 2021, p. 214: 250 k€/km (NA2XS2Y 3×1×240, incl. civil works); dena VNS II 2025: 278 k€/km (161–520); NAP 2024 (derived): 137–440 k€/km. Older: BW 2017: 130/145/160; dena 2012: 80/140 |
+| `mv_cable_eur_per_km` | 290,000 €/km | central value: median of the three study values with 2021–2025 prices | ef.Ruhr/EWI 2024: 230 k€/km; PuBStadt 2021, p. 214: 250 k€/km (NA2XS2Y 3×1×240, incl. civil works); dena VNS II 2025: 278 k€/km (161–520); NAP 2024 (derived): 137–440 k€/km. Older: BW 2017: 130/145/160; dena 2012: 80/140 |
 | `new_station_lv_connection_km` | 0.1 km at the settlement's trench cost | assumption | Two LV links of 50 m (dena 2012, p. 93–94: critical feeders are cut at half length and connected to the new station) |
 | `new_station_kva` | 630 kVA | standard size of a new compact station | dena 2012, p. 97; BW 2017, p. 44; eDisGo `config_grid_expansion_default.cfg`. PuBStadt 2021 recommends 800 kVA as the new urban standard |
-| `load_transfer_eur` | 20,000 € | assumption from unit costs, rounded up | LV link of about 50 m at 165 k€/km = 8.3 k€, plus a cable distribution cabinet of 5 k€ (PuBStadt 2021, p. 212) = 13.3 k€, rounded up for planning and switching. No study prices a load transfer; dena 2012 treats switching changes as operating reserve |
+| `load_transfer_eur` | 20,000 € | derived: LV link of 50 m at the urban trench cost plus a cable distribution cabinet, rounded up to 10 k€ | LV link of 50 m at 195 k€/km = 9.8 k€, plus a cable distribution cabinet of 5 k€ (PuBStadt 2021, p. 212; 6.8 k€ at 2025 prices) = 16.5 k€, rounded up for planning and switching. No study prices a load transfer; dena 2012 treats switching changes as operating reserve |
 | `load_transfer_adjacency_m` | 50 m | assumption | Niederle 2026, p. 17: feeders or feeder sections move to less loaded stations. 0 disables the transfer |
-| `ront_premium_eur` | 12,000 € | central value (median of twelve derived premiums, 5.5–30 k€) | MR/BUW 2023: 5.5; IEE/BWP 2022: 8; PuBLIK 2016: 8.5; Arnold 2019: 10–11; MONA: 10–11.5; PuBStadt 2021, p. 213: 11–12.5; Schlömer 2017: 12; FfE/Agora 2023: 13; BMWi 2014: 15; Hessen 2018: 16–17; dena 2012, p. 169: about 20 (30 k€ conversion incl. measurement, derived); BW 2017: 30 k€. Where the rONT replaces a kept transformer, stage 5 adds the conventional price of its size |
+| `ront_premium_eur` | 17,500 € | central value (median of twelve derived premiums, 5.5–30 k€) | MR/BUW 2023: 5.5; IEE/BWP 2022: 8; PuBLIK 2016: 8.5; Arnold 2019: 10–11; MONA: 10–11.5; PuBStadt 2021, p. 213: 11–12.5; Schlömer 2017: 12; FfE/Agora 2023: 13; BMWi 2014: 15; Hessen 2018: 16–17; dena 2012, p. 169: about 20 (30 k€ conversion incl. measurement, derived); BW 2017: 30 k€. Where the rONT replaces a kept transformer, stage 5 adds the conventional price of its size |
 | `ront_control_range_percent` | ±10 % | product value | Schneider Minera SGrid (2015): 5 positions ±5 % or 9 positions ±10 % |
 | `service_lines_in_total` | no | decision D9 | NAV § 9: the connectee usually reimburses changes of the house connection |
 | `line_planning_limit` | 1.0 | nominal ratings, as `transformer_planning_limit` (decision D4) | PuBStadt 2021 §7.5.2, p. 50; dena 2012, p. 89–90; BW 2017, p. 37 (LV cables up to 100 % of their rating). Stricter: Arnold 2019, Table 4, p. 45 (80 %); IEE/BWP 2022 (Spalthoff et al.) and ef.Ruhr/EWI 2024 (Probst et al.): 60 % as a planning premise (sensitivity rows) |
 | `station_replacement_from_kva` | 1000 kVA | DSO experience | Candas 2024, Table 3.8: a transformer replaced by one of 1000 kVA or more needs a new station (rONT 800 kVA 40.3 k€, 1000 kVA 191.4 k€ incl. the station) |
-| `station_replacement_eur` | 70,000 € | derived: `new_station_eur` (85 k€, station incl. transformer) minus `transformer_replace_1000_eur` (15 k€), which the exchange already pays | see `new_station_eur`. Cross-checks: PuBStadt 2021: station replacement 55 k€, new station 45 k€ (2021 prices, via Lee 2026, Table 3.17); Candas 2024: about 151 k€ between the 800 and 1000 kVA rONT |
+| `station_replacement_eur` | 62,000 € | derived: `new_station_eur` (85 k€, station incl. transformer) minus `transformer_replace_1000_eur` (15 k€), which the exchange already pays | see `new_station_eur`. Cross-checks: PuBStadt 2021: station replacement 55 k€, new station 45 k€ (2021 prices, via Lee 2026, Table 3.17); Candas 2024: about 151 k€ between the 800 and 1000 kVA rONT |
 
 The baseline columns `transformer_station_rebuild_boundary_eur` and `transformer_capacity_step_kva` belong to the
 retired rule set; the staged rows keep their defaults and do not use them.
@@ -168,13 +170,41 @@ pylovo's cable sizing and the Step 4 overload check use the nominal ratings as w
 would count existing double cables as overloaded from 85 % loading and would weigh most on the real rural grids,
 which have the most parallel cables.
 
+### Price level (2025)
+
+Migration 0011 brings every monetary parameter to 2025 prices. It is generated by
+`uv run python scripts/expansion_price_index.py --write` from two data files:
+
+- `data/expansion_costs/source_values.csv`: every source value that enters a parameter, with its price year and cost type.
+  A source without a stated price base gets its publication year minus one; dena 2012 uses its study base 2011. Ranges
+  enter with their midpoint.
+- `data/expansion_costs/price_indices.csv`: annual Destatis indices, 2021 = 100.
+  - Civil works: construction price index *Ortskanäle*, *Bauleistungen am Bauwerk (Tiefbau)*, without VAT
+    (GENESIS 61261-0003). It applies to trenches, parallel cable laying, the MV cable, LV links and the load transfer.
+  - Transformers and the rONT premium: producer price index GP19-27114 *Elektrische Transformatoren*. These are
+    annual means of the monthly values of the Destatis statistical report; 2007–2009 are chained with GP19-27
+    *Elektrische Ausrüstungen* (GENESIS 61241-0003).
+  - New stations: the mean of both factors, since a compact station is about half housing and civil works and half
+    equipment.
+
+Each parameter keeps its rule of 0007/0010, applied to the indexed source values:
+- median or upper value, rounded to 500 € (transformers, rONT), 1 k€/km (parallel cables), 5 k€/km (trenches),
+  5 k€ (stations) or 10 k€/km (MV cable);
+- the station replacement stays new station minus 1000 kVA exchange;
+- the load transfer stays 50 m of urban trench plus a cabinet, rounded up to 10 k€.
+
+The sensitivity rows scale their overrides with the factor of the default parameter. The `parameter_provenance` of
+every row lists each indexed source with its price year, index and factor. Between 2021 and 2025 the construction
+index rose by 36 % and the transformer index by 52 %, after a flat transformer decade.
+
 ### Sensitivity rows
 
 | Assumption key | Change against `de_lv_staged_2026` |
 |---|---|
-| `de_lv_staged_2026_low` | new substation 60 k€ (BW 2017 incl. transformer; the upper end of the sources with 2006–2018 prices), MV cable 200 k€/km, load transfer 10 k€ |
-| `de_lv_staged_2026_high` | new substation 150 k€ (NAP 2024 up to 151 k€; dena VNS II high 140 k€), MV cable 400 k€/km (NAP enercity/SWM), load transfer 30 k€ |
-| `de_lv_staged_2026_trafo_allin` | transformer exchange at the all-in bins of `heuristic_2026` (28–48 k€; source not verifiable) |
+| `de_lv_staged_2026_low` | new substation 60 k€ (BW 2017 incl. transformer; the upper end of the sources with 2006–2018 prices), MV cable 230 k€/km (200 at the source price base, scaled with the MV-cable factor), load transfer 10 k€ |
+| `de_lv_staged_2026_high` | new substation 150 k€ (NAP 2024 up to 151 k€; dena VNS II high 140 k€), MV cable 460 k€/km (400 at the source price base, scaled) (NAP enercity/SWM), load transfer 30 k€ |
+| `de_lv_staged_2026_trafo_allin` | transformer exchange at the all-in bins of `heuristic_2026` (28–48 k€; source not verifiable; not indexed, they have no price year) |
+| `de_lv_staged_2026_nominal` | all unit costs at the price base of their sources (the values before 0011, not indexed) |
 | `de_lv_staged_2026_station_800` | station limit 800 kVA in every settlement type (PuBLIK/Harnisch rural 800 kVA, Kerber 630 kVA, Munich 630/800 kVA); also covers small rural stations that need a new housing for 1000 kVA |
 | `de_lv_staged_2026_no_transfer` | no load transfer (`load_transfer_adjacency_m` = 0): whole new substations only |
 | `de_lv_staged_2026_no_station_replacement` | no station replacement: an exchange to 1000 kVA pays the transformer only (the rules before 0010) |

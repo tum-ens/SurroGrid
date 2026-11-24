@@ -153,15 +153,16 @@ def test_synthetic_materialization(sandbox_db):
     assert grid1["measure"].tolist() == ["relieved_by_new_station", "local", "none", "service"]
     assert grid1["additional_parallel"].tolist() == [0, 1, 0, 1]
     # 0.81 kA outlet: 2 x NAYY 150, relieved by the new substation; 0.432 kA feeder: 1 x NAYY 150
-    # (85 kEUR/km x 0.15 km); 0.486 kA service line: 1 x NAYY 150 (85 kEUR/km x 0.02 km), not in the total.
-    assert grid1["estimated_cost_eur"].round(2).tolist() == [0.0, 12750.0, 0.0, 0.0]
-    assert grid1["service_cost_eur"].round(2).tolist() == [0.0, 0.0, 0.0, 1700.0]
+    # (0.2 x 27 + 0.8 x 155 = 129.4 kEUR/km x 0.15 km, 2025 prices of 0011); 0.486 kA service line: 1 x NAYY 150
+    # (129.4 kEUR/km x 0.02 km), not in the total.
+    assert grid1["estimated_cost_eur"].round(2).tolist() == [0.0, 19410.0, 0.0, 0.0]
+    assert grid1["service_cost_eur"].round(2).tolist() == [0.0, 0.0, 0.0, 2588.0]
     # 1100 kVA > 1000 kVA limit; the neighbour is about 90 m away (> 50 m): one new substation
-    # (85 + 0.2 x 250 + 0.1 x 100 = 145 kEUR) plus the exchange to 800 kVA (12.5 kEUR), the largest
-    # unit without a station replacement (0010).
+    # (85 + 0.2 x 290 + 0.1 x 155 = 158.5 kEUR) plus the exchange to 800 kVA (18.5 kEUR), the largest
+    # unit without a station replacement (0010); 2025 prices (0011).
     assert trafos["station_measure"].tolist() == ["new_station", "none"]
-    assert trafos["estimated_cost_eur"].tolist() == [157500.0, 0.0]
-    assert grids["total_cost_eur"].round(2).tolist() == [170250.0, 0.0]
+    assert trafos["estimated_cost_eur"].tolist() == [177000.0, 0.0]
+    assert grids["total_cost_eur"].round(2).tolist() == [196410.0, 0.0]
 
     from gridexpand.analysis.expansion.overview import expansion_indicators
 
@@ -171,7 +172,7 @@ def test_synthetic_materialization(sandbox_db):
     assert total["added_cable_km"] == pytest.approx(0.15) and total["added_cable_km_150"] == pytest.approx(0.15)
     assert total["service_cable_km"] == pytest.approx(0.02)
     assert (total["transformer_exchanges"], total["transformer_kva_added"], total["station_replacements"]) == (1, 400.0, 0)
-    assert total["total_cost_eur"] == pytest.approx(170250.0)
+    assert total["total_cost_eur"] == pytest.approx(196410.0)
     per_plz = expansion_indicators("test_de_lv_staged_2026", by_plz=True, db=sandbox_db)
     assert per_plz[["plz", "population"]].values.tolist() == [[99999, 500]]
-    assert per_plz["cost_per_inhabitant_eur"].iloc[0] == pytest.approx(170250.0 / 500)
+    assert per_plz["cost_per_inhabitant_eur"].iloc[0] == pytest.approx(196410.0 / 500)
