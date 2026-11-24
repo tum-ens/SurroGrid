@@ -65,6 +65,8 @@ def _fixture(db):
                 to_bus int, length_km double precision, geom geometry(LineString, 25832));
             CREATE TABLE pylovo.postcode_result (version_id varchar(10), postcode_result_plz int, settlement_type int);
             INSERT INTO pylovo.postcode_result VALUES ('a1', 99999, 2);
+            CREATE TABLE pylovo.municipal_register (plz int, ags int, pop int);
+            INSERT INTO pylovo.municipal_register VALUES (99999, 9999999, 500), (99999, 9999998, 500);
         """))
     schema._checked.discard(str(db.engine.url))
     try:
@@ -160,3 +162,16 @@ def test_synthetic_materialization(sandbox_db):
     assert trafos["station_measure"].tolist() == ["new_station", "none"]
     assert trafos["estimated_cost_eur"].tolist() == [157500.0, 0.0]
     assert grids["total_cost_eur"].round(2).tolist() == [170250.0, 0.0]
+
+    from gridexpand.analysis.expansion.overview import expansion_indicators
+
+    total = expansion_indicators("test_de_lv_staged_2026", db=sandbox_db).iloc[0]
+    assert (total["grids"], total["grids_with_measures"], total["grids_with_cable_measures"],
+            total["grids_with_station_measures"], total["new_stations"]) == (2, 1, 1, 1, 1.0)
+    assert total["added_cable_km"] == pytest.approx(0.15) and total["added_cable_km_150"] == pytest.approx(0.15)
+    assert total["service_cable_km"] == pytest.approx(0.02)
+    assert (total["transformer_exchanges"], total["transformer_kva_added"], total["station_replacements"]) == (1, 400.0, 0)
+    assert total["total_cost_eur"] == pytest.approx(170250.0)
+    per_plz = expansion_indicators("test_de_lv_staged_2026", by_plz=True, db=sandbox_db)
+    assert per_plz[["plz", "population"]].values.tolist() == [[99999, 500]]
+    assert per_plz["cost_per_inhabitant_eur"].iloc[0] == pytest.approx(170250.0 / 500)

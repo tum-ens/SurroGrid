@@ -336,3 +336,136 @@ def load_expansion_overview(
         }
     tables["analysis_key"] = analysis_key
     return tables
+
+
+# Indicators per analysis (after Lee 2026, Sections 4.1.3-4.1.5) ------------------------------------------------------
+
+# Every indicator is a count or a sum, so the PLZ rows add up to the analysis total.
+INDICATOR_QUERY = text(
+    """
+    WITH ar AS (
+        SELECT expansion_analysis_run_id AS id FROM surrogrid.expansion_analysis_run
+        WHERE analysis_key = :analysis_key
+    ), grids AS (
+        SELECT plz,
+               COUNT(*) AS grids,
+               COUNT(*) FILTER (WHERE total_cost_eur > 0) AS grids_with_measures,
+               COUNT(*) FILTER (WHERE routes_reinforced > 0) AS grids_with_cable_measures,
+               COUNT(*) FILTER (WHERE station_measure IN ('exchange', 'over_limit', 'transfer', 'new_station'))
+                   AS grids_with_station_measures,
+               COUNT(*) FILTER (WHERE voltage_measure IN ('ront', 'split')) AS grids_with_voltage_measures,
+               COUNT(*) FILTER (WHERE station_measure = 'transfer') AS load_transfers,
+               COALESCE(SUM(new_stations), 0.0) AS new_stations,
+               COALESCE(SUM(routes_reinforced), 0) AS routes_reinforced,
+               COALESCE(SUM(unresolved_routes), 0) AS unresolved_routes,
+               COALESCE(SUM(cable_cost_eur), 0.0) AS cable_cost_eur,
+               COALESCE(SUM(transformer_exchange_cost_eur), 0.0) AS transformer_exchange_cost_eur,
+               COALESCE(SUM(load_transfer_cost_eur), 0.0) AS load_transfer_cost_eur,
+               COALESCE(SUM(new_station_cost_eur), 0.0) AS new_station_cost_eur,
+               COALESCE(SUM(voltage_cost_eur), 0.0) AS voltage_cost_eur,
+               COALESCE(SUM(total_cost_eur), 0.0) AS total_cost_eur,
+               COALESCE(SUM(service_cost_eur), 0.0) AS service_cost_eur
+        FROM surrogrid.expansion_grid_result
+        WHERE expansion_analysis_run_id = (SELECT id FROM ar)
+        GROUP BY plz
+    ), lines AS (
+        SELECT plz, length_km, additional_parallel, reinforcement_150_count, reinforcement_185_count,
+               reinforcement_240_count, measure
+        FROM surrogrid.expansion_line_result WHERE expansion_analysis_run_id = (SELECT id FROM ar)
+        UNION ALL
+        SELECT plz, length_km, additional_parallel, reinforcement_150_count, reinforcement_185_count,
+               reinforcement_240_count, measure
+        FROM surrogrid.expansion_real_line_result WHERE expansion_analysis_run_id = (SELECT id FROM ar)
+    ), line_parts AS (
+        SELECT plz,
+               COALESCE(SUM(length_km * additional_parallel) FILTER (WHERE measure IN ('local', 'outlet')), 0.0)
+                   AS added_cable_km,
+               COALESCE(SUM(length_km * reinforcement_150_count) FILTER (WHERE measure IN ('local', 'outlet')), 0.0)
+                   AS added_cable_km_150,
+               COALESCE(SUM(length_km * reinforcement_185_count) FILTER (WHERE measure IN ('local', 'outlet')), 0.0)
+                   AS added_cable_km_185,
+               COALESCE(SUM(length_km * reinforcement_240_count) FILTER (WHERE measure IN ('local', 'outlet')), 0.0)
+                   AS added_cable_km_240,
+               COALESCE(SUM(length_km * additional_parallel) FILTER (WHERE measure = 'service'), 0.0)
+                   AS service_cable_km
+        FROM lines GROUP BY plz
+    ), trafos AS (
+        SELECT plz, transformer_rated_power_kva, required_transformer_kva, transformer_cost_basis
+        FROM surrogrid.expansion_transformer_result WHERE expansion_analysis_run_id = (SELECT id FROM ar)
+        UNION ALL
+        SELECT plz, transformer_rated_power_kva, required_transformer_kva, transformer_cost_basis
+        FROM surrogrid.expansion_real_transformer_result WHERE expansion_analysis_run_id = (SELECT id FROM ar)
+    ), trafo_parts AS (
+        SELECT plz,
+               COALESCE(SUM(transformer_rated_power_kva), 0.0) AS transformer_kva_before,
+               COUNT(*) FILTER (WHERE required_transformer_kva > transformer_rated_power_kva) AS transformer_exchanges,
+               COALESCE(SUM(GREATEST(required_transformer_kva - transformer_rated_power_kva, 0.0)), 0.0)
+                   AS transformer_kva_added,
+               COUNT(*) FILTER (WHERE transformer_cost_basis LIKE '%station_replaced%') AS station_replacements
+        FROM trafos GROUP BY plz
+    )
+    SELECT g.plz,
+           g.grids, g.grids_with_measures, g.grids_with_cable_measures, g.grids_with_station_measures,
+           g.grids_with_voltage_measures,
+           g.routes_reinforced, g.unresolved_routes,
+           COALESCE(l.added_cable_km, 0.0) AS added_cable_km,
+           COALESCE(l.added_cable_km_150, 0.0) AS added_cable_km_150,
+           COALESCE(l.added_cable_km_185, 0.0) AS added_cable_km_185,
+           COALESCE(l.added_cable_km_240, 0.0) AS added_cable_km_240,
+           COALESCE(t.transformer_kva_before, 0.0) AS transformer_kva_before,
+           COALESCE(t.transformer_exchanges, 0) AS transformer_exchanges,
+           COALESCE(t.transformer_kva_added, 0.0) AS transformer_kva_added,
+           COALESCE(t.station_replacements, 0) AS station_replacements,
+           g.load_transfers, g.new_stations,
+           g.cable_cost_eur, g.transformer_exchange_cost_eur, g.load_transfer_cost_eur, g.new_station_cost_eur,
+           g.voltage_cost_eur, g.total_cost_eur,
+           g.service_cost_eur, COALESCE(l.service_cable_km, 0.0) AS service_cable_km
+    FROM grids g
+    LEFT JOIN line_parts l ON l.plz IS NOT DISTINCT FROM g.plz
+    LEFT JOIN trafo_parts t ON t.plz IS NOT DISTINCT FROM g.plz
+    ORDER BY g.plz
+    """
+)
+
+POPULATION_QUERY = text(
+    """
+    SELECT plz, MAX(pop) AS population
+    FROM pylovo.municipal_register
+    WHERE plz = ANY(:plz)
+    GROUP BY plz
+    """
+)
+
+
+def expansion_indicators(
+    analysis_key: str | None = None,
+    *,
+    by_plz: bool = False,
+    db: SurroGridDatabase | None = None,
+) -> pd.DataFrame:
+    """Reinforcement need, measures and cost of one analysis, as a total row or one row per PLZ.
+
+    The indicators follow Lee (2026): grids with measures (any, cable, station, voltage), reinforced and
+    unresolved routes, added cable km (per cross-section), transformer exchanges and added kVA, station
+    replacements, load transfers, new substations and the cost breakdown. Service lines are reported
+    separately, as in the total (decision D9). Per PLZ, ``population`` comes from ``pylovo.municipal_register``
+    and ``cost_per_inhabitant_eur`` assumes that the analysis covers every grid of the PLZ.
+    """
+    db = db or SurroGridDatabase()
+    analysis_key = _resolve_analysis_key(db, analysis_key)
+    with db.engine.connect() as conn:
+        frame = pd.read_sql(INDICATOR_QUERY, conn, params={"analysis_key": analysis_key})
+        if frame.empty:
+            raise ValueError(f"Expansion analysis {analysis_key!r} has no grid results.")
+        if by_plz:
+            plz = [int(value) for value in frame["plz"].dropna()]
+            population = pd.read_sql(POPULATION_QUERY, conn, params={"plz": plz})
+    if not by_plz:
+        values = frame.drop(columns="plz")
+        total = values.sum().to_frame().T.astype(values.dtypes.to_dict())
+        total.insert(0, "analysis_key", analysis_key)
+        return total
+    frame = frame.merge(population, on="plz", how="left")
+    frame["cost_per_inhabitant_eur"] = frame["total_cost_eur"] / frame["population"]
+    frame.insert(0, "analysis_key", analysis_key)
+    return frame

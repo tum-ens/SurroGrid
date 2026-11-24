@@ -20,7 +20,8 @@ Code: `src/gridexpand/analysis/`
 | `expansion/sql/*.sql` | synthetic scope and mapping: selected runs, component loading, transformer peaks, line and transformer inserts |
 | `expansion/real_materialization.py` | real DSO A / DSO B grids: cable corridors, grid status |
 | `expansion/cases.py` | model case → stage and analysis-key suffix |
-| `expansion/overview.py` | read-only loaders of expansion analyses |
+| `expansion/overview.py` | read-only loaders of expansion analyses; `expansion_indicators` (reinforcement need, measures, cost) |
+| `expansion/summary.py` | `gridexpand expansion summary`: the indicators of one analysis, total or per PLZ |
 | `powerflow/raw.py`, `powerflow/scope.py` | raw-series loaders, run/scope resolution |
 | `plotting/*` | figures (voltage, transformer import, heatmaps, expansion costs) |
 
@@ -35,6 +36,7 @@ uv run gridexpand expansion --run-name <power-flow run name> --stage post --ags 
 uv run gridexpand expansion --data-source real_dso_a --run-name <real run name> --stage post --plz 99999 \
   --exclude-real-lv-id 113 --analysis-key <key> --replace
 uv run gridexpand expansion --refresh-only        # refresh the QGIS materialized views
+uv run gridexpand expansion summary <analysis key> [--by-plz] [--csv out.csv]   # indicators of one analysis
 ```
 
 | option | default | meaning |
@@ -46,7 +48,7 @@ uv run gridexpand expansion --refresh-only        # refresh the QGIS materialize
 | `--scenario-id` | the single scenario of the selected runs | scenario recorded with the analysis |
 | `--pylovo-version-id` | run assumptions | synthetic grid-case filter; real-grid settlement type |
 | `--exclude-real-lv-id` | none | real grid kept in coverage but not costed (repeatable) |
-| `--assumption-key` | `de_lv_staged_2026` | cost row of `expansion_cost_assumption`; its `rule_set` picks the rules. Sensitivity rows: `_low`, `_high`, `_trafo_allin`, `_load_factor_1_0`, `_no_transfer` ([expansion_costs.md](../expansion_costs.md)) |
+| `--assumption-key` | `de_lv_staged_2026` | cost row of `expansion_cost_assumption`; its `rule_set` picks the rules. Sensitivity rows: `_low`, `_high`, `_trafo_allin`, `_station_800`, `_no_transfer`, `_no_station_replacement`, `_line60`, `_line80` ([expansion_costs.md](../expansion_costs.md)) |
 | `--line-existing-duct-share` | from the assumption | existing-duct share override |
 | `--analysis-key` | `<ags or all>_<run>_<stage>_<UTC stamp>` | readable key |
 | `--note` | empty | free text |

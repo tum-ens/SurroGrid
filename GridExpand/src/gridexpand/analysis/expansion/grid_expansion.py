@@ -327,42 +327,15 @@ def _print_summary(db: SurroGridDatabase, analysis_key: str) -> None:
     )
     with db.engine.connect() as conn:
         row = conn.execute(query, {"analysis_key": analysis_key}).mappings().one()
-    total = float(row["cable_cost_eur"]) + float(row["transformer_cost_eur"])
     print(f"analysis_key: {row['analysis_key']}")
     print(f"data_source: {row['data_source']}")
     print(f"grids_with_line_rows: {row['grids_with_line_rows']}")
     print(f"incomplete_grids: {row['incomplete_grids']}")
     print(f"excluded_grids: {row['excluded_grids']}")
-    print(f"cable_expansion_segments: {row['cable_expansion_segments']}")
-    print(f"transformer_expansion_count: {row['transformer_expansion_count']}")
-    print(f"cable_cost_eur: {float(row['cable_cost_eur']):.2f}")
-    print(f"transformer_cost_eur (all station-level measures): {float(row['transformer_cost_eur']):.2f}")
-    print(f"total_cost_eur: {total:.2f}")
-    breakdown = text(
-        """
-        SELECT MAX(g.rule_set) AS rule_set,
-               COALESCE(SUM(g.service_cost_eur), 0.0) AS service_cost_eur,
-               COALESCE(SUM(g.transformer_exchange_cost_eur), 0.0) AS transformer_exchange_cost_eur,
-               COALESCE(SUM(g.load_transfer_cost_eur), 0.0) AS load_transfer_cost_eur,
-               COALESCE(SUM(g.new_station_cost_eur), 0.0) AS new_station_cost_eur,
-               COALESCE(SUM(g.voltage_cost_eur), 0.0) AS voltage_cost_eur,
-               COUNT(*) FILTER (WHERE g.station_measure = 'transfer') AS load_transfers,
-               COALESCE(SUM(g.new_stations), 0.0) AS new_stations,
-               COUNT(*) FILTER (WHERE g.voltage_measure IN ('ront', 'split')) AS voltage_measures
-        FROM surrogrid.expansion_grid_result g
-        JOIN surrogrid.expansion_analysis_run ar USING (expansion_analysis_run_id)
-        WHERE ar.analysis_key = :analysis_key
-        """
-    )
-    with db.engine.connect() as conn:
-        parts = conn.execute(breakdown, {"analysis_key": analysis_key}).mappings().one()
-    if parts["rule_set"] is not None:
-        print(f"rule_set: {parts['rule_set']}")
-        print(f"  transformer_exchange_cost_eur: {float(parts['transformer_exchange_cost_eur']):.2f}")
-        print(f"  load_transfer_cost_eur: {float(parts['load_transfer_cost_eur']):.2f} ({parts['load_transfers']} grids)")
-        print(f"  new_station_cost_eur: {float(parts['new_station_cost_eur']):.2f} ({float(parts['new_stations']):.1f} stations)")
-        print(f"  voltage_cost_eur: {float(parts['voltage_cost_eur']):.2f} ({parts['voltage_measures']} grids)")
-        print(f"  service_cost_eur (not in the total): {float(parts['service_cost_eur']):.2f}")
+    from gridexpand.analysis.expansion.overview import expansion_indicators
+    from gridexpand.analysis.expansion.summary import print_indicators
+
+    print_indicators(expansion_indicators(analysis_key, db=db).drop(columns="analysis_key"))
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -511,6 +484,11 @@ def materialize(
 
 
 def main(argv: list[str] | None = None) -> None:
+    if argv and argv[0] == "summary":
+        from gridexpand.analysis.expansion import summary
+
+        summary.main(argv[1:])
+        return
     parser = _build_parser()
     args = parser.parse_args(argv)
     if args.run_name is None and not (args.schema_only or args.refresh_only):
