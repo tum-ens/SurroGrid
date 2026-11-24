@@ -65,6 +65,12 @@ TOUCHING_MEASURES = frozenset({"local", "outlet", "service", *RELIEVED_BY.values
 # Parameters -------------------------------------------------------------------------------------
 
 
+def _optional(row: Mapping[str, Any], name: str, default: float) -> float:
+    """A column added after 0007 (NULL or absent: the behaviour of 0007)."""
+    value = row.get(name)
+    return default if value is None else float(value)
+
+
 @dataclass(frozen=True)
 class StagedParameters:
     """The ``staged_2026`` columns of one ``expansion_cost_assumption`` row."""
@@ -72,6 +78,9 @@ class StagedParameters:
     assumption: Mapping[str, Any]
     duct_share_override: float | None
     planning_limit: float
+    line_planning_limit: float
+    station_replacement_from_kva: float
+    station_replacement_eur: float
     station_max_kva: Mapping[int, float]
     transformer_cost: tuple[tuple[float, float], ...]
     max_added_cables: int
@@ -110,10 +119,16 @@ class StagedParameters:
         missing = [name for name in required if row.get(name) is None]
         if missing:
             raise ValueError(f"Assumption {row.get('assumption_key')!r} lacks {missing}.")
+        line_limit = _optional(row, "line_planning_limit", 1.0)
+        if not 0.0 < line_limit <= 1.0:
+            raise ValueError(f"Assumption {row.get('assumption_key')!r}: line_planning_limit must be in (0, 1].")
         return cls(
             assumption=row,
             duct_share_override=duct_share_override,
             planning_limit=float(row["transformer_planning_limit"]),
+            line_planning_limit=line_limit,
+            station_replacement_from_kva=_optional(row, "station_replacement_from_kva", math.inf),
+            station_replacement_eur=_optional(row, "station_replacement_eur", 0.0),
             station_max_kva={
                 1: float(row["station_max_kva_rural"]),
                 2: float(row["station_max_kva_suburban"]),
@@ -198,6 +213,18 @@ class StationResult:
     cost_basis: str = NO_EXPANSION_BASIS
 
 
+def _station_exchange(size_kva: float, params: StagedParameters) -> tuple[float, str]:
+    """Cost of an exchange to ``size_kva`` and a cost-basis suffix.
+
+    From ``station_replacement_from_kva`` on, the station itself is replaced as well (housing and
+    switchgear for the larger unit, ``station_replacement_eur``).
+    """
+    cost = _exchange_cost(size_kva, params)
+    if size_kva + KVA_EPSILON >= params.station_replacement_from_kva:
+        return cost + params.station_replacement_eur, "_station_replaced"
+    return cost, ""
+
+
 def _exchange_cost(size_kva: float, params: StagedParameters) -> float:
     for kva, eur in params.transformer_cost:
         if abs(kva - size_kva) < KVA_EPSILON:
@@ -222,16 +249,18 @@ def station_decision(
             kva for kva in STANDARD_KVA
             if kva <= ceiling + KVA_EPSILON and tau * kva + KVA_EPSILON >= peak_kva and kva > rated_kva
         )
+        cost, suffix = _station_exchange(size, params)
         return StationResult(
             rated_kva, peak_kva, limit, "exchange", size,
-            exchange_cost_eur=_exchange_cost(size, params), cost_basis=f"exchange_to_{int(size)}kva",
+            exchange_cost_eur=cost, cost_basis=f"exchange_to_{int(size)}kva{suffix}",
         )
     excess = peak_kva - tau * ceiling
     if rated_kva + KVA_EPSILON < limit:
         size = max(kva for kva in STANDARD_KVA if kva <= limit + KVA_EPSILON)
+        cost, suffix = _station_exchange(size, params)
         return StationResult(
             rated_kva, peak_kva, limit, "over_limit", size, excess_kva=excess,
-            exchange_cost_eur=_exchange_cost(size, params), cost_basis=f"exchange_to_{int(size)}kva_limit",
+            exchange_cost_eur=cost, cost_basis=f"exchange_to_{int(size)}kva_limit{suffix}",
         )
     return StationResult(rated_kva, peak_kva, limit, "over_limit", rated_kva, excess_kva=excess,
                          cost_basis="at_limit")
@@ -300,6 +329,9 @@ class RouteResult:
 def select_route(route: RouteInput, settlement_type: int | None, params: StagedParameters) -> RouteResult:
     """Stage 2: least-cost catalogue cables for one route under the cap (nominal ratings).
 
+    A route is overloaded when its P100 current exceeds ``line_planning_limit`` times its capacity
+    (1.0 by default); the added cables must bring it back below that share.
+
     Tie-breaks: fewer cables, less excess capacity, more 240 mm2, more 185 mm2 cables. The trench is
     charged once per route: the most expensive selected cable is replaced by the settlement's trench
     cost for the trenching share of the route.
@@ -312,7 +344,8 @@ def select_route(route: RouteInput, settlement_type: int | None, params: StagedP
         route.key, "none", existing_duct_share=duct_share,
         trenching_share=trenching_share, reopen_cost_eur_per_km=reopen_cost,
     )
-    if route.p100_ka <= route.installed_capacity_ka + CAPACITY_EPSILON:
+    limit = params.line_planning_limit
+    if route.p100_ka <= limit * route.installed_capacity_ka + CAPACITY_EPSILON:
         return base
     catalog = (
         (float(assumption["line_reinforcement_150_max_i_ka"]), float(assumption["line_parallel_150_eur_per_km"])),
@@ -331,19 +364,19 @@ def select_route(route: RouteInput, settlement_type: int | None, params: StagedP
                 counts = (n150, n185, n240)
                 added = sum(n * capacity for n, (capacity, _) in zip(counts, catalog))
                 capacity_ka = route.installed_capacity_ka + added
-                if capacity_ka + CAPACITY_EPSILON < route.p100_ka:
+                if limit * capacity_ka + CAPACITY_EPSILON < route.p100_ka:
                     continue
                 duct_total = sum(n * cost for n, (_, cost) in zip(counts, catalog))
                 primary = max(cost for n, (_, cost) in zip(counts, catalog) if n > 0)
                 cost_per_km = duct_total + trenching_share * (reopen_cost - primary)
-                key = (cost_per_km, count, capacity_ka - route.p100_ka, -n240, -n185)
+                key = (cost_per_km, count, limit * capacity_ka - route.p100_ka, -n240, -n185)
                 if best_key is None or key < best_key:
                     best_key = key
                     best = (n150, n185, n240, added, duct_total, cost_per_km)
     if best is None:
         full = route.installed_capacity_ka + cap * catalog[2][0]
         base.measure = "unresolved_service" if route.is_service else "unresolved"
-        base.missing_capacity_ka = max(route.p100_ka - full, 0.0)
+        base.missing_capacity_ka = max(route.p100_ka - limit * full, 0.0)
         base.cost_basis = f"unresolved_within_{cap}_cables"
         return base
     n150, n185, n240, added, duct_total, cost_per_km = best

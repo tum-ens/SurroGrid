@@ -10,8 +10,8 @@ former overload heuristic was retired on 2026-09-29 (see [History](#history)).
 - `synthetic_materialization.py`: the SQL keeps only the scope and the mapping to the visible pylovo lines.
 - `real_materialization.py`: the real DSO A and DSO B grids.
 
-**Where the numbers come from.** The rows are seeded by migration `0007_staged_expansion.sql` (`ON CONFLICT DO
-NOTHING`, so manual edits survive). Every row documents each parameter in the JSON column `parameter_provenance`:
+**Where the numbers come from.** The rows are seeded by migrations `0007_staged_expansion.sql` and
+`0010_line_limit_station_replacement.sql` (`ON CONFLICT DO NOTHING`, so manual edits survive). Every row documents each parameter in the JSON column `parameter_provenance`:
 value, unit, method and sources. The tables below are the readable form of that
 column, and a test (`tests/analysis/test_staged_assumption.py`) keeps both in step.
 
@@ -60,9 +60,14 @@ within 5 %).
   - its transformer is exchanged up to S_max;
   - the rest goes to stage 4.
 - A station whose unit is already above S_max keeps it as its ceiling.
+- **Station replacement** (`station_replacement_*`, off by default): an exchange to a unit of
+  `station_replacement_from_kva` or larger also costs `station_replacement_eur` for the station (housing and
+  switchgear for the larger unit). The cost basis ends in `_station_replaced`.
 
 **2. Routes.** Each overloaded route gets the least-cost combination of parallel NAYY 4×150/185/240 cables, with at
 most `line_max_added_cables`.
+- **Planning limit.** A route is overloaded when its P100 current exceeds `line_planning_limit` times its capacity,
+  and the added cables must bring it back below that share (default 1.0: the nominal ratings).
 - **Ratings.** All cables of a route, existing and added, count at their nominal ratings (no grouping derating,
   see below).
 - **Route cost.** On a trenched route the most expensive added cable pays the settlement's trench cost
@@ -146,6 +151,8 @@ base of their source; nothing is inflation-adjusted.
 | `ront_premium_eur` | 12,000 € | central value (median of twelve derived premiums, 5.5–30 k€) | MR/BUW 2023: 5.5; IEE/BWP 2022: 8; PuBLIK 2016: 8.5; Arnold 2019: 10–11; MONA: 10–11.5; PuBStadt 2021, p. 213: 11–12.5; Schlömer 2017: 12; FfE/Agora 2023: 13; BMWi 2014: 15; Hessen 2018: 16–17; dena 2012, p. 169: about 20 (30 k€ conversion incl. measurement, derived); BW 2017: 30 k€. Where the rONT replaces a kept transformer, stage 5 adds the conventional price of its size |
 | `ront_control_range_percent` | ±10 % | product value | Schneider Minera SGrid (2015): 5 positions ±5 % or 9 positions ±10 % |
 | `service_lines_in_total` | no | decision D9 | NAV § 9: the connectee usually reimburses changes of the house connection |
+| `line_planning_limit` | 1.0 | nominal ratings (0010; behaviour of 0007) | PuBStadt 2021 §7.5.2, p. 50 (LV cables up to 100 %) |
+| `station_replacement_from_kva` / `_eur` | none / 0 € | no station replacement (0010; behaviour of 0007) | see the note on `station_max_kva_*` |
 
 The baseline columns `transformer_station_rebuild_boundary_eur` and `transformer_capacity_step_kva` belong to the
 retired rule set; the staged rows keep their defaults and do not use them.
@@ -167,6 +174,22 @@ which have the most parallel cables.
 | `de_lv_staged_2026_trafo_allin` | transformer exchange at the all-in bins of `heuristic_2026` (28–48 k€; source not verifiable) |
 | `de_lv_staged_2026_station_800` | station limit 800 kVA in every settlement type (PuBLIK/Harnisch rural 800 kVA, Kerber 630 kVA, Munich 630/800 kVA); also covers small rural stations that need a new housing for 1000 kVA |
 | `de_lv_staged_2026_no_transfer` | no load transfer (`load_transfer_adjacency_m` = 0): whole new substations only |
+| `de_lv_staged_2026_line60` | cables reinforced above 60 % of their rating (`line_planning_limit` = 0.6; planning premises of Spalthoff et al. 2022) |
+| `de_lv_staged_2026_station_replacement` | an exchange to 1000 kVA also replaces the station for 55 k€ (Wintzek et al. 2021, 2021 prices; threshold of Candas 2024) |
+| `de_lv_staged_2026_station_replacement_line60` | both of the above |
+
+**Cost cases A1/B1/A2/B2.** Cables laid in parallel in a spare conduit (A) or separately (B), with a cable limit
+of 100 % (1) or 60 % (2), and the station replaced from 1000 kVA. In these rules A and B are the existing-duct share:
+
+| Case | Assumption row | `--line-existing-duct-share` |
+|---|---|---|
+| A1 | `de_lv_staged_2026_station_replacement` | 1.0 (all routes in existing ducts: parallel price only) |
+| B1 | `de_lv_staged_2026_station_replacement` | 0 (every route trenched) |
+| A2 | `de_lv_staged_2026_station_replacement_line60` | 1.0 |
+| B2 | `de_lv_staged_2026_station_replacement_line60` | 0 |
+
+The other stages (station limit, load transfer, new substations, residual voltage) and the unit costs remain those
+of `staged_2026`.
 
 Further sensitivities: `--line-existing-duct-share`, or new rows with another planning limit, station limit or
 cable cap.
