@@ -33,6 +33,7 @@ import numpy as np
 from gridexpand.common.ev_sessions import (
     ENERGY_TOL_KWH as SESSION_ENERGY_TOL_KWH,
     POWER_TOL_KW as SESSION_POWER_TOL_KW,
+    SESSION_HOUR_OFFSET,
     earliest_feasible_schedule,
     validate_sessions,
 )
@@ -776,7 +777,7 @@ def _inflex_timesteps(inflex_inputs):
     return timesteps, reference_label
 
 
-def _process_inflex_demands(inflex_inputs, df_raw_demand, df_pre_demand_elec, df_pre_demand_react, *, timesteps, reference_label):
+def _process_inflex_demands(inflex_inputs, df_raw_demand, df_pre_demand_elec, df_pre_demand_react, *, timesteps, reference_label, p14a_rating_kva=None):
     delta_t = inflex_inputs.get("delta_t_hours")
     if delta_t is not None and abs(float(delta_t) - 1.0) > 1e-9:
         raise ValueError(
@@ -805,6 +806,12 @@ def _process_inflex_demands(inflex_inputs, df_raw_demand, df_pre_demand_elec, df
         df_supim, df_process, inflex_inputs["cap_pro"]
     )
 
+    if p14a_rating_kva is not None:
+        df_heat_elec, df_heat_hp_elec, df_ev_elec, _ = _apply_section_14a(
+            inflex_inputs, df_raw_demand, df_eff_factor, df_pre_demand_elec, df_pv_elec,
+            timesteps, p14a_rating_kva,
+        )
+
     active_parts = [df_pre_demand_elec, df_heat_elec, df_ev_elec, -df_pv_elec]
     net_before_battery = pd.concat(active_parts, axis=1).T.groupby(
         level=0, observed=True
@@ -827,6 +834,115 @@ def _process_inflex_demands(inflex_inputs, df_raw_demand, df_pre_demand_elec, df
     return df_post_demand_elec, df_post_demand_react, df_react_save, battery_diagnostics
 
 
+def _heat_pump_devices(inflex_inputs, df_raw_demand, df_eff_factor):
+    """Per bus: total heat (kW), effective heat-pump COP and installed heat-pump / auxiliary capacities.
+
+    The effective COP is chosen so that ``section14a.heat_to_el`` reproduces the
+    INFLEX heat split of this module exactly when no control is applied.
+    """
+    from gridexpand.common.thermal import dispatch_heat_services
+
+    devices = []
+    if inflex_inputs.get("thermal_parameters") is not None:
+        params = inflex_inputs["thermal_parameters"]
+        reference = inflex_inputs["internal_heat_reference"]
+        buses = sorted(params.Site.unique())
+        hp_caps = _input_capacity_by_bus(inflex_inputs["process"], "heatpump_air", buses)
+        rod_caps = _input_capacity_by_bus(inflex_inputs["process"], "heatpump_booster", buses)
+        for site, group in params.groupby("Site"):
+            heat, cops = [], []
+            for bid in group.building_objectid.astype(str):
+                for service in ("space", "water"):
+                    heat.append(reference[bid, service + "_heat_kw"].to_numpy())
+                    cops.append(reference[bid, service + "_cop"].to_numpy())
+            heat, cops = np.column_stack(heat), np.column_stack(cops)
+            hp, _rod = dispatch_heat_services(heat, cops, hp_caps[site])
+            hp_el = hp.sum(axis=1)
+            fallback = np.divide((heat * cops).sum(axis=1), heat.sum(axis=1),
+                                 out=cops.mean(axis=1), where=heat.sum(axis=1) > 0)
+            cop = np.divide((hp * cops).sum(axis=1), hp_el, out=fallback, where=hp_el > 0)
+            devices.append(dict(site=site, heat=heat.sum(axis=1), cop=cop,
+                                cap_hp=float(hp_caps[site]), cap_rod=float(rod_caps[site])))
+        return devices
+
+    heat_by_bus, cop_by_bus = _heat_and_cop_by_bus(df_raw_demand, df_eff_factor)
+    if heat_by_bus.empty:
+        return devices
+    buses = list(heat_by_bus.columns)
+    hp_caps = _input_capacity_by_bus(inflex_inputs["process"], "heatpump_air", buses)
+    rod_caps = _input_capacity_by_bus(inflex_inputs["process"], "heatpump_booster", buses)
+    for site in buses:
+        cop = pd.to_numeric(cop_by_bus[site], errors="coerce").to_numpy(dtype=float)
+        cop = np.where(np.isfinite(cop) & (cop > 0), cop, 1.0)
+        devices.append(dict(site=site, heat=heat_by_bus[site].to_numpy(dtype=float), cop=cop,
+                            cap_hp=float(hp_caps[site]), cap_rod=float(rod_caps[site])))
+    return devices
+
+
+def _vehicles(sessions, session_hours, horizon_hours):
+    """Per charge point: charger rating, plugged-in share, session per hour and the INFLEX charging profile."""
+    if sessions is None or sessions.empty:
+        return []
+    uncontrolled = earliest_feasible_schedule(sessions, session_hours, horizon_hours=horizon_hours)
+    hours = session_hours.merge(sessions[["session_id", "site", "process"]], on="session_id")
+    vehicles = []
+    for key, group in sessions.groupby(["site", "process"], sort=True):
+        fraction = np.zeros(horizon_hours)
+        session = np.full(horizon_hours, -1, dtype=int)
+        h = hours[(hours.site == key[0]) & (hours.process == key[1])]
+        position = h["t"].to_numpy(dtype=int) - SESSION_HOUR_OFFSET
+        fraction[position] = h["available_fraction"].to_numpy(dtype=float)
+        ids = {sid: i for i, sid in enumerate(group["session_id"])}
+        session[position] = h["session_id"].map(ids).to_numpy(dtype=int)
+        vehicles.append(dict(
+            key=key,
+            cap=float(group["charger_kw"].iloc[0]),
+            fraction=fraction,
+            session=session,
+            energy={ids[sid]: float(e) for sid, e in zip(group["session_id"], group["energy_kwh"])},
+            uncontrolled=uncontrolled[key].to_numpy(dtype=float),
+        ))
+    return vehicles
+
+
+def _apply_section_14a(inflex_inputs, df_raw_demand, df_eff_factor, df_pre_demand_elec, df_pv_elec,
+                       timesteps, rating_kva):
+    """Section 14a control on the INFLEX heat and EV profiles (see ``section14a``)."""
+    from gridexpand.powerflow import section14a
+
+    index = df_raw_demand.index
+    heat_pumps = _heat_pump_devices(inflex_inputs, df_raw_demand, df_eff_factor)
+    vehicles = _vehicles(inflex_inputs["ev_sessions"], inflex_inputs["ev_session_hours"], timesteps)
+    base = df_pre_demand_elec.sum(axis=1).to_numpy(dtype=float)
+    pv = df_pv_elec.sum(axis=1).to_numpy(dtype=float) if not df_pv_elec.empty else np.zeros(len(index))
+    heat_pumps, vehicles, diagnostics = section14a.control(
+        base, pv, heat_pumps, vehicles, rating_kva, config.PF_ELC, config.PF_HP
+    )
+
+    def by_bus(values):
+        if not values:
+            return _empty_electricity_frame(index)
+        frame = pd.DataFrame(values, index=index)
+        return _sum_columns_by_bus(frame) if getattr(frame.columns, "nlevels", 1) > 1 else \
+            frame.set_axis(pd.MultiIndex.from_tuples([(c, "electricity") for c in frame.columns]), axis=1)
+
+    total = by_bus({d["site"]: d["el"] for d in heat_pumps})
+    hp_only = by_bus({d["site"]: np.minimum(d["heat_served"], d["cap_hp"] * d["cop"]) / d["cop"]
+                      for d in heat_pumps})
+    ev = by_bus({v["key"]: v["charge"] for v in vehicles})
+    print(
+        "Section 14a: "
+        f"rating {diagnostics['rating_kva']:.0f} kVA, uncontrolled peak {diagnostics['peak_uncontrolled_kva']:.0f} kVA, "
+        f"congested {diagnostics['congested_hours']} h (not cleared {diagnostics['hours_not_cleared']} h), "
+        f"mean ratio {diagnostics['mean_ratio_congested']:.3f}, "
+        f"{diagnostics['controlled_heat_pumps']} heat pumps and {diagnostics['controlled_charge_points']} charge points "
+        f"controlled, unserved heat {diagnostics['unserved_heat_kwh']:.1f} kWh, "
+        f"unserved EV {diagnostics['unserved_ev_kwh']:.1f} kWh.",
+        flush=True,
+    )
+    return total, hp_only, ev, diagnostics
+
+
 def obtain_pre_demand(SF):
     df_raw_demand = SF.get_pre_demand()
     if SF.uses_reduced_demand():
@@ -835,7 +951,7 @@ def obtain_pre_demand(SF):
     df_pre_demand_elec, df_pre_demand_react = _process_pre_demands(df_raw_demand)
     return pd.concat([df_pre_demand_elec, df_pre_demand_react], axis=1)
 
-def reconstruct_demands(SF, post_demand_mode="flexible", ev_charger_kw=None):
+def reconstruct_demands(SF, post_demand_mode="flexible", ev_charger_kw=None, p14a_rating_kva=None):
     """Pre and post demand of one scenario result (no side effects).
 
     Args:
@@ -843,12 +959,16 @@ def reconstruct_demands(SF, post_demand_mode="flexible", ev_charger_kw=None):
             (``io.ScenarioResultReader``).
         post_demand_mode: ``flexible`` (optimized URBS net import) or ``inflex``.
         ev_charger_kw: optional inflex cross-check of every charger rating.
+        p14a_rating_kva: transformer rating; applies Section 14a control to the
+            inflex heat and EV profiles (``section14a``). Inflex only.
 
     Returns:
         ``(df_pre_demand, df_post_demand, df_reactive_components, battery_diagnostics)``.
     """
     if post_demand_mode not in {"flexible", "inflex"}:
         raise ValueError("post_demand_mode must be 'flexible' or 'inflex'.")
+    if p14a_rating_kva is not None and post_demand_mode != "inflex":
+        raise ValueError("Section 14a control requires post_demand_mode 'inflex'.")
 
     battery_diagnostics = pd.DataFrame()
     if post_demand_mode == "flexible":
@@ -895,6 +1015,7 @@ def reconstruct_demands(SF, post_demand_mode="flexible", ev_charger_kw=None):
                 df_pre_demand_react,
                 timesteps=timesteps,
                 reference_label=reference_label,
+                p14a_rating_kva=p14a_rating_kva,
             )
         )
 
